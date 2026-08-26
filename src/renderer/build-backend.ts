@@ -109,6 +109,7 @@ export function buildBackend(
     getImportableSessionTree: () => req('sessionImport:getTree'),
     importSession: (params: { sessionId: string; targetWorktreePath: string }) =>
       req('sessionImport:import', params),
+    listImportableRepos: () => req('sessionImport:listRepos'),
     probeRepoImport: (repoRoot: string) => req('sessionImport:probeRepo', repoRoot),
     importRepoBranches: (params: RepoImportRequest) => req('sessionImport:importRepo', params),
 

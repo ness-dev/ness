@@ -5,6 +5,8 @@ import type {
   RepoImportRequest,
   RepoImportResult
 } from '../shared/repo-import-types'
+import type { RepoIndexEntry, RepoIndexResult } from '../shared/repo-index-types'
+export type { RepoIndexEntry, RepoIndexResult }
 export type { StateEvent, StateSnapshot }
 
 import type { Worktree, PendingWorktree, PendingDeletion, ForkSource } from '../shared/state/worktrees'
@@ -219,6 +221,7 @@ export interface ElectronAPI {
     sessionId: string
     targetWorktreePath: string
   }): Promise<ImportOutcome>
+  listImportableRepos(): Promise<RepoIndexResult>
   probeRepoImport(repoRoot: string): Promise<RepoImportPlan | null>
   importRepoBranches(params: RepoImportRequest): Promise<RepoImportResult>
   runPendingWorktree(params: {

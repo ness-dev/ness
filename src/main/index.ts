@@ -14,6 +14,7 @@ import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
 import { SessionImportManager } from './session-import'
+import { scanRepoIndex } from './repo-index'
 import type { RepoImportRequest } from '../shared/repo-import-types'
 import { buildRelocationPreamble } from './fork-relocation'
 import { shellQuote } from './shell-quote'
@@ -1670,6 +1671,12 @@ function registerIpcHandlers(): void {
       return sessionImportManager.importSession(params.sessionId, params.targetWorktreePath)
     }
   )
+
+  // Which repos does this person have history in? Answered without the deep
+  // scan above, so the wizard's first screen renders immediately.
+  transport.onRequest('sessionImport:listRepos', async () => {
+    return scanRepoIndex()
+  })
 
   // Repo-scoped bulk import: "this repo already has history — want it back?"
   transport.onRequest('sessionImport:probeRepo', async (_ctx, repoRoot: string) => {
