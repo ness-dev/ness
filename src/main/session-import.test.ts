@@ -61,6 +61,8 @@ interface HarnessOptions {
   inventory?: BranchInventoryEntry[]
   /** Branches whose worktree creation should fail. */
   failBranches?: string[]
+  /** Tab ids a worktree already has before the import runs. */
+  existingTabs?: Record<string, string[]>
 }
 
 function harness(sessions: DiscoveredSession[], options: HarnessOptions = {}): Harness {
@@ -72,6 +74,9 @@ function harness(sessions: DiscoveredSession[], options: HarnessOptions = {}): H
     dispatch: (e) => events.push(e),
     getRepoRoots: () => [],
     addTab: (worktreePath, tab) => tabs.push({ worktreePath, tab }),
+    hasTab: (worktreePath, tabId) =>
+      tabs.some((t) => t.worktreePath === worktreePath && t.tab.id === tabId) ||
+      (options.existingTabs?.[worktreePath]?.includes(tabId) ?? false),
     startSession: (sessionId, worktreePath) => started.push({ sessionId, worktreePath }),
     homeDir: () => fakeHome,
     listBranchInventory: async () => options.inventory ?? [],
@@ -389,6 +394,77 @@ describe('importRepoBranches', () => {
     expect(result.created).toBe(0)
     expect(result.ok).toBe(false)
     expect(h.created).toHaveLength(0)
+  })
+
+  /** `main` is always checked out in the repo's own clone, so this is the
+   *  path that carries the single most important row in the picker. */
+  describe('a branch that is already checked out', () => {
+    function openHarness(over: HarnessOptions = {}): Harness {
+      return repoHarness({
+        inventory: [
+          inventoryEntry({ name: 'feat', checkedOutAt: '/work/repo' }),
+          inventoryEntry({ name: 'fix' })
+        ],
+        ...over
+      })
+    }
+
+    it('attaches its chats to the existing worktree instead of creating one', async () => {
+      const h = openHarness()
+      const result = await h.manager.importRepoBranches({
+        repoRoot: '/work/repo',
+        branches: [pick('feat', 'new', 'old')]
+      })
+      expect(h.created).toHaveLength(0)
+      expect(result.created).toBe(0)
+      expect(result.attached).toBe(1)
+      expect(result.ok).toBe(true)
+      expect(result.importedChats).toBe(2)
+      expect(h.tabs.map((t) => t.worktreePath)).toEqual(['/work/repo', '/work/repo'])
+    })
+
+    it('reports the existing worktree as the destination', async () => {
+      const h = openHarness()
+      const result = await h.manager.importRepoBranches({
+        repoRoot: '/work/repo',
+        branches: [pick('feat', 'new')]
+      })
+      expect(result.branches[0].worktreePath).toBe('/work/repo')
+      expect(result.branches[0].createdWorktree).toBe(false)
+    })
+
+    it('leaves every attached chat asleep — the worktree is already on screen', async () => {
+      const h = openHarness()
+      await h.manager.importRepoBranches({
+        repoRoot: '/work/repo',
+        branches: [pick('feat', 'new', 'old')]
+      })
+      expect(h.tabs.every((t) => t.tab.mode === 'asleep')).toBe(true)
+      expect(h.started).toHaveLength(0)
+    })
+
+    it('does not re-add a chat the worktree already has as a tab', async () => {
+      // Running the wizard twice would otherwise sit two tabs on one
+      // transcript, which --resume can't reconcile.
+      const h = openHarness({ existingTabs: { '/work/repo': ['new'] } })
+      const result = await h.manager.importRepoBranches({
+        repoRoot: '/work/repo',
+        branches: [pick('feat', 'new', 'old')]
+      })
+      expect(h.tabs.map((t) => t.tab.id)).toEqual(['old'])
+      expect(result.attached).toBe(1)
+    })
+
+    it('still creates worktrees for the free branches in the same batch', async () => {
+      const h = openHarness()
+      const result = await h.manager.importRepoBranches({
+        repoRoot: '/work/repo',
+        branches: [pick('feat', 'new'), pick('fix', 'other')]
+      })
+      expect(h.created.map((c) => c.branchName)).toEqual(['fix'])
+      expect(result.created).toBe(1)
+      expect(result.attached).toBe(1)
+    })
   })
 })
 

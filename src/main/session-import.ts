@@ -40,6 +40,7 @@ export interface SessionImportDeps {
   dispatch: (event: SessionImportEvent) => void
   getRepoRoots: () => string[]
   addTab: (worktreePath: string, tab: TerminalTab) => void
+  hasTab: (worktreePath: string, tabId: string) => boolean
   startSession: (sessionId: string, worktreePath: string) => void
   homeDir: () => string
   listBranchInventory: (repoRoot: string) => Promise<BranchInventoryEntry[]>
@@ -144,6 +145,10 @@ export class SessionImportManager {
   /** Recreate the chosen branches as worktrees with their chat history
    *  attached.
    *
+   *  A branch that is already checked out — always true of `main`, and true of
+   *  every branch Ness already has open — skips creation and takes its chats
+   *  as tabs on the existing worktree instead.
+   *
    *  Serial on purpose. `git worktree add` takes a repo-wide lock, and each
    *  creation also runs the repo's setup script (`npm install` and friends);
    *  twenty of those in parallel would thrash the machine for no wall-clock
@@ -164,6 +169,7 @@ export class SessionImportManager {
           branch,
           ok: false,
           worktreePath: null,
+          createdWorktree: false,
           importedChats: 0,
           error: 'no importable chat history for this branch'
         })
@@ -180,6 +186,27 @@ export class SessionImportManager {
         .filter((c) => chosen.includes(c.sessionId))
         .map((c) => c.sessionId)
       const sessionIds = ordered.length > 0 ? ordered : [candidate.chats[0].sessionId]
+
+      // Nothing to create when git already has the branch checked out. Every
+      // chat goes in asleep, since there is no "opening tab" slot to fill —
+      // the worktree is already on screen with whatever tabs it had.
+      if (candidate.existingWorktreePath) {
+        const target = candidate.existingWorktreePath
+        let importedChats = 0
+        for (const sessionId of sessionIds) {
+          const outcome = this.importSession(sessionId, target, { spawn: false })
+          if (outcome.ok) importedChats++
+        }
+        results.push({
+          branch,
+          ok: true,
+          worktreePath: target,
+          createdWorktree: false,
+          importedChats,
+          error: null
+        })
+        continue
+      }
 
       // The most recent chat rides in as the worktree's first agent tab via
       // the existing fork-on-create path, so the worktree opens on "where I
@@ -199,6 +226,7 @@ export class SessionImportManager {
           branch,
           ok: false,
           worktreePath: null,
+          createdWorktree: false,
           importedChats: 0,
           error: created.error ?? 'worktree creation failed'
         })
@@ -213,19 +241,29 @@ export class SessionImportManager {
         if (outcome.ok) importedChats++
       }
 
-      results.push({ branch, ok: true, worktreePath: created.path, importedChats, error: null })
+      results.push({
+        branch,
+        ok: true,
+        worktreePath: created.path,
+        createdWorktree: true,
+        importedChats,
+        error: null
+      })
     }
 
-    const created = results.filter((r) => r.ok).length
+    const created = results.filter((r) => r.ok && r.createdWorktree).length
+    const attached = results.filter((r) => r.ok && !r.createdWorktree).length
+    const importedChats = results.reduce((n, r) => n + r.importedChats, 0)
     log(
       'session-import',
       `repo import ${repoRoot} requested=${branches.length} created=${created} ` +
-        `chats=${results.reduce((n, r) => n + r.importedChats, 0)}`
+        `attached=${attached} chats=${importedChats}`
     )
     return {
-      ok: created > 0,
+      ok: created + attached > 0,
       created,
-      importedChats: results.reduce((n, r) => n + r.importedChats, 0),
+      attached,
+      importedChats,
       branches: results
     }
   }
@@ -254,6 +292,14 @@ export class SessionImportManager {
 
     const adopt = session.cwd === targetWorktreePath
     let attachedId = sessionId
+
+    // Importing into a worktree that is already open can name a chat that is
+    // already a tab there — running the wizard twice, or importing `main` on a
+    // repo Ness has had for a while. Adding it again would sit two tabs on one
+    // transcript, which the CLI's --resume can't reconcile.
+    if (adopt && this.deps.hasTab(targetWorktreePath, sessionId)) {
+      return { ok: true, sessionId, mode: 'adopt' }
+    }
 
     if (!adopt) {
       const forked = forkTranscript({

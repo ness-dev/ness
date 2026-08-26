@@ -152,15 +152,21 @@ describe('buildRepoImportPlan', () => {
     expect(result.recommendedCount).toBe(1)
   })
 
-  it('drops a branch already checked out somewhere and counts it instead', () => {
+  it('keeps a branch that is already checked out, pointed at its worktree', () => {
+    // Excluding these took `main` — always checked out in the repo's own
+    // clone — off the list entirely, and emptied repos with many worktrees.
     const result = plan(
       [session()],
       [branch({ checkedOutAt: '/work/repo-worktrees/feature' })]
     )
-    expect(result.candidates).toHaveLength(0)
-    expect(result.alreadyOpenCount).toBe(1)
-    // The chat is still real work in this repo — the total must not shrink.
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0].existingWorktreePath).toBe('/work/repo-worktrees/feature')
     expect(result.totalSessionCount).toBe(1)
+  })
+
+  it('leaves existingWorktreePath null for a free branch', () => {
+    const result = plan([session()], [branch()])
+    expect(result.candidates[0].existingWorktreePath).toBeNull()
   })
 
   it('does not recommend a merged branch', () => {

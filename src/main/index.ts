@@ -1036,6 +1036,7 @@ const sessionImportManager = new SessionImportManager({
   dispatch: (event) => store.dispatch(event),
   getRepoRoots: () => config.repoRoots || [],
   addTab: (worktreePath, tab) => panesFSM.addTab(worktreePath, tab),
+  hasTab: (worktreePath, tabId) => panesFSM.getTabType(worktreePath, tabId) !== null,
   startSession: (sessionId, worktreePath) => startJsonClaudeSession(sessionId, worktreePath),
   homeDir: () => homedir(),
   listBranchInventory: (repoRoot) => listBranchInventory(repoRoot),

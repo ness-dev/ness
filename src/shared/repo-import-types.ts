@@ -26,6 +26,10 @@ export interface RepoImportCandidate {
   /** Ancestor-of-base only, so it under-reports on squash/rebase merges.
    *  A badge, never a filter — see buildRepoImportPlan. */
   merged: boolean
+  /** Worktree this branch is already checked out in, when it is. Importing
+   *  such a branch attaches its chats there rather than creating anything —
+   *  `main` is always in this state, and it is the row users look for first. */
+  existingWorktreePath: string | null
   prNumber: number | null
   /** Best available chat title — reads as "what this branch was for". */
   latestTitle: string | null
@@ -40,9 +44,6 @@ export interface RepoImportPlan {
   /** Chats whose branch no longer has a local ref, so they can't become a
    *  worktree. Surfaced as a count so the number never silently shrinks. */
   strandedSessionCount: number
-  /** Branches Ness already has open as worktrees, so there is nothing to
-   *  import. Counted rather than listed — see buildRepoImportPlan. */
-  alreadyOpenCount: number
   totalSessionCount: number
   recommendedCount: number
 }
@@ -67,13 +68,19 @@ export interface RepoImportBranchResult {
   branch: string
   ok: boolean
   worktreePath: string | null
+  /** False when the branch was already checked out and the chats were
+   *  attached to that existing worktree. */
+  createdWorktree: boolean
   importedChats: number
   error: string | null
 }
 
 export interface RepoImportResult {
   ok: boolean
+  /** Worktrees newly created by this import. */
   created: number
+  /** Branches that already had a worktree and just received chats. */
+  attached: number
   importedChats: number
   branches: RepoImportBranchResult[]
 }

@@ -67,8 +67,10 @@ interface BranchRow {
 
 interface ImportSummary {
   created: number
+  attached: number
   importedChats: number
   firstWorktreePath: string | null
+  createdFirst: boolean
   failures: { repoLabel: string; branch: string; error: string | null }[]
 }
 
@@ -86,6 +88,26 @@ function relativeTime(ms: number): string {
 function plural(n: number, word: string): string {
   if (n === 1) return `${n} ${word}`
   return `${n} ${word}${/(?:ch|sh|s|x|z)$/.test(word) ? 'es' : 's'}`
+}
+
+/** Branches already checked out — `main` above all — don't produce a worktree,
+ *  they gain tabs on one that exists. Saying "creates 9 worktrees" when four of
+ *  them are already in the sidebar would be a lie the user notices. */
+function countScope(rows: BranchRow[]): { creates: number; attaches: number } {
+  let creates = 0
+  let attaches = 0
+  for (const row of rows) {
+    if (row.candidate.existingWorktreePath) attaches++
+    else creates++
+  }
+  return { creates, attaches }
+}
+
+function scopeLabel(creates: number, attaches: number): string {
+  if (creates === 0 && attaches === 0) return 'Nothing selected'
+  if (attaches === 0) return `Creates ${plural(creates, 'worktree')}`
+  if (creates === 0) return `Adds to ${plural(attaches, 'open worktree')}`
+  return `Creates ${plural(creates, 'worktree')}, adds to ${attaches} already open`
 }
 
 export function ImportWizard({
@@ -211,24 +233,27 @@ export function ImportWizard({
   // Unchecking every chat on a branch is how the user drops it at that stage.
   // Sending it anyway would hit the backend's newest-chat fallback and create
   // the worktree they just declined.
+  const requestedRows = useMemo(
+    () =>
+      chosenRows.filter((r) => r.candidate.chats.some((c) => selectedChats.has(c.sessionId))),
+    [chosenRows, selectedChats]
+  )
+
   const requested = useMemo(() => {
     const byRepo = new Map<string, RepoImportSelection[]>()
-    for (const row of chosenRows) {
+    for (const row of requestedRows) {
       const sessionIds = row.candidate.chats
         .filter((chat) => selectedChats.has(chat.sessionId))
         .map((chat) => chat.sessionId)
-      if (sessionIds.length === 0) continue
       const list = byRepo.get(row.repoRoot)
       if (list) list.push({ branch: row.candidate.branch, sessionIds })
       else byRepo.set(row.repoRoot, [{ branch: row.candidate.branch, sessionIds }])
     }
     return byRepo
-  }, [chosenRows, selectedChats])
+  }, [requestedRows, selectedChats])
 
-  const requestedCount = useMemo(
-    () => [...requested.values()].reduce((n, list) => n + list.length, 0),
-    [requested]
-  )
+  const chosenScope = useMemo(() => countScope(chosenRows), [chosenRows])
+  const requestedScope = useMemo(() => countScope(requestedRows), [requestedRows])
 
   const toggleRepo = useCallback((root: string) => {
     setSelectedRepos((prev) => {
@@ -287,8 +312,10 @@ export function ImportWizard({
     const labels = new Map(plans.map((p) => [p.repoRoot, p.repoLabel]))
     const acc: ImportSummary = {
       created: 0,
+      attached: 0,
       importedChats: 0,
       firstWorktreePath: null,
+      createdFirst: false,
       failures: []
     }
     for (const [root, branches] of requested) {
@@ -297,10 +324,16 @@ export function ImportWizard({
       await backend.addRepoAtPath(root)
       const outcome = await backend.importRepoBranches({ repoRoot: root, branches })
       acc.created += outcome.created
+      acc.attached += outcome.attached
       acc.importedChats += outcome.importedChats
       for (const b of outcome.branches) {
         if (b.ok) {
-          if (!acc.firstWorktreePath) acc.firstWorktreePath = b.worktreePath
+          // A freshly created worktree is the better landing spot than one the
+          // user already had open, so it wins the focus even if it came later.
+          if (!acc.firstWorktreePath || (b.createdWorktree && !acc.createdFirst)) {
+            acc.firstWorktreePath = b.worktreePath
+            acc.createdFirst = b.createdWorktree
+          }
         } else {
           acc.failures.push({
             repoLabel: labels.get(root) ?? root,
@@ -361,6 +394,7 @@ export function ImportWizard({
             plans={plans}
             multiRepo={multiRepo}
             selected={selected}
+            scope={chosenScope}
             onToggle={toggle}
             windowDays={windowDays}
             onWindowChange={setWindowDays}
@@ -377,7 +411,7 @@ export function ImportWizard({
             multiRepo={multiRepo}
             selectedChats={selectedChats}
             expanded={expanded}
-            worktreeCount={requestedCount}
+            scope={requestedScope}
             onToggleChat={toggleChat}
             onToggleBranch={(key) =>
               setExpanded((prev) => {
@@ -395,12 +429,10 @@ export function ImportWizard({
         {stage === 'working' ? (
           <div className="px-5 py-10 flex flex-col items-center gap-3">
             <Loader2 className="icon-lg animate-spin text-accent" />
-            <div className="text-sm text-fg-bright">
-              Creating {plural(requestedCount, 'worktree')}…
-            </div>
+            <div className="text-sm text-fg-bright">Importing your work…</div>
             <div className="text-xs text-dim text-center max-w-sm">
-              Each one checks out its branch and runs the repo&apos;s setup script. Progress
-              shows in the sidebar.
+              New worktrees check out their branch and run the repo&apos;s setup script.
+              Progress shows in the sidebar.
             </div>
           </div>
         ) : null}
@@ -556,6 +588,7 @@ function BranchStage({
   plans,
   multiRepo,
   selected,
+  scope,
   onToggle,
   windowDays,
   onWindowChange,
@@ -569,6 +602,7 @@ function BranchStage({
   plans: RepoImportPlan[]
   multiRepo: boolean
   selected: Set<string>
+  scope: { creates: number; attaches: number }
   onToggle: (key: string) => void
   windowDays: number | null
   onWindowChange: (days: number | null) => void
@@ -577,7 +611,6 @@ function BranchStage({
   onBack: () => void
   onContinue: () => void
 }): JSX.Element {
-  const alreadyOpen = plans.reduce((n, p) => n + p.alreadyOpenCount, 0)
   const stranded = plans.reduce((n, p) => n + p.strandedSessionCount, 0)
 
   return (
@@ -587,7 +620,8 @@ function BranchStage({
           Which branches are you still working on?
         </h2>
         <p className="text-xs text-dim mt-1">
-          Each one becomes a worktree with its chat history attached.
+          Each one becomes a worktree with its chat history attached. Branches you already
+          have open just get their chats back.
         </p>
       </div>
 
@@ -641,7 +675,6 @@ function BranchStage({
 
       <div className="px-5 pt-2.5 text-xs text-dim flex items-center gap-3 flex-wrap">
         {hiddenCount > 0 ? <span>{hiddenCount} hidden by filters</span> : null}
-        {alreadyOpen > 0 ? <span>{plural(alreadyOpen, 'branch')} already open</span> : null}
       </div>
       {stranded > 0 ? (
         <div className="px-5 pt-1 text-xs text-dim">
@@ -651,7 +684,7 @@ function BranchStage({
       ) : null}
 
       <div className="px-5 py-3 mt-2.5 border-t border-border flex items-center justify-between gap-2">
-        <span className="text-xs text-dim">Creates {plural(selected.size, 'worktree')}</span>
+        <span className="text-xs text-dim">{scopeLabel(scope.creates, scope.attaches)}</span>
         <div className="flex items-center gap-2">
           <button
             onClick={onBack}
@@ -677,7 +710,7 @@ function ChatStage({
   multiRepo,
   selectedChats,
   expanded,
-  worktreeCount,
+  scope,
   onToggleChat,
   onToggleBranch,
   onBack,
@@ -687,7 +720,7 @@ function ChatStage({
   multiRepo: boolean
   selectedChats: Set<string>
   expanded: Set<string>
-  worktreeCount: number
+  scope: { creates: number; attaches: number }
   onToggleChat: (sessionId: string) => void
   onToggleBranch: (key: string) => void
   onBack: () => void
@@ -761,7 +794,7 @@ function ChatStage({
 
       <div className="px-5 py-3 border-t border-border flex items-center justify-between gap-2">
         <span className="text-xs text-dim">
-          {plural(worktreeCount, 'worktree')}, {plural(total, 'chat')}
+          {scopeLabel(scope.creates, scope.attaches)} · {plural(total, 'chat')}
         </span>
         <div className="flex items-center gap-2">
           <button
@@ -772,10 +805,10 @@ function ChatStage({
           </button>
           <button
             onClick={onConfirm}
-            disabled={worktreeCount === 0}
+            disabled={scope.creates + scope.attaches === 0}
             className="px-4 py-1.5 text-xs font-medium rounded bg-accent/20 hover:bg-accent/30 text-fg-bright border border-accent/40 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Create {plural(worktreeCount, 'worktree')}
+            Import
           </button>
         </div>
       </div>
@@ -807,6 +840,11 @@ function CandidateRow({
           <GitBranch className="icon-xs text-dim shrink-0" />
           <span className="text-sm text-fg-bright truncate">{candidate.branch}</span>
           {repoLabel ? <span className="text-xs text-dim shrink-0">{repoLabel}</span> : null}
+          {candidate.existingWorktreePath ? (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-surface-hover text-dim shrink-0">
+              open
+            </span>
+          ) : null}
           {candidate.merged ? (
             <span className="text-xs px-1.5 py-0.5 rounded bg-surface-hover text-dim shrink-0">
               merged
@@ -846,11 +884,19 @@ function DoneStage({
       <div className="px-5 py-3.5 border-b border-border flex items-center gap-2">
         <Check className="icon-sm text-accent" />
         <h2 className="text-sm font-semibold text-fg-bright">
-          Imported {plural(summary.created, 'worktree')}
+          Imported {plural(summary.importedChats, 'chat')}
         </h2>
       </div>
       <div className="px-5 py-4 text-sm text-fg overflow-y-auto">
-        <p>{plural(summary.importedChats, 'chat')} attached and ready to resume.</p>
+        <p>
+          {summary.created > 0
+            ? `${plural(summary.created, 'new worktree')} ready to resume`
+            : 'Ready to resume'}
+          {summary.attached > 0
+            ? `, plus ${plural(summary.attached, 'branch')} you already had open`
+            : ''}
+          .
+        </p>
         {summary.failures.length > 0 ? (
           <div className="mt-3">
             <p className="text-xs text-dim mb-1.5">
