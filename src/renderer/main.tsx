@@ -1,5 +1,5 @@
 import './styles.css'
-import { Profiler, type ProfilerOnRenderCallback } from 'react'
+import { Profiler, type ProfilerOnRenderCallback, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { initStore } from './store'
@@ -17,15 +17,29 @@ const onRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration) => {
   rendererPerf.recordCommit(actualDuration)
 }
 
+// Without the react-dom/profiling alias onRender is never called, so mounting
+// <Profiler> would only add tree depth for a counter that stays 0.
+// See electron.vite.config.ts for why the alias is opt-in.
+const reactProfiling =
+  typeof __HARNESS_REACT_PROFILING__ !== 'undefined' && __HARNESS_REACT_PROFILING__
+if (reactProfiling) rendererPerf.markReactProfilingEnabled()
+
+function withProfiler(children: ReactNode): ReactNode {
+  if (!reactProfiling) return children
+  return (
+    <Profiler id="app" onRender={onRender}>
+      {children}
+    </Profiler>
+  )
+}
+
 initStore()
   .then(() => {
     defineHarnessTheme()
     rendererPerf.start((sample) => getBackend().perfReportRendererSample(sample))
     createRoot(document.getElementById('root')!).render(
       <ErrorBoundary label="app:root" showReload>
-        <Profiler id="app" onRender={onRender}>
-          <App />
-        </Profiler>
+        {withProfiler(<App />)}
         <LinuxWindowControls />
       </ErrorBoundary>
     )

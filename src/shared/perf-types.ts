@@ -38,6 +38,10 @@ export interface RendererPerfSample {
    *  value is the only direct evidence of a major GC we can observe from JS. */
   heapGrowthMB: number
   heapReclaimedMB: number
+  /** False unless the build aliased react-dom/client to react-dom/profiling
+   *  (HARNESS_REACT_PROFILING=1). When false the three react* fields below are
+   *  not measurements — render them as "n/a", never as 0. */
+  reactProfiling: boolean
   reactCommits: number
   reactTotalMs: number
   reactMaxMs: number

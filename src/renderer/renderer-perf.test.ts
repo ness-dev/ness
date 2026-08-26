@@ -18,6 +18,7 @@ function bucket(overrides: Partial<RendererPerfSample> = {}): Omit<RendererPerfS
     heapLimitMB: 4096,
     heapGrowthMB: 0,
     heapReclaimedMB: 0,
+    reactProfiling: true,
     reactCommits: 0,
     reactTotalMs: 0,
     reactMaxMs: 0,
@@ -59,6 +60,11 @@ describe('computeFlags', () => {
 
   it('does not flag a quiet second with one cheap commit', () => {
     expect(computeFlags(bucket({ reactCommits: 1, reactTotalMs: 3, reactMaxMs: 3 }))).toEqual([])
+  })
+
+  it('never flags react when profiling is off, whatever the counters say', () => {
+    const notMeasured = bucket({ reactProfiling: false, reactCommits: 40, reactTotalMs: 180 })
+    expect(computeFlags(notMeasured)).not.toContain('react')
   })
 
   // Chromium throttles timers in hidden windows, so a backgrounded renderer

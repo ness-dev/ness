@@ -31,6 +31,9 @@ interface CombinedSample extends PerfSample {
   rendererHeap: number
 }
 
+/** Neither good nor bad — the number simply wasn't collected. */
+const NOT_MEASURED_CLASS = 'text-faint'
+
 function statusClass(value: number, green: number, amber: number): string {
   if (value < green) return 'text-success'
   if (value < amber) return 'text-warning'
@@ -325,21 +328,23 @@ export function PerfMonitorHUD({ onClose }: Props): JSX.Element {
   )
   const [fps, setFps] = useState(60)
   const [windowMode, setWindowMode] = useState<WindowMode>('1s')
-  const [enabledMetrics, setEnabledMetrics] = useState<Set<MetricKey>>(
-    () =>
-      new Set<MetricKey>([
-        'storeEvents',
-        'ipcMessages',
-        'githubApi',
-        'terminalBytes',
-        'eventLoopLag',
-        'memory',
-        'reactCommits',
-        'reactRenderMs',
-        'blockingMs',
-        'rendererHeap',
-      ])
-  )
+  // Only true under HARNESS_REACT_PROFILING=1; otherwise onRender never fires
+  // and the react* fields are zeros, not measurements.
+  const reactProfiling = renderLatest.reactProfiling
+  const [enabledMetrics, setEnabledMetrics] = useState<Set<MetricKey>>(() => {
+    const keys: MetricKey[] = [
+      'storeEvents',
+      'ipcMessages',
+      'githubApi',
+      'terminalBytes',
+      'eventLoopLag',
+      'memory',
+      'blockingMs',
+      'rendererHeap',
+    ]
+    if (rendererPerf.getLatest().reactProfiling) keys.push('reactCommits', 'reactRenderMs')
+    return new Set<MetricKey>(keys)
+  })
   const frameCountRef = useRef(0)
   const lastFpsTimeRef = useRef(performance.now())
   const rafRef = useRef(0)
@@ -462,14 +467,18 @@ export function PerfMonitorHUD({ onClose }: Props): JSX.Element {
         {
           key: 'reactCommits',
           label: 'React commits',
-          value: `${renderLatest.reactCommits}/s`,
-          valueClassName: statusClass(renderLatest.reactCommits, 20, 60),
+          value: reactProfiling ? `${renderLatest.reactCommits}/s` : 'n/a',
+          valueClassName: reactProfiling
+            ? statusClass(renderLatest.reactCommits, 20, 60)
+            : NOT_MEASURED_CLASS,
         },
         {
           key: 'reactRenderMs',
           label: 'React time',
-          value: `${renderLatest.reactTotalMs.toFixed(1)}ms/s`,
-          valueClassName: statusClass(renderLatest.reactTotalMs, 16, 50),
+          value: reactProfiling ? `${renderLatest.reactTotalMs.toFixed(1)}ms/s` : 'n/a',
+          valueClassName: reactProfiling
+            ? statusClass(renderLatest.reactTotalMs, 16, 50)
+            : NOT_MEASURED_CLASS,
         },
         {
           key: 'blockingMs',
@@ -543,8 +552,10 @@ export function PerfMonitorHUD({ onClose }: Props): JSX.Element {
         />
         <Scalar
           label="Max commit"
-          value={`${renderLatest.reactMaxMs.toFixed(1)}ms`}
-          className={statusClass(renderLatest.reactMaxMs, 8, 16)}
+          value={reactProfiling ? `${renderLatest.reactMaxMs.toFixed(1)}ms` : 'n/a'}
+          className={
+            reactProfiling ? statusClass(renderLatest.reactMaxMs, 8, 16) : NOT_MEASURED_CLASS
+          }
         />
         <Scalar
           label="GC churn"

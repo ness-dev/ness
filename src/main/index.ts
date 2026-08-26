@@ -5173,6 +5173,9 @@ if (desktopShellMod && desktopEarly) {
   })
   desktopHooks.startAutoUpdateChecks = handle.startAutoUpdateChecks
   desktopHooks.stopAutoUpdateChecks = handle.stopAutoUpdateChecks
+  // Real renderer RSS/CPU for `[snapshot]`. Headless has no BrowserWindow, so
+  // no provider is set there and the fields log as null rather than lying.
+  perfMonitor.setRendererProcessMetricsProvider(handle.getRendererProcessMetrics)
 } else {
   // Headless: no app.whenReady to wait for, no menus, no window. Just
   // boot. The WS server already listens (the webHttpServer.listen call

@@ -33,6 +33,7 @@ import {
   type StateEvent,
   type WireSnapshotState
 } from '../shared/state'
+import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import type { LocalTransportHandle, BackendConnection } from './types'
 import type { BootstrapProgress, SshBootstrapState } from '../shared/state/ssh-bootstrap'
@@ -878,6 +879,23 @@ export function useTerminalSession(terminalId: string) {
  *  for entries it didn't touch. */
 export function useTerminalProgress(terminalId: string) {
   return useAppState((s) => s.terminals.progress[terminalId] ?? null)
+}
+
+/** Per-terminal status. Same narrowing rationale as useTerminalProgress,
+ *  but this one was load-bearing for a different reason: `statuses` used to
+ *  be threaded whole from App through WorkspaceView → SplitRenderer →
+ *  LeafPane → TerminalPanel, so one terminal changing status allocated a new
+ *  map and re-rendered every mounted worktree's entire subtree. With ~22
+ *  worktrees mounted at once and a status dispatch per streamed token, that
+ *  was the renderer's dominant commit-phase cost. Read it here, per tab. */
+export function useTerminalStatus(terminalId: string): PtyStatus {
+  return useAppState((s) => s.terminals.statuses[terminalId] ?? 'idle')
+}
+
+/** Per-terminal shell busy/process-name. Narrowed for the same reason as
+ *  useTerminalStatus — see that comment. */
+export function useShellActivity(terminalId: string) {
+  return useAppState((s) => s.terminals.shellActivity[terminalId] ?? null)
 }
 
 export function useJsonClaude() {

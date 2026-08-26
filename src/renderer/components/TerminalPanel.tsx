@@ -13,7 +13,14 @@ import { Tooltip } from './Tooltip'
 import { AgentIcon } from './AgentIcon'
 import { repoNameColor } from './RepoIcon'
 import { AppTitleSegment } from './AppTitleSegment'
-import { getClientId, useTerminalProgress, useTerminalSession, useAliasForPath } from '../store'
+import {
+  getClientId,
+  useTerminalProgress,
+  useTerminalSession,
+  useTerminalStatus,
+  useShellActivity,
+  useAliasForPath
+} from '../store'
 import { useBackend } from '../backend'
 import { useReviewProgress } from '../review-progress'
 
@@ -62,8 +69,6 @@ interface TerminalPanelProps {
   pane: WorkspacePane
   isFocused: boolean
   paneCount: number
-  statuses: Record<string, PtyStatus>
-  shellActivity: Record<string, { active: boolean; processName?: string }>
   repoLabel: string
   branch: string
   registerSlot: (paneId: string, el: HTMLDivElement | null) => void
@@ -110,8 +115,6 @@ const TAB_STATUS_DOT: Record<PtyStatus, string> = {
 interface SortableTabProps {
   tab: TerminalTab
   isActive: boolean
-  status: PtyStatus
-  shellActivity?: { active: boolean; processName?: string }
   showClose: boolean
   onSelect: () => void
   onClose: () => void
@@ -163,7 +166,13 @@ function TabProgressBar({ terminalId }: { terminalId: string }): JSX.Element | n
   )
 }
 
-function SortableTab({ tab, isActive, status, shellActivity, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
+function SortableTab({ tab, isActive, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
+  // Read per-tab rather than taking the whole statuses/shellActivity maps as
+  // props: a single terminal's status change used to allocate a new map and
+  // re-render every mounted worktree's subtree. Same pattern as
+  // TabProgressBar / SpectatorChip above.
+  const status = useTerminalStatus(tab.id)
+  const shellActivity = useShellActivity(tab.id) ?? undefined
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id
   })
@@ -530,8 +539,6 @@ export function TerminalPanel({
   worktreePath,
   pane,
   paneCount,
-  statuses,
-  shellActivity,
   repoLabel,
   branch,
   registerSlot,
@@ -677,8 +684,6 @@ export function TerminalPanel({
                   key={tab.id}
                   tab={tab}
                   isActive={tab.id === pane.activeTabId}
-                  status={statuses[tab.id] || 'idle'}
-                  shellActivity={shellActivity[tab.id]}
                   showClose={pane.tabs.length > 1 || paneCount > 1}
                   onSelect={() => onSelectTab(tab.id)}
                   onClose={() => onCloseTab(tab.id)}

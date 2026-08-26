@@ -8,7 +8,7 @@ import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
 import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
-import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource } from './types'
+import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
 import { getLeaves, findLeaf } from '../shared/state/terminals'
 import { CheckCircle2, FolderOpen } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
@@ -732,6 +732,21 @@ const setQuestStep = useCallback((next: QuestStep) => {
     activeWorktreeId,
     setActiveWorktreeId
   })
+
+  // Hoisted out of the WorkspaceView JSX below. Every worktree stays mounted,
+  // so an inline arrow here allocates N new callbacks on every App render and
+  // defeats WorkspaceView's memo before it can compare anything else.
+  const handleFocusPane = useCallback((wtPath: string, paneId: string) => {
+    setActivePaneId((prev) => (prev[wtPath] === paneId ? prev : { ...prev, [wtPath]: paneId }))
+  }, [])
+
+  const effectiveDefaultAgent = defaultAgent ?? 'claude'
+  const handleAddAgentTabWithDefault = useCallback(
+    (wtPath: string, kind: AgentKind | undefined, paneId?: string) => {
+      handleAddAgentTab(wtPath, kind ?? effectiveDefaultAgent, paneId)
+    },
+    [handleAddAgentTab, effectiveDefaultAgent]
+  )
 
   // True when the active worktree's workspace (and its tab bar) is actually on
   // screen — i.e. no full-content view (new-worktree, activity, cleanup, command
@@ -1591,16 +1606,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   branch={wt.branch}
                   paneTree={paneTree}
                   focusedPaneId={activePaneId[wt.path] || leaves[0]?.id || ''}
-                  statuses={statuses}
-                  shellActivity={shellActivity}
                   visible={isVisible}
                   crashedTabIds={crashedTabIds}
                   nameAgentSessions={nameAgentSessions}
                   onSelectTab={handleSelectTab}
-                  onFocusPane={(wtPath, paneId) => setActivePaneId((prev) => prev[wtPath] === paneId ? prev : { ...prev, [wtPath]: paneId })}
+                  onFocusPane={handleFocusPane}
                   onAddTab={handleAddTerminalTab}
-                  defaultAgent={defaultAgent ?? 'claude'}
-                  onAddAgentTab={(wt, kind, paneId) => handleAddAgentTab(wt, kind ?? defaultAgent ?? 'claude', paneId)}
+                  defaultAgent={effectiveDefaultAgent}
+                  onAddAgentTab={handleAddAgentTabWithDefault}
                   onAddBrowserTab={handleAddBrowserTab}
                   onAddJsonClaudeTab={handleAddJsonClaudeTab}
                   onConvertTabType={handleConvertTabType}

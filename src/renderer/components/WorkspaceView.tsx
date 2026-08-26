@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { memo, useCallback, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
   DndContext,
@@ -11,7 +11,7 @@ import {
   type DragOverEvent,
   type CollisionDetection
 } from '@dnd-kit/core'
-import type { PaneNode, PaneLeaf, PaneSplit, PtyStatus, AgentKind } from '../types'
+import type { PaneNode, PaneLeaf, PaneSplit, AgentKind } from '../types'
 import { getLeaves, findLeafByTabId } from '../../shared/state/terminals'
 import { TerminalPanel } from './TerminalPanel'
 import { XTerminal } from './XTerminal'
@@ -27,8 +27,6 @@ interface WorkspaceViewProps {
   worktreePath: string
   paneTree: PaneNode
   focusedPaneId: string
-  statuses: Record<string, PtyStatus>
-  shellActivity: Record<string, { active: boolean; processName?: string }>
   visible: boolean
   nameAgentSessions: boolean
   repoLabel: string
@@ -138,8 +136,6 @@ function SplitRenderer({
   node,
   worktreePath,
   focusedPaneId,
-  statuses,
-  shellActivity,
   repoLabel,
   branch,
   nameAgentSessions,
@@ -168,8 +164,6 @@ function SplitRenderer({
   node: PaneNode
   worktreePath: string
   focusedPaneId: string
-  statuses: Record<string, PtyStatus>
-  shellActivity: Record<string, { active: boolean; processName?: string }>
   repoLabel: string
   branch: string
   nameAgentSessions: boolean
@@ -210,8 +204,6 @@ function SplitRenderer({
           pane={node}
           isFocused={node.id === focusedPaneId}
           paneCount={leafCount}
-          statuses={statuses}
-          shellActivity={shellActivity}
           repoLabel={showLabel ? repoLabel : ''}
           branch={showLabel ? branch : ''}
           registerSlot={registerSlot}
@@ -254,8 +246,6 @@ function SplitRenderer({
           node={split.children[0]}
           worktreePath={worktreePath}
           focusedPaneId={focusedPaneId}
-          statuses={statuses}
-          shellActivity={shellActivity}
           repoLabel={repoLabel}
           branch={branch}
           nameAgentSessions={nameAgentSessions}
@@ -296,8 +286,6 @@ function SplitRenderer({
           node={split.children[1]}
           worktreePath={worktreePath}
           focusedPaneId={focusedPaneId}
-          statuses={statuses}
-          shellActivity={shellActivity}
           repoLabel={repoLabel}
           branch={branch}
           nameAgentSessions={nameAgentSessions}
@@ -328,12 +316,10 @@ function SplitRenderer({
   )
 }
 
-export function WorkspaceView({
+function WorkspaceViewInner({
   worktreePath,
   paneTree,
   focusedPaneId,
-  statuses,
-  shellActivity,
   visible,
   nameAgentSessions,
   onSelectTab,
@@ -515,8 +501,6 @@ export function WorkspaceView({
           node={paneTree}
           worktreePath={worktreePath}
           focusedPaneId={focusedPaneId}
-          statuses={statuses}
-          shellActivity={shellActivity}
           repoLabel={repoLabel}
           branch={branch}
           nameAgentSessions={nameAgentSessions}
@@ -657,6 +641,12 @@ export function WorkspaceView({
     </DndContext>
   )
 }
+
+// App keeps every worktree mounted, so this component exists ~N times over and
+// every App render re-rendered all of them. Memo is only sound now that the
+// whole `statuses` / `shellActivity` maps are no longer props — they changed
+// identity on every streamed token, which would have made this a no-op.
+export const WorkspaceView = memo(WorkspaceViewInner)
 
 function findTopLeftLeaf(node: PaneNode): PaneLeaf {
   if (node.type === 'leaf') return node

@@ -18,6 +18,7 @@ function sample(overrides: Partial<RendererPerfSample> = {}): RendererPerfSample
     heapLimitMB: 4096,
     heapGrowthMB: 0,
     heapReclaimedMB: 0,
+    reactProfiling: true,
     reactCommits: 0,
     reactTotalMs: 0,
     reactMaxMs: 0,
@@ -33,6 +34,14 @@ describe('formatRendererSample', () => {
     expect(line).toContain('churn=+0/-0MB')
     expect(line).toContain('longtasks=0')
     expect(line).toContain('react=6c/15.5ms')
+  })
+
+  // A zero here reads as "React is idle", which sent two perf investigations
+  // to the wrong process. Unmeasured has to look unmeasured.
+  it('reports React as n/a when the build did not enable profiling', () => {
+    const line = formatRendererSample(sample({ reactProfiling: false }))
+    expect(line).toContain('react=n/a')
+    expect(line).not.toContain('0c/')
   })
 
   it('omits input latency when no slow events occurred', () => {

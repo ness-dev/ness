@@ -33,7 +33,7 @@ import { join } from 'path'
 import { BrowserManager } from './browser-manager'
 import { ElectronServerTransport } from './transport-electron'
 import type { Store } from './store'
-import type { PerfMonitor } from './perf-monitor'
+import type { PerfMonitor, RendererProcessMetrics } from './perf-monitor'
 import type { CompoundServerTransport } from './transport-compound'
 import type { PtyManager } from './pty-manager'
 import type { WorktreesFSM } from './worktrees-fsm'
@@ -161,6 +161,39 @@ export interface DesktopShellStartDeps {
 export interface DesktopShellStartHandle {
   startAutoUpdateChecks: () => void
   stopAutoUpdateChecks: () => void
+  getRendererProcessMetrics: () => RendererProcessMetrics | null
+}
+
+/** Real RSS/CPU for the app's own renderer process(es), for PerfMonitor.
+ *
+ *  Scoped to BrowserWindow webContents on purpose. Browser tabs are
+ *  WebContentsViews with their own renderer processes, and folding those in
+ *  would make the app's renderer look like it ballooned whenever the user
+ *  opened a heavy page. */
+function getRendererProcessMetrics(): RendererProcessMetrics | null {
+  const pids = new Set<number>()
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue
+    try {
+      pids.add(w.webContents.getOSProcessId())
+    } catch {
+      // webContents torn down mid-iteration; nothing to attribute.
+    }
+  }
+  if (pids.size === 0) return null
+
+  let rssKB = 0
+  let cpuPct = 0
+  let matched = false
+  for (const m of app.getAppMetrics()) {
+    if (!pids.has(m.pid)) continue
+    matched = true
+    // workingSetSize is KB (Electron's ProcessMetric).
+    rssKB += m.memory.workingSetSize
+    cpuPct += m.cpu.percentCPUUsage
+  }
+  if (!matched) return null
+  return { rssMB: Math.round(rssKB / 1024), cpuPct: Math.round(cpuPct) }
 }
 
 /** Second call. After index.ts has wired its mode-agnostic IPC handlers,
@@ -906,6 +939,7 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
 
   return {
     startAutoUpdateChecks,
-    stopAutoUpdateChecks
+    stopAutoUpdateChecks,
+    getRendererProcessMetrics
   }
 }

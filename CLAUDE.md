@@ -391,10 +391,72 @@ replaced them:
    tasks, in a different process from the one `perf-monitor.ts` samples, so
    it is invisible to both React profiler callbacks and main-process
    event-loop lag. The `longtask` PerformanceObserver catches those pauses
-   (plus layout thrash and any non-React work), and per-second heap deltas
-   expose the allocate-and-collect sawtooth as `heapReclaimedMB`.
+   (plus layout thrash and any non-React work).
 3. **`[snapshot]` memory was main-only but unlabelled.** Now prefixed, per
    above.
+
+**Two fields lied for months, and both hid the same class of bug. Read this
+before trusting a `[renderer-*]` line.**
+
+- **`reactCommits` / `reactTotalMs` were structurally 0 in every packaged
+  build.** React's production build compiles out `enableProfilerTimer`, so
+  `<Profiler>`'s `onRender` is never called — `react-dom-client.production.js`
+  contains zero occurrences of `onRender`. `"reactCommits":0` appeared in
+  100% of ~1,823 samples across two log files and never once nonzero. The fix
+  — aliasing `react-dom/client` → `react-dom/profiling` in
+  `electron.vite.config.ts` — turned out to cost more than the number was
+  worth: React 19.2's profiling entry emits a `performance.measure()` per
+  component render for the DevTools Performance track, and in a trace of a
+  loaded session `logComponentRender` + `logComponentEffect` + their
+  `performance.now()` calls were **~15% of total renderer CPU**, plus 21k
+  retained `PerformanceMeasure` objects in a heap snapshot taken while nothing
+  was recording. So the alias is now **opt-in via `HARNESS_REACT_PROFILING=1`**.
+  Default builds ship `reactProfiling: false` on every sample and every
+  consumer renders `n/a` — never `0`, which is what caused the original
+  misreading. **Do not add a bare `react-dom` alias** — the profiling build
+  itself does `require("react-dom")` for `ReactDOMSharedInternals`, so that
+  creates a cycle and the app dies at startup on `reading 'd'`.
+
+  The meta-lesson, since this bug's *fix* became the next bug: **profiling
+  builds are not free, and instrumentation added to explain a slowdown can
+  become a measurable share of it.** After enabling any always-on profiler,
+  re-profile and confirm the instrumentation isn't in its own top-10.
+- **`heapUsedMB` and its deltas are quantized and up to ~20 minutes stale.**
+  Chrome caches `performance.memory` on pages that aren't cross-origin
+  isolated. Observed: `heapUsedMB` pinned at exactly 560.8 for 40 minutes
+  across 617 samples (9 distinct values in an entire log) while real RSS swung
+  600MB inside 30 seconds. So `heapGrowthMB` / `heapReclaimedMB` **cannot**
+  show an allocate-and-collect sawtooth — the exact shape they were added to
+  catch — and when the cached value does refresh, the whole 20-minute delta
+  gets misattributed to one 1-second bucket. The trustworthy number is
+  `rendererRssMB` / `rendererCpuPct` in `[snapshot]`, sampled in main via
+  `app.getAppMetrics()` and scoped to `BrowserWindow` webContents (browser
+  tabs are separate renderer processes and are deliberately excluded). The
+  `performance.memory`-derived fields are suffixed `…Quantized` so they can't
+  be misread as live.
+- **`rendererBlockingMsPerSec` was not per second.** It logged the renderer
+  bucket's raw `blockingMs`. That bucket is nominally 1 s but stretches without
+  bound when the renderer's timer is starved — a DevTools heap snapshot
+  produced a single ~104 s bucket, which surfaced as `blocked=103792ms/s`.
+  Reading those totals as rates overstates blocking by 20-100x and makes a
+  mostly-idle renderer look pegged. Now normalized by `elapsedMs`, with
+  `rendererBucketMs` and `rendererBlockingMsTotal` logged alongside so the raw
+  numbers stay recoverable. **Check `rendererBucketMs` before comparing
+  blocking across snapshots** — a long window is itself a signal that the
+  renderer stalled, and it means everything derived from that bucket is
+  averaged over a period long enough to hide the spike.
+
+Two of these three were caught only because someone asked whether a number
+could physically be what it claimed: 100% zeros, a heap that never moved, and
+1399 ms of blocking inside a 1000 ms second. **Sanity-check units and ranges
+against physical limits before drawing conclusions** — a rate that exceeds its
+own denominator is a units bug, not a finding.
+
+The general lesson, since this has now cost three investigations: **a
+telemetry field that reads a constant is not evidence of a quiet system, it is
+evidence of broken instrumentation.** Before optimizing against a metric,
+confirm it has ever moved — `grep -oE '"field":[0-9.]+' perf.log | sort -u`
+takes seconds and would have caught both of these.
 
 The hard constraint when extending this: **the telemetry must not become
 the bottleneck.** `longtask` can fire continuously under load, so buckets

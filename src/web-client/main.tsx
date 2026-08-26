@@ -16,7 +16,6 @@
 //      transport sits behind the local-backend handle.
 
 import '../renderer/styles.css'
-import type { ProfilerOnRenderCallback } from 'react'
 import { WebSocketClientTransport } from '../shared/transport/transport-websocket'
 
 declare global {
@@ -85,9 +84,8 @@ async function boot(): Promise<void> {
   // fires on first mount) so the import-order constraint is softer
   // than it used to be, but we keep dynamic imports here for symmetry
   // with how the Electron renderer awaits initStore before mount.
-  const [react, reactDom, appMod, storeMod, monacoMod, metricsMod, errorBoundaryMod] =
+  const [reactDom, appMod, storeMod, monacoMod, metricsMod, errorBoundaryMod] =
     await Promise.all([
-      import('react'),
       import('react-dom/client'),
       import('../renderer/App'),
       import('../renderer/store'),
@@ -103,10 +101,8 @@ async function boot(): Promise<void> {
   const backendMod = await import('../renderer/backend')
   rendererPerf.start((sample) => backendMod.getBackend().perfReportRendererSample(sample))
 
-  const onRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration) => {
-    rendererPerf.recordCommit(actualDuration)
-  }
-
+  // No <Profiler> here: vite.web.config.ts has no react-dom/profiling alias, so
+  // onRender could never fire. Samples report reactProfiling:false.
   const App = appMod.default
   const ErrorBoundary = errorBoundaryMod.ErrorBoundary
 
@@ -114,9 +110,7 @@ async function boot(): Promise<void> {
     .createRoot(document.getElementById('root')!)
     .render(
       <ErrorBoundary label="app:root" showReload>
-        <react.Profiler id="app" onRender={onRender}>
-          <App />
-        </react.Profiler>
+        <App />
       </ErrorBoundary>
     )
 }

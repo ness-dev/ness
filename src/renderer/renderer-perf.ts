@@ -60,7 +60,8 @@ export function computeFlags(sample: Omit<RendererPerfSample, 'flags'>): string[
   const flags: string[] = []
   if (sample.blockingMs / seconds >= THRESHOLDS.blockingMs) flags.push('blocking')
   if (sample.longTaskMaxMs >= THRESHOLDS.longTaskMaxMs) flags.push('longtask')
-  if (sample.reactTotalMs / seconds >= THRESHOLDS.reactTotalMs) flags.push('react')
+  if (sample.reactProfiling && sample.reactTotalMs / seconds >= THRESHOLDS.reactTotalMs)
+    flags.push('react')
   if (sample.slowEventMaxMs >= THRESHOLDS.slowEventMaxMs) flags.push('input')
   if (sample.heapReclaimedMB >= THRESHOLDS.heapReclaimedMB) flags.push('gc')
   return flags
@@ -99,6 +100,7 @@ class RendererPerf {
   private slowEventMaxMs = 0
   private slowEventName: string | null = null
 
+  private reactProfiling = false
   private reactCommits = 0
   private reactTotalMs = 0
   private reactMaxMs = 0
@@ -126,6 +128,13 @@ class RendererPerf {
 
     this.lastTickAt = Date.now()
     this.timer = setInterval(() => this.tick(), BUCKET_MS)
+  }
+
+  /** Declared by whichever entry mounted the root <Profiler>. Without it every
+   *  react* field stays 0, and 0 is indistinguishable from an idle app — the
+   *  flag is what lets consumers say "not measured" instead. */
+  markReactProfilingEnabled(): void {
+    this.reactProfiling = true
   }
 
   /** Called from the root <Profiler>'s onRender for every React commit.
@@ -204,6 +213,7 @@ class RendererPerf {
       heapLimitMB: round(heap?.limitMB ?? 0),
       heapGrowthMB: round(Math.max(0, delta)),
       heapReclaimedMB: round(Math.max(0, -delta)),
+      reactProfiling: this.reactProfiling,
       reactCommits: this.reactCommits,
       reactTotalMs: round(this.reactTotalMs),
       reactMaxMs: round(this.reactMaxMs),
@@ -281,6 +291,7 @@ function emptySample(): RendererPerfSample {
     heapLimitMB: 0,
     heapGrowthMB: 0,
     heapReclaimedMB: 0,
+    reactProfiling: false,
     reactCommits: 0,
     reactTotalMs: 0,
     reactMaxMs: 0,
