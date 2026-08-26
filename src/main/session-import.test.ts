@@ -232,6 +232,18 @@ describe('scan', () => {
     })
   })
 
+  it('hands a second caller the in-flight scan rather than an early answer', async () => {
+    // The wizard probes several repos at once. A caller that resolved before
+    // the shared scan finished would read an empty session list and report
+    // every repo but the first as having no history at all.
+    mkdirSync(join(fakeHome, '.claude', 'projects'), { recursive: true })
+    const h = harness([])
+    const first = h.manager.scan()
+    expect(h.manager.scan()).toBe(first)
+    await first
+    expect(h.events.filter((e) => e.type === 'sessionImport/scanStarted')).toHaveLength(1)
+  })
+
   it('reports not scanning once finished', async () => {
     const h = harness([])
     mkdirSync(join(fakeHome, '.claude', 'projects'), { recursive: true })
@@ -398,6 +410,7 @@ describe('probeRepo', () => {
     await h.manager.probeRepo('/work/repo')
     expect(h.events.some((e) => e.type === 'sessionImport/scanStarted')).toBe(true)
   })
+
 })
 
 describe('getTree', () => {

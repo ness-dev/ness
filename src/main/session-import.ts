@@ -51,6 +51,7 @@ export class SessionImportManager {
   private sessions: DiscoveredSession[] = []
   private scanning = false
   private scanned = false
+  private inFlight: Promise<{ sessionCount: number; groupCount: number }> | null = null
 
   constructor(private readonly deps: SessionImportDeps) {}
 
@@ -58,16 +59,25 @@ export class SessionImportManager {
     return this.deps.now?.() ?? Date.now()
   }
 
-  /** Whether a scan is already running. A second caller is a no-op rather
-   *  than a second concurrent walk of the same tree. */
+  /** Whether a scan is already running. A second caller joins it rather than
+   *  starting a second concurrent walk of the same tree. */
   isScanning(): boolean {
     return this.scanning
   }
 
-  async scan(): Promise<{ sessionCount: number; groupCount: number }> {
-    if (this.scanning) {
-      return { sessionCount: this.sessions.length, groupCount: this.getTree().length }
-    }
+  /** Joining the in-flight scan matters, not just deduping it: the wizard
+   *  probes several repos at once, and a caller that returned early would
+   *  read `this.sessions` while it was still empty and conclude the repo had
+   *  no history at all. */
+  scan(): Promise<{ sessionCount: number; groupCount: number }> {
+    if (this.inFlight) return this.inFlight
+    this.inFlight = this.runScan().finally(() => {
+      this.inFlight = null
+    })
+    return this.inFlight
+  }
+
+  private async runScan(): Promise<{ sessionCount: number; groupCount: number }> {
     this.scanning = true
     this.deps.dispatch({ type: 'sessionImport/scanStarted' })
     try {
