@@ -1690,8 +1690,12 @@ function registerIpcHandlers(): void {
     }
     return sessionImportManager.importRepoBranches({
       repoRoot: params.repoRoot,
-      branches: params.branches,
-      chatDepth: params.chatDepth === 'all' ? 'all' : 'latest'
+      branches: params.branches
+        .filter((b) => b?.branch)
+        .map((b) => ({
+          branch: b.branch,
+          sessionIds: Array.isArray(b.sessionIds) ? b.sessionIds : []
+        }))
     })
   })
 

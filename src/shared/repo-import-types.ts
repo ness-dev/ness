@@ -2,12 +2,22 @@
  *  Code history as Ness worktrees. Lives in shared/ because the renderer
  *  reads these and never imports from main/. */
 
+/** One chat recorded against a branch. Carries enough to render a row in the
+ *  chat picker without a second round trip. */
+export interface RepoImportChat {
+  sessionId: string
+  title: string | null
+  lastActivityMs: number
+  /** Whether Ness pre-checks this chat — see pickRecommendedChats. */
+  recommended: boolean
+}
+
 /** One branch of a repo that has chat history on disk and could become a
  *  Ness worktree. */
 export interface RepoImportCandidate {
   branch: string
-  /** Sessions recorded against this branch, most recent first. */
-  sessionIds: string[]
+  /** Chats recorded against this branch, most recent first. */
+  chats: RepoImportChat[]
   sessionCount: number
   /** Most recent chat activity — the signal for "am I still working here". */
   latestActivityMs: number
@@ -37,13 +47,20 @@ export interface RepoImportPlan {
   recommendedCount: number
 }
 
-/** How many chats to open as tabs in each newly created worktree. */
-export type ChatDepth = 'latest' | 'all'
+/** One branch to recreate, plus exactly which of its chats to attach.
+ *  Enumerated rather than expressed as a depth or a window, because the
+ *  picker lets the user check individual chats and the request has to be able
+ *  to say what they checked. */
+export interface RepoImportSelection {
+  branch: string
+  /** Most recent first. The first entry rides in as the worktree's opening
+   *  tab; the rest are attached asleep. */
+  sessionIds: string[]
+}
 
 export interface RepoImportRequest {
   repoRoot: string
-  branches: string[]
-  chatDepth: ChatDepth
+  branches: RepoImportSelection[]
 }
 
 export interface RepoImportBranchResult {

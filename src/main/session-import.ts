@@ -141,12 +141,13 @@ export class SessionImportManager {
    *  branches and should get the fourteen that work, with the fifteenth
    *  named. */
   async importRepoBranches(request: RepoImportRequest): Promise<RepoImportResult> {
-    const { repoRoot, branches, chatDepth } = request
+    const { repoRoot, branches } = request
     const plan = await this.probeRepo(repoRoot)
     const byBranch = new Map(plan.candidates.map((c) => [c.branch, c]))
     const results: RepoImportBranchResult[] = []
 
-    for (const branch of branches) {
+    for (const selection of branches) {
+      const { branch } = selection
       const candidate = byBranch.get(branch)
       if (!candidate) {
         results.push({
@@ -159,10 +160,21 @@ export class SessionImportManager {
         continue
       }
 
+      // The picker sends what the user checked, but a stale plan or a hand-made
+      // request could name chats this branch doesn't own. Intersect rather than
+      // trust, and fall back to the newest chat when nothing survives — an
+      // empty worktree isn't what "import my work" asked for.
+      const owned = new Set(candidate.chats.map((c) => c.sessionId))
+      const chosen = selection.sessionIds.filter((id) => owned.has(id))
+      const ordered = candidate.chats
+        .filter((c) => chosen.includes(c.sessionId))
+        .map((c) => c.sessionId)
+      const sessionIds = ordered.length > 0 ? ordered : [candidate.chats[0].sessionId]
+
       // The most recent chat rides in as the worktree's first agent tab via
       // the existing fork-on-create path, so the worktree opens on "where I
       // left off" rather than on an empty session nobody wanted.
-      const lead = this.findSession(candidate.sessionIds[0])
+      const lead = this.findSession(sessionIds[0])
       const created = await this.deps.createWorktree({
         repoRoot,
         branchName: branch,
@@ -184,13 +196,11 @@ export class SessionImportManager {
       }
 
       let importedChats = lead?.cwd != null ? 1 : 0
-      if (chatDepth === 'all') {
-        for (const sessionId of candidate.sessionIds.slice(1)) {
-          // Asleep: a branch with 40 chats must not become 40 subprocesses.
-          // The tab resumes when the user clicks it.
-          const outcome = this.importSession(sessionId, created.path, { spawn: false })
-          if (outcome.ok) importedChats++
-        }
+      for (const sessionId of sessionIds.slice(1)) {
+        // Asleep: a branch with 40 chats must not become 40 subprocesses.
+        // The tab resumes when the user clicks it.
+        const outcome = this.importSession(sessionId, created.path, { spawn: false })
+        if (outcome.ok) importedChats++
       }
 
       results.push({ branch, ok: true, worktreePath: created.path, importedChats, error: null })
@@ -199,7 +209,8 @@ export class SessionImportManager {
     const created = results.filter((r) => r.ok).length
     log(
       'session-import',
-      `repo import ${repoRoot} requested=${branches.length} created=${created} depth=${chatDepth}`
+      `repo import ${repoRoot} requested=${branches.length} created=${created} ` +
+        `chats=${results.reduce((n, r) => n + r.importedChats, 0)}`
     )
     return {
       ok: created > 0,

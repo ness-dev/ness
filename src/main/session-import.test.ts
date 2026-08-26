@@ -7,6 +7,7 @@ import type { TerminalTab } from '../shared/state/terminals'
 import { SessionImportManager, type CreateWorktreeParams } from './session-import'
 import type { DiscoveredSession } from './session-scanner'
 import type { BranchInventoryEntry } from './worktree'
+import type { RepoImportSelection } from '../shared/repo-import-types'
 
 /** forkTranscript reads and writes under the real ~/.claude/projects tree,
  *  so these tests point it at a scratch HOME. */
@@ -253,12 +254,15 @@ describe('importRepoBranches', () => {
     )
   }
 
+  function pick(branch: string, ...sessionIds: string[]): RepoImportSelection {
+    return { branch, sessionIds }
+  }
+
   it('creates a worktree per requested branch', async () => {
     const h = repoHarness()
     const result = await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat', 'fix'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'new'), pick('fix', 'other')]
     })
     expect(result.ok).toBe(true)
     expect(result.created).toBe(2)
@@ -269,19 +273,17 @@ describe('importRepoBranches', () => {
     const h = repoHarness()
     await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'new')]
     })
     // runPending would otherwise try `-b feat` against a branch that exists.
     expect(h.created[0].forkSource).toBeDefined()
   })
 
-  it('seeds the worktree with the most recent chat, not an arbitrary one', async () => {
+  it('seeds the worktree with the newest selected chat whatever order it was sent in', async () => {
     const h = repoHarness()
     await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'old', 'new')]
     })
     expect(h.created[0].forkSource?.sessionId).toBe('new')
   })
@@ -290,33 +292,30 @@ describe('importRepoBranches', () => {
     const h = repoHarness()
     await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat', 'fix'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'new'), pick('fix', 'other')]
     })
     expect(h.created.every((c) => c.forkSource?.silent === true)).toBe(true)
   })
 
-  it('opens only the latest chat at depth "latest"', async () => {
+  it('opens only the chats that were selected', async () => {
     const h = repoHarness()
     const result = await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'new')]
     })
     // The lead chat rides in via forkSource, so no extra tab is added.
     expect(h.tabs).toHaveLength(0)
     expect(result.importedChats).toBe(1)
   })
 
-  it('attaches the remaining chats as extra tabs at depth "all"', async () => {
+  it('attaches every additional selected chat as its own tab', async () => {
     writeTranscript('/work/repo', 'old', [
       { type: 'user', sessionId: 'old', message: { role: 'user', content: 'hi' } }
     ])
     const h = repoHarness()
     const result = await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat'],
-      chatDepth: 'all'
+      branches: [pick('feat', 'new', 'old')]
     })
     expect(h.tabs).toHaveLength(1)
     expect(h.tabs[0].worktreePath).toBe('/work/repo-worktrees/feat')
@@ -330,19 +329,36 @@ describe('importRepoBranches', () => {
     const h = repoHarness()
     await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat'],
-      chatDepth: 'all'
+      branches: [pick('feat', 'new', 'old')]
     })
     expect(h.tabs[0].tab.mode).toBe('asleep')
     expect(h.started).toHaveLength(0)
+  })
+
+  it('ignores selected chats that belong to another branch', async () => {
+    const h = repoHarness()
+    const result = await h.manager.importRepoBranches({
+      repoRoot: '/work/repo',
+      branches: [pick('feat', 'new', 'other')]
+    })
+    expect(result.importedChats).toBe(1)
+    expect(h.tabs).toHaveLength(0)
+  })
+
+  it('falls back to the newest chat when the selection is empty', async () => {
+    const h = repoHarness()
+    await h.manager.importRepoBranches({
+      repoRoot: '/work/repo',
+      branches: [pick('feat')]
+    })
+    expect(h.created[0].forkSource?.sessionId).toBe('new')
   })
 
   it('keeps going when one branch fails, and names the one that did', async () => {
     const h = repoHarness({ failBranches: ['feat'] })
     const result = await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['feat', 'fix'],
-      chatDepth: 'latest'
+      branches: [pick('feat', 'new'), pick('fix', 'other')]
     })
     expect(result.created).toBe(1)
     expect(result.ok).toBe(true)
@@ -356,8 +372,7 @@ describe('importRepoBranches', () => {
     const h = repoHarness()
     const result = await h.manager.importRepoBranches({
       repoRoot: '/work/repo',
-      branches: ['never-chatted'],
-      chatDepth: 'latest'
+      branches: [pick('never-chatted')]
     })
     expect(result.created).toBe(0)
     expect(result.ok).toBe(false)

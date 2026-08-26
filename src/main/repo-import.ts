@@ -1,15 +1,20 @@
 import type { DiscoveredSession } from '../shared/session-import-types'
-import type { RepoImportCandidate, RepoImportPlan } from '../shared/repo-import-types'
+import type {
+  RepoImportCandidate,
+  RepoImportChat,
+  RepoImportPlan
+} from '../shared/repo-import-types'
 import type { BranchInventoryEntry } from './worktree'
 import { resolveRepoRoot } from './session-tree'
 
 export type {
-  ChatDepth,
   RepoImportBranchResult,
   RepoImportCandidate,
+  RepoImportChat,
   RepoImportPlan,
   RepoImportRequest,
-  RepoImportResult
+  RepoImportResult,
+  RepoImportSelection
 } from '../shared/repo-import-types'
 
 /** Turns "this repo has history on disk" into a checklist of branches worth
@@ -37,6 +42,11 @@ export type {
  *  the picker exposes wider windows as one click. */
 export const ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
+/** A branch at or under this many chats offers all of them. The recency rule
+ *  exists to keep a 61-chat branch from opening 61 tabs; on the median branch,
+ *  which has four, it would drop history that costs nothing to keep. */
+export const FEW_CHATS = 5
+
 function basename(path: string): string {
   const trimmed = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
   const idx = trimmed.lastIndexOf('/')
@@ -47,19 +57,48 @@ function sessionTime(session: DiscoveredSession): number {
   return session.lastTimestamp ?? session.mtimeMs
 }
 
-/** A named title beats a first-message fallback even from an older chat.
- *  First messages here are frequently a Ness kickoff prompt (which just
- *  restates the branch name) or a bare "." — a real title from two chats
- *  back tells the user far more about what the branch was for, and no title
- *  at all beats one that repeats the branch name already on the row. */
+/** Whether a first-message title tells the reader anything the row doesn't
+ *  already say. First messages here are frequently a Ness kickoff prompt
+ *  (which just restates the branch name) or a bare "." — no title at all
+ *  reads better than either. */
+function isMeaningfulFallback(title: string | null, branch: string): boolean {
+  const trimmed = title?.trim() ?? ''
+  return trimmed.length > 2 && !trimmed.endsWith(branch)
+}
+
+function chatTitle(session: DiscoveredSession, branch: string): string | null {
+  if (session.titleSource === 'custom' || session.titleSource === 'ai') return session.title
+  return isMeaningfulFallback(session.title, branch) ? session.title : null
+}
+
+/** A named title beats a first-message fallback even from an older chat: a
+ *  real title from two chats back tells the user far more about what the
+ *  branch was for. */
 function pickTitle(ordered: DiscoveredSession[], branch: string): string | null {
   const named = ordered.find((s) => s.titleSource === 'custom' || s.titleSource === 'ai')
   if (named?.title) return named.title
-  const fallback = ordered.find((s) => {
-    const t = s.title?.trim() ?? ''
-    return t.length > 2 && !t.endsWith(branch)
-  })
-  return fallback?.title ?? null
+  return ordered.find((s) => isMeaningfulFallback(s.title, branch))?.title ?? null
+}
+
+/** Which of a branch's chats to pre-check.
+ *
+ *  Short branches offer everything. Long ones fall back to the same recency
+ *  window the branch list uses, and always keep the most recent chat — a
+ *  worktree that opens with no chat at all is not what "import my work" meant,
+ *  however stale the branch is. */
+function pickRecommendedChats(
+  ordered: DiscoveredSession[],
+  branch: string,
+  now: number,
+  activeWindowMs: number
+): RepoImportChat[] {
+  const offerAll = ordered.length <= FEW_CHATS
+  return ordered.map((session, index) => ({
+    sessionId: session.sessionId,
+    title: chatTitle(session, branch),
+    lastActivityMs: sessionTime(session),
+    recommended: offerAll || index === 0 || now - sessionTime(session) <= activeWindowMs
+  }))
 }
 
 export interface BuildPlanOptions {
@@ -114,7 +153,7 @@ export function buildRepoImportPlan(options: BuildPlanOptions): RepoImportPlan {
 
     candidates.push({
       branch,
-      sessionIds: ordered.map((s) => s.sessionId),
+      chats: pickRecommendedChats(ordered, branch, now, activeWindowMs),
       sessionCount: ordered.length,
       latestActivityMs,
       lastCommitMs: entry.lastCommitMs || null,

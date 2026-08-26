@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { GitBranch, GitPullRequest, Loader2, MessageSquare, Check } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  GitPullRequest,
+  Loader2,
+  MessageSquare,
+  Check
+} from 'lucide-react'
 import { useBackend } from '../backend'
 import type {
-  ChatDepth,
   RepoImportCandidate,
   RepoImportPlan,
   RepoImportResult
@@ -10,11 +17,15 @@ import type {
 
 /** Offers to recreate a repo's existing Claude Code work as Ness worktrees.
  *
- *  Two steps on purpose. Step one asks a yes/no question about a repo the
- *  user just added, because a checklist of forty branches is not an answer
- *  to "do you want this at all". Step two is the checklist, pre-checked with
- *  the branches whose chats are recent — see repo-import.ts for why recency
- *  and not merge state carries that decision. */
+ *  Three questions, narrowing. "Do you want this at all" comes first, because
+ *  a checklist of forty branches is not an answer to that. Then which
+ *  branches — pre-checked by chat recency, see repo-import.ts for why recency
+ *  and not merge state carries that decision. Then which chats on them.
+ *
+ *  Every default here is generous and every filter is visible, because not
+ *  importing a chat costs the user nothing: all of it stays indexed and
+ *  searchable in the session browser either way. Import only decides what is
+ *  already on the tab strip when the worktree opens. */
 
 interface RepoImportModalProps {
   repoRoot: string
@@ -22,7 +33,12 @@ interface RepoImportModalProps {
   onImported: (firstWorktreePath: string | null) => void
 }
 
-type Stage = 'probing' | 'offer' | 'pick' | 'working' | 'done'
+type Stage = 'probing' | 'offer' | 'branches' | 'chats' | 'working' | 'done'
+
+/** A branch with more chats than this opens collapsed in the chat step. Long
+ *  branches are the reason that screen needs structure at all; short ones read
+ *  fine as a flat list and shouldn't cost a click. */
+const COLLAPSE_ABOVE = 5
 
 /** Windows the recency filter offers, in days. `null` is everything. */
 const WINDOWS: { label: string; days: number | null }[] = [
@@ -58,7 +74,8 @@ export function RepoImportModal({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [windowDays, setWindowDays] = useState<number | null>(30)
   const [hideMerged, setHideMerged] = useState(true)
-  const [chatDepth, setChatDepth] = useState<ChatDepth>('latest')
+  const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [result, setResult] = useState<RepoImportResult | null>(null)
 
   useEffect(() => {
@@ -104,6 +121,12 @@ export function RepoImportModal({
     })
   }, [plan, windowDays, hideMerged, selected])
 
+  /** The branches the chat step asks about, in the order it shows them. */
+  const chosenCandidates = useMemo(() => {
+    if (!plan) return []
+    return plan.candidates.filter((c) => selected.has(c.branch))
+  }, [plan, selected])
+
   const toggle = useCallback((branch: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -113,17 +136,52 @@ export function RepoImportModal({
     })
   }, [])
 
+  const toggleChat = useCallback((sessionId: string) => {
+    setSelectedChats((prev) => {
+      const next = new Set(prev)
+      if (next.has(sessionId)) next.delete(sessionId)
+      else next.add(sessionId)
+      return next
+    })
+  }, [])
+
+  const openChatStep = useCallback(() => {
+    setSelectedChats(
+      new Set(
+        chosenCandidates.flatMap((c) =>
+          c.chats.filter((chat) => chat.recommended).map((chat) => chat.sessionId)
+        )
+      )
+    )
+    setExpanded(
+      new Set(chosenCandidates.filter((c) => c.chats.length <= COLLAPSE_ABOVE).map((c) => c.branch))
+    )
+    setStage('chats')
+  }, [chosenCandidates])
+
+  // Unchecking every chat on a branch is how the user drops it at this stage.
+  // Sending it anyway would hit the backend's newest-chat fallback and create
+  // the worktree they just declined.
+  const requested = useMemo(
+    () =>
+      chosenCandidates
+        .map((c) => ({
+          branch: c.branch,
+          sessionIds: c.chats
+            .filter((chat) => selectedChats.has(chat.sessionId))
+            .map((chat) => chat.sessionId)
+        }))
+        .filter((b) => b.sessionIds.length > 0),
+    [chosenCandidates, selectedChats]
+  )
+
   const runImport = useCallback(async () => {
     if (!plan) return
     setStage('working')
-    const outcome = await backend.importRepoBranches({
-      repoRoot,
-      branches: [...selected],
-      chatDepth
-    })
+    const outcome = await backend.importRepoBranches({ repoRoot, branches: requested })
     setResult(outcome)
     setStage('done')
-  }, [plan, backend, repoRoot, selected, chatDepth])
+  }, [plan, backend, repoRoot, requested])
 
   if (stage === 'probing' || !plan) return null
 
@@ -142,11 +200,11 @@ export function RepoImportModal({
           <OfferStage
             plan={plan}
             onDismiss={onDismiss}
-            onContinue={() => setStage('pick')}
+            onContinue={() => setStage('branches')}
           />
         ) : null}
 
-        {stage === 'pick' ? (
+        {stage === 'branches' ? (
           <>
             <div className="px-5 py-3.5 border-b border-border">
               <h2 className="text-sm font-semibold text-fg-bright">
@@ -217,15 +275,9 @@ export function RepoImportModal({
             </div>
 
             <div className="px-5 py-3 border-t border-border flex items-center justify-between gap-2">
-              <label className="flex items-center gap-1.5 text-xs text-dim cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={chatDepth === 'all'}
-                  onChange={(e) => setChatDepth(e.target.checked ? 'all' : 'latest')}
-                  className="icon-base cursor-pointer"
-                />
-                Open every chat, not just the most recent
-              </label>
+              <span className="text-xs text-dim">
+                Creates {plural(selected.size, 'worktree')}
+              </span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={onDismiss}
@@ -234,22 +286,41 @@ export function RepoImportModal({
                   Cancel
                 </button>
                 <button
-                  onClick={runImport}
+                  onClick={openChatStep}
                   disabled={selected.size === 0}
                   className="px-4 py-1.5 text-xs font-medium rounded bg-accent/20 hover:bg-accent/30 text-fg-bright border border-accent/40 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Create {plural(selected.size, 'worktree')}
+                  Choose chats
                 </button>
               </div>
             </div>
           </>
         ) : null}
 
+        {stage === 'chats' ? (
+          <ChatStage
+            candidates={chosenCandidates}
+            selectedChats={selectedChats}
+            expanded={expanded}
+            onToggleChat={toggleChat}
+            onToggleBranch={(branch) =>
+              setExpanded((prev) => {
+                const next = new Set(prev)
+                if (next.has(branch)) next.delete(branch)
+                else next.add(branch)
+                return next
+              })
+            }
+            onBack={() => setStage('branches')}
+            onConfirm={runImport}
+          />
+        ) : null}
+
         {stage === 'working' ? (
           <div className="px-5 py-10 flex flex-col items-center gap-3">
             <Loader2 className="icon-lg animate-spin text-accent" />
             <div className="text-sm text-fg-bright">
-              Creating {plural(selected.size, 'worktree')}…
+              Creating {plural(requested.length, 'worktree')}…
             </div>
             <div className="text-xs text-dim text-center max-w-sm">
               Each one checks out its branch and runs the repo&apos;s setup script. Progress
@@ -314,6 +385,110 @@ function OfferStage({
         >
           Choose branches
         </button>
+      </div>
+    </>
+  )
+}
+
+function ChatStage({
+  candidates,
+  selectedChats,
+  expanded,
+  onToggleChat,
+  onToggleBranch,
+  onBack,
+  onConfirm
+}: {
+  candidates: RepoImportCandidate[]
+  selectedChats: Set<string>
+  expanded: Set<string>
+  onToggleChat: (sessionId: string) => void
+  onToggleBranch: (branch: string) => void
+  onBack: () => void
+  onConfirm: () => void
+}): JSX.Element {
+  const perBranch = candidates.map(
+    (c) => c.chats.filter((chat) => selectedChats.has(chat.sessionId)).length
+  )
+  const total = perBranch.reduce((n, count) => n + count, 0)
+  const worktrees = perBranch.filter((count) => count > 0).length
+
+  return (
+    <>
+      <div className="px-5 py-3.5 border-b border-border">
+        <h2 className="text-sm font-semibold text-fg-bright">Which chats should open?</h2>
+        <p className="text-xs text-dim mt-1">
+          Each becomes a tab in its worktree. Everything else stays searchable in the session
+          browser.
+        </p>
+      </div>
+
+      <div className="overflow-y-auto flex-1">
+        {candidates.map((c) => {
+          const open = expanded.has(c.branch)
+          const chosen = c.chats.filter((chat) => selectedChats.has(chat.sessionId)).length
+          return (
+            <div key={c.branch} className="border-b border-border/50">
+              <button
+                onClick={() => onToggleBranch(c.branch)}
+                className="w-full flex items-center gap-2 px-5 py-2 text-left cursor-pointer hover:bg-surface-hover transition-colors"
+              >
+                {open ? (
+                  <ChevronDown className="icon-xs text-dim shrink-0" />
+                ) : (
+                  <ChevronRight className="icon-xs text-dim shrink-0" />
+                )}
+                <GitBranch className="icon-xs text-dim shrink-0" />
+                <span className="text-sm text-fg-bright truncate">{c.branch}</span>
+                <span className="ml-auto text-xs text-dim shrink-0">
+                  {chosen} of {c.chats.length}
+                </span>
+              </button>
+              {open
+                ? c.chats.map((chat) => (
+                    <label
+                      key={chat.sessionId}
+                      className="flex items-center gap-3 pl-12 pr-5 py-1.5 cursor-pointer hover:bg-surface-hover transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedChats.has(chat.sessionId)}
+                        onChange={() => onToggleChat(chat.sessionId)}
+                        className="icon-base cursor-pointer shrink-0"
+                      />
+                      <span className="text-xs text-fg truncate flex-1">
+                        {chat.title ?? 'Untitled chat'}
+                      </span>
+                      <span className="text-xs text-dim shrink-0 w-16 text-right">
+                        {relativeTime(chat.lastActivityMs)}
+                      </span>
+                    </label>
+                  ))
+                : null}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="px-5 py-3 border-t border-border flex items-center justify-between gap-2">
+        <span className="text-xs text-dim">
+          {plural(worktrees, 'worktree')}, {plural(total, 'chat')}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onBack}
+            className="px-3 py-1.5 text-xs font-medium rounded text-dim hover:text-fg cursor-pointer transition-colors"
+          >
+            Back
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={worktrees === 0}
+            className="px-4 py-1.5 text-xs font-medium rounded bg-accent/20 hover:bg-accent/30 text-fg-bright border border-accent/40 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Create {plural(worktrees, 'worktree')}
+          </button>
+        </div>
       </div>
     </>
   )

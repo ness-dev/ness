@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DiscoveredSession } from '../shared/session-import-types'
 import type { BranchInventoryEntry } from './worktree'
-import { buildRepoImportPlan } from './repo-import'
+import { buildRepoImportPlan, FEW_CHATS } from './repo-import'
 
 const NOW = 1_000_000_000_000
 const DAY = 24 * 60 * 60 * 1000
@@ -94,7 +94,56 @@ describe('buildRepoImportPlan', () => {
     )
     expect(result.candidates[0].sessionCount).toBe(2)
     // Most recent first, so [0] is where the user left off.
-    expect(result.candidates[0].sessionIds).toEqual(['a', 'b'])
+    expect(result.candidates[0].chats.map((c) => c.sessionId)).toEqual(['a', 'b'])
+  })
+
+  it('offers every chat on a short branch however old they are', () => {
+    const sessions = Array.from({ length: FEW_CHATS }, (_, i) =>
+      session({ sessionId: `s${i}`, lastTimestamp: NOW - (i + 1) * 90 * DAY })
+    )
+    const result = plan(sessions, [branch()])
+    expect(result.candidates[0].chats.every((c) => c.recommended)).toBe(true)
+  })
+
+  it('falls back to the recency window once a branch has too many chats', () => {
+    const sessions = [
+      ...Array.from({ length: 3 }, (_, i) =>
+        session({ sessionId: `recent${i}`, lastTimestamp: NOW - (i + 1) * DAY })
+      ),
+      ...Array.from({ length: FEW_CHATS }, (_, i) =>
+        session({ sessionId: `stale${i}`, lastTimestamp: NOW - (i + 30) * DAY })
+      )
+    ]
+    const result = plan(sessions, [branch()])
+    const recommended = result.candidates[0].chats.filter((c) => c.recommended)
+    expect(recommended.map((c) => c.sessionId)).toEqual(['recent0', 'recent1', 'recent2'])
+  })
+
+  it('always keeps the newest chat, so no worktree opens empty', () => {
+    const sessions = Array.from({ length: FEW_CHATS + 1 }, (_, i) =>
+      session({ sessionId: `s${i}`, lastTimestamp: NOW - (i + 30) * DAY })
+    )
+    const result = plan(sessions, [branch()])
+    const recommended = result.candidates[0].chats.filter((c) => c.recommended)
+    expect(recommended.map((c) => c.sessionId)).toEqual(['s0'])
+  })
+
+  it('carries each chat title through for the picker to render', () => {
+    const result = plan([session({ sessionId: 'a', title: 'Fix the thing' })], [branch()])
+    expect(result.candidates[0].chats[0].title).toBe('Fix the thing')
+  })
+
+  it('blanks a chat title that only restates the branch name', () => {
+    const result = plan(
+      [session({ title: 'harness/feature', titleSource: 'first-message' })],
+      [branch()]
+    )
+    expect(result.candidates[0].chats[0].title).toBeNull()
+  })
+
+  it('blanks a trivially short chat title', () => {
+    const result = plan([session({ title: '.', titleSource: 'first-message' })], [branch()])
+    expect(result.candidates[0].chats[0].title).toBeNull()
   })
 
   it('recommends a recent, unmerged, unclaimed branch', () => {
