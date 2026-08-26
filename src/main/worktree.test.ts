@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { parseWorktreeListPorcelain } from './worktree'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { execFileSync } from 'child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { listBranchInventory, parseWorktreeListPorcelain } from './worktree'
 
 describe('parseWorktreeListPorcelain', () => {
   it('parses two active worktrees with branch + HEAD lines', () => {
@@ -104,5 +108,51 @@ describe('parseWorktreeListPorcelain', () => {
 
     expect(trees).toHaveLength(1)
     expect(trees[0].path).toBe('/Users/x/repo')
+  })
+})
+
+describe('listBranchInventory', () => {
+  let repo: string
+
+  function git(...args: string[]): void {
+    execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+  }
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'branch-inventory-'))
+    execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' })
+    git('config', 'user.email', 'test@example.com')
+    git('config', 'user.name', 'Test')
+    writeFileSync(join(repo, 'a.txt'), 'a')
+    git('add', '.')
+    git('commit', '-m', 'first')
+  })
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('does not report the base branch as merged into itself', async () => {
+    // git branch --merged main lists main, since a branch is its own
+    // ancestor. Taken at face value it makes `main` read as landed work and
+    // the import picker's hide-merged default drops it.
+    const entries = await listBranchInventory(repo)
+    expect(entries.find((e) => e.name === 'main')?.merged).toBe(false)
+  })
+
+  it('still reports a branch that really did land', async () => {
+    git('branch', 'landed')
+    const entries = await listBranchInventory(repo)
+    expect(entries.find((e) => e.name === 'landed')?.merged).toBe(true)
+  })
+
+  it('reports an unlanded branch as unmerged', async () => {
+    git('checkout', '-b', 'ahead')
+    writeFileSync(join(repo, 'b.txt'), 'b')
+    git('add', '.')
+    git('commit', '-m', 'second')
+    git('checkout', 'main')
+    const entries = await listBranchInventory(repo)
+    expect(entries.find((e) => e.name === 'ahead')?.merged).toBe(false)
   })
 })

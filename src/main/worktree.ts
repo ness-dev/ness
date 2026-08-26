@@ -241,6 +241,11 @@ export async function listBranchInventory(repoRoot: string): Promise<BranchInven
         const trimmed = name.trim()
         if (trimmed) merged.add(trimmed)
       }
+      // A branch is an ancestor of itself, so the base always comes back in
+      // its own merged list. Left in, `main` reads as landed work and the
+      // import picker's "hide merged" default drops the one branch users
+      // look for first.
+      merged.delete(base.startsWith('origin/') ? base.slice('origin/'.length) : base)
     }
   } catch {
     // No resolvable base (no remote, fresh repo). Every branch reads as
