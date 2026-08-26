@@ -9,6 +9,7 @@ import {
   viewportCaptureError
 } from './browser-screenshot'
 import { normalizeBrowserUrl } from './browser-url'
+import { evalWithTimeout, evalBlockedReason } from './browser-eval'
 
 export type { ConsoleLog }
 
@@ -27,6 +28,13 @@ export interface BrowserInstance {
   /** Viewport to give the view while parked — the size it last had on screen,
    * or the default for a tab that has never been displayed. */
   parkedSize: { width: number; height: number }
+  /** True once any document has committed in the main frame. */
+  hasDocument: boolean
+  /** Description of the last main-frame load failure, cleared on commit. */
+  lastLoadError: string | null
+  /** Why the renderer process died, from `render-process-gone`. Cleared when a
+   * fresh document commits. */
+  crashReason: string | null
 }
 
 const CONSOLE_LOG_CAP = 200
@@ -339,7 +347,10 @@ export class BrowserManager implements BrowserManagerLike {
       lastBounds: null,
       visible: false,
       parked: false,
-      parkedSize: { ...DEFAULT_VIEW_SIZE }
+      parkedSize: { ...DEFAULT_VIEW_SIZE },
+      hasDocument: false,
+      lastLoadError: null,
+      crashReason: null
     }
     this.instances.set(tabId, inst)
     this.wireEvents(tabId, inst)
@@ -365,6 +376,22 @@ export class BrowserManager implements BrowserManagerLike {
     }
     wc.on('did-navigate', nav)
     wc.on('did-navigate-in-page', nav)
+    wc.on('dom-ready', () => {
+      inst.hasDocument = true
+      inst.lastLoadError = null
+      inst.crashReason = null
+    })
+    wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      // ERR_ABORTED means a newer navigation superseded this one, not a failure.
+      if (!isMainFrame || errorCode === -3) return
+      inst.lastLoadError = `${errorDescription} (${errorCode}) loading ${validatedURL}`
+      log('browser', `did-fail-load tab=${tabId}`, inst.lastLoadError)
+    })
+    wc.on('render-process-gone', (_e, details) => {
+      if (details.reason === 'clean-exit') return
+      inst.crashReason = details.reason
+      log('browser', `render-process-gone tab=${tabId}`, details.reason)
+    })
     wc.on('did-start-loading', () => {
       this.dispatchState(tabId, { loading: true })
     })
@@ -568,13 +595,12 @@ export class BrowserManager implements BrowserManagerLike {
   async scrollTab(tabId: string, deltaX: number, deltaY: number): Promise<void> {
     const inst = this.instances.get(tabId)
     if (!inst) return
-    try {
-      await inst.view.webContents.executeJavaScript(
-        `window.scrollBy(${Number(deltaX) || 0}, ${Number(deltaY) || 0})`
-      )
-    } catch (err) {
-      log('browser', `scrollTab failed tab=${tabId}`, err instanceof Error ? err.message : err)
-    }
+    await this.evalInTab(
+      tabId,
+      inst,
+      `window.scrollBy(${Number(deltaX) || 0}, ${Number(deltaY) || 0})`,
+      'scrollTab'
+    ).catch(() => {})
   }
 
   async showCursor(
@@ -619,10 +645,35 @@ export class BrowserManager implements BrowserManagerLike {
         );
       }
     })()`
+    await this.evalInTab(tabId, inst, script, 'showCursor').catch(() => {})
+  }
+
+  /** Every executeJavaScript call goes through here. A tab with a dead
+   * renderer can never run script, and one that is merely slow must not wedge
+   * the caller forever — see browser-eval.ts. Rejects so the control server
+   * turns the reason into a 500 the agent can act on. */
+  private async evalInTab(
+    tabId: string,
+    inst: BrowserInstance,
+    script: string,
+    what: string
+  ): Promise<unknown> {
+    const wc = inst.view.webContents
+    const blocked = evalBlockedReason({
+      hasDocument: inst.hasDocument,
+      lastLoadError: inst.lastLoadError,
+      crashed: inst.crashReason !== null || (!wc.isDestroyed() && wc.isCrashed()),
+      crashReason: inst.crashReason
+    })
+    if (blocked) {
+      log('browser', `${what} unusable tab=${tabId}`, blocked)
+      throw new Error(blocked)
+    }
     try {
-      await inst.view.webContents.executeJavaScript(script)
+      return await evalWithTimeout(() => wc.executeJavaScript(script), `${what} tab=${tabId}`)
     } catch (err) {
-      log('browser', `showCursor failed tab=${tabId}`, err instanceof Error ? err.message : err)
+      log('browser', `${what} failed tab=${tabId}`, err instanceof Error ? err.message : err)
+      throw err
     }
   }
 
@@ -630,19 +681,14 @@ export class BrowserManager implements BrowserManagerLike {
     const inst = this.instances.get(tabId)
     if (!inst) return null
     if (!inst.visible) this.park(inst)
-    try {
-      const result = await inst.view.webContents.executeJavaScript(CLICKABLES_SCRIPT)
-      // The script only reports in-viewport elements, so a 0×0 viewport looks
-      // like "this page has no buttons" rather than a failure.
-      const viewport = (result as { viewport?: { w: number; h: number } } | null)?.viewport
-      if (viewport && (viewport.w < 1 || viewport.h < 1)) {
-        log('browser', `getClickables tab=${tabId} has a ${viewport.w}x${viewport.h} viewport`)
-      }
-      return result ?? null
-    } catch (err) {
-      log('browser', `getClickables failed tab=${tabId}`, err instanceof Error ? err.message : err)
-      return null
+    const result = await this.evalInTab(tabId, inst, CLICKABLES_SCRIPT, 'getClickables')
+    // The script only reports in-viewport elements, so a 0×0 viewport looks
+    // like "this page has no buttons" rather than a failure.
+    const viewport = (result as { viewport?: { w: number; h: number } } | null)?.viewport
+    if (viewport && (viewport.w < 1 || viewport.h < 1)) {
+      log('browser', `getClickables tab=${tabId} has a ${viewport.w}x${viewport.h} viewport`)
     }
+    return result ?? null
   }
 
   /** Render a view that isn't on screen.
@@ -744,15 +790,13 @@ export class BrowserManager implements BrowserManagerLike {
   async getDom(tabId: string): Promise<string | null> {
     const inst = this.instances.get(tabId)
     if (!inst) return null
-    try {
-      const result = await inst.view.webContents.executeJavaScript(
-        'document.documentElement.outerHTML'
-      )
-      return typeof result === 'string' ? result : null
-    } catch (err) {
-      log('browser', `getDom failed tab=${tabId}`, err instanceof Error ? err.message : err)
-      return null
-    }
+    const result = await this.evalInTab(
+      tabId,
+      inst,
+      'document.documentElement.outerHTML',
+      'getDom'
+    )
+    return typeof result === 'string' ? result : null
   }
 
   getTabInfo(tabId: string): { id: string; url: string; title: string } | null {

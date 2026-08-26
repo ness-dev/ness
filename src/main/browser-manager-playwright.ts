@@ -25,6 +25,7 @@ import type { BrowserManagerLike, CaptureResult, ConsoleLog } from './browser-ma
 import type { Store } from './store'
 import { log } from './debug'
 import { normalizeBrowserUrl } from './browser-url'
+import { evalWithTimeout } from './browser-eval'
 
 const CONSOLE_LOG_CAP = 200
 
@@ -565,18 +566,20 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
   async scrollTab(tabId: string, deltaX: number, deltaY: number): Promise<void> {
     const inst = this.instances.get(tabId)
     if (!inst) return
-    try {
-      await inst.page.evaluate(
-        ({ dx, dy }) => window.scrollBy(dx, dy),
-        { dx: Number(deltaX) || 0, dy: Number(deltaY) || 0 }
-      )
-    } catch (err) {
+    await evalWithTimeout(
+      () =>
+        inst.page.evaluate(({ dx, dy }) => window.scrollBy(dx, dy), {
+          dx: Number(deltaX) || 0,
+          dy: Number(deltaY) || 0
+        }),
+      `scroll tab=${tabId}`
+    ).catch((err: unknown) => {
       log(
         'browser-playwright',
         `scroll failed tab=${tabId}`,
         err instanceof Error ? err.message : err
       )
-    }
+    })
   }
 
   async showCursor(
@@ -590,30 +593,36 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
     const px = Math.round(Number(x) || 0)
     const py = Math.round(Number(y) || 0)
     const pulse = opts?.pulse ? 1 : 0
-    try {
-      await inst.page.evaluate(CURSOR_SCRIPT(px, py, pulse))
-    } catch (err) {
+    await evalWithTimeout(
+      () => inst.page.evaluate(CURSOR_SCRIPT(px, py, pulse)),
+      `showCursor tab=${tabId}`
+    ).catch((err: unknown) => {
       log(
         'browser-playwright',
         `showCursor failed tab=${tabId}`,
         err instanceof Error ? err.message : err
       )
-    }
+    })
   }
 
+  // A Playwright page always has a committed document (about:blank at worst),
+  // so the frameless never-settles hang the Electron backend guards against
+  // can't happen here — but page.evaluate has no timeout of its own, so bound
+  // it anyway to keep the two backends behaving the same under a wedged page.
   async getClickables(tabId: string): Promise<unknown | null> {
     const inst = this.instances.get(tabId)
     if (!inst) return null
-    try {
-      return await inst.page.evaluate(CLICKABLES_SCRIPT)
-    } catch (err) {
+    return await evalWithTimeout(
+      () => inst.page.evaluate(CLICKABLES_SCRIPT),
+      `getClickables tab=${tabId}`
+    ).catch((err: unknown) => {
       log(
         'browser-playwright',
         `getClickables failed tab=${tabId}`,
         err instanceof Error ? err.message : err
       )
-      return null
-    }
+      throw err
+    })
   }
 
   async capturePage(
@@ -644,15 +653,15 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
   async getDom(tabId: string): Promise<string | null> {
     const inst = this.instances.get(tabId)
     if (!inst) return null
-    try {
-      return await inst.page.content()
-    } catch (err) {
-      log(
-        'browser-playwright',
-        `getDom failed tab=${tabId}`,
-        err instanceof Error ? err.message : err
-      )
-      return null
-    }
+    return await evalWithTimeout(() => inst.page.content(), `getDom tab=${tabId}`).catch(
+      (err: unknown) => {
+        log(
+          'browser-playwright',
+          `getDom failed tab=${tabId}`,
+          err instanceof Error ? err.message : err
+        )
+        throw err
+      }
+    )
   }
 }

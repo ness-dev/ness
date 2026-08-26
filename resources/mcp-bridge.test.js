@@ -40,13 +40,14 @@ function startStub(handler) {
   })
 }
 
-function spawnBridge(port, token) {
+function spawnBridge(port, token, extraEnv) {
   const proc = spawn(process.execPath, [BRIDGE], {
     env: {
       ...process.env,
       HARNESS_PORT: String(port),
       HARNESS_TOKEN: token,
-      HARNESS_TERMINAL_ID: 'test-terminal'
+      HARNESS_TERMINAL_ID: 'test-terminal',
+      ...extraEnv
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -305,6 +306,76 @@ describe('mcp-bridge create_worktree', () => {
     expect(response.result.content[0].text).toMatch(/HTTP 422/)
     expect(response.result.content[0].text).toMatch(/99999/)
   })
+})
+
+describe('mcp-bridge get_tab_dom', () => {
+  let stub
+  let bridge
+
+  afterEach(async () => {
+    if (bridge) await bridge.kill()
+    if (stub) await stub.close()
+  })
+
+  async function callGetDom(args, extraEnv) {
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'get_tab_dom', arguments: args }
+    })
+    return bridge.next()
+  }
+
+  function serveDom(html) {
+    return startStub((req, body, res) => {
+      if (req.url === '/scope') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ scope: null, browser: { enabled: true, mode: 'full' } }))
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ html }))
+    })
+  }
+
+  it('passes a small document through untouched', async () => {
+    stub = await serveDom('<html><body>hi</body></html>')
+    bridge = spawnBridge(stub.port, 'tok')
+    const response = await callGetDom({ tab_id: 'tab-1' })
+    expect(response.result.content[0].text).toBe('<html><body>hi</body></html>')
+  })
+
+  it('caps a heavy page so the markup cannot blow the caller context', async () => {
+    stub = await serveDom('<p>' + 'x'.repeat(500_000) + '</p>')
+    bridge = spawnBridge(stub.port, 'tok')
+    const text = (await callGetDom({ tab_id: 'tab-1' })).result.content[0].text
+    expect(text.length).toBeLessThan(101_000)
+    expect(text).toMatch(/truncated by Ness: showing the first 100000 of 500007 bytes/)
+  })
+
+  it('honours an explicit max_bytes', async () => {
+    stub = await serveDom('y'.repeat(5000))
+    bridge = spawnBridge(stub.port, 'tok')
+    const text = (await callGetDom({ tab_id: 'tab-1', max_bytes: 1000 })).result.content[0].text
+    expect(text.startsWith('y'.repeat(1000))).toBe(true)
+    expect(text).toMatch(/first 1000 of 5000 bytes/)
+  })
+
+  it('reports a timeout instead of hanging when the server never responds', async () => {
+    stub = await startStub((req, body, res) => {
+      if (req.url === '/scope') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ scope: null, browser: { enabled: true, mode: 'full' } }))
+      }
+      // Deliberately never respond — the pre-fix hang.
+    })
+    bridge = spawnBridge(stub.port, 'tok', { HARNESS_CALL_TIMEOUT_MS: '400' })
+    const response = await callGetDom({ tab_id: 'tab-1' })
+    expect(response.result.isError).toBe(true)
+    expect(response.result.content[0].text).toMatch(/did not respond within 400ms/)
+  }, 10_000)
 })
 
 describe('mcp-bridge log-size cap on startup', () => {

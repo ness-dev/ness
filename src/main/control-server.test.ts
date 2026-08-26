@@ -62,6 +62,9 @@ const runPendingPR = vi.fn<
 const BROWSER_TAB = 'browser-tab-1'
 let browserEnabled = false
 let captureResult: CaptureResult | null = null
+/** Stands in for BrowserManager.getDom, which rejects when the tab can't be
+ * evaluated (load failed, or the eval timed out). */
+let domResult: () => Promise<string | null> = async () => null
 
 const deps: ControlServerDeps = {
   getRepoRoots: () => ['/repo'],
@@ -82,7 +85,7 @@ const deps: ControlServerDeps = {
     getTabUrl: () => null,
     getTabConsoleLogs: () => [],
     screenshotTab: async () => captureResult,
-    getTabDom: async () => null,
+    getTabDom: () => domResult(),
     getTabClickables: async () => null,
     navigateTab: () => {},
     backTab: () => {},
@@ -564,5 +567,49 @@ describe('control-server /browser/screenshot endpoint', () => {
     const r = await get(`/browser/screenshot?tabId=${BROWSER_TAB}`)
     expect(r.status).toBe(500)
     expect(r.json.error).toMatch(/no longer available/)
+  })
+})
+
+describe('control-server /browser/dom endpoint', () => {
+  beforeAll(() => {
+    browserEnabled = true
+  })
+  afterAll(() => {
+    browserEnabled = false
+    domResult = async () => null
+  })
+
+  it('returns the markup', async () => {
+    domResult = async () => '<html></html>'
+    const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
+    expect(r.status).toBe(200)
+    expect(r.json.html).toBe('<html></html>')
+  })
+
+  it('tells the caller to reload when the tab renderer crashed', async () => {
+    domResult = async () => {
+      throw new Error('tab renderer crashed (reason: crashed) — reload the tab')
+    }
+    const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
+    expect(r.status).toBe(500)
+    expect(r.json.error).toMatch(/renderer crashed .* reload the tab/)
+  })
+
+  it('answers instead of hanging when the eval times out', async () => {
+    domResult = async () => {
+      throw new Error('getDom tab=t1 timed out after 5000ms')
+    }
+    const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
+    expect(r.status).toBe(500)
+    expect(r.json.error).toMatch(/timed out after 5000ms/)
+  })
+
+  it('surfaces the failed-load reason so the caller knows the URL was dead', async () => {
+    domResult = async () => {
+      throw new Error("tab has no document loaded (last load failed: ERR_FAILED (-2) loading 'http://localhost:8765/')")
+    }
+    const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
+    expect(r.status).toBe(500)
+    expect(r.json.error).toMatch(/tab has no document loaded/)
   })
 })
