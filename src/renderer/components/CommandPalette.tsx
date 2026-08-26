@@ -31,6 +31,7 @@ interface CommandPaletteProps {
   onOpenFile: (filePath: string) => void
   onAddBackend: () => void
   onImportSessions: () => void
+  onImportWizard: () => void
 }
 
 type PaletteItem =
@@ -39,6 +40,7 @@ type PaletteItem =
   | { kind: 'open-files'; label: string }
   | { kind: 'add-backend'; label: string }
   | { kind: 'import-sessions'; label: string }
+  | { kind: 'import-wizard'; label: string }
   | { kind: 'heading'; label: string }
   | { kind: 'recent-worktree'; wt: Worktree }
   | { kind: 'recent-action'; action: Action; label: string; hint?: string }
@@ -198,6 +200,7 @@ export function CommandPalette({
   onOpenFile,
   onAddBackend,
   onImportSessions,
+  onImportWizard,
 }: CommandPaletteProps): JSX.Element {
   const backend = useBackend()
   const changedFiles = useChangedFilesSet(activeWorktreeId)
@@ -403,7 +406,9 @@ export function CommandPalette({
         fuzzyScore(query, 'Import chat history') > 0 ||
         /import|history|resume|session/i.test(query)
       ) {
-        items.push({ kind: 'import-sessions', label: 'Import Chat History…' })
+        items.push({ kind: 'import-wizard', label: 'Import Chat History…' })
+        selectable++
+        items.push({ kind: 'import-sessions', label: 'Browse All Chats…' })
         selectable++
       }
     } else {
@@ -450,7 +455,9 @@ export function CommandPalette({
       selectable++
       items.push({ kind: 'add-backend', label: 'Add Backend…' })
       selectable++
-      items.push({ kind: 'import-sessions', label: 'Import Chat History…' })
+      items.push({ kind: 'import-wizard', label: 'Import Chat History…' })
+      selectable++
+      items.push({ kind: 'import-sessions', label: 'Browse All Chats…' })
       selectable++
       for (const a of actionItems) {
         items.push({ kind: 'action', ...a })
@@ -513,6 +520,8 @@ export function CommandPalette({
         onAddBackend()
       } else if (item.kind === 'import-sessions') {
         onImportSessions()
+      } else if (item.kind === 'import-wizard') {
+        onImportWizard()
       } else if (item.kind === 'recent-file') {
         if (activeWorktreeId) pushRecent(activeWorktreeId, item.path)
         pushPaletteRecent({
@@ -532,6 +541,7 @@ export function CommandPalette({
       onOpenFile,
       onAddBackend,
       onImportSessions,
+      onImportWizard,
       activeWorktreeId
     ]
   )
@@ -794,10 +804,10 @@ export function CommandPalette({
               )
             }
 
-            if (item.kind === 'import-sessions') {
+            if (item.kind === 'import-sessions' || item.kind === 'import-wizard') {
               return (
                 <button
-                  key={`import-sessions-${flatIdx}`}
+                  key={`${item.kind}-${flatIdx}`}
                   data-idx={flatIdx}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors ${
                     isSelected ? 'bg-accent/15 text-fg-bright' : 'text-fg hover:bg-surface-hover'

@@ -37,7 +37,9 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   } = args
 
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
-  const [repoImportRoot, setRepoImportRoot] = useState<string | null>(null)
+  // `repoRoot: null` is the wizard opened from an entry point, which starts by
+  // asking which repos. A root means it opened on the back of a repo add.
+  const [importWizard, setImportWizard] = useState<{ repoRoot: string | null } | null>(null)
   const [repoAddPrompt, setRepoAddPrompt] = useState<
     | { kind: 'resolve'; picked: string; resolved: string }
     | { kind: 'error'; message: string }
@@ -81,7 +83,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
           // find the importer later. The modal probes first and dismisses
           // itself when there's nothing to offer, so this is silent on a
           // repo Ness has never seen.
-          setRepoImportRoot(result.repoRoot)
+          setImportWizard({ repoRoot: result.repoRoot })
           return
         case 'walked-up':
           setRepoAddPrompt({ kind: 'resolve', picked: result.picked, resolved: result.resolved })
@@ -453,8 +455,11 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     repoAddPrompt,
     handleConfirmRepoResolve,
     handleDismissRepoPrompt,
-    repoImportRoot,
-    openRepoImport: setRepoImportRoot,
-    dismissRepoImport: useCallback(() => setRepoImportRoot(null), [])
+    importWizard,
+    openImportWizard: useCallback(
+      (repoRoot: string | null = null) => setImportWizard({ repoRoot }),
+      []
+    ),
+    dismissImportWizard: useCallback(() => setImportWizard(null), [])
   }
 }

@@ -45,7 +45,7 @@ import { NewProjectScreen } from './components/NewProjectScreen'
 import { RemoteFilePicker } from './components/RemoteFilePicker'
 import { ResolveRepoModal } from './components/ResolveRepoModal'
 import { RepoAddErrorModal } from './components/RepoAddErrorModal'
-import { RepoImportModal } from './components/RepoImportModal'
+import { ImportWizard } from './components/ImportWizard'
 import { ReportIssueScreen, onOpenReportIssue, type OpenReportIssueDetail } from './components/ReportIssueScreen'
 import { AddBackendModal } from './components/AddBackendModal'
 import { SessionImportBrowser } from './components/SessionImportBrowser'
@@ -693,8 +693,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
     repoAddPrompt,
     handleConfirmRepoResolve,
     handleDismissRepoPrompt,
-    repoImportRoot,
-    dismissRepoImport
+    importWizard,
+    openImportWizard,
+    dismissImportWizard
   } = useWorktreeHandlers({
     worktrees,
     pendingWorktrees,
@@ -959,11 +960,11 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Rendered alongside repoAddPromptOverlay in both trees: adding the first
   // repo happens on the onboarding screen, which is exactly the case this
   // is for.
-  const repoImportOverlay = repoImportRoot ? (
-    <RepoImportModal
-      key={repoImportRoot}
-      repoRoot={repoImportRoot}
-      onDismiss={dismissRepoImport}
+  const repoImportOverlay = importWizard ? (
+    <ImportWizard
+      key={importWizard.repoRoot ?? 'all'}
+      repoRoot={importWizard.repoRoot}
+      onDismiss={dismissImportWizard}
       onImported={(path) => {
         if (path) setActiveWorktreeId(path)
       }}
@@ -1301,6 +1302,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
                       start a new project
                     </button>
                   </span>
+                </div>
+                <div className="ml-8 mt-3 pt-3 border-t border-border/60">
+                  <button
+                    onClick={() => openImportWizard()}
+                    className="text-xs text-accent hover:underline cursor-pointer"
+                  >
+                    Already using Claude Code? Import the chats you were working on →
+                  </button>
                 </div>
               </div>
             </div>
@@ -1867,6 +1876,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
         onOpenFile={(filePath) => handleOpenFile(filePath)}
         onAddBackend={() => setShowAddBackend(true)}
         onImportSessions={() => setShowSessionImport(true)}
+        onImportWizard={() => openImportWizard()}
       />
     )}
     {showHotkeyCheatsheet && (
