@@ -654,6 +654,8 @@ export function buildBackend(
       req('jsonClaude:rewindTo', id, entryId),
     forkJsonClaudeAt: (id: string, entryId: string) =>
       req('jsonClaude:forkAt', id, entryId),
+    openParkedFork: (parentSessionId: string, forkSessionId: string) =>
+      req('jsonClaude:openParkedFork', parentSessionId, forkSessionId),
     openJsonClaudeAuthLoginTab: (worktreePath: string) =>
       req('jsonClaude:openAuthLoginTab', worktreePath),
     setJsonClaudePermissionMode: (

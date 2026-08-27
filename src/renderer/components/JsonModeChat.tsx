@@ -31,10 +31,18 @@ import {
   ShieldAlert,
   Sparkles,
   GitBranch,
-  GitBranchPlus
+  GitBranchPlus,
+  GitFork
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
-import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import {
+  useAliases,
+  useAppState,
+  useJsonClaudeSession,
+  useSettings,
+  useWorktrees
+} from '../store'
+import { getLeaves } from '../../shared/state/terminals'
 import { useBackend } from '../backend'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
@@ -50,6 +58,7 @@ import { JsonModeChatImageThumb } from './JsonModeChatImageThumb'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import { CLAUDE_MODELS } from '../../shared/agent-registry'
+import { collectParkedForks, isForkChatTool } from '../../shared/fork-chat'
 import {
   QUESTION_TOOL_NAME,
   type JsonClaudeAutomationSource,
@@ -769,6 +778,13 @@ function automationLabel(
       brand: false
     }
   }
+  if (source === 'chat-fork') {
+    return {
+      label: 'Forked Thread',
+      note: 'the agent parked this tangent · you opened it',
+      brand: true
+    }
+  }
   return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
 }
 
@@ -1126,7 +1142,11 @@ function renderEntries(
           rows.push({
             key: `${entry.entryId}-${block.id || 'tu'}`,
             entryId: entry.entryId,
-            type: 'tool',
+            // A parked fork is an offer to the user, not agent bookkeeping.
+            // Filing it as 'text' keeps it out of the collapsed tool group
+            // it would otherwise be buried in, which is the whole point of
+            // rendering it at the spot the agent had the thought.
+            type: isForkChatTool(block.name) ? 'text' : 'tool',
             toolName: block.name,
             hasError: !!result?.isError,
             hasPendingApproval:
@@ -1161,7 +1181,11 @@ function renderEntries(
                     subAgentDescendantHasPendingApproval,
                     backgroundAgent: block.id
                       ? ctx.backgroundAgents[block.id]
-                      : undefined
+                      : undefined,
+                    fork: {
+                      parentSessionId: ctx.sessionId,
+                      worktreePath: ctx.worktreePath
+                    }
                   })
                 )}
                 {ctx.approvalCard(block.id)}
@@ -1626,6 +1650,23 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const entriesHydrated = session?.entriesHydrated ?? false
   const deferredEntries = useDeferredValue(entries)
   const find = useFindController(entries, scrollRef)
+  // Forks this conversation parked that have no tab yet. Deliberately
+  // scoped to this chat and derived from its transcript — a global forks
+  // inbox is the thing this feature is trying not to become. Runs off the
+  // deferred entries so a streaming turn doesn't rewalk the transcript per
+  // token.
+  const paneTree = useAppState((s) => s.terminals.panes[worktreePath])
+  const unopenedForks = useMemo(() => {
+    const parked = collectParkedForks(deferredEntries)
+    if (parked.length === 0) return parked
+    const openTabIds = new Set<string>()
+    if (paneTree) {
+      for (const leaf of getLeaves(paneTree)) {
+        for (const t of leaf.tabs) openTabIds.add(t.id)
+      }
+    }
+    return parked.filter((f) => !openTabIds.has(f.forkSessionId))
+  }, [deferredEntries, paneTree])
   const outerDivRef = useRef<HTMLDivElement | null>(null)
   // Document-level Cmd+F so the shortcut works from anywhere in the app —
   // sidebar, composer, tab bar, etc. Every mounted JsonModeChat installs
@@ -2704,6 +2745,35 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           </button>
         )}
       </div>
+      {unopenedForks.length > 0 && (
+        <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
+          <GitFork className="icon-xs shrink-0 text-warning" />
+          <span className="opacity-70 shrink-0">
+            {unopenedForks.length} parked fork
+            {unopenedForks.length === 1 ? '' : 's'}:
+          </span>
+          <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+            {unopenedForks.map((f) => (
+              <button
+                key={f.forkSessionId}
+                type="button"
+                // Scrolls to the card rather than opening the fork: the
+                // point of the strip is "you haven't lost this", and the
+                // decision still belongs where the agent made the note.
+                onClick={() => {
+                  scrollRef.current
+                    ?.querySelector(`[data-fork-card-id="${f.forkSessionId}"]`)
+                    ?.scrollIntoView({ block: 'center' })
+                }}
+                className="truncate hover:text-fg underline decoration-dotted underline-offset-2 cursor-pointer"
+                title={f.prompt}
+              >
+                {f.topic}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
       {session && session.sessionToolApprovals.length > 0 && (
         <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
           <span className="opacity-70">auto-allowing:</span>

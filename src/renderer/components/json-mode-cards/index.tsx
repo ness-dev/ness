@@ -40,6 +40,10 @@ export interface ToolCardProps {
    *  Such a call resolves its tool_result immediately, so the card needs
    *  this to know it's still working rather than instantly finished. */
   backgroundAgent?: JsonClaudeBackgroundAgent
+  /** Only the fork_chat case uses this. The card has to act on the
+   *  conversation that parked the fork, not on the fork itself, so it
+   *  needs the host chat's identity — no other card does. */
+  fork?: { parentSessionId: string; worktreePath: string }
 }
 
 export function basename(p: string): string {
@@ -176,8 +180,13 @@ import { GlobCard } from './GlobCard'
 import { TodoWriteCard } from './TodoWriteCard'
 import { TaskCard } from './TaskCard'
 import { GenericToolCard } from './GenericToolCard'
+import { ForkCard } from './ForkCard'
+import { isForkChatTool } from '../../../shared/fork-chat'
 
 export function dispatchToolCard(props: ToolCardProps): JSX.Element {
+  // Matched ahead of the switch because the tool name carries an MCP
+  // server prefix that has two spellings (see isForkChatTool).
+  if (isForkChatTool(props.block.name)) return <ForkCard {...props} />
   switch (props.block.name) {
     case 'Read':
       return <ReadCard {...props} />

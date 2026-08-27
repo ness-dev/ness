@@ -8,6 +8,7 @@ import {
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { parseForkSessionId } from '../shared/fork-chat'
 
 // Integration test for the local HTTP control server. Exercises the
 // `/aliases` endpoint end-to-end (POST + DELETE, both scoped and
@@ -66,6 +67,16 @@ let captureResult: CaptureResult | null = null
  * evaluated (load failed, or the eval timed out). */
 let domResult: () => Promise<string | null> = async () => null
 
+const FORK_SESSION = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
+/** Stands in for the real transcript copy. `parkFailure` lets a test drive
+ * the cap-refusal branch without building a transcript on disk. */
+let parkFailure: string | null = null
+const parkChatFork = vi.fn<ControlServerDeps['parkChatFork']>(() =>
+  parkFailure
+    ? { ok: false as const, error: parkFailure }
+    : { ok: true as const, forkSessionId: FORK_SESSION, remaining: 2 }
+)
+
 const deps: ControlServerDeps = {
   getRepoRoots: () => ['/repo'],
   getWorktreeBase: () => 'remote',
@@ -77,6 +88,8 @@ const deps: ControlServerDeps = {
     terminalId === CALLER_TERMINAL || terminalId === NO_TRANSCRIPT_TERMINAL ? scope : null,
   hasForkableTranscript: (sessionId) => sessionId === CALLER_TERMINAL,
   getConversationForkEnabled: () => conversationForkEnabled,
+  parkChatFork: (parentSessionId, worktreePath) =>
+    parkChatFork(parentSessionId, worktreePath),
   getBrowserPerms: () => ({ enabled: browserEnabled, mode: 'full' }),
   getWorktreeStatus: () => ({ status: 'no-pr', statusLabel: 'Active' }),
   browser: {
@@ -373,6 +386,57 @@ describe('control-server POST /worktrees forkConversation', () => {
       expect(r.json.error).toMatch(/disabled in Ness settings/)
     } finally {
       conversationForkEnabled = true
+    }
+  })
+})
+
+describe('control-server POST /forks', () => {
+  const body = { topic: 'drop the cron', prompt: 'check whether the cron is dead' }
+
+  it('parks a fork scoped to the calling terminal', async () => {
+    parkChatFork.mockClear()
+    const r = await call('POST', '/forks', body)
+    expect(r.status).toBe(200)
+    expect(parkChatFork).toHaveBeenCalledWith(CALLER_TERMINAL, CALLER_WORKTREE)
+    expect(r.json.forkSessionId).toBe(FORK_SESSION)
+  })
+
+  it('returns a result the card can recover the session id from', async () => {
+    const r = await call('POST', '/forks', body)
+    expect(parseForkSessionId(String(r.json.message))).toBe(FORK_SESSION)
+    expect(String(r.json.message)).toContain('"drop the cron"')
+  })
+
+  it('requires both topic and prompt', async () => {
+    expect((await call('POST', '/forks', { prompt: 'x' })).status).toBe(400)
+    expect((await call('POST', '/forks', { topic: 'x' })).status).toBe(400)
+  })
+
+  it('rejects a caller whose terminal has no forkable transcript', async () => {
+    const r = await call('POST', '/forks', body, { terminalId: NO_TRANSCRIPT_TERMINAL })
+    expect(r.status).toBe(400)
+    expect(r.json.error).toMatch(/only available from a Ness Chat tab/)
+  })
+
+  it('rejects when the setting is disabled', async () => {
+    conversationForkEnabled = false
+    try {
+      const r = await call('POST', '/forks', body)
+      expect(r.status).toBe(400)
+      expect(r.json.error).toMatch(/disabled in Ness settings/)
+    } finally {
+      conversationForkEnabled = true
+    }
+  })
+
+  it('surfaces the cap refusal as 409 with the reason intact', async () => {
+    parkFailure = 'this conversation already has 3 forks parked and unopened'
+    try {
+      const r = await call('POST', '/forks', body)
+      expect(r.status).toBe(409)
+      expect(r.json.error).toMatch(/3 forks parked/)
+    } finally {
+      parkFailure = null
     }
   })
 })

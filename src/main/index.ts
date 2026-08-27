@@ -106,6 +106,11 @@ import {
   wrapAutomatedMessage,
   type JsonClaudePermissionMode
 } from '../shared/state/json-claude'
+import {
+  MAX_UNOPENED_FORKS,
+  collectParkedForks,
+  type ParkedFork
+} from '../shared/fork-chat'
 import { deriveWorktreeStatus } from './worktree-status'
 import {
   DEFAULT_LIGHT_THEME,
@@ -1079,6 +1084,67 @@ async function resolveForkedKickoff(args: {
         })
       : `${preamble}${initialPrompt ?? ''}`,
     forkedSessionId: outcome.newSessionId
+  }
+}
+
+function findTab(
+  worktreePath: string,
+  tabId: string
+): { paneId: string; tab: TerminalTab } | undefined {
+  const tree = store.getSnapshot().state.terminals.panes[worktreePath]
+  if (!tree) return undefined
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.id === tabId) return { paneId: leaf.id, tab }
+    }
+  }
+  return undefined
+}
+
+/** Forks this conversation has parked but the user hasn't opened. "Opened"
+ *  is the existence of a tab, not a flag: panes persist, so this stays
+ *  correct across a restart without any bookkeeping of our own. */
+function unopenedForks(parentSessionId: string, worktreePath: string): ParkedFork[] {
+  const session = store.getSnapshot().state.jsonClaude.sessions[parentSessionId]
+  if (!session) return []
+  return collectParkedForks(session.entries).filter(
+    (f) => !findTab(worktreePath, f.forkSessionId)
+  )
+}
+
+/** Agent-initiated fork. Copies the caller's transcript as it stands into a
+ *  fresh session id and stops there — no tab, no subprocess, nothing running.
+ *  A parked fork is a jsonl on disk plus the tool_result naming it; it only
+ *  becomes a chat when the user opens the card. That asymmetry is the whole
+ *  safety story: an agent can leave a thought behind mid-answer without
+ *  spawning a sibling that edits the same working tree unattended. */
+function parkChatFork(
+  parentSessionId: string,
+  worktreePath: string
+):
+  | { ok: true; forkSessionId: string; remaining: number }
+  | { ok: false; error: string } {
+  const unopened = unopenedForks(parentSessionId, worktreePath)
+  if (unopened.length >= MAX_UNOPENED_FORKS) {
+    const topics = unopened.map((f) => `"${f.topic}"`).join(', ')
+    return {
+      ok: false,
+      error: `this conversation already has ${unopened.length} forks parked and unopened (${topics}). Mention what you noticed in your answer instead — the user can ask you to fork it if they want it pursued.`
+    }
+  }
+  const outcome = forkTranscript({
+    sourceSessionId: parentSessionId,
+    sourceWorktreePath: worktreePath,
+    destWorktreePath: worktreePath
+  })
+  if (!outcome.ok || !outcome.newSessionId) {
+    return { ok: false, error: outcome.reason || 'could not copy the transcript' }
+  }
+  log('json-claude', `parked fork ${outcome.newSessionId} from ${parentSessionId}`)
+  return {
+    ok: true,
+    forkSessionId: outcome.newSessionId,
+    remaining: MAX_UNOPENED_FORKS - unopened.length - 1
   }
 }
 
@@ -3770,6 +3836,58 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // Promote a parked fork (see parkChatFork) into a live chat: give it a tab
+  // and send the prompt the agent queued for it. Idempotent — a card clicked
+  // twice, or clicked after the tab already exists, focuses rather than
+  // respawning, because the tab id IS the fork's session id.
+  transport.onRequest(
+    'jsonClaude:openParkedFork',
+    (
+      _ctx,
+      parentSessionId: string,
+      forkSessionId: string
+    ): { ok: boolean; reason?: string } => {
+      if (!parentSessionId || !forkSessionId) {
+        return { ok: false, reason: 'missing args' }
+      }
+      const parent = store.getSnapshot().state.jsonClaude.sessions[parentSessionId]
+      if (!parent) return { ok: false, reason: 'unknown session' }
+      const fork = collectParkedForks(parent.entries).find(
+        (f) => f.forkSessionId === forkSessionId
+      )
+      if (!fork) return { ok: false, reason: 'not a fork of this conversation' }
+      const existing = findTab(parent.worktreePath, forkSessionId)
+      if (existing) {
+        panesFSM.selectTab(parent.worktreePath, existing.paneId, forkSessionId)
+        return { ok: true }
+      }
+
+      const model = findJsonClaudeTabModel(parentSessionId)
+      panesFSM.addTab(
+        parent.worktreePath,
+        {
+          id: forkSessionId,
+          type: 'json-claude',
+          label: fork.topic.slice(0, 40),
+          sessionId: forkSessionId,
+          mode: 'awake',
+          ...(model ? { model } : {})
+        },
+        // Same pane as the parent chat, so the fork lands as a sibling tab
+        // next to the conversation it came from rather than in pane zero.
+        findTab(parent.worktreePath, parentSessionId)?.paneId
+      )
+      startJsonClaudeSession(forkSessionId, parent.worktreePath)
+      if (fork.prompt) {
+        jsonClaudeManager.send(
+          forkSessionId,
+          wrapAutomatedMessage('chat-fork', fork.prompt)
+        )
+      }
+      return { ok: true }
+    }
+  )
+
   transport.onRequest(
     'jsonClaude:openAuthLoginTab',
     (_ctx, worktreePath: string): { ok: true; tabId: string } | { ok: false; error: string } => {
@@ -4846,6 +4964,7 @@ async function runBoot(): Promise<void> {
     resolveCallerScope,
     hasForkableTranscript,
     getConversationForkEnabled: () => config.conversationForkEnabled === true,
+    parkChatFork,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,
       mode: config.browserToolsMode === 'view' ? 'view' : 'full'

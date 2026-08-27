@@ -78,13 +78,15 @@ export type JsonClaudeAutomationSource =
   | 'worktree-message'
   | 'worktree-kickoff'
   | 'worktree-autoname'
+  | 'chat-fork'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
   'merge-conflict',
   'worktree-message',
   'worktree-kickoff',
-  'worktree-autoname'
+  'worktree-autoname',
+  'chat-fork'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -100,7 +102,12 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // name interpolated: the footer is stripped by exact match on parse, and
   // the agent can read its own branch from git anyway.
   'worktree-autoname':
-    'The message above is the user\'s own kickoff prompt, typed by them. Ness created this worktree from it and guessed the branch name — before you start the work, call the `rename_worktree` tool from the ness-control MCP server once with a better `branchName` (kebab-case, e.g. `fix-login-redirect`) and a short Title Case `alias` for the sidebar (e.g. "Login Redirect"). One call, no need to ask first, then get on with the task. If you do not have that tool, skip this and carry on.'
+    'The message above is the user\'s own kickoff prompt, typed by them. Ness created this worktree from it and guessed the branch name — before you start the work, call the `rename_worktree` tool from the ness-control MCP server once with a better `branchName` (kebab-case, e.g. `fix-login-redirect`) and a short Title Case `alias` for the sidebar (e.g. "Login Redirect"). One call, no need to ask first, then get on with the task. If you do not have that tool, skip this and carry on.',
+  // You are the fork. Everything above this message is inherited context in
+  // which a DIFFERENT question was being answered — without this note the
+  // natural reading is that the user just changed the subject on you.
+  'chat-fork':
+    'You are a fork of the conversation above. You wrote this note to yourself after noticing the tangent while working on something else, and the user has now chosen to pursue it. The transcript above is context you already hold, not the task — the task is only what this message asks for. The original conversation is still running separately and is still handling its own work, so do not pick that back up. You are in the same worktree and on the same branch, so uncommitted changes made above are really on disk.'
 }
 
 const AUTOMATION_TAG = 'ness-automated-message'
