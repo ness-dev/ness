@@ -68,6 +68,12 @@ export interface DesktopShellEarlyHandle {
   transport: ElectronServerTransport
 }
 
+/** User-facing product name. Deliberately NOT `app.name` — package.json's
+ *  `name` stays "harness" because it keys the userData directory and the
+ *  macOS Safe Storage keychain item (see CLAUDE.md), so renaming it or
+ *  calling `app.setName()` would break secrets.enc decryption. */
+const APP_DISPLAY_NAME = 'Ness'
+
 /** Where the web-client bundle lives at runtime. Differs between
  *  packaged builds (asar-relative) and dev / unpacked (sibling of the
  *  main bundle output). Lives here so index.ts doesn't need to call
@@ -411,9 +417,9 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
   function buildMenu(): void {
     const template: Electron.MenuItemConstructorOptions[] = [
       {
-        label: app.name,
+        label: APP_DISPLAY_NAME,
         submenu: [
-          { role: 'about' },
+          { role: 'about', label: `About ${APP_DISPLAY_NAME}` },
           { type: 'separator' },
           {
             label: 'Settings…',
@@ -421,7 +427,7 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
             click: () => transport.sendSignal('app:openSettings')
           },
           { type: 'separator' },
-          { role: 'hide' },
+          { role: 'hide', label: `Hide ${APP_DISPLAY_NAME}` },
           { role: 'hideOthers' },
           { role: 'unhide' },
           { type: 'separator' },
@@ -444,7 +450,7 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
           // AND keyup) flows to our handlers, where the hold gesture lives.
           // Menu click still quits immediately.
           {
-            label: `Quit ${app.name}`,
+            label: `Quit ${APP_DISPLAY_NAME}`,
             click: () => app.quit()
           }
         ]
@@ -801,6 +807,12 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
       } catch (err) {
         log('app', 'failed to set dock icon', err instanceof Error ? err.message : err)
       }
+    }
+    if (process.platform === 'darwin') {
+      app.setAboutPanelOptions({
+        applicationName: APP_DISPLAY_NAME,
+        applicationVersion: app.getVersion()
+      })
     }
     buildMenu()
     void runBoot()
