@@ -41,11 +41,6 @@ export function GenericToolCard({ block, result, autoApproved, sessionAllowed }:
           ))}
         </div>
       )}
-      {block.input && (
-        <pre className="px-2 py-1 text-xs font-mono bg-app/40 whitespace-pre-wrap max-h-40 overflow-auto">
-          <HighlightedText text={JSON.stringify(block.input, null, 2)} />
-        </pre>
-      )}
       {hasArgs && <ArgsBlock args={args} rawInput={block.input} />}
       {result && result.content.trim() !== '' && (
         <pre
