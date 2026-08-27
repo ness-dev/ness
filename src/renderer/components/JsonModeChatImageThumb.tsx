@@ -32,9 +32,18 @@ function fetchImage(path: string, mediaType: string): Promise<string | null> {
 interface Props {
   path: string
   mediaType: string
+  /** 'square' crops to a 64px tile — right for pasted attachments, where
+   *  the thumbnail is an affordance rather than something to read.
+   *  'wide' keeps the aspect ratio at 128px tall, for browser
+   *  screenshots where a centre-crop would throw away the page. */
+  shape?: 'square' | 'wide'
 }
 
-export function JsonModeChatImageThumb({ path, mediaType }: Props): JSX.Element {
+export function JsonModeChatImageThumb({
+  path,
+  mediaType,
+  shape = 'square'
+}: Props): JSX.Element {
   const [dataUrl, setDataUrl] = useState<string | null>(
     CACHE.has(path) ? CACHE.get(path)! : null
   )
@@ -69,11 +78,16 @@ export function JsonModeChatImageThumb({ path, mediaType }: Props): JSX.Element 
   }, [showFull])
 
   const name = path.split('/').pop() || path
+  const boxClass = shape === 'wide' ? 'h-32 w-48' : 'h-16 w-16'
+  const imgClass =
+    shape === 'wide'
+      ? 'h-32 w-auto max-w-full object-contain bg-app'
+      : 'h-16 w-16 object-cover'
 
   if (pending) {
     return (
       <div
-        className="h-16 w-16 rounded bg-panel border border-border animate-pulse"
+        className={`${boxClass} rounded bg-panel border border-border animate-pulse`}
         title={path}
       />
     )
@@ -81,7 +95,7 @@ export function JsonModeChatImageThumb({ path, mediaType }: Props): JSX.Element 
   if (!dataUrl) {
     return (
       <div
-        className="h-16 w-16 rounded bg-panel border border-border flex items-center justify-center text-faint"
+        className={`${boxClass} rounded bg-panel border border-border flex items-center justify-center text-faint`}
         title={`${path} (no longer on disk)`}
       >
         <ImageOff className="icon-base" />
@@ -99,7 +113,7 @@ export function JsonModeChatImageThumb({ path, mediaType }: Props): JSX.Element 
         <img
           src={dataUrl}
           alt={name}
-          className="h-16 w-16 object-cover rounded border border-border hover:border-accent transition-colors"
+          className={`${imgClass} rounded border border-border hover:border-accent transition-colors`}
         />
       </button>
       {showFull && (
