@@ -785,6 +785,14 @@ function automationLabel(
       brand: true
     }
   }
+  // Body is the user's own question — only the framing was Ness's.
+  if (source === 'chat-side-question') {
+    return {
+      label: 'Side Question',
+      note: 'forked off the conversation above',
+      brand: true
+    }
+  }
   return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
 }
 
@@ -1297,6 +1305,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     ? `${modKeySymbol}⇧↵`
     : `${modKeySymbol}Shift+Enter`
   const interruptSendHotkeyAria = `${modKeyWord}+Shift+Enter`
+  // Ask-as-fork. Alt rather than Shift because Shift is already taken by
+  // interrupt & send, and a bare Alt+Enter has to stay a newline.
+  const forkSendHotkeyLabel = isMac
+    ? `${modKeySymbol}⌥↵`
+    : `${modKeySymbol}Alt+Enter`
+  const forkSendHotkeyAria = `${modKeyWord}+Alt+Enter`
   const composerPlaceholder = sendOnEnter
     ? 'Message Claude — Enter to send, Shift+Enter for newline'
     : `Message Claude — ${modKeyWord}+Enter to send`
@@ -2357,6 +2371,20 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     backend.sendJsonClaudeMessage(sessionId, outgoing.text, outgoing.images)
   }
 
+  /** Ask this somewhere else. Forks the conversation and delivers the draft
+   *  to the copy, which opens as a sibling tab and takes focus. This chat is
+   *  left exactly as it was — including a turn that's still streaming, which
+   *  is the point: a side question no longer costs you an interrupt. */
+  function sendAsSideQuestion(): void {
+    const outgoing = takeDraft()
+    if (!outgoing) return
+    void backend.forkForSideQuestion(
+      sessionId,
+      outgoing.text,
+      outgoing.images
+    )
+  }
+
   async function attachImageFile(
     file: File,
     sourcePath: string | null
@@ -2921,6 +2949,13 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                   interruptAndSend()
                   return
                 }
+                // Cmd/Ctrl+Alt+Enter → ask as a side question. Checked
+                // before wantsSend for the same reason as the branch above.
+                if ((e.metaKey || e.ctrlKey) && e.altKey) {
+                  e.preventDefault()
+                  if (conversationForkEnabled) sendAsSideQuestion()
+                  return
+                }
                 const wantsSend = sendOnEnter
                   ? !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
                   : e.metaKey || e.ctrlKey
@@ -2990,6 +3025,19 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 ) : (
                   'interrupt'
                 )}
+              </button>
+            )}
+            {conversationForkEnabled && (
+              <button
+                onClick={sendAsSideQuestion}
+                disabled={!hasOutgoing}
+                aria-label={`Ask as a side question in a fork (${forkSendHotkeyAria})`}
+                title={`Ask this in a fork instead — copies the conversation into a new tab and asks there, leaving this one untouched (${forkSendHotkeyAria})`}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-xs text-muted hover:text-fg hover:border-warning/60 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
+              >
+                <GitFork className="icon-2xs" />
+                <span>ask in fork</span>
+                <span className="opacity-60">{forkSendHotkeyLabel}</span>
               </button>
             )}
             <button

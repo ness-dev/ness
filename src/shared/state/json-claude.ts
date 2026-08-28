@@ -79,6 +79,7 @@ export type JsonClaudeAutomationSource =
   | 'worktree-kickoff'
   | 'worktree-autoname'
   | 'chat-fork'
+  | 'chat-side-question'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
@@ -86,7 +87,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
   'worktree-message',
   'worktree-kickoff',
   'worktree-autoname',
-  'chat-fork'
+  'chat-fork',
+  'chat-side-question'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -107,7 +109,12 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // which a DIFFERENT question was being answered — without this note the
   // natural reading is that the user just changed the subject on you.
   'chat-fork':
-    'You are a fork of the conversation above. You wrote this note to yourself after noticing the tangent while working on something else, and the user has now chosen to pursue it. The transcript above is context you already hold, not the task — the task is only what this message asks for. The original conversation is still running separately and is still handling its own work, so do not pick that back up. You are in the same worktree and on the same branch, so uncommitted changes made above are really on disk.'
+    'You are a fork of the conversation above. You wrote this note to yourself after noticing the tangent while working on something else, and the user has now chosen to pursue it. The transcript above is context you already hold, not the task — the task is only what this message asks for. The original conversation is still running separately and is still handling its own work, so do not pick that back up. You are in the same worktree and on the same branch, so uncommitted changes made above are really on disk.',
+  // The user forked rather than typed into the original, which is itself the
+  // instruction: they wanted this asked WITHOUT disturbing that thread. The
+  // original is very likely still mid-turn, hence the warning about writes.
+  'chat-side-question':
+    'The message above is the user\'s own words, typed by them. They asked it here rather than in the conversation above because it is a side question they did not want to derail that thread with — so answer only this, and do not resume, re-plan, or continue the work in progress above. The transcript is context you already hold, not your task. That conversation is still open and may still be running right now, in this same worktree and branch: prefer reading and explaining, and before you write to a file, say what you are about to change so the user can stop you if the other thread is already in there.'
 }
 
 const AUTOMATION_TAG = 'ness-automated-message'

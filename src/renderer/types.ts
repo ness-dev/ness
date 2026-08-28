@@ -668,6 +668,11 @@ export interface ElectronAPI {
     parentSessionId: string,
     forkSessionId: string
   ): Promise<{ ok: boolean; reason?: string }>
+  forkForSideQuestion(
+    parentSessionId: string,
+    text: string,
+    images?: Array<{ mediaType: string; data: string; path: string }>
+  ): Promise<{ ok: boolean; forkSessionId?: string; reason?: string }>
   openJsonClaudeAuthLoginTab(
     worktreePath: string
   ): Promise<{ ok: true; tabId: string } | { ok: false; error: string }>
