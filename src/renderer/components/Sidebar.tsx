@@ -1,10 +1,22 @@
-import { Trash2, Layers, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { Trash2, Layers, Rows3, PanelLeftClose, RefreshCw, ArrowUpDown } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { WorktreeListModel } from '../worktree-list-model'
 import { WorktreeList } from './WorktreeList'
 import { BackendChipStrip } from './BackendChipStrip'
 import { BottomIconStrip } from './BottomIconStrip'
+import { ContextMenu } from './ContextMenu'
+import { useBackend } from '../backend'
+import { useSettings } from '../store'
+import { PROJECT_SORT_MODES, type ProjectSortMode } from '../../shared/state/settings'
+
+const PROJECT_SORT_LABELS: Record<ProjectSortMode, string> = {
+  manual: 'Manual — drag repo headers',
+  alphabetical: 'Alphabetical',
+  'recent-human': 'Recent — your last input',
+  'recent-agent': 'Recent — last agent reply'
+}
 
 /** The desktop shell around the shared worktree list: fixed-width panel,
  *  header controls, backend chip strip and bottom icon strip. The list
@@ -82,6 +94,9 @@ export function Sidebar({
   onStartAliasEdit,
   onEndAliasEdit
 }: SidebarProps): JSX.Element {
+  const backend = useBackend()
+  const projectSort = useSettings().projectSort
+  const [sortMenuAt, setSortMenuAt] = useState<{ x: number; y: number } | null>(null)
   return (
     <div className="shrink-0 bg-panel flex flex-col h-full" style={{ width }}>
       {/* Worktrees header */}
@@ -103,6 +118,26 @@ export function Sidebar({
               className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
             >
               <Trash2 className="icon-xs" />
+            </button>
+          </Tooltip>
+          <Tooltip
+            label={
+              repoCount <= 1
+                ? 'Order projects (add another repo to enable)'
+                : `Order projects — ${PROJECT_SORT_LABELS[projectSort]}`
+            }
+            side="bottom"
+          >
+            <button
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                setSortMenuAt({ x: rect.left, y: rect.bottom + 4 })
+              }}
+              disabled={repoCount <= 1}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-dim"
+              aria-label="Order projects"
+            >
+              <ArrowUpDown className="icon-xs" />
             </button>
           </Tooltip>
           <Tooltip
@@ -178,6 +213,19 @@ export function Sidebar({
         onOpenHotkeyCheatsheet={onOpenHotkeyCheatsheet}
         onOpenSettings={onOpenSettings}
       />
+
+      {sortMenuAt && (
+        <ContextMenu
+          x={sortMenuAt.x}
+          y={sortMenuAt.y}
+          items={PROJECT_SORT_MODES.map((mode) => ({
+            label: PROJECT_SORT_LABELS[mode],
+            checked: projectSort === mode,
+            onClick: () => void backend.setProjectSort(mode)
+          }))}
+          onClose={() => setSortMenuAt(null)}
+        />
+      )}
     </div>
   )
 }

@@ -373,3 +373,79 @@ describe('per-row decoration', () => {
     expect(model.sections[0].count).toBe(2)
   })
 })
+
+describe('project sort', () => {
+  const threeRepos = {
+    repoRoots: ['/repos/zulu', '/repos/alpha', '/repos/mike'],
+    worktrees: [
+      wt({ path: '/w/z', repoRoot: '/repos/zulu' }),
+      wt({ path: '/w/a', repoRoot: '/repos/alpha' }),
+      wt({ path: '/w/m', repoRoot: '/repos/mike' })
+    ],
+    unifiedRepos: false
+  }
+
+  it('keeps repoRoots order in manual mode', () => {
+    const model = buildWorktreeListModel(input({ ...threeRepos, projectSort: 'manual' }))
+    expect(model.sections.map((s) => s.repoName)).toEqual(['zulu', 'alpha', 'mike'])
+  })
+
+  it('defaults to manual when no mode is supplied', () => {
+    const model = buildWorktreeListModel(input(threeRepos))
+    expect(model.sections.map((s) => s.repoName)).toEqual(['zulu', 'alpha', 'mike'])
+  })
+
+  it('sorts by repo name in alphabetical mode', () => {
+    const model = buildWorktreeListModel(input({ ...threeRepos, projectSort: 'alphabetical' }))
+    expect(model.sections.map((s) => s.repoName)).toEqual(['alpha', 'mike', 'zulu'])
+  })
+
+  it('sorts newest-human-input first, using the newest worktree in each repo', () => {
+    const model = buildWorktreeListModel(
+      input({
+        ...threeRepos,
+        worktrees: [...threeRepos.worktrees, wt({ path: '/w/z2', repoRoot: '/repos/zulu' })],
+        projectSort: 'recent-human',
+        lastHumanActive: { '/w/a': 100, '/w/m': 300, '/w/z': 50, '/w/z2': 500 }
+      })
+    )
+    expect(model.sections.map((s) => s.repoName)).toEqual(['zulu', 'mike', 'alpha'])
+  })
+
+  it('reads a different map for agent recency than for human recency', () => {
+    const model = buildWorktreeListModel(
+      input({
+        ...threeRepos,
+        projectSort: 'recent-agent',
+        lastHumanActive: { '/w/z': 999 },
+        lastAgentActive: { '/w/a': 200, '/w/m': 100 }
+      })
+    )
+    expect(model.sections.map((s) => s.repoName)).toEqual(['alpha', 'mike', 'zulu'])
+  })
+
+  it('sorts repos with no activity to the bottom, alphabetically among themselves', () => {
+    const model = buildWorktreeListModel(
+      input({
+        ...threeRepos,
+        projectSort: 'recent-human',
+        lastHumanActive: { '/w/m': 100 }
+      })
+    )
+    expect(model.sections.map((s) => s.repoName)).toEqual(['mike', 'alpha', 'zulu'])
+  })
+
+  it('leaves the single unified section alone', () => {
+    const model = buildWorktreeListModel(
+      input({ ...threeRepos, unifiedRepos: true, projectSort: 'alphabetical' })
+    )
+    expect(model.sections.map((s) => s.repoRoot)).toEqual([UNIFIED_REPO_ROOT])
+  })
+
+  it('assigns Cmd ordinals in sorted display order', () => {
+    const model = buildWorktreeListModel(input({ ...threeRepos, projectSort: 'alphabetical' }))
+    const firstRows = model.sections.map((s) => s.groups[0].rows[0])
+    expect(firstRows.map((r) => r.path)).toEqual(['/w/a', '/w/m', '/w/z'])
+    expect(firstRows.map((r) => r.cmdOrdinal)).toEqual([1, 2, 3])
+  })
+})

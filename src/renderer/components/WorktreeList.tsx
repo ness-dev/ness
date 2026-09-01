@@ -1,5 +1,21 @@
-import { useCallback, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles } from 'lucide-react'
+import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, GripVertical } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DraggableAttributes
+} from '@dnd-kit/core'
+import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities/useSyntheticListeners'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
 import type { GroupKey } from '../../shared/worktree-sort'
@@ -116,6 +132,26 @@ export function WorktreeList({
       setContinuing(false)
     }
   }, [continueTarget, continueBranchName, onContinueWorktree, cancelContinue])
+
+  // Dragging edits the stored repo order, so it's only offered in manual
+  // mode — in a dynamic mode the drop would be undone by the next re-sort.
+  const reorderable =
+    model.showRepoHeaders && settings.projectSort === 'manual' && model.sections.length > 1
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const sectionIds = useMemo(() => model.sections.map((s) => s.repoRoot), [model.sections])
+  const onSectionDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      const from = sectionIds.indexOf(String(active.id))
+      const to = sectionIds.indexOf(String(over.id))
+      if (from === -1 || to === -1) return
+      const next = [...sectionIds]
+      next.splice(to, 0, ...next.splice(from, 1))
+      void backend.reorderRepos(next)
+    },
+    [sectionIds, backend]
+  )
 
   const snoozeDays = Math.max(1, Math.floor(snoozeDefaultDays ?? 7))
 
@@ -278,47 +314,66 @@ export function WorktreeList({
           </div>
         </button>
       )}
-      {model.sections.map((section) => (
-        <div key={section.repoRoot}>
-          {model.showRepoHeaders && (
-            <RepoHeader
-              section={section}
-              variant={variant}
-              onToggle={() => onToggleRepo(section.repoRoot)}
-              onRemove={onRemoveRepo}
-            />
-          )}
-          {!section.collapsed && agentCount > 0 && onNewWorktree && (
-            <button
-              onClick={() => onNewWorktree(section.unified ? undefined : section.repoRoot)}
-              className={`group relative w-full flex items-center gap-2 px-3 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
-                touch ? 'min-h-11 py-3' : 'py-1.5'
-              }`}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSectionDragEnd}>
+        <SortableContext items={sectionIds} strategy={verticalListSortingStrategy}>
+          {model.sections.map((section) => (
+            <SortableRepoSection
+              key={section.repoRoot}
+              id={section.repoRoot}
+              disabled={!reorderable}
             >
-              <span className="absolute left-0 top-0 bottom-0 w-0.5 brand-gradient-flow-bar opacity-0 group-hover:opacity-100 transition-opacity" />
-              <Plus className="icon-sm shrink-0 text-dim group-hover:text-brand transition-colors" />
-              <span className="text-sm font-medium brand-gradient-flow-text-hover">Add worktree</span>
-              {!touch && (section.unified || !model.showRepoHeaders) && (
-                <HotkeyBadge action="newWorktree" className="ml-auto" />
+              {(drag) => (
+                <>
+                  {model.showRepoHeaders && (
+                    <RepoHeader
+                      section={section}
+                      variant={variant}
+                      reorderable={reorderable}
+                      drag={drag}
+                      onToggle={() => onToggleRepo(section.repoRoot)}
+                      onRemove={onRemoveRepo}
+                    />
+                  )}
+                  {!section.collapsed && agentCount > 0 && onNewWorktree && (
+                    <button
+                      onClick={() => onNewWorktree(section.unified ? undefined : section.repoRoot)}
+                      className={`group relative w-full flex items-center gap-2 px-3 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
+                        touch ? 'min-h-11 py-3' : 'py-1.5'
+                      }`}
+                    >
+                      <span className="absolute left-0 top-0 bottom-0 w-0.5 brand-gradient-flow-bar opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <Plus className="icon-sm shrink-0 text-dim group-hover:text-brand transition-colors" />
+                      <span className="text-sm font-medium brand-gradient-flow-text-hover">
+                        Add worktree
+                      </span>
+                      {!touch && (section.unified || !model.showRepoHeaders) && (
+                        <HotkeyBadge action="newWorktree" className="ml-auto" />
+                      )}
+                    </button>
+                  )}
+                  {!section.collapsed &&
+                    section.pending.map((pending) => (
+                      <PendingWorktreeRow
+                        key={pending.id}
+                        pending={pending}
+                        variant={variant}
+                        isActive={pending.id === activeWorktreeId}
+                        onClick={() => onSelectWorktree(pending.id)}
+                        onDismiss={
+                          onDismissPendingWorktree
+                            ? () => onDismissPendingWorktree(pending.id)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  {!section.collapsed &&
+                    section.groups.map((group) => renderGroup(section, group))}
+                </>
               )}
-            </button>
-          )}
-          {!section.collapsed &&
-            section.pending.map((pending) => (
-              <PendingWorktreeRow
-                key={pending.id}
-                pending={pending}
-                variant={variant}
-                isActive={pending.id === activeWorktreeId}
-                onClick={() => onSelectWorktree(pending.id)}
-                onDismiss={
-                  onDismissPendingWorktree ? () => onDismissPendingWorktree(pending.id) : undefined
-                }
-              />
-            ))}
-          {!section.collapsed && section.groups.map((group) => renderGroup(section, group))}
-        </div>
-      ))}
+            </SortableRepoSection>
+          ))}
+        </SortableContext>
+      </DndContext>
       {model.totalWorktrees === 0 &&
         (onNewWorktree ? (
           agentCount > 0 && <div className="px-4 py-3 text-xs text-faint">No worktrees found</div>
@@ -350,25 +405,69 @@ function Chevron({ collapsed }: { collapsed: boolean }): JSX.Element {
   )
 }
 
+/** Drag handle bundle handed down to the repo header. Listeners live on the
+ *  header button rather than the grip icon so the whole row is draggable; the
+ *  4px activation distance keeps a plain click toggling collapse. */
+interface SectionDrag {
+  attributes: DraggableAttributes
+  listeners: SyntheticListenerMap | undefined
+}
+
+function SortableRepoSection({
+  id,
+  disabled,
+  children
+}: {
+  id: string
+  disabled: boolean
+  children: (drag: SectionDrag) => JSX.Element
+}): JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1
+      }}
+    >
+      {children({ attributes, listeners })}
+    </div>
+  )
+}
+
 function RepoHeader({
   section,
   variant,
+  reorderable,
+  drag,
   onToggle,
   onRemove
 }: {
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
+  reorderable: boolean
+  drag: SectionDrag
   onToggle: () => void
   onRemove?: (repoRoot: string) => Promise<void>
 }): JSX.Element {
   return (
     <button
       onClick={onToggle}
-      className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors cursor-pointer ${
-        variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'
-      }`}
-      title={section.repoRoot}
+      {...(reorderable ? drag.attributes : {})}
+      {...(reorderable ? drag.listeners : {})}
+      className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors ${
+        reorderable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      } ${variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'}`}
+      title={reorderable ? `${section.repoRoot}\nDrag to reorder` : section.repoRoot}
     >
+      {reorderable && (
+        <GripVertical className="icon-2xs shrink-0 -ml-1 text-faint opacity-0 group-hover:opacity-100 transition-opacity" />
+      )}
       <Chevron collapsed={section.collapsed} />
       <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
       <span className="ml-auto relative flex items-center">

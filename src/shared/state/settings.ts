@@ -264,6 +264,23 @@ export const BOTTOM_ICON_KEYS: readonly BottomIconKey[] = [
 
 export type HiddenBottomIcons = Partial<Record<BottomIconKey, boolean>>
 
+/** How the sidebar orders repo sections. `manual` renders `repoRoots` in the
+ *  order the user dragged them into; the rest re-sort a copy at display time
+ *  so the underlying manual order survives a round trip through a dynamic
+ *  mode. */
+export type ProjectSortMode = 'manual' | 'alphabetical' | 'recent-human' | 'recent-agent'
+
+export const PROJECT_SORT_MODES: readonly ProjectSortMode[] = [
+  'manual',
+  'alphabetical',
+  'recent-human',
+  'recent-agent'
+] as const
+
+export function isProjectSortMode(v: unknown): v is ProjectSortMode {
+  return typeof v === 'string' && (PROJECT_SORT_MODES as readonly string[]).includes(v)
+}
+
 export interface SettingsState {
   /** Whether the active theme is the light theme, the dark theme, or follows
    *  the OS appearance. Default 'system'. */
@@ -454,6 +471,9 @@ export interface SettingsState {
    *  at read time (so adding a new icon to the codebase just shows up on the
    *  end). Managed via up/down chevrons in the hamburger dropdown. */
   bottomIconOrder: BottomIconKey[]
+  /** How the sidebar orders repo sections. Only observable when more than
+   *  one repo is in the workspace and repos aren't merged into one list. */
+  projectSort: ProjectSortMode
 }
 
 export type SettingsEvent =
@@ -530,6 +550,7 @@ export type SettingsEvent =
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
+  | { type: 'settings/projectSortChanged'; payload: ProjectSortMode }
 
 // Client-side placeholder. Real values are seeded in the main-process Store
 // constructor from the on-disk config and secrets.
@@ -603,7 +624,8 @@ export const initialSettings: SettingsState = {
   preventSleepMode: 'off',
   preventSleepUntil: null,
   hiddenBottomIcons: {},
-  bottomIconOrder: [...BOTTOM_ICON_KEYS]
+  bottomIconOrder: [...BOTTOM_ICON_KEYS],
+  projectSort: 'manual'
 }
 
 /** Read helper: return the user's stored order with any missing keys
@@ -773,6 +795,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, hiddenBottomIcons: event.payload }
     case 'settings/bottomIconOrderChanged':
       return { ...state, bottomIconOrder: event.payload }
+    case 'settings/projectSortChanged':
+      return { ...state, projectSort: event.payload }
     default: {
       const _exhaustive: never = event
       void _exhaustive

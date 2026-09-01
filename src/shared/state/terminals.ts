@@ -1,5 +1,8 @@
 export type PtyStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval'
 
+/** Who was responsible for a burst of activity in a worktree. */
+export type ActivityActor = 'human' | 'agent'
+
 export interface PendingTool {
   name: string
   input: Record<string, unknown>
@@ -231,6 +234,13 @@ export interface TerminalsState {
    * the sidebar for recency sort. Updated by the activity-deriver in main
    * whenever a contained terminal changes status. */
   lastActive: Record<string, number>
+  /** Per-worktree recency split by who acted. `human` advances when the user
+   * submits a prompt or types into the composer; `agent` advances when the
+   * agent finishes a turn or blocks on approval. Both are derived from the
+   * same status transitions `lastActive` is, so they carry its ±30s debounce
+   * — fine for sorting, not for anything needing exact times. */
+  lastHumanActive: Record<string, number>
+  lastAgentActive: Record<string, number>
   /** Controller + spectator roster per xterm-backed terminal id. Entries
    *  are created lazily on the first join (or on pty:create) and deleted
    *  when the last client leaves. See the `controlTaken` reducer cases
@@ -266,7 +276,11 @@ export type TerminalsEvent =
     }
   | {
       type: 'terminals/lastActiveChanged'
-      payload: { worktreePath: string; ts: number }
+      payload: { worktreePath: string; ts: number; actors?: ActivityActor[] }
+    }
+  | {
+      type: 'terminals/actorActivitySeeded'
+      payload: { human: Record<string, number>; agent: Record<string, number> }
     }
   | {
       type: 'terminals/paneRatioChanged'
@@ -346,6 +360,8 @@ export const initialTerminals: TerminalsState = {
   progress: {},
   panes: {},
   lastActive: {},
+  lastHumanActive: {},
+  lastAgentActive: {},
   sessions: {}
 }
 
@@ -440,10 +456,27 @@ export function terminalsReducer(
       return { ...state, panes: rest }
     }
     case 'terminals/lastActiveChanged': {
-      const { worktreePath, ts } = event.payload
-      return {
+      const { worktreePath, ts, actors } = event.payload
+      const next: TerminalsState = {
         ...state,
         lastActive: { ...state.lastActive, [worktreePath]: ts }
+      }
+      if (actors?.includes('human')) {
+        next.lastHumanActive = { ...state.lastHumanActive, [worktreePath]: ts }
+      }
+      if (actors?.includes('agent')) {
+        next.lastAgentActive = { ...state.lastAgentActive, [worktreePath]: ts }
+      }
+      return next
+    }
+    case 'terminals/actorActivitySeeded': {
+      // Boot-time hydration from the on-disk activity log. Existing entries
+      // win — a live transition that landed before the seed dispatch is
+      // newer than anything the log can offer.
+      return {
+        ...state,
+        lastHumanActive: { ...event.payload.human, ...state.lastHumanActive },
+        lastAgentActive: { ...event.payload.agent, ...state.lastAgentActive }
       }
     }
     case 'terminals/paneRatioChanged': {

@@ -1,9 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 
 export interface ContextMenuItem {
   label: string
   onClick: () => void
   danger?: boolean
+  /** Renders the item as a radio/toggle choice with a leading tick. Any item
+   *  in the menu setting this puts every item in the checked gutter, so the
+   *  labels stay aligned. */
+  checked?: boolean
 }
 
 interface ContextMenuProps {
@@ -16,6 +21,7 @@ interface ContextMenuProps {
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y })
+  const hasChecks = items.some((item) => item.checked !== undefined)
 
   useLayoutEffect(() => {
     const el = menuRef.current
@@ -56,15 +62,18 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
       {items.map((item, i) => (
         <button
           key={i}
-          className={`block w-full text-left px-3 py-1.5 hover:bg-panel cursor-pointer ${
-            item.danger ? 'text-danger' : 'text-fg-bright'
-          }`}
+          className={`w-full text-left px-3 py-1.5 hover:bg-panel cursor-pointer ${
+            hasChecks ? 'flex items-center gap-2' : 'block'
+          } ${item.danger ? 'text-danger' : 'text-fg-bright'}`}
           onClick={(e) => {
             e.stopPropagation()
             item.onClick()
             onClose()
           }}
         >
+          {hasChecks && (
+            <Check className={`icon-2xs shrink-0 ${item.checked ? 'text-accent' : 'opacity-0'}`} />
+          )}
           {item.label}
         </button>
       ))}

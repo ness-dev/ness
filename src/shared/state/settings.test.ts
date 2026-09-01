@@ -853,6 +853,15 @@ describe('settingsReducer', () => {
     expect(reordered.bottomIconOrder).toEqual(['settings', 'commandCenter', 'newProject'])
   })
 
+  it('projectSortChanged replaces the sidebar project order mode', () => {
+    const next = apply(initialSettings, {
+      type: 'settings/projectSortChanged',
+      payload: 'recent-agent'
+    })
+    expect(initialSettings.projectSort).toBe('manual')
+    expect(next.projectSort).toBe('recent-agent')
+  })
+
   it('returns a new object reference (no mutation)', () => {
     const next = apply(initialSettings, { type: 'settings/themeDarkChanged', payload: 'dracula' })
     expect(next).not.toBe(initialSettings)

@@ -47,6 +47,7 @@ export function useWorktreeListModel(
   const aliases = useAliases()
   const assignedPRs = useAssignedPRs()
   const viewerLogin = useAppState((s) => s.settings.viewerLogin)
+  const projectSort = useAppState((s) => s.settings.projectSort)
   const tabsByWorktree = useTabsByWorktree()
 
   const { unifiedRepos, collapsedRepos, isGroupCollapsed } = collapse
@@ -71,6 +72,9 @@ export function useWorktreeListModel(
         unifiedRepos,
         collapsedRepos,
         isGroupCollapsed,
+        projectSort,
+        lastHumanActive: terminals.lastHumanActive,
+        lastAgentActive: terminals.lastAgentActive,
         assignOrdinals
       }),
     [
@@ -91,6 +95,9 @@ export function useWorktreeListModel(
       unifiedRepos,
       collapsedRepos,
       isGroupCollapsed,
+      projectSort,
+      terminals.lastHumanActive,
+      terminals.lastAgentActive,
       assignOrdinals
     ]
   )

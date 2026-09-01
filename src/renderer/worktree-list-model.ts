@@ -9,6 +9,7 @@ import type {
 } from './types'
 import type { SnoozeEntry } from '../shared/state'
 import type { AssignedPR } from '../shared/state/assigned-prs'
+import type { ProjectSortMode } from '../shared/state/settings'
 import { groupWorktrees, type GroupKey } from '../shared/worktree-sort'
 import type { DisplayStatus } from './worktree-row-style'
 
@@ -115,6 +116,12 @@ export interface WorktreeListModelInput {
   unifiedRepos: boolean
   collapsedRepos: Record<string, boolean>
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
+  /** Defaults to 'manual' — i.e. render `repoRoots` in the stored order. */
+  projectSort?: ProjectSortMode
+  /** Per-worktree-path human/agent recency, used by the two recency sorts.
+   *  A repo's recency is the newest of its worktrees'. */
+  lastHumanActive?: Record<string, number>
+  lastAgentActive?: Record<string, number>
   /** Touch surfaces don't bind Cmd+N, so they skip ordinal assignment. */
   assignOrdinals?: boolean
 }
@@ -138,6 +145,42 @@ function aggregate(
   return { status, pendingTool: null }
 }
 
+/** Reorder repo sections in place per the user's sort mode. 'manual' is the
+ *  identity — `repoRoots` already carries the order the user dragged into.
+ *  A repo with no activity for the chosen actor sorts to the bottom rather
+ *  than the top, so untouched repos don't outrank ones you worked in
+ *  yesterday. Ties (and the whole never-touched tail) break alphabetically
+ *  so the order is stable instead of dependent on iteration order. */
+function sortRepoBuckets(
+  buckets: { repoRoot: string; worktrees: Worktree[] }[],
+  mode: ProjectSortMode,
+  recencyMaps: Partial<Record<ProjectSortMode, Record<string, number> | undefined>>
+): void {
+  if (mode === 'manual') return
+  const byName = (a: { repoRoot: string }, b: { repoRoot: string }): number =>
+    repoLabelFor(a.repoRoot).localeCompare(repoLabelFor(b.repoRoot), undefined, {
+      sensitivity: 'base'
+    })
+  if (mode === 'alphabetical') {
+    buckets.sort(byName)
+    return
+  }
+  const byPath = recencyMaps[mode] ?? {}
+  const recency = new Map<string, number>()
+  for (const bucket of buckets) {
+    let newest = 0
+    for (const wt of bucket.worktrees) {
+      const ts = byPath[wt.path]
+      if (typeof ts === 'number' && ts > newest) newest = ts
+    }
+    recency.set(bucket.repoRoot, newest)
+  }
+  buckets.sort((a, b) => {
+    const diff = (recency.get(b.repoRoot) ?? 0) - (recency.get(a.repoRoot) ?? 0)
+    return diff !== 0 ? diff : byName(a, b)
+  })
+}
+
 export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeListModel {
   const {
     worktrees,
@@ -157,6 +200,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     unifiedRepos,
     collapsedRepos,
     isGroupCollapsed,
+    projectSort = 'manual',
+    lastHumanActive,
+    lastAgentActive,
     assignOrdinals = true
   } = input
 
@@ -203,6 +249,10 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     for (const [repoRoot, wts] of map) {
       buckets.push({ repoRoot, worktrees: wts, assignedPRs: assignedPRsByRepo?.[repoRoot] ?? [] })
     }
+    sortRepoBuckets(buckets, projectSort, {
+      'recent-human': lastHumanActive,
+      'recent-agent': lastAgentActive
+    })
   }
 
   const sections: WorktreeRepoSectionModel[] = buckets.map((bucket) => {

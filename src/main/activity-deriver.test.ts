@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('./debug', () => ({
   log: () => {}
 }))
-vi.mock('./activity', () => ({
+vi.mock('./activity', async (importActual) => ({
+  ...(await importActual<typeof import('./activity')>()),
   recordActivity: vi.fn()
 }))
 

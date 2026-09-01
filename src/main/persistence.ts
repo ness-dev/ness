@@ -176,6 +176,10 @@ export interface Config {
   // read time (see resolveBottomIconOrder). Absent from disk when the
   // user hasn't reordered anything.
   bottomIconOrder?: string[]
+  // How the sidebar orders repo sections: 'manual' (repoRoots order, set by
+  // dragging headers), 'alphabetical', 'recent-human' or 'recent-agent'.
+  // Absent from disk while the user is on the 'manual' default.
+  projectSort?: string
   // Branches that have been merged locally via Ness, keyed by branch name.
   // Value is the branch-tip SHA at merge time — if the branch later advances
   // past this SHA, the flag is considered stale and the branch is no longer

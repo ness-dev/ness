@@ -115,11 +115,13 @@ import {
   DEFAULT_NESSIE_COLOR,
   nessieColorById,
   BOTTOM_ICON_KEYS,
+  isProjectSortMode,
   type SidebarDetailPrefs,
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
   type HiddenBottomIcons,
-  type BottomIconKey
+  type BottomIconKey,
+  type ProjectSortMode
 } from '../shared/state/settings'
 import { watchStatusDir } from './hooks'
 import { getAgent, type AgentKind } from './agents'
@@ -143,7 +145,7 @@ import {
 import { buildMergeConflictMessage } from './merge-conflict-request'
 import { writeMcpConfigForTerminal, pruneMcpConfigs, getBridgeScriptPath } from './mcp-config'
 import { getControlServerInfo } from './control-server'
-import { recordActivity, getActivityLog, clearAllActivity, clearActivityForWorktree, sealAllActive, touchActivityMeta, finalizeActivity, type ActivityState, type PRState } from './activity'
+import { recordActivity, getActivityLog, clearAllActivity, clearActivityForWorktree, sealAllActive, touchActivityMeta, finalizeActivity, deriveActorTimestamps, type ActivityState, type PRState } from './activity'
 import { log, getLogFilePath } from './debug'
 import { loadCustomThemes } from './themes-loader'
 import { perfLog, flushPerfLogSync } from './perf-log'
@@ -1794,6 +1796,30 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // Manual project order. `repoRoots` is itself the order the sidebar renders
+  // in, so reordering is a permutation of the existing array — anything the
+  // caller omits keeps its relative position at the end rather than vanishing.
+  transport.onRequest('repo:reorder', (_ctx, order: string[]) => {
+    if (!Array.isArray(order)) return false
+    const known = new Set(config.repoRoots)
+    const seen = new Set<string>()
+    const next: string[] = []
+    for (const root of order) {
+      if (typeof root === 'string' && known.has(root) && !seen.has(root)) {
+        next.push(root)
+        seen.add(root)
+      }
+    }
+    for (const root of config.repoRoots) {
+      if (!seen.has(root)) next.push(root)
+    }
+    if (next.every((root, i) => root === config.repoRoots[i])) return true
+    config.repoRoots = next
+    saveConfig(config)
+    worktreesFSM.dispatchRepos([...next])
+    return true
+  })
+
   transport.onRequest('repo:remove', (_ctx, repoRoot: string) => {
     const idx = config.repoRoots.indexOf(repoRoot)
     if (idx === -1) return false
@@ -3044,6 +3070,15 @@ function registerIpcHandlers(): void {
     }
   )
 
+  transport.onRequest('config:setProjectSort', (_ctx, mode: ProjectSortMode) => {
+    if (!isProjectSortMode(mode)) return false
+    if (mode === 'manual') delete config.projectSort
+    else config.projectSort = mode
+    saveConfig(config)
+    store.dispatch({ type: 'settings/projectSortChanged', payload: mode })
+    return true
+  })
+
   transport.onRequest('config:getAvailableThemes', (_ctx) => {
     return AVAILABLE_THEMES
   })
@@ -3181,7 +3216,7 @@ function registerIpcHandlers(): void {
   transport.onRequest('terminals:touchLastActive', (_ctx, wtPath: string) => {
     store.dispatch({
       type: 'terminals/lastActiveChanged',
-      payload: { worktreePath: wtPath, ts: Date.now() }
+      payload: { worktreePath: wtPath, ts: Date.now(), actors: ['human'] }
     })
     return true
   })
@@ -4717,6 +4752,11 @@ async function runBoot(): Promise<void> {
     type: 'repoConfigs/loaded',
     payload: { byRepo: initialRepoConfigsMap, filenameByRepo: initialRepoConfigNames }
   })
+
+  // Recover per-worktree human/agent recency from the activity log before the
+  // deriver starts producing live ones, so the sidebar's recency sorts aren't
+  // blank until each worktree happens to change state.
+  store.dispatch({ type: 'terminals/actorActivitySeeded', payload: deriveActorTimestamps() })
 
   // Start the activity deriver — it observes terminals/prs/panes events
   // and writes recordActivity + lastActive without renderer involvement.

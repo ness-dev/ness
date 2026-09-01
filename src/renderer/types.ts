@@ -170,12 +170,14 @@ import type {
   SidebarDetailPrefs as SidebarDetailPrefsShared,
   SidebarDetailPrefsByMode as SidebarDetailPrefsByModeShared,
   HiddenBottomIcons as HiddenBottomIconsShared,
-  BottomIconKey as BottomIconKeyShared
+  BottomIconKey as BottomIconKeyShared,
+  ProjectSortMode as ProjectSortModeShared
 } from '../shared/state/settings'
 export type SidebarDetailPrefs = SidebarDetailPrefsShared
 export type SidebarDetailPrefsByMode = SidebarDetailPrefsByModeShared
 export type HiddenBottomIcons = HiddenBottomIconsShared
 export type BottomIconKey = BottomIconKeyShared
+export type ProjectSortMode = ProjectSortModeShared
 
 export type GitHubMergeMethod = 'merge' | 'squash' | 'rebase'
 
@@ -269,6 +271,7 @@ export interface ElectronAPI {
   addRepo(): Promise<AddRepoResult>
   addRepoAtPath(repoRoot: string): Promise<AddRepoResult>
   removeRepo(repoRoot: string): Promise<boolean>
+  reorderRepos(order: string[]): Promise<boolean>
   createNewProject(opts: {
     parentDir: string
     name: string
@@ -444,6 +447,7 @@ export interface ElectronAPI {
   setSidebarDetails(prefs: SidebarDetailPrefsByMode): Promise<boolean>
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
+  setProjectSort(mode: ProjectSortMode): Promise<boolean>
   setEditor(editorId: string): Promise<boolean>
   getAvailableEditors(): Promise<{ id: string; name: string }[]>
   snooze(path: string, wakeAt: number): Promise<boolean>

@@ -1,10 +1,10 @@
 import type { Store } from './store'
 import type { AppState, StateEvent } from '../shared/state'
-import type { PtyStatus } from '../shared/state/terminals'
+import type { ActivityActor, PtyStatus } from '../shared/state/terminals'
 import { getLeaves } from '../shared/state/terminals'
 import { isWorktreeMerged } from '../shared/state/prs'
 import type { ActivityState } from './activity'
-import { recordActivity } from './activity'
+import { actorForState, recordActivity } from './activity'
 
 const DEBOUNCE_MS = 30000
 
@@ -68,6 +68,9 @@ export class ActivityDeriver {
   private store: Store
   private debounceTimers = new Map<string, NodeJS.Timeout>()
   private lastRecorded = new Map<string, ActivityState>()
+  /** Actors seen since the last flush, so a human submit followed by an
+   * agent reply inside one debounce window advances both timestamps. */
+  private pendingActors = new Map<string, Set<ActivityActor>>()
   private unsubscribe: (() => void) | null = null
 
   constructor(store: Store) {
@@ -86,6 +89,7 @@ export class ActivityDeriver {
     }
     for (const t of this.debounceTimers.values()) clearTimeout(t)
     this.debounceTimers.clear()
+    this.pendingActors.clear()
   }
 
   /** Decide which worktrees to re-derive based on the event type. */
@@ -174,6 +178,16 @@ export class ActivityDeriver {
     this.lastRecorded.set(wtPath, next)
     recordActivity(wtPath, next)
 
+    const actor = actorForState(next)
+    if (actor) {
+      let set = this.pendingActors.get(wtPath)
+      if (!set) {
+        set = new Set()
+        this.pendingActors.set(wtPath, set)
+      }
+      set.add(actor)
+    }
+
     // Debounce lastActive updates per worktree (30s window). Consumers
     // (CommandCenter relative-time label, Cleanup sort, AutoSleepMonitor)
     // only need minute-level precision, so a relaxed window keeps this
@@ -181,9 +195,15 @@ export class ActivityDeriver {
     if (this.debounceTimers.has(wtPath)) return
     const timer = setTimeout(() => {
       this.debounceTimers.delete(wtPath)
+      const actors = this.pendingActors.get(wtPath)
+      this.pendingActors.delete(wtPath)
       this.store.dispatch({
         type: 'terminals/lastActiveChanged',
-        payload: { worktreePath: wtPath, ts: Date.now() }
+        payload: {
+          worktreePath: wtPath,
+          ts: Date.now(),
+          actors: actors ? [...actors] : undefined
+        }
       })
     }, DEBOUNCE_MS)
     this.debounceTimers.set(wtPath, timer)

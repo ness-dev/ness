@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { userDataDir } from './paths'
 import { log } from './debug'
+import type { ActivityActor } from '../shared/state/terminals'
 
 export type ActivityState = 'processing' | 'waiting' | 'needs-approval' | 'idle' | 'merged'
 
@@ -169,6 +170,35 @@ export function finalizeActivity(
 
 export function getActivityLog(): ActivityLog {
   return load()
+}
+
+/** Attribute a state transition to whoever caused it. Entering 'processing'
+ *  only ever follows a submitted prompt, so it reads as human input; the
+ *  turn-ending states are the agent reporting back. 'idle' and 'merged' are
+ *  ambient and belong to neither. */
+export function actorForState(state: ActivityState): ActivityActor | null {
+  if (state === 'processing') return 'human'
+  if (state === 'waiting' || state === 'needs-approval') return 'agent'
+  return null
+}
+
+/** Replay the log to recover per-worktree human/agent recency. Without this
+ *  the sidebar's recency sorts would fall back to arbitrary order after every
+ *  relaunch, since the timestamps themselves aren't persisted. */
+export function deriveActorTimestamps(): {
+  human: Record<string, number>
+  agent: Record<string, number>
+} {
+  const human: Record<string, number> = {}
+  const agent: Record<string, number> = {}
+  for (const [path, rec] of Object.entries(load())) {
+    for (const ev of rec.events) {
+      const actor = actorForState(ev.s)
+      if (actor === 'human') human[path] = ev.t
+      else if (actor === 'agent') agent[path] = ev.t
+    }
+  }
+  return { human, agent }
 }
 
 export function clearActivityForWorktree(worktreePath: string): void {

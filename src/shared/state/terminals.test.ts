@@ -236,6 +236,8 @@ describe('terminalsReducer', () => {
       progress: { 'term-1': { state: 1, value: 50 } },
       panes: {},
       lastActive: {},
+      lastHumanActive: {},
+      lastAgentActive: {},
       sessions: {}
     }
     const next = apply(start, { type: 'terminals/removed', payload: 'term-1' })
@@ -253,6 +255,8 @@ describe('terminalsReducer', () => {
       progress: {},
       panes: {},
       lastActive: {},
+      lastHumanActive: {},
+      lastAgentActive: {},
       sessions: {}
     }
     const next = apply(start, { type: 'terminals/removed', payload: 'missing' })
@@ -372,6 +376,43 @@ describe('terminalsReducer', () => {
       payload: { worktreePath: '/wt/a', ts: 1234 }
     })
     expect(next.lastActive['/wt/a']).toBe(1234)
+    expect(next.lastHumanActive['/wt/a']).toBeUndefined()
+    expect(next.lastAgentActive['/wt/a']).toBeUndefined()
+  })
+
+  it('lastActiveChanged records each listed actor alongside the shared timestamp', () => {
+    const next = apply(initialTerminals, {
+      type: 'terminals/lastActiveChanged',
+      payload: { worktreePath: '/wt/a', ts: 500, actors: ['human', 'agent'] }
+    })
+    expect(next.lastHumanActive['/wt/a']).toBe(500)
+    expect(next.lastAgentActive['/wt/a']).toBe(500)
+  })
+
+  it('lastActiveChanged leaves the other actor stale when only one acted', () => {
+    const start = apply(initialTerminals, {
+      type: 'terminals/lastActiveChanged',
+      payload: { worktreePath: '/wt/a', ts: 100, actors: ['human'] }
+    })
+    const next = apply(start, {
+      type: 'terminals/lastActiveChanged',
+      payload: { worktreePath: '/wt/a', ts: 200, actors: ['agent'] }
+    })
+    expect(next.lastHumanActive['/wt/a']).toBe(100)
+    expect(next.lastAgentActive['/wt/a']).toBe(200)
+  })
+
+  it('actorActivitySeeded hydrates missing entries but never clobbers live ones', () => {
+    const start = apply(initialTerminals, {
+      type: 'terminals/lastActiveChanged',
+      payload: { worktreePath: '/wt/a', ts: 900, actors: ['human'] }
+    })
+    const next = apply(start, {
+      type: 'terminals/actorActivitySeeded',
+      payload: { human: { '/wt/a': 1, '/wt/b': 2 }, agent: { '/wt/a': 3 } }
+    })
+    expect(next.lastHumanActive).toEqual({ '/wt/a': 900, '/wt/b': 2 })
+    expect(next.lastAgentActive).toEqual({ '/wt/a': 3 })
   })
 
   describe('sessions (controller/spectator)', () => {

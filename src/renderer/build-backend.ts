@@ -46,7 +46,8 @@ import type {
   SidebarDetailPrefsByMode,
   PreventSleepMode,
   HiddenBottomIcons,
-  BottomIconKey
+  BottomIconKey,
+  ProjectSortMode
 } from '../shared/state/settings'
 
 export type { ElectronOnlyHelpers }
@@ -150,6 +151,7 @@ export function buildBackend(
     addRepo: () => req('repo:add'),
     addRepoAtPath: (repoRoot: string) => req('repo:addAtPath', repoRoot),
     removeRepo: (repoRoot: string) => req('repo:remove', repoRoot),
+    reorderRepos: (order: string[]) => req('repo:reorder', order),
     createNewProject: (opts: {
       parentDir: string
       name: string
@@ -425,6 +427,7 @@ export function buildBackend(
       req('config:setHiddenBottomIcons', hidden),
     setBottomIconOrder: (order: BottomIconKey[]) =>
       req('config:setBottomIconOrder', order),
+    setProjectSort: (mode: ProjectSortMode) => req('config:setProjectSort', mode),
 
     setEditor: (editorId: string) => req('config:setEditor', editorId),
     getAvailableEditors: () => req('config:getAvailableEditors'),

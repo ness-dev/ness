@@ -30,6 +30,7 @@ import {
   DEFAULT_SIDEBAR_DETAILS,
   BOTTOM_ICON_KEYS,
   resolveBottomIconOrder,
+  isProjectSortMode,
   type PreventSleepMode,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -195,7 +196,8 @@ export function buildInitialAppState(
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),
       bottomIconOrder: resolveBottomIconOrder(
         sanitizeBottomIconOrder(config.bottomIconOrder)
-      )
+      ),
+      projectSort: isProjectSortMode(config.projectSort) ? config.projectSort : 'manual'
     }
   }
 }
