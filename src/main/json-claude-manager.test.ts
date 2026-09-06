@@ -429,6 +429,70 @@ describe('JsonClaudeManager', () => {
     })
   })
 
+  describe('permission mode reconciliation from init', () => {
+    function startWithMode(store: Store, sessionId: string, mode: 'default' | 'plan' | 'auto') {
+      const cwd = '/tmp/wt'
+      store.dispatch({
+        type: 'jsonClaude/sessionStarted',
+        payload: { sessionId, worktreePath: cwd }
+      })
+      store.dispatch({
+        type: 'jsonClaude/permissionModeChanged',
+        payload: { sessionId, mode }
+      })
+      const mgr = makeManager(store)
+      mgr.create(sessionId, cwd, mode)
+      return sessionProcs()[sessionProcs().length - 1]
+    }
+
+    const emitInit = (proc: ReturnType<typeof makeFakeProc>, permissionMode?: string) =>
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          JSON.stringify({ type: 'system', subtype: 'init', permissionMode }) + '\n'
+        )
+      )
+
+    const modeOf = (store: Store, sessionId: string) =>
+      store.getSnapshot().state.jsonClaude.sessions[sessionId].permissionMode
+
+    it('adopts the mode the CLI reports when it drifted behind our back', () => {
+      const store = new Store()
+      const sessionId = 'sess-mode-drift'
+      const proc = startWithMode(store, sessionId, 'auto')
+
+      // The model called EnterPlanMode, so the subprocess is really in
+      // plan while the toggle still shows auto.
+      emitInit(proc, 'plan')
+
+      expect(modeOf(store, sessionId)).toBe('plan')
+    })
+
+    it('leaves the mode alone when init agrees with the slice', () => {
+      const store = new Store()
+      const sessionId = 'sess-mode-agree'
+      const proc = startWithMode(store, sessionId, 'auto')
+      const before = store.getSnapshot().seq
+
+      emitInit(proc, 'auto')
+
+      expect(modeOf(store, sessionId)).toBe('auto')
+      expect(store.getSnapshot().seq).toBe(before)
+    })
+
+    it('ignores modes we do not expose and init payloads with no mode', () => {
+      const store = new Store()
+      const sessionId = 'sess-mode-unknown'
+      const proc = startWithMode(store, sessionId, 'plan')
+
+      emitInit(proc, 'bypassPermissions')
+      expect(modeOf(store, sessionId)).toBe('plan')
+
+      emitInit(proc, undefined)
+      expect(modeOf(store, sessionId)).toBe('plan')
+    })
+  })
+
   it('rate_limit_event over threshold emits one warning card; back-to-back duplicates dedup', () => {
     const store = new Store()
     const mgr = makeManager(store)

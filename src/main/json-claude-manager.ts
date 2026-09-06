@@ -30,7 +30,10 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseAutomatedMessage } from '../shared/state/json-claude'
+import {
+  isJsonClaudePermissionMode,
+  parseAutomatedMessage
+} from '../shared/state/json-claude'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
 import { shellQuote } from './shell-quote'
@@ -1638,6 +1641,32 @@ export class JsonClaudeManager {
         this.store.dispatch({
           type: 'jsonClaude/currentModelChanged',
           payload: { sessionId: instance.sessionId, model: initModel }
+        })
+      }
+      // Ground-truth permission mode, same deal as the model above. The
+      // slice is otherwise write-only — we set it optimistically on the
+      // user's toggle click and never hear back — so anything that moves
+      // the mode behind our back (the model calling EnterPlanMode, a
+      // /slash command, a dropped control_request on a session that
+      // wasn't running) left the toggle displaying a lie for the rest of
+      // the session. The CLI has no push notification for mode changes
+      // (`permission_mode_changed` is OTel-only, not stream-json), but
+      // init re-fires at the start of every turn and carries the real
+      // mode, so reconciling here bounds the drift to one turn.
+      const initMode = parsed['permissionMode']
+      const slice =
+        this.store.getSnapshot().state.jsonClaude.sessions[instance.sessionId]
+      if (
+        isJsonClaudePermissionMode(initMode) &&
+        initMode !== slice?.permissionMode
+      ) {
+        log(
+          'json-claude',
+          `permissionMode reconciled from init sessionId=${instance.sessionId} mode=${initMode}`
+        )
+        this.store.dispatch({
+          type: 'jsonClaude/permissionModeChanged',
+          payload: { sessionId: instance.sessionId, mode: initMode }
         })
       }
       return
