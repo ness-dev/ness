@@ -29,7 +29,7 @@ export const AVAILABLE_EDITORS: EditorDef[] = [
   { id: 'rider', name: 'Rider', cmd: 'rider' }
 ]
 
-export const DEFAULT_EDITOR_ID = 'vscode'
+export { DEFAULT_EDITOR_ID } from '../shared/editor-resolve'
 
 function findEditor(id: string): EditorDef | null {
   return AVAILABLE_EDITORS.find((e) => e.id === id) || null

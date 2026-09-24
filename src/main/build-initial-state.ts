@@ -122,6 +122,8 @@ export function buildInitialAppState(
       terminalFontFamily: config.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY,
       terminalFontSize: config.terminalFontSize || DEFAULT_TERMINAL_FONT_SIZE,
       editor: config.editor || DEFAULT_EDITOR_ID,
+      repoEditors: config.repoEditors || {},
+      worktreeEditors: config.worktreeEditors || {},
       worktreeBase: config.worktreeBase || DEFAULT_WORKTREE_BASE,
       mergeStrategy: config.mergeStrategy || DEFAULT_MERGE_STRATEGY,
       sidebarDensity: config.sidebarDensity || DEFAULT_SIDEBAR_DENSITY,

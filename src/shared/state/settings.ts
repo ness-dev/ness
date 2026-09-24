@@ -1,4 +1,13 @@
 import type { JsonClaudePermissionMode } from './json-claude'
+import { DEFAULT_EDITOR_ID } from '../editor-resolve'
+
+/** Set (`editorId: string`) or clear (`editorId: null`) one entry of the
+ *  `repoEditors` / `worktreeEditors` maps. `key` is the repoRoot or the
+ *  worktree path respectively. */
+export interface EditorOverridePayload {
+  key: string
+  editorId: string | null
+}
 
 export interface WorktreeScripts {
   setup: string
@@ -290,6 +299,15 @@ export interface SettingsState {
   terminalFontFamily: string
   terminalFontSize: number
   editor: string
+  /** repoRoot → editor id. Overrides `editor` for every worktree of that
+   *  repo. Personal + per-machine (userData/config.json) rather than
+   *  `.ness.json`, so an editor preference is never committed onto
+   *  teammates. */
+  repoEditors: Record<string, string>
+  /** worktree path → editor id. Overrides both of the above for one
+   *  worktree. See `resolveEditorId` in shared/editor-resolve.ts for the
+   *  chain both main and the renderer run. */
+  worktreeEditors: Record<string, string>
   worktreeBase: WorktreeBase
   mergeStrategy: MergeStrategy
   sidebarDensity: SidebarDensity
@@ -475,6 +493,8 @@ export type SettingsEvent =
   | { type: 'settings/terminalFontFamilyChanged'; payload: string }
   | { type: 'settings/terminalFontSizeChanged'; payload: number }
   | { type: 'settings/editorChanged'; payload: string }
+  | { type: 'settings/repoEditorChanged'; payload: EditorOverridePayload }
+  | { type: 'settings/worktreeEditorChanged'; payload: EditorOverridePayload }
   | { type: 'settings/worktreeBaseChanged'; payload: WorktreeBase }
   | { type: 'settings/mergeStrategyChanged'; payload: MergeStrategy }
   | { type: 'settings/sidebarDensityChanged'; payload: SidebarDensity }
@@ -551,7 +571,9 @@ export const initialSettings: SettingsState = {
   nameClaudeSessions: false,
   terminalFontFamily: '',
   terminalFontSize: 13,
-  editor: 'vscode',
+  editor: DEFAULT_EDITOR_ID,
+  repoEditors: {},
+  worktreeEditors: {},
   worktreeBase: 'remote',
   mergeStrategy: 'squash',
   sidebarDensity: 'comfy',
@@ -626,6 +648,23 @@ export function resolveBottomIconOrder(
   return out
 }
 
+/** Apply one set/clear to an override map, returning the SAME reference when
+ *  nothing actually changed. Without this a no-op dispatch would hand every
+ *  `useSettings()` consumer a fresh object and re-render the world. */
+function patchOverrides(
+  map: Record<string, string>,
+  { key, editorId }: EditorOverridePayload
+): Record<string, string> {
+  if (editorId === null) {
+    if (!(key in map)) return map
+    const next = { ...map }
+    delete next[key]
+    return next
+  }
+  if (map[key] === editorId) return map
+  return { ...map, [key]: editorId }
+}
+
 export function settingsReducer(state: SettingsState, event: SettingsEvent): SettingsState {
   switch (event.type) {
     case 'settings/themeModeChanged':
@@ -664,6 +703,14 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, terminalFontSize: event.payload }
     case 'settings/editorChanged':
       return { ...state, editor: event.payload }
+    case 'settings/repoEditorChanged': {
+      const repoEditors = patchOverrides(state.repoEditors, event.payload)
+      return repoEditors === state.repoEditors ? state : { ...state, repoEditors }
+    }
+    case 'settings/worktreeEditorChanged': {
+      const worktreeEditors = patchOverrides(state.worktreeEditors, event.payload)
+      return worktreeEditors === state.worktreeEditors ? state : { ...state, worktreeEditors }
+    }
     case 'settings/worktreeBaseChanged':
       return { ...state, worktreeBase: event.payload }
     case 'settings/mergeStrategyChanged':

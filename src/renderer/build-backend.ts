@@ -427,6 +427,10 @@ export function buildBackend(
       req('config:setBottomIconOrder', order),
 
     setEditor: (editorId: string) => req('config:setEditor', editorId),
+    setRepoEditor: (repoRoot: string, editorId: string | null) =>
+      req('config:setRepoEditor', repoRoot, editorId),
+    setWorktreeEditor: (worktreePath: string, editorId: string | null) =>
+      req('config:setWorktreeEditor', worktreePath, editorId),
     getAvailableEditors: () => req('config:getAvailableEditors'),
 
     snooze: (path: string, wakeAt: number) => req('snooze:snooze', path, wakeAt),

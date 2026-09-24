@@ -133,6 +133,13 @@ export interface Config {
   terminalFontSize?: number
   // Preferred external editor id (see AVAILABLE_EDITORS)
   editor?: string
+  // Per-repo editor overrides, repoRoot → editor id. Deliberately kept here
+  // rather than in the repo's committed .ness.json: which editor you use
+  // is a personal, per-machine preference, not a project fact.
+  repoEditors?: Record<string, string>
+  // Per-worktree editor overrides, worktree path → editor id. Narrower than
+  // repoEditors; pruned when the worktree is removed.
+  worktreeEditors?: Record<string, string>
   // New worktrees are branched from: 'remote' = fetch origin then branch
   // from origin/<default>, 'local' = branch from current HEAD.
   worktreeBase?: 'remote' | 'local'

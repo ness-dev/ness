@@ -368,6 +368,8 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     terminalFontFamily,
     terminalFontSize,
     editor: editorId,
+    repoEditors,
+    worktreeEditors,
     worktreeBase,
     mergeStrategy,
     sidebarDensity,
@@ -657,9 +659,34 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     ? Math.max(0, Math.ceil((preventSleepUntil! - nowTick) / 60000))
     : 0
 
-  const handleSelectEditor = useCallback(async (id: string) => {
-    await backend.setEditor(id)
-  }, [])
+  // The Editor section carries its own repo scope, separate from the
+  // Worktrees section's: editor overrides are written to config.json (personal,
+  // per-machine), not the repo's committed .ness.json.
+  const [editorScopeRepoRoot, setEditorScopeRepoRoot] = useState<string | null>(null)
+  const displayedEditorId = editorScopeRepoRoot
+    ? repoEditors[editorScopeRepoRoot] || editorId
+    : editorId
+  const editorIsRepoOverride = !!(editorScopeRepoRoot && repoEditors[editorScopeRepoRoot])
+
+  const handleSelectEditor = useCallback(
+    async (id: string) => {
+      if (editorScopeRepoRoot) await backend.setRepoEditor(editorScopeRepoRoot, id)
+      else await backend.setEditor(id)
+    },
+    [editorScopeRepoRoot]
+  )
+
+  const handleResetEditorToGlobal = useCallback(async () => {
+    if (!editorScopeRepoRoot) return
+    await backend.setRepoEditor(editorScopeRepoRoot, null)
+  }, [editorScopeRepoRoot])
+
+  // Worktrees that pin an editor, grouped so the global view can say how many
+  // exist and offer a single "clear them all" escape hatch.
+  const worktreeEditorPaths = useMemo(() => Object.keys(worktreeEditors), [worktreeEditors])
+  const handleClearWorktreeEditors = useCallback(async () => {
+    await Promise.all(worktreeEditorPaths.map((p) => backend.setWorktreeEditor(p, null)))
+  }, [worktreeEditorPaths])
 
   const handleSelectWorktreeBase = useCallback(async (mode: 'remote' | 'local') => {
     await backend.setWorktreeBase(mode)
@@ -3093,9 +3120,63 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 changed file, or click a file path in a terminal. The editor's
                 CLI must be installed and on your shell PATH.
               </p>
+
+              {repoList.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-1 text-xs text-faint mb-1.5 uppercase tracking-wide">
+                    Scope
+                  </div>
+                  <div className="flex flex-wrap gap-1 bg-panel-raised border border-border rounded p-1">
+                    <button
+                      onClick={() => setEditorScopeRepoRoot(null)}
+                      className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
+                        editorScopeRepoRoot === null
+                          ? 'bg-surface text-fg-bright'
+                          : 'text-dim hover:text-fg'
+                      }`}
+                    >
+                      Global
+                    </button>
+                    {repoList.map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setEditorScopeRepoRoot(r)}
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-colors cursor-pointer ${
+                          editorScopeRepoRoot === r
+                            ? 'bg-surface text-fg-bright'
+                            : 'text-dim hover:text-fg'
+                        }`}
+                        title={r}
+                      >
+                        {repoBasename(r)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-faint mt-1.5">
+                    {editorScopeRepoRoot
+                      ? <>Every worktree of <span className="font-mono">{repoBasename(editorScopeRepoRoot)}</span> opens in this editor. Stored on this machine only — never written to <code className="bg-panel-raised px-1 rounded">.ness.json</code>, so it isn't shared with teammates.</>
+                      : 'The default for every repo. Pick a repo above to give it its own editor.'}
+                  </p>
+                </div>
+              )}
+
+              {editorScopeRepoRoot === null && Object.keys(repoEditors).length > 0 && (
+                <p className="text-xs text-warning mb-3">
+                  Overridden in {Object.keys(repoEditors).map(repoBasename).join(', ')}
+                </p>
+              )}
+              {editorIsRepoOverride && (
+                <button
+                  onClick={handleResetEditorToGlobal}
+                  className="text-xs text-dim hover:text-fg underline cursor-pointer mb-3"
+                >
+                  Reset to global ({availableEditors.find((e) => e.id === editorId)?.name || editorId})
+                </button>
+              )}
+
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {availableEditors.map((ed) => {
-                  const isActive = editorId === ed.id
+                  const isActive = displayedEditorId === ed.id
                   return (
                     <button
                       key={ed.id}
@@ -3147,6 +3228,19 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   </div>
                 </div>
               </label>
+              {editorScopeRepoRoot === null && worktreeEditorPaths.length > 0 && (
+                <p className="text-xs text-faint mt-2">
+                  {worktreeEditorPaths.length} worktree
+                  {worktreeEditorPaths.length === 1 ? '' : 's'} pin a specific editor.
+                  Right-click a worktree in the sidebar to change or clear one.{' '}
+                  <button
+                    onClick={handleClearWorktreeEditors}
+                    className="text-dim hover:text-fg underline cursor-pointer"
+                  >
+                    Clear {worktreeEditorPaths.length === 1 ? 'it' : 'them'}
+                  </button>
+                </p>
+              )}
             </section>
 
             {/* GitHub section */}
