@@ -167,10 +167,10 @@ export function defineHarnessTheme(): void {
       'scrollbarSlider.background': '#3a424d55',
       'scrollbarSlider.hoverBackground': '#4a5260aa',
       'scrollbarSlider.activeBackground': '#5a6270',
-      'diffEditor.insertedTextBackground': '#1a5c2a22',
-      'diffEditor.removedTextBackground': '#5c1a2a22',
-      'diffEditor.insertedLineBackground': '#1a5c2a1a',
-      'diffEditor.removedLineBackground': '#5c1a2a1a'
+      'diffEditor.insertedTextBackground': '#2ea04355',
+      'diffEditor.removedTextBackground': '#f8514955',
+      'diffEditor.insertedLineBackground': '#2ea04322',
+      'diffEditor.removedLineBackground': '#f8514922'
     }
   })
   monaco.editor.setTheme('harness')
