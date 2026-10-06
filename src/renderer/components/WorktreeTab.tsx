@@ -16,7 +16,7 @@ import type { WorktreeRowModel } from '../worktree-list-model'
 import {
   buildRowActions,
   buildAliasActions,
-  buildPinActions,
+  buildRowMenuEntries,
   type WorktreeRowAction,
   type WorktreeRowActionHandlers
 } from './worktree-row-actions'
@@ -70,9 +70,10 @@ export function WorktreeTab({
     onClearAlias: () => void backend.clearAlias(worktree.path)
   })
   const rowActions = buildRowActions(row, deleting ? {} : actions)
-  // Pin is the one row action that also belongs in the right-click menu —
-  // the rest stay on the hover icons (desktop) / action sheet (touch).
-  const pinActions = buildPinActions(row, deleting ? {} : actions)
+  const menuEntries = buildRowMenuEntries(row, deleting ? {} : actions, {
+    onEditAlias: onStartAliasEdit,
+    onClearAlias: () => void backend.clearAlias(worktree.path)
+  })
 
   return (
     <div
@@ -202,10 +203,11 @@ export function WorktreeTab({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={[...pinActions, ...aliasActions].map((a) => ({
-            label: a.label,
-            onClick: () => a.onSelect()
-          }))}
+          items={menuEntries.map((e) =>
+            'separator' in e
+              ? { separator: true as const }
+              : { label: e.label, onClick: () => e.onSelect(), danger: e.tone === 'danger' }
+          )}
           onClose={() => setMenu(null)}
         />
       )}

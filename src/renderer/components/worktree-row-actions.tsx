@@ -59,9 +59,23 @@ export function buildRowActions(
 
   actions.push(...buildPinActions(row, handlers))
 
-  if ((handlers.onSnooze || handlers.onUnsnooze) && !worktree.isMain) {
-    if (row.isSnoozed) {
-      actions.push({
+  actions.push(...buildSnoozeActions(row, handlers))
+  actions.push(...buildDestructiveActions(row, handlers))
+
+  return actions
+}
+
+/** Snooze / wake. Never offered for the main worktree — it has no lifecycle
+ *  of its own to pause. */
+export function buildSnoozeActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onSnooze' | 'onUnsnooze'>
+): WorktreeRowAction[] {
+  if (!handlers.onSnooze && !handlers.onUnsnooze) return []
+  if (row.worktree.isMain) return []
+  if (row.isSnoozed) {
+    return [
+      {
         key: 'unsnooze',
         label:
           typeof row.snoozeWakeAt === 'number'
@@ -70,40 +84,51 @@ export function buildRowActions(
         icon: AlarmClock,
         tone: 'accent',
         onSelect: () => handlers.onUnsnooze?.()
-      })
-    } else {
-      actions.push({
-        key: 'snooze',
-        label: 'Snooze',
-        icon: Moon,
-        tone: 'accent',
-        tooltipExtra: ' (⌥-click to pick a date)',
-        onSelect: (e) => handlers.onSnooze?.(e)
-      })
+      }
+    ]
+  }
+  return [
+    {
+      key: 'snooze',
+      label: 'Snooze',
+      icon: Moon,
+      tone: 'accent',
+      tooltipExtra: ' (⌥-click to pick a date)',
+      onSelect: (e) => handlers.onSnooze?.(e)
     }
-  }
+  ]
+}
 
+/** Prune / remove — the irreversible ones. Mutually exclusive: a prunable
+ *  worktree is already gone from disk, so it gets prune instead of remove. */
+export function buildDestructiveActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onPrune' | 'onDelete'>
+): WorktreeRowAction[] {
+  const { worktree } = row
   if (handlers.onPrune && worktree.prunable) {
-    actions.push({
-      key: 'prune',
-      label: 'Prune stale worktree (git worktree prune)',
-      icon: Trash2,
-      tone: 'warning',
-      onSelect: () => handlers.onPrune!()
-    })
+    return [
+      {
+        key: 'prune',
+        label: 'Prune stale worktree (git worktree prune)',
+        icon: Trash2,
+        tone: 'warning',
+        onSelect: () => handlers.onPrune!()
+      }
+    ]
   }
-
   if (handlers.onDelete && !worktree.prunable) {
-    actions.push({
-      key: 'delete',
-      label: 'Remove worktree',
-      icon: Trash2,
-      tone: 'danger',
-      onSelect: () => handlers.onDelete!()
-    })
+    return [
+      {
+        key: 'delete',
+        label: 'Remove worktree',
+        icon: Trash2,
+        tone: 'danger',
+        onSelect: () => handlers.onDelete!()
+      }
+    ]
   }
-
-  return actions
+  return []
 }
 
 /** Alias edit / clear. Desktop surfaces these through the right-click context
@@ -158,4 +183,34 @@ export function buildPinActions(
           onSelect: () => handlers.onTogglePin!()
         }
   ]
+}
+
+/** A divider between two runs of menu entries. */
+export interface WorktreeMenuSeparator {
+  separator: true
+}
+
+export type WorktreeMenuEntry = WorktreeRowAction | WorktreeMenuSeparator
+
+/** The desktop right-click menu: pin, snooze and alias, then the
+ *  irreversible actions fenced off below a divider. Deliberately narrower
+ *  than `buildRowActions` — "continue on a new branch" stays a hover icon,
+ *  because it opens an inline form rather than acting immediately.
+ *
+ *  The divider is only emitted when there is something on both sides of it,
+ *  so a row with nothing destructive to offer doesn't end in a stray rule. */
+export function buildRowMenuEntries(
+  row: WorktreeRowModel,
+  handlers: WorktreeRowActionHandlers,
+  aliasHandlers: WorktreeAliasActionHandlers
+): WorktreeMenuEntry[] {
+  const primary = [
+    ...buildPinActions(row, handlers),
+    ...buildSnoozeActions(row, handlers),
+    ...buildAliasActions(row, aliasHandlers)
+  ]
+  const destructive = buildDestructiveActions(row, handlers)
+  if (primary.length === 0) return destructive
+  if (destructive.length === 0) return primary
+  return [...primary, { separator: true }, ...destructive]
 }

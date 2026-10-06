@@ -6,10 +6,18 @@ export interface ContextMenuItem {
   danger?: boolean
 }
 
+/** A horizontal rule fencing off a run of entries — used to keep the
+ *  irreversible actions away from the everyday ones. */
+export interface ContextMenuSeparator {
+  separator: true
+}
+
+export type ContextMenuEntry = ContextMenuItem | ContextMenuSeparator
+
 interface ContextMenuProps {
   x: number
   y: number
-  items: ContextMenuItem[]
+  items: ContextMenuEntry[]
   onClose: () => void
 }
 
@@ -53,21 +61,25 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
       style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {items.map((item, i) => (
-        <button
-          key={i}
-          className={`block w-full text-left px-3 py-1.5 hover:bg-panel cursor-pointer ${
-            item.danger ? 'text-danger' : 'text-fg-bright'
-          }`}
-          onClick={(e) => {
-            e.stopPropagation()
-            item.onClick()
-            onClose()
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.map((item, i) =>
+        'separator' in item ? (
+          <div key={i} role="separator" className="my-1 border-t border-border-strong" />
+        ) : (
+          <button
+            key={i}
+            className={`block w-full text-left px-3 py-1.5 hover:bg-panel cursor-pointer ${
+              item.danger ? 'text-danger' : 'text-fg-bright'
+            }`}
+            onClick={(e) => {
+              e.stopPropagation()
+              item.onClick()
+              onClose()
+            }}
+          >
+            {item.label}
+          </button>
+        )
+      )}
     </div>
   )
 }
