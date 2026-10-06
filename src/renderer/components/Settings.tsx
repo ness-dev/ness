@@ -2034,7 +2034,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
               <div className="bg-panel-raised border border-border rounded-lg p-4 mb-4">
                 <label className="block text-sm font-medium text-fg mb-1">Model</label>
                 <p className="text-xs text-dim mb-2">
-                  Appends <code className="bg-panel px-1 rounded">--model</code> to the launch command. Leave on default to let the CLI choose.
+                  Appends <code className="bg-panel px-1 rounded">--model</code> to the launch command. Leave on default to let the CLI choose. Auto-updating entries track Anthropic's releases; pinned versions stay put.
                 </p>
                 <select
                   value={claudeModel || ''}
@@ -2042,7 +2042,12 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   className="w-full bg-panel border border-border-strong rounded px-3 py-2 text-sm text-fg-bright outline-none focus:border-fg cursor-pointer"
                 >
                   <option value="">(Default — let CLI choose)</option>
-                  <optgroup label="Current">
+                  <optgroup label="Auto-updating">
+                    {CLAUDE_MODELS.filter((m) => m.tier === 'alias').map((m) => (
+                      <option key={m.id} value={m.id}>{m.displayName}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Pinned version">
                     {CLAUDE_MODELS.filter((m) => m.tier === 'current').map((m) => (
                       <option key={m.id} value={m.id}>{m.displayName}</option>
                     ))}

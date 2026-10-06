@@ -68,3 +68,46 @@ describe('priceFor', () => {
     expect(priceFor('mystery-model', { input_tokens: 100 })).toBe(0)
   })
 })
+
+// One million tokens, so each expectation reads as the published $/MTok
+// figure from Anthropic's pricing page.
+const MTOK = 1_000_000
+
+describe('Claude Opus 5.5', () => {
+  it('bills base input and output at $4 / $20 per MTok', () => {
+    expect(priceFor('claude-opus-5-5', { input_tokens: MTOK })).toBeCloseTo(4, 6)
+    expect(priceFor('claude-opus-5-5', { output_tokens: MTOK })).toBeCloseTo(20, 6)
+  })
+
+  it('bills cache reads at $0.20 per MTok (0.05x input, not the usual 0.1x)', () => {
+    expect(
+      priceFor('claude-opus-5-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.2, 6)
+  })
+
+  it('bills 5m cache writes at $5 per MTok (1.25x input)', () => {
+    expect(
+      priceFor('claude-opus-5-5', { cache_creation_input_tokens: MTOK })
+    ).toBeCloseTo(5, 6)
+  })
+
+  it('does not let a dated 5.5 id fall through to Opus 5 rates', () => {
+    // 'claude-opus-5' is a prefix of 'claude-opus-5-5', so if the keys were
+    // ordered the other way rateFor's insertion-order scan would bill a
+    // dated 5.5 id at $5/$25 instead of $4/$20.
+    expect(rateFor('claude-opus-5-5-20260922')).toEqual(
+      rateFor('claude-opus-5-5')
+    )
+    expect(rateFor('claude-opus-5-5-20260922')?.in).toBe(4)
+  })
+
+  it('leaves every other model on the standard 0.1x read multiplier', () => {
+    // Haiku 4.5 is $1/MTok input -> $0.10/MTok; Sonnet 5 is $2 -> $0.20.
+    expect(
+      priceFor('claude-haiku-4-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.1, 6)
+    expect(
+      priceFor('claude-sonnet-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.2, 6)
+  })
+})

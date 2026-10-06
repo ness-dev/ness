@@ -6,6 +6,11 @@
 // forget it):
 //   cache read  = input rate x 0.10   (90% discount)
 //   cache write = input rate x 1.25   (25% surcharge)
+//
+// The 0.10 cache-read multiplier is not universal any more. Opus 5.5
+// discounts reads to 0.05x; set `cacheReadMult` per model to override it.
+// Getting this wrong doubles the reported cost of a cache-heavy agent
+// session, where reads dominate token volume.
 
 export interface TokenUsage {
   input_tokens?: number
@@ -20,6 +25,8 @@ interface ModelRate {
   in: number
   out: number
   reasoning?: number
+  /** Cache-read discount as a multiple of the input rate. Defaults to 0.10. */
+  cacheReadMult?: number
 }
 
 const RATES: Record<string, ModelRate> = {
@@ -30,8 +37,11 @@ const RATES: Record<string, ModelRate> = {
   // matters: rateFor's prefix fallback iterates in insertion order, so
   // the specific opus keys must precede the bare 'claude-opus-4' or
   // dated ids like claude-opus-4-8-20260527 would bill at old rates.
+  // Same rule puts 'claude-opus-5-5' ahead of 'claude-opus-5', which is
+  // a prefix of it — otherwise a dated 5.5 id would bill at Opus 5 rates.
   'claude-fable-5': { in: 10, out: 50 },
   'claude-mythos-5': { in: 10, out: 50 },
+  'claude-opus-5-5': { in: 4, out: 20, cacheReadMult: 0.05 },
   'claude-opus-5': { in: 5, out: 25 },
   'claude-opus-4-8': { in: 5, out: 25 },
   'claude-opus-4-7': { in: 5, out: 25 },
@@ -75,7 +85,7 @@ export function priceFor(model: string, usage: TokenUsage): number {
     (inTok * rate.in +
       (outTok - reasoningTok) * rate.out +
       reasoningTok * reasoningRate +
-      cacheRead * rate.in * 0.1 +
+      cacheRead * rate.in * (rate.cacheReadMult ?? 0.1) +
       cacheWrite * rate.in * 1.25) /
     1_000_000
   )

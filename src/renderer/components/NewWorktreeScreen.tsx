@@ -1435,7 +1435,16 @@ function AgentModelRow({
               className="flex-1 min-w-0 bg-app border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-accent disabled:opacity-50 cursor-pointer"
             >
               <option value="">{defaultLabel}</option>
-              <optgroup label="Current">
+              {/* Codex has no aliases — skip the group rather than render
+                  an empty one. */}
+              {modelOptions.some((m) => m.tier === 'alias') && (
+                <optgroup label="Auto-updating">
+                  {modelOptions.filter((m) => m.tier === 'alias').map((m) => (
+                    <option key={m.id} value={m.id}>{m.displayName}</option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Pinned version">
                 {modelOptions.filter((m) => m.tier === 'current').map((m) => (
                   <option key={m.id} value={m.id}>{m.displayName}</option>
                 ))}
