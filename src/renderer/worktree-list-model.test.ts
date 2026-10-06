@@ -71,6 +71,7 @@ function input(overrides: Partial<WorktreeListModelInput> = {}): WorktreeListMod
     prStatuses: {},
     mergedPaths: {},
     snoozeByPath: {},
+    pinnedPaths: {},
     aliases: {},
     viewerLogin: null,
     unifiedRepos: false,
@@ -371,5 +372,43 @@ describe('per-row decoration', () => {
     const reviewing = findGroup(model, 0, 'reviewing')!
     expect(reviewing.count).toBe(2)
     expect(model.sections[0].count).toBe(2)
+  })
+})
+
+describe('pinned rows', () => {
+  it('routes a pinned worktree into the pinned group instead of its status group', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' }), wt({ path: '/w/b' })],
+        prStatuses: { '/w/a': pr({ number: 1, checksOverall: 'failure' }) },
+        pinnedPaths: { '/w/a': true }
+      })
+    )
+    expect(findGroup(model, 0, 'pinned')?.rows.map((r) => r.path)).toEqual(['/w/a'])
+    expect(findGroup(model, 0, 'needs-attention')).toBeUndefined()
+    expect(findGroup(model, 0, 'no-pr')?.rows.map((r) => r.path)).toEqual(['/w/b'])
+  })
+
+  it('marks isPinned on the row model', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' }), wt({ path: '/w/b' })],
+        pinnedPaths: { '/w/a': true }
+      })
+    )
+    const pinnedRow = findGroup(model, 0, 'pinned')!.rows[0]
+    const plainRow = findGroup(model, 0, 'no-pr')!.rows[0]
+    expect(pinnedRow.isPinned).toBe(true)
+    expect(plainRow.isPinned).toBe(false)
+  })
+
+  it('orders the pinned group first', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' }), wt({ path: '/w/b' })],
+        pinnedPaths: { '/w/b': true }
+      })
+    )
+    expect(model.sections[0].groups[0].key).toBe('pinned')
   })
 })

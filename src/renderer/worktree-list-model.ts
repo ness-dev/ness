@@ -46,6 +46,7 @@ export interface WorktreeRowModel {
   isMerged: boolean
   isSnoozed: boolean
   snoozeWakeAt?: number
+  isPinned: boolean
   alias?: string
   /** Repo hint shown on the row. Only set in unified-repo mode, where two
    *  branches with the same name would otherwise be indistinguishable. */
@@ -109,6 +110,7 @@ export interface WorktreeListModelInput {
   prStatuses: Record<string, PRStatus | null>
   mergedPaths: Record<string, boolean>
   snoozeByPath: Record<string, SnoozeEntry>
+  pinnedPaths: Record<string, true>
   aliases: Record<string, string>
   viewerLogin?: string | null
   assignedPRsByRepo?: Record<string, AssignedPR[]>
@@ -151,6 +153,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     prStatuses,
     mergedPaths,
     snoozeByPath,
+    pinnedPaths,
     aliases,
     viewerLogin,
     assignedPRsByRepo,
@@ -212,7 +215,8 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       mergedPaths,
       snoozedPaths,
       viewerLogin,
-      bucket.assignedPRs
+      bucket.assignedPRs,
+      pinnedPaths
     ).map((group): WorktreeListGroupModel => {
       const rows = group.worktrees.map((wt): WorktreeRowModel => {
         const status = statusByPath[wt.path] ?? 'idle'
@@ -228,6 +232,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
           isMerged,
           isSnoozed: snoozedPaths[wt.path] === true,
           snoozeWakeAt: snoozeByPath[wt.path]?.wakeAt,
+          isPinned: pinnedPaths[wt.path] === true,
           alias: aliases[wt.path],
           repoLabel: showRepoLabels ? repoLabelFor(wt.repoRoot) : undefined,
           deleting: deletingPaths.has(wt.path)

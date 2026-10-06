@@ -195,6 +195,13 @@ export const migrations: Migration[] = [
       c.themeDark = legacy
     }
     delete c.theme
+  },
+
+  // v7 → v8: introduce `pinned`. No reshape needed — the field defaults to
+  // absent at read time. Bumps the version so future shape changes can rely
+  // on a stable starting point.
+  (_c) => {
+    // no-op
   }
 ]
 

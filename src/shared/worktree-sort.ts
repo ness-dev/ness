@@ -3,7 +3,7 @@ import type { PRStatus } from './state/prs'
 import { isPRMerged } from './state/prs'
 import type { AssignedPR } from './state/assigned-prs'
 
-export type GroupKey = 'needs-attention' | 'reviewing' | 'active' | 'no-pr' | 'snoozed' | 'merged'
+export type GroupKey = 'pinned' | 'needs-attention' | 'reviewing' | 'active' | 'no-pr' | 'snoozed' | 'merged'
 
 export interface WorktreeGroup {
   key: GroupKey
@@ -21,9 +21,13 @@ export function getGroupKey(
   pr: PRStatus | null | undefined,
   locallyMerged?: boolean,
   isSnoozed?: boolean,
-  viewerLogin?: string | null
+  viewerLogin?: string | null,
+  isPinned?: boolean
 ): GroupKey {
   void wt
+  // Pinned is an explicit user override, so it outranks every derived
+  // signal — a pinned worktree appears only in the Pinned section.
+  if (isPinned) return 'pinned'
   if (isSnoozed) return 'snoozed'
   if (locallyMerged) return 'merged'
   if (!pr) return 'no-pr'
@@ -37,9 +41,10 @@ export function getGroupKey(
   return 'active'
 }
 
-export const GROUP_ORDER: GroupKey[] = ['needs-attention', 'reviewing', 'active', 'no-pr', 'snoozed', 'merged']
+export const GROUP_ORDER: GroupKey[] = ['pinned', 'needs-attention', 'reviewing', 'active', 'no-pr', 'snoozed', 'merged']
 
 export const GROUP_LABELS: Record<GroupKey, string> = {
+  pinned: 'Pinned',
   'needs-attention': 'Needs Attention',
   reviewing: 'Reviewing',
   active: 'Open PRs',
@@ -90,9 +95,11 @@ export function groupWorktrees(
   mergedPaths?: Record<string, boolean>,
   snoozedPaths?: Record<string, true>,
   viewerLogin?: string | null,
-  assignedPRs?: AssignedPR[]
+  assignedPRs?: AssignedPR[],
+  pinnedPaths?: Record<string, true>
 ): WorktreeGroup[] {
   const grouped: Record<GroupKey, Worktree[]> = {
+    pinned: [],
     'needs-attention': [],
     reviewing: [],
     active: [],
@@ -107,7 +114,8 @@ export function groupWorktrees(
       prStatuses[wt.path],
       mergedPaths?.[wt.path],
       snoozedPaths?.[wt.path],
-      viewerLogin
+      viewerLogin,
+      pinnedPaths?.[wt.path]
     )
     grouped[key].push(wt)
   }
@@ -157,9 +165,16 @@ export function sortedWorktrees(
   prStatuses: Record<string, PRStatus | null>,
   mergedPaths?: Record<string, boolean>,
   snoozedPaths?: Record<string, true>,
-  viewerLogin?: string | null
+  viewerLogin?: string | null,
+  pinnedPaths?: Record<string, true>
 ): Worktree[] {
-  return groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin).flatMap(
-    (g) => g.worktrees
-  )
+  return groupWorktrees(
+    worktrees,
+    prStatuses,
+    mergedPaths,
+    snoozedPaths,
+    viewerLogin,
+    undefined,
+    pinnedPaths
+  ).flatMap((g) => g.worktrees)
 }

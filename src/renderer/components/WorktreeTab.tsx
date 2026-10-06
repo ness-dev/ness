@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal } from 'lucide-react'
+import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { repoNameColor } from './RepoIcon'
@@ -16,6 +16,7 @@ import type { WorktreeRowModel } from '../worktree-list-model'
 import {
   buildRowActions,
   buildAliasActions,
+  buildPinActions,
   type WorktreeRowAction,
   type WorktreeRowActionHandlers
 } from './worktree-row-actions'
@@ -54,7 +55,7 @@ export function WorktreeTab({
 }: WorktreeTabProps): JSX.Element {
   const backend = useBackend()
   const touch = variant === 'touch'
-  const { worktree, prStatus, displayStatus, pendingTool, shellActive, deleting, alias } = row
+  const { worktree, prStatus, displayStatus, pendingTool, shellActive, deleting, alias, isPinned } = row
   const label = displayLabel(worktree, alias, metaHeld)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -69,6 +70,9 @@ export function WorktreeTab({
     onClearAlias: () => void backend.clearAlias(worktree.path)
   })
   const rowActions = buildRowActions(row, deleting ? {} : actions)
+  // Pin is the one row action that also belongs in the right-click menu —
+  // the rest stay on the hover icons (desktop) / action sheet (touch).
+  const pinActions = buildPinActions(row, deleting ? {} : actions)
 
   return (
     <div
@@ -98,6 +102,11 @@ export function WorktreeTab({
       )}
       {shellActive && (
         <Loader2 className="icon-xs animate-spin text-fg-bright shrink-0" aria-label="Shell activity" />
+      )}
+      {isPinned && (
+        <span className="shrink-0 inline-flex group-hover:hidden" title="Pinned" aria-label="Pinned">
+          <Pin className="icon-xs text-accent" />
+        </span>
       )}
       {prStatus && (
         <span className="relative shrink-0" title={prIconTitle(prStatus)}>
@@ -193,7 +202,10 @@ export function WorktreeTab({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={aliasActions.map((a) => ({ label: a.label, onClick: () => a.onSelect() }))}
+          items={[...pinActions, ...aliasActions].map((a) => ({
+            label: a.label,
+            onClick: () => a.onSelect()
+          }))}
           onClose={() => setMenu(null)}
         />
       )}

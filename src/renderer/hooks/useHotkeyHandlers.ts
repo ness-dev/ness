@@ -11,6 +11,7 @@ import {
   getBackendsRegistry,
   useSettings,
   useSnooze,
+  usePinned,
   useJsonClaudePendingApprovals
 } from '../store'
 import { useBackend } from '../backend'
@@ -120,9 +121,10 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     for (const p of Object.keys(snoozeByPath)) m[p] = true
     return m
   }, [snoozeByPath])
+  const pinnedPaths = usePinned().byPath
   const byRepoGroups = useMemo(() => {
     if (unifiedRepos && repoRoots.length > 1) {
-      return [{ repoRoot: '__unified__', groups: groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin) }]
+      return [{ repoRoot: '__unified__', groups: groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths) }]
     }
     const map = new Map<string, Worktree[]>()
     for (const root of repoRoots) map.set(root, [])
@@ -132,9 +134,9 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     }
     return Array.from(map.entries()).map(([repoRoot, wts]) => ({
       repoRoot,
-      groups: groupWorktrees(wts, prStatuses, mergedPaths, snoozedPaths, viewerLogin)
+      groups: groupWorktrees(wts, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths)
     }))
-  }, [unifiedRepos, repoRoots, worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin])
+  }, [unifiedRepos, repoRoots, worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, pinnedPaths])
 
   const allOrderedWorktrees = useMemo(() => {
     const out: Worktree[] = []

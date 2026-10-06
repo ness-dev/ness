@@ -82,8 +82,8 @@ describe('getGroupKey', () => {
 })
 
 describe('GROUP_ORDER', () => {
-  it('places reviewing between needs-attention and active, and snoozed above merged', () => {
-    expect(GROUP_ORDER).toEqual(['needs-attention', 'reviewing', 'active', 'no-pr', 'snoozed', 'merged'])
+  it('places pinned first, reviewing between needs-attention and active, and snoozed above merged', () => {
+    expect(GROUP_ORDER).toEqual(['pinned', 'needs-attention', 'reviewing', 'active', 'no-pr', 'snoozed', 'merged'])
   })
 })
 
@@ -166,6 +166,10 @@ describe('worktree-sort snoozed group', () => {
     expect(getGroupKey(wt('/a'), mergedPR, true, true)).toBe('snoozed')
   })
 
+  it('pinned trumps snoozed', () => {
+    expect(getGroupKey(wt('/a'), mergedPR, true, true, null, true)).toBe('pinned')
+  })
+
   it('no-pr group lists merge-point worktrees (PR bases) above feature worktrees', () => {
     const main = stubWorktree({ path: '/main', branch: 'main', isMain: true, createdAt: 100 })
     const develop = stubWorktree({ path: '/develop', branch: 'develop', createdAt: 50 })
@@ -186,5 +190,86 @@ describe('worktree-sort snoozed group', () => {
     const noPR = groups.find((g) => g.key === 'no-pr')!
     // main pinned to top, then develop (a base branch), then features by createdAt desc.
     expect(noPR.worktrees.map((w) => w.path)).toEqual(['/main', '/develop', '/feat'])
+  })
+})
+
+describe('worktree-sort pinned group', () => {
+  it('puts a pinned path in the pinned group regardless of PR state', () => {
+    const groups = groupWorktrees(
+      [wt('/a'), wt('/b')],
+      { '/a': stubPRStatus({ checksOverall: 'failure' }), '/b': null },
+      {},
+      {},
+      null,
+      undefined,
+      { '/a': true, '/b': true }
+    )
+    const pinned = groups.find((g) => g.key === 'pinned')
+    expect(pinned?.worktrees.map((w) => w.path).sort()).toEqual(['/a', '/b'])
+    // Pinned worktrees appear ONLY in the pinned section.
+    expect(groups.map((g) => g.key)).toEqual(['pinned'])
+  })
+
+  it('pinned group sorts above needs-attention', () => {
+    const groups = groupWorktrees(
+      [wt('/a'), wt('/b')],
+      { '/a': null, '/b': stubPRStatus({ checksOverall: 'failure' }) },
+      {},
+      {},
+      null,
+      undefined,
+      { '/a': true }
+    )
+    const keys = groups.map((g) => g.key)
+    expect(keys.indexOf('pinned')).toBeLessThan(keys.indexOf('needs-attention'))
+  })
+
+  it('pinned wins over merged, snoozed, and reviewing', () => {
+    const groups = groupWorktrees(
+      [wt('/merged'), wt('/snoozed'), wt('/review')],
+      {
+        '/merged': mergedPR,
+        '/snoozed': null,
+        '/review': stubPRStatus({ author: { login: 'someone-else', avatarUrl: '' } })
+      },
+      { '/merged': true },
+      { '/snoozed': true },
+      'me',
+      undefined,
+      { '/merged': true, '/snoozed': true, '/review': true }
+    )
+    expect(groups.map((g) => g.key)).toEqual(['pinned'])
+    expect(groups[0].worktrees).toHaveLength(3)
+  })
+
+  it('labels the group "Pinned"', () => {
+    const groups = groupWorktrees([wt('/a')], { '/a': null }, {}, {}, null, undefined, { '/a': true })
+    expect(groups[0].label).toBe('Pinned')
+  })
+
+  it('sorts the pinned group main-first then createdAt desc', () => {
+    const main = stubWorktree({ path: '/main', branch: 'main', isMain: true, createdAt: 1 })
+    const old = stubWorktree({ path: '/old', branch: 'old', createdAt: 50 })
+    const recent = stubWorktree({ path: '/recent', branch: 'recent', createdAt: 500 })
+    const groups = groupWorktrees(
+      [old, recent, main],
+      { '/main': null, '/old': null, '/recent': null },
+      {},
+      {},
+      null,
+      undefined,
+      { '/main': true, '/old': true, '/recent': true }
+    )
+    expect(groups[0].worktrees.map((w) => w.path)).toEqual(['/main', '/recent', '/old'])
+  })
+
+  it('omits the pinned group when nothing is pinned', () => {
+    const groups = groupWorktrees([wt('/a')], { '/a': null }, {}, {}, null, undefined, {})
+    expect(groups.map((g) => g.key)).toEqual(['no-pr'])
+  })
+
+  it('treats an omitted pinnedPaths argument as nothing pinned', () => {
+    const groups = groupWorktrees([wt('/a')], { '/a': null }, {}, {})
+    expect(groups.map((g) => g.key)).toEqual(['no-pr'])
   })
 })

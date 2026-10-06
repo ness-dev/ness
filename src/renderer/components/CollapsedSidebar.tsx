@@ -51,6 +51,10 @@ export function CollapsedSidebar({
     for (const p of Object.keys(snooze.byPath)) m[p] = true
     return m
   }, [snooze.byPath])
+  // Deliberately NOT passing pinnedPaths: these badges are a status
+  // summary, not a mirror of the sidebar's sections. Grouping pinned
+  // worktrees out would drop them from every badge, so a pinned worktree
+  // with failing checks would stop counting toward "needs attention".
   const groupCounts = useMemo(() => {
     const counts: Partial<Record<GroupKey, number>> = {}
     const groups = groupWorktrees(worktrees, prs.byPath, prs.mergedByPath, snoozedPaths, viewerLogin)

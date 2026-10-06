@@ -144,6 +144,15 @@ export function WorktreeList({
         onContinue: locked || !onContinueWorktree ? undefined : () => beginContinue(worktree.path, worktree.branch),
         onSnooze: locked ? undefined : (e?: ReactMouseEvent) => onSnoozeRow(worktree.path, e),
         onUnsnooze: locked ? undefined : () => void backend.unsnooze(worktree.path),
+        // Pinning is an organisational choice, not a lifecycle action — the
+        // main worktree is pinnable too, so this gates on `deleting` alone
+        // rather than `locked`.
+        onTogglePin: deleting
+          ? undefined
+          : () =>
+              void (row.isPinned
+                ? backend.unpinWorktree(worktree.path)
+                : backend.pinWorktree(worktree.path)),
         onPrune:
           worktree.prunable && onPruneWorktrees
             ? () => void onPruneWorktrees(worktree.repoRoot)

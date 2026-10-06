@@ -15,6 +15,7 @@ import {
 } from '../shared/state/json-claude'
 import { initialSnooze } from '../shared/state/snooze'
 import { initialCiNotify } from '../shared/state/ci-notify'
+import { initialPinned } from '../shared/state/pinned'
 import { initialAnnouncements } from '../shared/state/announcements'
 import { initialScratchpad } from '../shared/state/scratchpad'
 import { initialSshBootstrap } from '../shared/state/ssh-bootstrap'
@@ -90,6 +91,7 @@ export function buildInitialAppState(
     jsonClaude: initialJsonClaude,
     snooze: config.snooze ? { byPath: { ...config.snooze } } : initialSnooze,
     ciNotify: config.ciNotify ? { byPath: { ...config.ciNotify } } : initialCiNotify,
+    pinned: config.pinned ? { byPath: { ...config.pinned } } : initialPinned,
     announcements: initialAnnouncements,
     scratchpad: { byWorktreePath: flattenScratchpadNotes(config.scratchpadNotes) },
     sshBootstrap: initialSshBootstrap,

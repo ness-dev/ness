@@ -1,5 +1,5 @@
 import type { ComponentType, MouseEvent } from 'react'
-import { RotateCw, Moon, AlarmClock, Trash2, Tag, X } from 'lucide-react'
+import { RotateCw, Moon, AlarmClock, Trash2, Tag, X, Pin, PinOff } from 'lucide-react'
 import { isPRMerged } from '../../shared/state/prs'
 import { formatWakeAt } from '../../shared/state/snooze'
 import type { WorktreeRowModel } from '../worktree-list-model'
@@ -30,6 +30,7 @@ export interface WorktreeRowActionHandlers {
   onUnsnooze?: () => void
   onPrune?: () => void
   onDelete?: () => void
+  onTogglePin?: () => void
 }
 
 export interface WorktreeAliasActionHandlers {
@@ -55,6 +56,8 @@ export function buildRowActions(
       onSelect: () => handlers.onContinue!()
     })
   }
+
+  actions.push(...buildPinActions(row, handlers))
 
   if ((handlers.onSnooze || handlers.onUnsnooze) && !worktree.isMain) {
     if (row.isSnoozed) {
@@ -127,4 +130,32 @@ export function buildAliasActions(
     })
   }
   return actions
+}
+
+/** Pin / unpin. Unlike the other row actions this is also fed to the desktop
+ *  right-click menu, so pinning is reachable without hunting for the hover
+ *  icon. Available on every worktree including main — pinning is an
+ *  organisational choice, not a lifecycle action. */
+export function buildPinActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onTogglePin'>
+): WorktreeRowAction[] {
+  if (!handlers.onTogglePin) return []
+  return [
+    row.isPinned
+      ? {
+          key: 'unpin',
+          label: 'Unpin Worktree',
+          icon: PinOff,
+          tone: 'accent',
+          onSelect: () => handlers.onTogglePin!()
+        }
+      : {
+          key: 'pin',
+          label: 'Pin Worktree',
+          icon: Pin,
+          tone: 'accent',
+          onSelect: () => handlers.onTogglePin!()
+        }
+  ]
 }

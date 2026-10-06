@@ -448,6 +448,8 @@ export interface ElectronAPI {
   getAvailableEditors(): Promise<{ id: string; name: string }[]>
   snooze(path: string, wakeAt: number): Promise<boolean>
   unsnooze(path: string): Promise<boolean>
+  pinWorktree(path: string): Promise<boolean>
+  unpinWorktree(path: string): Promise<boolean>
   setSnoozeDefaultDays(days: number): Promise<boolean>
   /** `enabled: null` clears the override so the worktree inherits the
    *  global `notifyChatOnCiFailure` setting again. */

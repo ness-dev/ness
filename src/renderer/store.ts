@@ -764,6 +764,10 @@ export function useAssignedPRs() {
   return useAppState((s) => s.assignedPRs)
 }
 
+export function usePinned() {
+  return useAppState((s) => s.pinned)
+}
+
 /** Scratchpad text for one worktree. Per-id selector — only re-renders
  *  when this worktree's text changes (other worktrees' edits don't fan
  *  out). Returns '' for unknown / null paths so the consumer doesn't

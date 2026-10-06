@@ -430,6 +430,8 @@ export function buildBackend(
     getAvailableEditors: () => req('config:getAvailableEditors'),
 
     snooze: (path: string, wakeAt: number) => req('snooze:snooze', path, wakeAt),
+    pinWorktree: (path: string) => req('pinned:pin', path),
+    unpinWorktree: (path: string) => req('pinned:unpin', path),
     unsnooze: (path: string) => req('snooze:unsnooze', path),
     setSnoozeDefaultDays: (days: number) => req('config:setSnoozeDefaultDays', days),
     setCiNotifyOverride: (path: string, enabled: boolean | null) =>

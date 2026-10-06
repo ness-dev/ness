@@ -97,6 +97,12 @@ import {
   type CiNotifyState
 } from './ci-notify'
 import {
+  initialPinned,
+  pinnedReducer,
+  type PinnedEvent,
+  type PinnedState
+} from './pinned'
+import {
   initialAnnouncements,
   announcementsReducer,
   type AnnouncementsEvent,
@@ -208,6 +214,7 @@ export type { SnoozeState, SnoozeEvent, SnoozeEntry } from './snooze'
 export { MAX_WAKE } from './snooze'
 export type { CiNotifyState, CiNotifyEvent } from './ci-notify'
 export { isCiNotifyEnabled } from './ci-notify'
+export type { PinnedState, PinnedEvent } from './pinned'
 export type {
   AnnouncementsState,
   AnnouncementsEvent,
@@ -240,6 +247,7 @@ export interface AppState {
   jsonClaude: JsonClaudeState
   snooze: SnoozeState
   ciNotify: CiNotifyState
+  pinned: PinnedState
   announcements: AnnouncementsState
   scratchpad: ScratchpadState
   sshBootstrap: SshBootstrapState
@@ -263,6 +271,7 @@ export type StateEvent =
   | JsonClaudeEvent
   | SnoozeEvent
   | CiNotifyEvent
+  | PinnedEvent
   | AnnouncementsEvent
   | ScratchpadEvent
   | SshBootstrapEvent
@@ -284,6 +293,7 @@ export const initialState: AppState = {
   jsonClaude: initialJsonClaude,
   snooze: initialSnooze,
   ciNotify: initialCiNotify,
+  pinned: initialPinned,
   announcements: initialAnnouncements,
   scratchpad: initialScratchpad,
   sshBootstrap: initialSshBootstrap,
@@ -365,6 +375,12 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       ciNotify: ciNotifyReducer(state.ciNotify, event as CiNotifyEvent)
     }
   }
+  if (event.type.startsWith('pinned/')) {
+    return {
+      ...state,
+      pinned: pinnedReducer(state.pinned, event as PinnedEvent)
+    }
+  }
   if (event.type.startsWith('announcements/')) {
     return {
       ...state,
@@ -443,6 +459,7 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     jsonClaude: { ...initialState.jsonClaude, ...state.jsonClaude },
     snooze: { ...initialState.snooze, ...state.snooze },
     ciNotify: { ...initialState.ciNotify, ...state.ciNotify },
+    pinned: { ...initialState.pinned, ...state.pinned },
     announcements: { ...initialState.announcements, ...state.announcements },
     scratchpad: { ...initialState.scratchpad, ...state.scratchpad },
     sshBootstrap: { ...initialState.sshBootstrap, ...state.sshBootstrap },
