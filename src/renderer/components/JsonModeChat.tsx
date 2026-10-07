@@ -31,10 +31,18 @@ import {
   ShieldAlert,
   Sparkles,
   GitBranch,
-  GitBranchPlus
+  GitBranchPlus,
+  GitFork
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
-import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import {
+  useAliases,
+  useAppState,
+  useJsonClaudeSession,
+  useSettings,
+  useWorktrees
+} from '../store'
+import { getLeaves } from '../../shared/state/terminals'
 import { useBackend } from '../backend'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
@@ -50,6 +58,7 @@ import { JsonModeChatImageThumb } from './JsonModeChatImageThumb'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import { CLAUDE_MODELS } from '../../shared/agent-registry'
+import { collectParkedForks, isForkChatTool } from '../../shared/fork-chat'
 import {
   QUESTION_TOOL_NAME,
   type JsonClaudeAutomationSource,
@@ -769,6 +778,21 @@ function automationLabel(
       brand: false
     }
   }
+  if (source === 'chat-fork') {
+    return {
+      label: 'Forked Thread',
+      note: 'the agent parked this tangent · you opened it',
+      brand: true
+    }
+  }
+  // Body is the user's own question — only the framing was Ness's.
+  if (source === 'chat-side-question') {
+    return {
+      label: 'Side Question',
+      note: 'forked off the conversation above',
+      brand: true
+    }
+  }
   return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
 }
 
@@ -1126,7 +1150,11 @@ function renderEntries(
           rows.push({
             key: `${entry.entryId}-${block.id || 'tu'}`,
             entryId: entry.entryId,
-            type: 'tool',
+            // A parked fork is an offer to the user, not agent bookkeeping.
+            // Filing it as 'text' keeps it out of the collapsed tool group
+            // it would otherwise be buried in, which is the whole point of
+            // rendering it at the spot the agent had the thought.
+            type: isForkChatTool(block.name) ? 'text' : 'tool',
             toolName: block.name,
             hasError: !!result?.isError,
             hasPendingApproval:
@@ -1161,7 +1189,11 @@ function renderEntries(
                     subAgentDescendantHasPendingApproval,
                     backgroundAgent: block.id
                       ? ctx.backgroundAgents[block.id]
-                      : undefined
+                      : undefined,
+                    fork: {
+                      parentSessionId: ctx.sessionId,
+                      worktreePath: ctx.worktreePath
+                    }
                   })
                 )}
                 {ctx.approvalCard(block.id)}
@@ -1273,6 +1305,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     ? `${modKeySymbol}⇧↵`
     : `${modKeySymbol}Shift+Enter`
   const interruptSendHotkeyAria = `${modKeyWord}+Shift+Enter`
+  // Ask-as-fork. Alt rather than Shift because Shift is already taken by
+  // interrupt & send, and a bare Alt+Enter has to stay a newline.
+  const forkSendHotkeyLabel = isMac
+    ? `${modKeySymbol}⌥↵`
+    : `${modKeySymbol}Alt+Enter`
+  const forkSendHotkeyAria = `${modKeyWord}+Alt+Enter`
   const composerPlaceholder = sendOnEnter
     ? 'Message Claude — Enter to send, Shift+Enter for newline'
     : `Message Claude — ${modKeyWord}+Enter to send`
@@ -1626,6 +1664,23 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const entriesHydrated = session?.entriesHydrated ?? false
   const deferredEntries = useDeferredValue(entries)
   const find = useFindController(entries, scrollRef)
+  // Forks this conversation parked that have no tab yet. Deliberately
+  // scoped to this chat and derived from its transcript — a global forks
+  // inbox is the thing this feature is trying not to become. Runs off the
+  // deferred entries so a streaming turn doesn't rewalk the transcript per
+  // token.
+  const paneTree = useAppState((s) => s.terminals.panes[worktreePath])
+  const unopenedForks = useMemo(() => {
+    const parked = collectParkedForks(deferredEntries)
+    if (parked.length === 0) return parked
+    const openTabIds = new Set<string>()
+    if (paneTree) {
+      for (const leaf of getLeaves(paneTree)) {
+        for (const t of leaf.tabs) openTabIds.add(t.id)
+      }
+    }
+    return parked.filter((f) => !openTabIds.has(f.forkSessionId))
+  }, [deferredEntries, paneTree])
   const outerDivRef = useRef<HTMLDivElement | null>(null)
   // Document-level Cmd+F so the shortcut works from anywhere in the app —
   // sidebar, composer, tab bar, etc. Every mounted JsonModeChat installs
@@ -2316,6 +2371,20 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     backend.sendJsonClaudeMessage(sessionId, outgoing.text, outgoing.images)
   }
 
+  /** Ask this somewhere else. Forks the conversation and delivers the draft
+   *  to the copy, which opens as a sibling tab and takes focus. This chat is
+   *  left exactly as it was — including a turn that's still streaming, which
+   *  is the point: a side question no longer costs you an interrupt. */
+  function sendAsSideQuestion(): void {
+    const outgoing = takeDraft()
+    if (!outgoing) return
+    void backend.forkForSideQuestion(
+      sessionId,
+      outgoing.text,
+      outgoing.images
+    )
+  }
+
   async function attachImageFile(
     file: File,
     sourcePath: string | null
@@ -2704,6 +2773,35 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           </button>
         )}
       </div>
+      {unopenedForks.length > 0 && (
+        <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
+          <GitFork className="icon-xs shrink-0 text-warning" />
+          <span className="opacity-70 shrink-0">
+            {unopenedForks.length} parked fork
+            {unopenedForks.length === 1 ? '' : 's'}:
+          </span>
+          <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+            {unopenedForks.map((f) => (
+              <button
+                key={f.forkSessionId}
+                type="button"
+                // Scrolls to the card rather than opening the fork: the
+                // point of the strip is "you haven't lost this", and the
+                // decision still belongs where the agent made the note.
+                onClick={() => {
+                  scrollRef.current
+                    ?.querySelector(`[data-fork-card-id="${f.forkSessionId}"]`)
+                    ?.scrollIntoView({ block: 'center' })
+                }}
+                className="truncate hover:text-fg underline decoration-dotted underline-offset-2 cursor-pointer"
+                title={f.prompt}
+              >
+                {f.topic}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
       {session && session.sessionToolApprovals.length > 0 && (
         <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
           <span className="opacity-70">auto-allowing:</span>
@@ -2851,6 +2949,13 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                   interruptAndSend()
                   return
                 }
+                // Cmd/Ctrl+Alt+Enter → ask as a side question. Checked
+                // before wantsSend for the same reason as the branch above.
+                if ((e.metaKey || e.ctrlKey) && e.altKey) {
+                  e.preventDefault()
+                  if (conversationForkEnabled) sendAsSideQuestion()
+                  return
+                }
                 const wantsSend = sendOnEnter
                   ? !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
                   : e.metaKey || e.ctrlKey
@@ -2920,6 +3025,19 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 ) : (
                   'interrupt'
                 )}
+              </button>
+            )}
+            {conversationForkEnabled && (
+              <button
+                onClick={sendAsSideQuestion}
+                disabled={!hasOutgoing}
+                aria-label={`Ask as a side question in a fork (${forkSendHotkeyAria})`}
+                title={`Ask this in a fork instead — copies the conversation into a new tab and asks there, leaving this one untouched (${forkSendHotkeyAria})`}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-xs text-muted hover:text-fg hover:border-warning/60 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
+              >
+                <GitFork className="icon-2xs" />
+                <span>ask in fork</span>
+                <span className="opacity-60">{forkSendHotkeyLabel}</span>
               </button>
             )}
             <button

@@ -226,6 +226,27 @@ const TOOLS = [
     }
   },
   {
+    name: 'fork_chat',
+    description:
+      "Park a fork of THIS conversation to chase a tangent YOU found, without derailing what you're currently doing. Ness copies the conversation as it stands into a second chat in this same worktree, queues `prompt` as its first message, and leaves it idle. Nothing runs: the fork does not start until the user clicks it, so this never puts a second agent on these files behind their back. It shows up as a card at this point in the transcript, so the user sees what you noticed next to the work that made you notice it.\n\nUSE IT when, while doing what the user asked, you turn up something real that they did NOT ask about and that deserves its own thread — a bug next to the one you were sent for, a config that contradicts the docs you just read, a second cause you can prove but that isn't yours to fix right now. The test is whether you'd otherwise be tempted to either derail into it or bury it in a closing bullet. Both of those lose it; this keeps it, with the context that produced it.\n\nDO NOT use it as a way to avoid answering, or to shard the task the user actually gave you into pieces — sub-tasks of the current job are your job, and the Task tool is for parallelising them. Not for something you can just fix correctly in the next thirty seconds; fix it and say so. Not for speculative improvements ('we could add tests here', 'this could be faster'), which are opinions rather than findings, and belong in your answer where the user can wave them off in one word. Not for anything the user already told you about — they know.\n\nAFTER forking: say ONE line about what you parked, and go back to the original task. Do not start investigating the tangent — that is what the fork is for, and the user has not agreed to it yet. Do not ask whether they want it; parking it IS the low-cost way to ask.\n\nBudget: a few unopened forks per conversation, then the tool refuses. Each result tells you what's left. If you're near the cap you're forking too eagerly — the rest goes in your answer as prose.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description:
+            'A few words naming the tangent, in the user\'s vocabulary — it becomes the card title and the new tab\'s name. "Cron job never fires", "auth.ts swallows 401s". Not "investigation" or "follow-up".'
+        },
+        prompt: {
+          type: 'string',
+          description:
+            "The fork's first message: what you want it to look into. It already holds this entire conversation, so do not re-explain the background — say what you noticed, where, and what you want established. Write it to your future self, not to the user."
+        }
+      },
+      required: ['topic', 'prompt']
+    }
+  },
+  {
     name: 'list_worktrees',
     description:
       "List git worktrees currently managed by Ness, with the same status Ness groups the sidebar by. Each entry carries `status` + `statusLabel`: 'merged' (Merged / Closed — the work landed, treat it as finished), 'needs-attention' (open PR of yours with failing checks, conflicts, or changes requested), 'active' (Open PRs — yours, healthy, awaiting review), 'reviewing' (someone else's PR you're reviewing), 'no-pr' (labelled Active — a branch with no PR yet, i.e. work still in progress), 'snoozed' (deliberately parked). Note 'active' means \"has an open PR\" and 'no-pr' is the one labelled Active — read statusLabel, not the key. `prunable: true` means the directory was deleted and only a stale git ref remains. Entries also carry `alias` when the user has named the worktree — that's the name to pass to send_message, and the name a message from it will show. This describes PR/review state, NOT whether an agent is currently running there; Ness does not report agent liveness.",
@@ -664,18 +685,21 @@ function filterToolsByPerms(tools, perms) {
   })
 }
 
-// Strip every trace of forking from create_worktree when it's disabled, rather
-// than advertising a parameter whose only outcome is a rejection.
+// Strip every trace of forking when it's disabled, rather than advertising
+// affordances whose only outcome is a rejection. fork_chat goes entirely;
+// create_worktree keeps everything except its forkConversation parameter.
 function stripForkAffordance(tools) {
-  return tools.map((t) => {
-    if (t.name !== 'create_worktree') return t
-    const { forkConversation, ...rest } = t.inputSchema.properties
-    return {
-      ...t,
-      description: t.description.replace(FORK_DESCRIPTION_SENTENCE, ''),
-      inputSchema: { ...t.inputSchema, properties: rest }
-    }
-  })
+  return tools
+    .filter((t) => t.name !== 'fork_chat')
+    .map((t) => {
+      if (t.name !== 'create_worktree') return t
+      const { forkConversation, ...rest } = t.inputSchema.properties
+      return {
+        ...t,
+        description: t.description.replace(FORK_DESCRIPTION_SENTENCE, ''),
+        inputSchema: { ...t.inputSchema, properties: rest }
+      }
+    })
 }
 
 async function handleToolCall(name, args) {
@@ -724,6 +748,16 @@ async function handleToolCall(name, args) {
     return prNumber
       ? `Created worktree ${r.path} on branch ${r.branch} for PR #${prNumber}${aliasSuffix}. Ness will open a new ${agentLabel} chat tab in it${modelSuffix}.`
       : `Created worktree ${r.path} on branch ${r.branch}${aliasSuffix}. Ness will open a new ${agentLabel} chat tab in it${modelSuffix}.${forkSuffix}`
+  }
+  if (name === 'fork_chat') {
+    const topic = args && typeof args.topic === 'string' ? args.topic.trim() : ''
+    const prompt = args && typeof args.prompt === 'string' ? args.prompt.trim() : ''
+    if (!topic) throw new Error('topic is required')
+    if (!prompt) throw new Error('prompt is required')
+    // The message is built server-side because it carries the fork id in the
+    // exact shape the chat card parses back out.
+    const r = await callControl('POST', '/forks', { topic, prompt })
+    return r.message
   }
   if (name === 'list_worktrees') {
     const q =

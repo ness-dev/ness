@@ -10,6 +10,7 @@ import type { PRStatus } from '../shared/state/prs'
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
+import { formatForkResult } from '../shared/fork-chat'
 import { log } from './debug'
 
 export interface BrowserTabSummary {
@@ -158,6 +159,16 @@ export interface ControlServerDeps {
   /** Whether conversation forking is enabled in settings. Re-read per request
    * so a toggle takes effect without restarting the bridge. */
   getConversationForkEnabled: () => boolean
+  /** Copy the caller's own transcript into a parked fork — a jsonl on disk
+   * with no tab and no subprocess. Returns how many more the conversation may
+   * park, which the tool result passes back to the model so it can pace
+   * itself instead of discovering the cap by being refused. */
+  parkChatFork: (
+    parentSessionId: string,
+    worktreePath: string
+  ) =>
+    | { ok: true; forkSessionId: string; remaining: number }
+    | { ok: false; error: string }
   /** Current browser-tool permissions. Re-read on every request so user
    * toggles take effect mid-session without restarting the bridge. */
   getBrowserPerms: () => BrowserPerms
@@ -437,6 +448,44 @@ async function handleRequest(
       baseRef: baseBranch
     })
     return sendJson(res, 200, created)
+  }
+
+  // fork_chat — the caller forking ITSELF, mid-answer, over a tangent it
+  // found rather than one the user asked about. Same self-scoping rule as
+  // forkConversation: the session comes from the terminal id, never from an
+  // argument. Unlike create_worktree this stays in the caller's worktree, so
+  // there is no branch, no relocation preamble, and nothing running until the
+  // user opens it.
+  if (req.method === 'POST' && path === '/forks') {
+    const body = await readJson(req)
+    const topic = String(body.topic || '').trim()
+    const prompt = String(body.prompt || '').trim()
+    if (!topic) return sendJson(res, 400, { error: 'topic is required' })
+    if (!prompt) return sendJson(res, 400, { error: 'prompt is required' })
+    if (!deps.getConversationForkEnabled()) {
+      return sendJson(res, 400, {
+        error:
+          'conversation forking is disabled in Ness settings. Mention what you noticed in your answer instead.'
+      })
+    }
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!scope || !deps.hasForkableTranscript(terminalId, scope.worktreePath)) {
+      return sendJson(res, 400, {
+        error:
+          'fork_chat is only available from a Ness Chat tab that already has conversation history. Mention what you noticed in your answer instead.'
+      })
+    }
+    const parked = deps.parkChatFork(terminalId, scope.worktreePath)
+    if (!parked.ok) return sendJson(res, 409, { error: parked.error })
+    log('control', `fork_chat parked ${parked.forkSessionId} topic="${topic}"`)
+    return sendJson(res, 200, {
+      forkSessionId: parked.forkSessionId,
+      message: formatForkResult({
+        forkSessionId: parked.forkSessionId,
+        topic,
+        remaining: parked.remaining
+      })
+    })
   }
 
   // rename_worktree — the git-level counterpart to /aliases. Renames the
