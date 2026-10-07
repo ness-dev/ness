@@ -43,7 +43,7 @@ slice has:
 
 Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
 `terminals` (which also owns `panes` and `lastActive`), `updater`,
-`repoConfigs`. Adding a new piece of shared state means picking the
+`repoConfigs`, `permissions`. Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end
@@ -98,6 +98,7 @@ src/
 │   ├── hooks.ts                   # consent + justInstalled
 │   ├── updater.ts                 # status (checking/available/downloading/…)
 │   ├── repo-configs.ts            # byRepo: per-repo .ness.json contents
+│   ├── permissions.ts             # global "Always allow" tool grants
 │   └── *.test.ts                  # vitest reducer tests, one per slice
 │
 ├── main/
@@ -487,6 +488,33 @@ hard dependency on `gh`.
 
 ## Important quirks
 
+- **Never symlink `.claude/settings.local.json`.** Ness used to point every
+  worktree's copy at the main worktree's so "Always allow" grants would be
+  shared repo-wide. It cannot work, and it fails *silently in the worse
+  direction*: Claude Code's settings writer passes `allowSymlink: false`
+  for every source except `userSettings` (`~/.claude/settings.json`), then
+  lstats the target and throws `Refusing to write through symlink` when it
+  is one. A symlinked worktree therefore persisted **nothing at all** —
+  strictly worse than an unshared per-worktree file. `checkParentDir`
+  likewise refuses a symlinked `.claude` *directory*. This is deliberate
+  hardening (a repo-controllable settings file must not escape the
+  worktree), so don't expect it to be relaxed.
+
+  Ness owns the shared allowlist itself now: in json-mode it *is* the
+  `--permission-prompt-tool`, so `ApprovalBridge` matches each request
+  against the global `permissions` slice before Claude would ever prompt.
+  `shared/permission-match.ts` holds the matcher,
+  `shared/permission-patterns.ts` the suggestion ladder. Because Ness
+  matches the rules itself there's no destination root to anchor paths
+  against, which is why path rules now fire outside the session's worktree
+  — Claude's own matcher drops unanchored path rules, and working around
+  that used to force a bare-tool grant.
+
+  Terminal tabs spawn the user's PATH `claude`, which prompts in its own
+  TUI and persists to its own files — those grants are independent and
+  Ness never sees them. `unsymlinkClaudeSettings` +
+  `migrateClaudeSettingsOffSymlinks` exist only to undo the old scheme
+  (one-shot, gated on `claudeSettingsUnsymlinked`).
 - **Worktree dep installs** — fresh git worktrees under
   `claude-harness-worktrees/` start with no `node_modules`. Run
   `npm install --legacy-peer-deps` once before building (the `--legacy-peer-deps`

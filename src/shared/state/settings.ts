@@ -327,7 +327,6 @@ export interface SettingsState {
    *  expanded. Sticky across restarts: someone who works in there wants it
    *  open every time, and someone who never touches it never sees it. */
   newWorktreeAdvancedOpen: boolean
-  shareClaudeSettings: boolean
   claudeModel: string | null
   codexModel: string | null
   cursorModel: string | null
@@ -516,7 +515,6 @@ export type SettingsEvent =
   | { type: 'settings/sidebarDetailsChanged'; payload: SidebarDetailPrefsByMode }
   | { type: 'settings/newWorktreeAdvancedOpenChanged'; payload: boolean }
   | { type: 'settings/starterTasksDismissedChanged'; payload: boolean }
-  | { type: 'settings/shareClaudeSettingsChanged'; payload: boolean }
   | { type: 'settings/hasGithubTokenChanged'; payload: boolean }
   | { type: 'settings/githubAuthSourceChanged'; payload: 'pat' | 'gh-cli' | null }
   | { type: 'settings/viewerLoginChanged'; payload: string | null }
@@ -596,7 +594,6 @@ export const initialSettings: SettingsState = {
   sidebarDetails: DEFAULT_SIDEBAR_DETAILS,
   newWorktreeAdvancedOpen: false,
   starterTasksDismissed: false,
-  shareClaudeSettings: true,
   claudeModel: null,
   codexModel: null,
   cursorModel: null,
@@ -740,8 +737,6 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, newWorktreeAdvancedOpen: event.payload }
     case 'settings/starterTasksDismissedChanged':
       return { ...state, starterTasksDismissed: event.payload }
-    case 'settings/shareClaudeSettingsChanged':
-      return { ...state, shareClaudeSettings: event.payload }
     case 'settings/hasGithubTokenChanged':
       return { ...state, hasGithubToken: event.payload }
     case 'settings/githubAuthSourceChanged':

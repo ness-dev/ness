@@ -48,7 +48,7 @@ export interface ToolCardProps {
   block: JsonClaudeMessageBlock
   result?: ToolResultView
   autoApproved?: { model: string; reason: string; timestamp: number }
-  sessionAllowed?: { toolName: string; timestamp: number }
+  sessionAllowed?: { toolName: string; timestamp: number; rule?: string }
   /** Sub-agent fields. Only set by the Task case; other cards ignore
    *  them. Threaded through dispatchToolCard so the renderer keeps the
    *  same call shape for every tool. */
@@ -142,7 +142,7 @@ export function ToolCardChrome({
   brand?: boolean
   icon?: ToolIcon | null
   autoApproved?: { model: string; reason: string; timestamp: number }
-  sessionAllowed?: { toolName: string; timestamp: number }
+  sessionAllowed?: { toolName: string; timestamp: number; rule?: string }
   children: ReactNode
 }): JSX.Element {
   // Collapsed by default. Errors get a visible "error" badge in the
@@ -215,11 +215,15 @@ export function ToolCardChrome({
         )}
         {sessionAllowed && (
           <span
-            title={`allowed by session policy · ${sessionAllowed.toolName}`}
+            title={
+              sessionAllowed.rule
+                ? `allowed by saved rule · ${sessionAllowed.rule}`
+                : `allowed by session policy · ${sessionAllowed.toolName}`
+            }
             className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
-            session
+            {sessionAllowed.rule ? 'always' : 'session'}
           </span>
         )}
         {isError && (

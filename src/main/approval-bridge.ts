@@ -28,6 +28,7 @@ import {
 import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
+import { findMatchingRule, ruleKey } from '../shared/permission-match'
 
 interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -253,6 +254,33 @@ export class ApprovalBridge {
     })
   }
 
+  /** Allow a request without surfacing a card, and record the decision so
+   *  the tool card can render a provenance badge. `rule` is the display
+   *  form of the persistent grant that fired, omitted for session-scoped
+   *  grants. */
+  private resolveAllowed(
+    socket: Socket,
+    requestId: string,
+    base: { sessionId: string; toolName: string; toolUseId?: string; input: Record<string, unknown> },
+    rule?: string
+  ): void {
+    this.writeResponse(socket, requestId, {
+      behavior: 'allow',
+      updatedInput: base.input
+    })
+    if (!base.toolUseId) return
+    this.store.dispatch({
+      type: 'jsonClaude/approvalSessionAllowed',
+      payload: {
+        sessionId: base.sessionId,
+        toolUseId: base.toolUseId,
+        toolName: base.toolName,
+        timestamp: Date.now(),
+        ...(rule ? { rule } : {})
+      }
+    })
+  }
+
   private handleFrame(sessionId: string, socket: Socket, line: string): void {
     let frame: RequestFrame
     try {
@@ -284,29 +312,37 @@ export class ApprovalBridge {
     // QUESTION_TOOL_NAME. Bail out above both auto-resolve paths.
     const isQuestion = basePayload.toolName === QUESTION_TOOL_NAME
 
-    // Session-scoped auto-allow set: the user clicked "Allow {tool} this
-    // session" on a previous approval, so the bridge resolves matching
-    // tools directly without surfacing a card. Checked before the LLM
-    // auto-reviewer because an explicit user grant is cheaper and more
-    // authoritative than a Haiku call.
-    const slice = this.store.getSnapshot().state.jsonClaude
+    // Two explicit-user-grant paths, both checked before the LLM
+    // auto-reviewer because a grant the user made by hand is cheaper and
+    // more authoritative than a Haiku call:
+    //
+    //   1. The persistent global allowlist ("Always allow"). Lives in
+    //      Ness's own config, so it applies across every worktree and
+    //      repo — unlike Claude's per-worktree settings.local.json, which
+    //      is what this replaced.
+    //   2. The session-scoped set ("Allow {tool} this session").
+    const rootState = this.store.getSnapshot().state
+    if (!isQuestion) {
+      const matched = findMatchingRule(
+        rootState.permissions.rules,
+        basePayload.toolName,
+        basePayload.input
+      )
+      if (matched) {
+        const key = ruleKey(matched)
+        this.resolveAllowed(socket, frame.id, basePayload, key)
+        log(
+          'approval-bridge',
+          `rule-allowed session=${basePayload.sessionId} id=${frame.id} tool=${basePayload.toolName} rule=${key}`
+        )
+        return
+      }
+    }
+
+    const slice = rootState.jsonClaude
     const session = slice.sessions[basePayload.sessionId]
     if (!isQuestion && session?.sessionToolApprovals.includes(basePayload.toolName)) {
-      this.writeResponse(socket, frame.id, {
-        behavior: 'allow',
-        updatedInput: basePayload.input
-      })
-      if (basePayload.toolUseId) {
-        this.store.dispatch({
-          type: 'jsonClaude/approvalSessionAllowed',
-          payload: {
-            sessionId: basePayload.sessionId,
-            toolUseId: basePayload.toolUseId,
-            toolName: basePayload.toolName,
-            timestamp: Date.now()
-          }
-        })
-      }
+      this.resolveAllowed(socket, frame.id, basePayload)
       log(
         'approval-bridge',
         `session-allowed session=${basePayload.sessionId} id=${frame.id} tool=${basePayload.toolName}`

@@ -395,7 +395,7 @@ export interface JsonClaudeSession {
    *  "allowed by session policy" badge. */
   sessionAllowedDecisions: Record<
     string,
-    { toolName: string; timestamp: number }
+    { toolName: string; timestamp: number; rule?: string }
   >
   /** Background sub-agents keyed by their launching Task tool_use id.
    *  Entries persist after completion so the Task card can keep showing
@@ -584,6 +584,10 @@ export type JsonClaudeEvent =
         toolUseId: string
         toolName: string
         timestamp: number
+        /** Set when the grant came from the persistent allowlist rather
+         *  than the session-scoped set — carries the rule's display form
+         *  so the badge can say which saved rule fired. */
+        rule?: string
       }
     }
   | {
@@ -1187,7 +1191,7 @@ export function jsonClaudeReducer(
     case 'jsonClaude/approvalSessionAllowed': {
       const session = state.sessions[event.payload.sessionId]
       if (!session) return state
-      const { toolUseId, toolName, timestamp } = event.payload
+      const { toolUseId, toolName, timestamp, rule } = event.payload
       return {
         ...state,
         sessions: {
@@ -1196,7 +1200,7 @@ export function jsonClaudeReducer(
             ...session,
             sessionAllowedDecisions: {
               ...session.sessionAllowedDecisions,
-              [toolUseId]: { toolName, timestamp }
+              [toolUseId]: { toolName, timestamp, ...(rule ? { rule } : {}) }
             }
           }
         }

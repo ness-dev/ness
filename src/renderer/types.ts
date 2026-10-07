@@ -401,7 +401,9 @@ export interface ElectronAPI {
   setExpandedDiagnosticLoggingEnabled(enabled: boolean): Promise<boolean>
   setShowAssignedPRs(enabled: boolean): Promise<boolean>
   refreshAssignedPRs(): Promise<boolean>
-  setShareClaudeSettings(enabled: boolean): Promise<boolean>
+  grantPermission(rule: { toolName: string; ruleContent?: string }, grantedFrom?: string): Promise<boolean>
+  revokePermission(id: string): Promise<boolean>
+  clearPermissions(): Promise<boolean>
   setNewWorktreeAdvancedOpen(open: boolean): Promise<boolean>
   setStarterTasksDismissed(dismissed: boolean): Promise<boolean>
   setHarnessSystemPromptEnabled(enabled: boolean): Promise<boolean>

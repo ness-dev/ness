@@ -9,7 +9,7 @@ vi.mock('./worktree', () => ({
   fetchPullRequestRef: vi.fn(),
   localBranchExists: vi.fn(async () => false),
   runWorktreeScript: vi.fn(),
-  symlinkClaudeSettings: vi.fn()
+  unsymlinkClaudeSettings: vi.fn(() => null)
 }))
 vi.mock('./github', () => ({
   getPRMetadata: vi.fn()

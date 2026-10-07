@@ -225,10 +225,12 @@ export interface Config {
   // ⌘-click hands it to the system browser / editor — the inverse of the
   // default. Default is off (undefined/false).
   terminalPlainClickOpensInApp?: boolean
-  // When false, new worktrees don't symlink their .claude/settings.local.json
-  // to the main worktree's copy, and the boot migration doesn't convert
-  // existing regular files. Default is enabled (undefined/true).
-  shareClaudeSettings?: boolean
+  // One-shot migration flag: once true, we've converted every worktree's
+  // symlinked .claude/settings.local.json back to a real file and seeded
+  // permissionRules from the grants we found there. The symlink scheme it
+  // replaced never worked — Claude Code refuses to write through a
+  // symlinked settings file — see shared/permission-match.ts.
+  claudeSettingsUnsymlinked?: boolean
   // Sticky expand state for the New worktree screen's Advanced section.
   // Default is collapsed (undefined/false).
   newWorktreeAdvancedOpen?: boolean
@@ -293,6 +295,13 @@ export interface Config {
   // policy prompt. Empty by default. Has no effect unless
   // autoApprovePermissions is on.
   autoApproveSteerInstructions?: string
+  // Global "Always allow" tool-permission grants from the json-mode
+  // approval card. Global on purpose — the per-worktree
+  // .claude/settings.local.json this replaced only applied where the
+  // grant was made, which was the whole problem. See
+  // shared/permission-match.ts. Only json-mode consults it; terminal
+  // tabs prompt in Claude's own TUI and persist separately.
+  permissionRules?: unknown[]
   // Diagnostic toggle (no UI): when true, json-mode tabs spawn the user's
   // PATH `claude` instead of the bundled one. Default off.
   useSystemClaudeForJsonMode?: boolean

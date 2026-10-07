@@ -59,7 +59,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
-import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, symlinkClaudeSettings, pruneWorktrees, type MergeStrategy } from './worktree'
+import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
 import { resolveEditorId } from '../shared/editor-resolve'
@@ -103,6 +103,7 @@ import type { ForkSource } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
 import { normalizeAlias } from '../shared/state/aliases'
+import { parseRuleKey, ruleKey, type PermissionRule } from '../shared/permission-match'
 import {
   isJsonClaudePermissionMode,
   parseAutomatedMessage,
@@ -1236,35 +1237,82 @@ function uninstallHooksGlobally(): void {
   }
 }
 
-/** One-shot boot migration: for every non-main worktree that has a real
- *  .claude/settings.local.json file (not a symlink), replace it with a
- *  symlink to main's copy so permissions sync. New worktrees get the
- *  symlink at creation time in WorktreesFSM.runPending. */
-function migrateClaudeSettingsToSymlinks(): void {
-  if (config.shareClaudeSettings === false) return
+/** One-shot boot migration undoing the old symlink scheme.
+ *
+ *  Ness used to symlink every worktree's `.claude/settings.local.json` at
+ *  its main worktree's copy so "Always allow" grants would be shared. That
+ *  never worked: Claude Code refuses to write through a symlinked settings
+ *  file (see shared/permission-match.ts), so a symlinked worktree persisted
+ *  nothing at all. Ness owns the shared allowlist itself now.
+ *
+ *  Two jobs, both idempotent, gated behind `claudeSettingsUnsymlinked` so a
+ *  user who later hand-edits their settings files isn't swept again:
+ *    1. Convert every symlink back to a real file, so Claude's own
+ *       persistence (and terminal-tab grants) starts working again.
+ *    2. Seed `permissions.rules` from the `permissions.allow` entries found
+ *       along the way, so grants the user already made survive the switch. */
+function migrateClaudeSettingsOffSymlinks(): void {
+  if (config.claudeSettingsUnsymlinked) return
   const list = store.getSnapshot().state.worktrees.list
-  const mainByRepo = new Map<string, string>()
+  const recovered: string[] = []
   for (const wt of list) {
-    if (wt.isMain) mainByRepo.set(wt.repoRoot, wt.path)
-  }
-  for (const wt of list) {
-    if (wt.isMain) continue
-    const mainPath = mainByRepo.get(wt.repoRoot)
-    if (!mainPath || mainPath === wt.path) continue
-    const settingsPath = join(wt.path, '.claude', 'settings.local.json')
-    if (!existsSync(settingsPath)) continue
     try {
-      if (lstatSync(settingsPath).isSymbolicLink()) continue
-    } catch {
-      continue
-    }
-    try {
-      symlinkClaudeSettings(mainPath, wt.path)
-      log('hooks', `migrated .claude/settings.local.json to symlink: ${wt.path} → ${mainPath}`)
+      const fromLink = unsymlinkClaudeSettings(wt.path)
+      if (fromLink !== null) {
+        recovered.push(...fromLink)
+        log('hooks', `un-symlinked .claude/settings.local.json: ${wt.path}`)
+      } else {
+        recovered.push(...readClaudeAllowEntries(wt.path))
+      }
     } catch (err) {
-      log('hooks', `migrate symlink failed for ${wt.path}`, err instanceof Error ? err.message : err)
+      log(
+        'hooks',
+        `un-symlink failed for ${wt.path}`,
+        err instanceof Error ? err.message : err
+      )
     }
   }
+
+  config.claudeSettingsUnsymlinked = true
+  saveConfig(config)
+
+  if (recovered.length === 0) return
+  const imported = grantPermissionRules(
+    recovered.map((entry) => parseRuleKey(entry)).filter((r): r is PermissionRule => r !== null)
+  )
+  if (imported > 0) {
+    log('hooks', `imported ${imported} permission rule(s) from existing settings.local.json files`)
+  }
+}
+
+/** Add rules to the global allowlist, persist, and return how many were
+ *  actually new. Shared by the migration and the IPC handler so both go
+ *  through the same dedup + persist path. */
+function grantPermissionRules(rules: PermissionRule[], grantedFrom?: string): number {
+  let added = 0
+  for (const rule of rules) {
+    const before = store.getSnapshot().state.permissions.rules.length
+    store.dispatch({
+      type: 'permissions/granted',
+      payload: {
+        rule: {
+          id: ruleKey(rule),
+          toolName: rule.toolName,
+          ...(rule.ruleContent ? { ruleContent: rule.ruleContent } : {}),
+          grantedAt: Date.now(),
+          ...(grantedFrom ? { grantedFrom } : {})
+        }
+      }
+    })
+    if (store.getSnapshot().state.permissions.rules.length > before) added++
+  }
+  if (added > 0) persistPermissionRules()
+  return added
+}
+
+function persistPermissionRules(): void {
+  config.permissionRules = store.getSnapshot().state.permissions.rules
+  saveConfig(config)
 }
 
 // Sleep-on-boot for merged worktrees.
@@ -2461,20 +2509,6 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  transport.onRequest('config:setShareClaudeSettings', (_ctx, enabled: boolean) => {
-    if (enabled) {
-      delete config.shareClaudeSettings
-    } else {
-      config.shareClaudeSettings = false
-    }
-    saveConfig(config)
-    store.dispatch({
-      type: 'settings/shareClaudeSettingsChanged',
-      payload: config.shareClaudeSettings !== false
-    })
-    return true
-  })
-
   transport.onRequest('config:setAutoUpdateEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
       delete config.autoUpdateEnabled
@@ -2654,6 +2688,36 @@ function registerIpcHandlers(): void {
       type: 'settings/autoApproveSteerInstructionsChanged',
       payload: config.autoApproveSteerInstructions || ''
     })
+    return true
+  })
+
+  transport.onRequest(
+    'permissions:grant',
+    (_ctx, rule: PermissionRule, grantedFrom?: string): boolean => {
+      if (!rule || typeof rule.toolName !== 'string' || !rule.toolName) return false
+      grantPermissionRules(
+        [
+          {
+            toolName: rule.toolName,
+            ...(rule.ruleContent ? { ruleContent: rule.ruleContent } : {})
+          }
+        ],
+        grantedFrom
+      )
+      return true
+    }
+  )
+
+  transport.onRequest('permissions:revoke', (_ctx, id: string): boolean => {
+    if (!id) return false
+    store.dispatch({ type: 'permissions/revoked', payload: { id } })
+    persistPermissionRules()
+    return true
+  })
+
+  transport.onRequest('permissions:clear', (): boolean => {
+    store.dispatch({ type: 'permissions/cleared' })
+    persistPermissionRules()
     return true
   })
 
@@ -4854,7 +4918,7 @@ async function runBoot(): Promise<void> {
   void (async () => {
     await panesFSM.restoreFromConfig(config.panes)
     await worktreesFSM.refreshList()
-    migrateClaudeSettingsToSymlinks()
+    migrateClaudeSettingsOffSymlinks()
     reconcileBrowserViews()
   })()
 

@@ -6,7 +6,6 @@ import {
   mkdirSync,
   statSync,
   lstatSync,
-  symlinkSync,
   unlinkSync,
   readFileSync,
   writeFileSync
@@ -1944,37 +1943,66 @@ export async function runWorktreeScript(
   })
 }
 
-/** Point a worktree's `.claude/settings.local.json` at the main worktree's
- * copy via a symlink, so "Don't ask again" permissions granted in any
- * worktree apply to all of them. No-op if main has no settings.local.json
- * yet — we don't want to create one just to have something to symlink.
- * Idempotent: if the target is already a symlink, does nothing. If a
- * regular file already exists in the new worktree, it is merged into
- * main's copy (shallow merge) before being replaced with the symlink. */
-export function symlinkClaudeSettings(mainWorktreePath: string, newWorktreePath: string): void {
-  if (mainWorktreePath === newWorktreePath) return
-  const mainSettingsPath = join(mainWorktreePath, '.claude', 'settings.local.json')
-  if (!existsSync(mainSettingsPath)) return
-
-  const newClaudeDir = join(newWorktreePath, '.claude')
-  const newSettingsPath = join(newClaudeDir, 'settings.local.json')
-
-  if (!existsSync(newClaudeDir)) mkdirSync(newClaudeDir, { recursive: true })
-
-  if (existsSync(newSettingsPath)) {
-    const stat = lstatSync(newSettingsPath)
-    if (stat.isSymbolicLink()) return
+/** Replace a worktree's symlinked `.claude/settings.local.json` with a real
+ * file holding the link target's contents.
+ *
+ * Ness used to symlink every worktree's copy at main's, so that "Don't ask
+ * again" grants would apply repo-wide. That cannot work: Claude Code's
+ * settings writer passes `allowSymlink: false` for every source but
+ * `userSettings`, then lstats the target and throws "Refusing to write
+ * through symlink" when it is one. A symlinked worktree therefore persisted
+ * NOTHING — strictly worse than a plain per-worktree file. Ness owns the
+ * shared allowlist itself now (see shared/permission-match.ts); this
+ * function exists only to undo the damage.
+ *
+ * Returns the `permissions.allow` entries recovered from the link target so
+ * the caller can seed the Ness-side allowlist with grants the user already
+ * made. Returns null when there was no symlink to convert. */
+export function unsymlinkClaudeSettings(worktreePath: string): string[] | null {
+  const settingsPath = join(worktreePath, '.claude', 'settings.local.json')
+  let target: string
+  try {
+    if (!lstatSync(settingsPath).isSymbolicLink()) return null
+    target = readFileSync(settingsPath, 'utf-8')
+  } catch {
+    // Broken link (main's copy deleted) — drop it so Claude can create a
+    // real file on the next grant instead of hitting the symlink refusal.
     try {
-      const mainSettings = JSON.parse(readFileSync(mainSettingsPath, 'utf-8'))
-      const newSettings = JSON.parse(readFileSync(newSettingsPath, 'utf-8'))
-      writeFileSync(mainSettingsPath, JSON.stringify({ ...mainSettings, ...newSettings }, null, 2))
+      unlinkSync(settingsPath)
     } catch {
-      // If either file is corrupt JSON, fall through and let the symlink win.
+      /* ignore */
     }
-    unlinkSync(newSettingsPath)
+    return null
   }
 
-  symlinkSync(mainSettingsPath, newSettingsPath)
+  unlinkSync(settingsPath)
+  writeFileSync(settingsPath, target)
+
+  try {
+    const parsed = JSON.parse(target) as { permissions?: { allow?: unknown } }
+    const allow = parsed.permissions?.allow
+    if (!Array.isArray(allow)) return []
+    return allow.filter((e): e is string => typeof e === 'string')
+  } catch {
+    return []
+  }
+}
+
+/** Read the `permissions.allow` entries out of a worktree's real (non-
+ * symlink) `.claude/settings.local.json`. Used by the one-shot migration to
+ * collect grants the user made before Ness owned the allowlist. */
+export function readClaudeAllowEntries(worktreePath: string): string[] {
+  const settingsPath = join(worktreePath, '.claude', 'settings.local.json')
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8')) as {
+      permissions?: { allow?: unknown }
+    }
+    const allow = parsed.permissions?.allow
+    if (!Array.isArray(allow)) return []
+    return allow.filter((e): e is string => typeof e === 'string')
+  } catch {
+    return []
+  }
 }
 
 export async function removeWorktree(repoRoot: string, path: string, force?: boolean): Promise<void> {

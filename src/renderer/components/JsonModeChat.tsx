@@ -879,7 +879,7 @@ interface RenderContext {
   >
   sessionAllowedDecisions: Record<
     string,
-    { toolName: string; timestamp: number }
+    { toolName: string; timestamp: number; rule?: string }
   >
   /** Background sub-agents keyed by their launching Task tool_use id. */
   backgroundAgents: Record<string, JsonClaudeBackgroundAgent>
