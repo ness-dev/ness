@@ -10,6 +10,7 @@
 import { useState, type ReactNode } from 'react'
 import type {
   JsonClaudeBackgroundAgent,
+  JsonClaudeImageRef,
   JsonClaudeMessageBlock
 } from '../../../shared/state/json-claude'
 import {
@@ -25,9 +26,17 @@ import { HighlightedText, useFind } from '../JsonModeChatFind'
 export { extractArgs, getToolDisplay, isNessControl, prettyToolName }
 export type { ArgEntry }
 
+export interface ToolResultView {
+  content: string
+  isError: boolean
+  /** Images the tool returned — browser screenshots, in practice. Held
+   *  as on-disk paths; the thumbnail component reads them lazily. */
+  images?: JsonClaudeImageRef[]
+}
+
 export interface ToolCardProps {
   block: JsonClaudeMessageBlock
-  result?: { content: string; isError: boolean }
+  result?: ToolResultView
   autoApproved?: { model: string; reason: string; timestamp: number }
   sessionAllowed?: { toolName: string; timestamp: number }
   /** Sub-agent fields. Only set by the Task case; other cards ignore
@@ -60,12 +69,18 @@ export function ToolCardChrome({
   icon: Icon,
   autoApproved,
   sessionAllowed,
+  autoExpand = false,
   children
 }: {
   /** Stable id for find-integration. When Cmd+F cycles to a match inside
    *  this card, the FindContext adds the id to forceOpenIds and this
    *  card renders as expanded regardless of local state. */
   id?: string
+  /** Open the card without a click until the user says otherwise. Set
+   *  for results worth seeing at a glance (browser screenshots). Read on
+   *  every render rather than as an initial useState value, because the
+   *  tool_result lands after the card first mounts. */
+  autoExpand?: boolean
   name: string
   /** Accepts a ReactNode so cards whose primary render is the subtitle
    *  (Grep/Glob's pattern field) can pass a <HighlightedText> here. */
@@ -81,10 +96,13 @@ export function ToolCardChrome({
   // Collapsed by default. Errors get a visible "error" badge in the
   // header so they're discoverable, but we don't force-expand — the
   // user can choose to drill in.
-  const [expanded, setExpanded] = useState<boolean>(false)
+  //
+  // null means "no explicit choice yet, follow autoExpand"; once the
+  // user clicks, their decision sticks even if autoExpand flips.
+  const [expanded, setExpanded] = useState<boolean | null>(null)
   const find = useFind()
   const forceOpen = !!id && find.forceOpenIds.has(id)
-  const isOpen = expanded || forceOpen
+  const isOpen = forceOpen || (expanded ?? autoExpand)
   const isCurrentHit = !!id && find.currentHitBlockId === id
 
   const ring = isCurrentHit
@@ -115,7 +133,7 @@ export function ToolCardChrome({
       {brand && <div className="brand-gradient-bg h-0.5" />}
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !(v ?? autoExpand))}
         className={`${groupClass} w-full flex items-center gap-2 ${isOpen ? 'border-b border-border' : ''} ${headerBg} ${headerHover} cursor-pointer transition-colors text-left`}
         style={{
           paddingInline: 'var(--chat-chrome-px)',

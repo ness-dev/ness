@@ -54,6 +54,16 @@ export const EDIT_TOOL_NAMES = [
  *  skip this tool and let the question card handle it. */
 export const QUESTION_TOOL_NAME = 'AskUserQuestion'
 
+/** An image held on disk rather than in state. Tool results (browser
+ *  screenshots) and pasted user attachments can both carry megabytes of
+ *  base64; keeping only the path means state events stay small enough to
+ *  fan out over IPC/WS on every dispatch. The renderer reads the bytes
+ *  back lazily via jsonClaude:readAttachmentImage. */
+export interface JsonClaudeImageRef {
+  path: string
+  mediaType: string
+}
+
 export interface JsonClaudeMessageBlock {
   type: 'text' | 'thinking' | 'tool_use' | 'tool_result'
   // For 'text' and 'thinking': markdown content. The wire-format
@@ -68,6 +78,9 @@ export interface JsonClaudeMessageBlock {
   toolUseId?: string
   content?: string
   isError?: boolean
+  // For 'tool_result': images the tool returned (e.g. browser
+  // screenshots), spilled to disk at extraction time.
+  images?: JsonClaudeImageRef[]
 }
 
 /** Sources of a user turn that Ness injected on the human's behalf.
@@ -245,7 +258,7 @@ export interface JsonClaudeChatEntry {
    *  chat history. The path is also embedded in the user message that
    *  Claude sees ("(image attached at <path>)") so the model can
    *  Read/Bash/Write the file. */
-  images?: Array<{ path: string; mediaType: string }>
+  images?: JsonClaudeImageRef[]
   /** For kind === 'assistant'. When this assistant message was emitted
    *  by a sub-agent spawned via the Task tool, this is the tool_use id
    *  of the parent Task call. The renderer's grouping pre-pass uses it
@@ -483,6 +496,7 @@ export type JsonClaudeEvent =
         toolUseId: string
         content: string
         isError: boolean
+        images?: JsonClaudeImageRef[]
       }
     }
   | {
@@ -889,7 +903,7 @@ export function jsonClaudeReducer(
     case 'jsonClaude/toolResultAttached': {
       const session = state.sessions[event.payload.sessionId]
       if (!session) return state
-      const { toolUseId, content, isError } = event.payload
+      const { toolUseId, content, isError, images } = event.payload
       return {
         ...state,
         sessions: {
@@ -907,7 +921,8 @@ export function jsonClaudeReducer(
                     type: 'tool_result',
                     toolUseId,
                     content,
-                    isError
+                    isError,
+                    ...(images && images.length > 0 ? { images } : {})
                   }
                 ]
               }

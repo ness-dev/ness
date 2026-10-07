@@ -40,7 +40,7 @@ import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
 import { JsonClaudeQuestionCard } from './JsonClaudeQuestionCard'
 import { Tooltip } from './Tooltip'
-import { dispatchToolCard, ToolCardChrome } from './json-mode-cards'
+import { dispatchToolCard, ToolCardChrome, type ToolResultView } from './json-mode-cards'
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TaskCard } from './json-mode-cards/TaskCard'
@@ -299,6 +299,10 @@ interface RenderedRow {
   toolName?: string
   hasError?: boolean
   hasPendingApproval?: boolean
+  /** This row's tool returned an image (a browser screenshot). Bubbles
+   *  up to ToolGroup so the group opens far enough to show it — a
+   *  screenshot behind two collapsed chevrons may as well not be there. */
+  hasImages?: boolean
   /** Marks this row as a thinking card. Lives in the 'tool' bucket so
    *  it groups with adjacent tool_use rows (thinking + tools are both
    *  agent work between user-facing replies), but ToolGroup counts it
@@ -862,7 +866,7 @@ function AutomatedTurnCard({
 }
 
 interface RenderContext {
-  resultsByToolUseId: Map<string, { content: string; isError: boolean }>
+  resultsByToolUseId: Map<string, ToolResultView>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
   approvalCard: (toolUseId: string | undefined) => ReactNode
   pendingToolUseIds: Set<string>
@@ -1136,6 +1140,7 @@ function renderEntries(
             type: 'tool',
             toolName: block.name,
             hasError: !!result?.isError,
+            hasImages: !!result?.images && result.images.length > 0,
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,
@@ -1738,17 +1743,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // tool_use_id → tool_result lookup built once over the full
     // entries array (results live in top-level tool_result entries
     // even when their corresponding tool_use was a sub-agent's call).
-    const resultsByToolUseId = new Map<
-      string,
-      { content: string; isError: boolean }
-    >()
+    const resultsByToolUseId = new Map<string, ToolResultView>()
     for (const entry of deferredEntries) {
       if (entry.kind !== 'tool_result' || !entry.blocks) continue
       for (const b of entry.blocks) {
         if (b.type === 'tool_result' && b.toolUseId) {
           resultsByToolUseId.set(b.toolUseId, {
             content: b.content || '',
-            isError: !!b.isError
+            isError: !!b.isError,
+            ...(b.images && b.images.length > 0 ? { images: b.images } : {})
           })
         }
       }

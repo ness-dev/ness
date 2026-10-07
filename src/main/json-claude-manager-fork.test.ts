@@ -39,6 +39,7 @@ vi.mock('child_process', () => ({
 
 import { Store } from './store'
 import { JsonClaudeManager } from './json-claude-manager'
+import type { JsonClaudeMessageBlock } from '../shared/state/json-claude'
 
 function transcriptDir(worktreePath: string): string {
   return join(tmpHome, '.claude', 'projects', worktreePath.replace(/[^a-zA-Z0-9]/g, '-'))
@@ -364,5 +365,115 @@ describe('JsonClaudeManager.seedFromTranscript — mid-turn messages', () => {
     const entries = store.getSnapshot().state.jsonClaude.sessions[sessionId].entries
     expect(entries).toHaveLength(1)
     expect(entries[0].text).toBe('hello')
+  })
+})
+
+// Browser-screenshot tool results arrive as Anthropic-shaped image
+// blocks. The extractor spills them to disk and keeps a path, so the
+// renderer can show a thumbnail without megabytes of base64 riding
+// through every state event.
+describe('JsonClaudeManager.seedFromTranscript — tool_result images', () => {
+  // 1x1 red JPEG.
+  const JPEG_B64 =
+    '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q=='
+  const written: string[] = []
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'harness-seed-img-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpHome, { recursive: true, force: true })
+    for (const p of written) rmSync(p, { force: true })
+    written.length = 0
+    vi.clearAllMocks()
+  })
+
+  function seedWithScreenshot(sessionId: string, worktree: string): JsonClaudeMessageBlock {
+    const dir = transcriptDir(worktree)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, `${sessionId}.jsonl`),
+      [
+        { type: 'user', sessionId, message: { content: 'shot it' } },
+        {
+          type: 'assistant',
+          sessionId,
+          message: {
+            id: 'msg_a',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tu-shot',
+                name: 'mcp__ness-control__screenshot_tab'
+              }
+            ]
+          }
+        },
+        {
+          type: 'user',
+          sessionId,
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'tu-shot',
+                content: [
+                  { type: 'text', text: 'took a shot' },
+                  {
+                    type: 'image',
+                    source: { type: 'base64', media_type: 'image/jpeg', data: JPEG_B64 }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+        .map((l) => JSON.stringify(l))
+        .join('\n') + '\n',
+      'utf8'
+    )
+    const store = new Store()
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId, worktreePath: worktree }
+    })
+    makeManager(store).seedFromTranscript(sessionId, worktree)
+    const entries = store.getSnapshot().state.jsonClaude.sessions[sessionId].entries
+    const resultEntry = entries.find((e) => e.kind === 'tool_result')!
+    const block = resultEntry.blocks![0]
+    for (const img of block.images ?? []) written.push(img.path)
+    return block
+  }
+
+  it('spills the image to disk and keeps the text separate', () => {
+    const block = seedWithScreenshot(
+      '77777777-7777-7777-7777-777777777777',
+      '/tmp/wt-seed-shot'
+    )
+
+    expect(block.images).toHaveLength(1)
+    expect(block.images![0].mediaType).toBe('image/jpeg')
+    expect(existsSync(block.images![0].path)).toBe(true)
+    // The base64 never lands in state — only the path.
+    expect(block.content).toBe('took a shot')
+    expect(JSON.stringify(block)).not.toContain(JPEG_B64)
+    // The bytes on disk round-trip.
+    expect(readFileSync(block.images![0].path).toString('base64')).toBe(JPEG_B64)
+  })
+
+  it('reuses one file when the same image is extracted twice', () => {
+    // Resuming a session replays the whole transcript through the
+    // extractor; uuid-named files would leak a copy on every resume.
+    const first = seedWithScreenshot(
+      '88888888-8888-8888-8888-888888888888',
+      '/tmp/wt-seed-shot-a'
+    )
+    const second = seedWithScreenshot(
+      '99999999-9999-9999-9999-999999999999',
+      '/tmp/wt-seed-shot-b'
+    )
+    expect(second.images![0].path).toBe(first.images![0].path)
   })
 })
