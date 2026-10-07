@@ -8,23 +8,43 @@ import type { ComponentType } from 'react'
 import { NESS_MARK_PATHS } from '../NessMark'
 import {
   AlarmClock,
+  AppWindow,
+  ArrowLeft,
+  ArrowRight,
   Bell,
   Bot,
   CalendarClock,
+  Camera,
+  Code,
+  Crosshair,
   Database,
   FilePen,
   FilePlus,
   FileText,
   FolderSearch,
   FolderTree,
+  GitBranch,
   Globe,
+  Keyboard,
+  Link,
+  List,
   ListChecks,
   MessageCircleQuestion,
+  MessageSquare,
+  MousePointer,
+  MousePointerClick,
+  MoveVertical,
+  Navigation,
   Notebook,
   Octagon,
+  Pencil,
+  RotateCw,
   ScrollText,
   Search,
   Sparkles,
+  SquarePlus,
+  SquareTerminal,
+  SquareX,
   Terminal,
   Wrench,
   Zap
@@ -110,6 +130,33 @@ export const TriggerIcon: ToolIcon = ({ className }) => <Zap className={classNam
 export const TaskOutputIcon: ToolIcon = ({ className }) => <ScrollText className={className} />
 export const TaskStopIcon: ToolIcon = ({ className }) => <Octagon className={className} />
 export const McpResourceIcon: ToolIcon = ({ className }) => <Database className={className} />
+
+// Ness-control actions. Every ness-control tool shares the Ness brand
+// icon in card chrome, which is the right cue for "this drove the app"
+// — but useless in the collapsed timeline, where a browser session
+// would render as the same mark eight times in a row. These say what
+// the step actually did.
+
+export const ScreenshotIcon: ToolIcon = ({ className }) => <Camera className={className} />
+export const ClickIcon: ToolIcon = ({ className }) => <MousePointerClick className={className} />
+export const ScrollIcon: ToolIcon = ({ className }) => <MoveVertical className={className} />
+export const TypeIcon: ToolIcon = ({ className }) => <Keyboard className={className} />
+export const NavigateIcon: ToolIcon = ({ className }) => <Navigation className={className} />
+export const ReloadIcon: ToolIcon = ({ className }) => <RotateCw className={className} />
+export const BackIcon: ToolIcon = ({ className }) => <ArrowLeft className={className} />
+export const ForwardIcon: ToolIcon = ({ className }) => <ArrowRight className={className} />
+export const DomIcon: ToolIcon = ({ className }) => <Code className={className} />
+export const ClickablesIcon: ToolIcon = ({ className }) => <Crosshair className={className} />
+export const ConsoleIcon: ToolIcon = ({ className }) => <SquareTerminal className={className} />
+export const UrlIcon: ToolIcon = ({ className }) => <Link className={className} />
+export const NewTabIcon: ToolIcon = ({ className }) => <SquarePlus className={className} />
+export const TabListIcon: ToolIcon = ({ className }) => <AppWindow className={className} />
+export const CursorIcon: ToolIcon = ({ className }) => <MousePointer className={className} />
+export const ShellKillIcon: ToolIcon = ({ className }) => <SquareX className={className} />
+export const ListIcon: ToolIcon = ({ className }) => <List className={className} />
+export const BranchIcon: ToolIcon = ({ className }) => <GitBranch className={className} />
+export const RenameIcon: ToolIcon = ({ className }) => <Pencil className={className} />
+export const MessageIcon: ToolIcon = ({ className }) => <MessageSquare className={className} />
 
 // Brand icons — Simple Icons via react-icons. Brand-canonical colors
 // where they read in both light and dark themes; currentColor (text

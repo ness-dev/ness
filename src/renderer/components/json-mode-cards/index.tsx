@@ -15,6 +15,8 @@ import type {
 } from '../../../shared/state/json-claude'
 import {
   extractArgs,
+  formatActionCount,
+  getToolAction,
   getToolDisplay,
   isNessControl,
   prettyToolName,
@@ -24,7 +26,14 @@ import type { ToolIcon } from './tool-icons'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
 
-export { extractArgs, getToolDisplay, isNessControl, prettyToolName }
+export {
+  extractArgs,
+  formatActionCount,
+  getToolAction,
+  getToolDisplay,
+  isNessControl,
+  prettyToolName
+}
 export type { ArgEntry }
 
 export interface ToolResultView {

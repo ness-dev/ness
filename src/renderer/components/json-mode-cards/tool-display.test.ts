@@ -1,12 +1,55 @@
 import { describe, it, expect } from 'vitest'
 import {
   extractArgs,
+  formatActionCount,
+  getToolAction,
   getToolDisplay,
   isNessControl,
   normalizeServerName,
   parseMcpToolName,
   prettyToolName
 } from './tool-display'
+
+describe('getToolAction', () => {
+  it('resolves a ness-control browser action', () => {
+    const action = getToolAction('mcp__ness-control__click_tab')
+    expect(action?.one).toBe('click')
+    expect(action?.many).toBe('clicks')
+    expect(action?.icon).toBeTruthy()
+  })
+
+  it('resolves legacy harness-control transcripts too', () => {
+    expect(getToolAction('mcp__harness-control__screenshot_tab')?.many).toBe(
+      'screenshots'
+    )
+  })
+
+  it('gives distinct icons to distinct actions', () => {
+    // The whole point: the brand mark is identical for every
+    // ness-control tool, so the timeline needs per-action icons.
+    const click = getToolAction('mcp__ness-control__click_tab')?.icon
+    const shot = getToolAction('mcp__ness-control__screenshot_tab')?.icon
+    expect(click).not.toBe(shot)
+  })
+
+  it('is null for built-ins and other MCP servers', () => {
+    expect(getToolAction('Read')).toBeNull()
+    expect(getToolAction('mcp__claude_ai_Notion__notion-search')).toBeNull()
+    expect(getToolAction(undefined)).toBeNull()
+  })
+
+  it('is null for an unmapped ness-control tool', () => {
+    expect(getToolAction('mcp__ness-control__some_future_tool')).toBeNull()
+  })
+})
+
+describe('formatActionCount', () => {
+  it('pluralizes on count', () => {
+    const action = getToolAction('mcp__ness-control__click_tab')!
+    expect(formatActionCount(action, 1)).toBe('1 click')
+    expect(formatActionCount(action, 4)).toBe('4 clicks')
+  })
+})
 
 describe('parseMcpToolName', () => {
   it('parses claude.ai-hosted servers', () => {
