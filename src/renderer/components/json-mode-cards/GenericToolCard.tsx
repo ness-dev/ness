@@ -27,7 +27,7 @@ export function GenericToolCard({ block, result, autoApproved, sessionAllowed }:
       icon={display.icon}
       autoApproved={autoApproved}
       sessionAllowed={sessionAllowed}
-      autoExpand={images.length > 0}
+      collapsedImages={images}
     >
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-2 py-1.5 bg-app/40">

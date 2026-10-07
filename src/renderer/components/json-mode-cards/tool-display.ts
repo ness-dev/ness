@@ -9,12 +9,20 @@ import {
   AnthropicIcon,
   AsanaIcon,
   AskIcon,
+  BackIcon,
   BashIcon,
   BellIcon,
   BitbucketIcon,
   BlueskyIcon,
+  BranchIcon,
   BraveIcon,
   CalendarIcon,
+  ClickablesIcon,
+  ClickIcon,
+  ConsoleIcon,
+  CursorIcon,
+  DomIcon,
+  ForwardIcon,
   ClickupIcon,
   CloudflareIcon,
   CloudinaryIcon,
@@ -37,12 +45,16 @@ import {
   IntercomIcon,
   JiraIcon,
   LinearIcon,
+  ListIcon,
   MailchimpIcon,
   McpGenericIcon,
   McpResourceIcon,
+  MessageIcon,
   MongoIcon,
   MysqlIcon,
+  NavigateIcon,
   NetlifyIcon,
+  NewTabIcon,
   NotebookIcon,
   NotionIcon,
   OpenaiIcon,
@@ -52,8 +64,13 @@ import {
   ReadIcon,
   RedditIcon,
   RedisIcon,
+  ReloadIcon,
+  RenameIcon,
   SalesforceIcon,
+  ScreenshotIcon,
+  ScrollIcon,
   SentryIcon,
+  ShellKillIcon,
   ShopifyIcon,
   SkillIcon,
   SlackIcon,
@@ -62,6 +79,7 @@ import {
   SqliteIcon,
   StripeIcon,
   SupabaseIcon,
+  TabListIcon,
   TaskIcon,
   TaskOutputIcon,
   TaskStopIcon,
@@ -71,6 +89,8 @@ import {
   TrelloIcon,
   TriggerIcon,
   TwilioIcon,
+  TypeIcon,
+  UrlIcon,
   VercelIcon,
   WebIcon,
   WhatsappIcon,
@@ -318,6 +338,81 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
   // Unknown MCP: the generic plug icon doesn't say which server it is,
   // so keep the server prefix even in compact form.
   return { label: full, compactLabel: full, icon: McpGenericIcon }
+}
+
+/** What a single ness-control call *did*, for surfaces that summarize a
+ *  run of them rather than describe one card. */
+export interface ToolAction {
+  /** Action-specific icon. The Ness brand mark is right in card chrome
+   *  ("this drove the app") but says nothing in a timeline of eight
+   *  consecutive ness-control calls. */
+  icon: ToolIcon
+  /** Countable noun — "3 clicks · 2 screenshots" in a group header. */
+  one: string
+  many: string
+}
+
+// Keyed by the bare tool name (post-`mcp__ness-control__`). Only these
+// tools get broken out; anything missing falls back to the generic
+// "N tool calls" bucket, so adding a ness-control tool doesn't require
+// touching this table to keep working.
+//
+// back/forward/navigate deliberately share the "navigation" noun — the
+// distinction matters per-step (and the icons keep it) but not in a
+// count. They keep separate icons for the timeline.
+const NESS_ACTIONS: Record<string, ToolAction> = {
+  screenshot_tab: { icon: ScreenshotIcon, one: 'screenshot', many: 'screenshots' },
+  click_tab: { icon: ClickIcon, one: 'click', many: 'clicks' },
+  scroll_tab: { icon: ScrollIcon, one: 'scroll', many: 'scrolls' },
+  type_tab: { icon: TypeIcon, one: 'keystroke', many: 'keystrokes' },
+  navigate_tab: { icon: NavigateIcon, one: 'navigation', many: 'navigations' },
+  back_tab: { icon: BackIcon, one: 'navigation', many: 'navigations' },
+  forward_tab: { icon: ForwardIcon, one: 'navigation', many: 'navigations' },
+  reload_tab: { icon: ReloadIcon, one: 'reload', many: 'reloads' },
+  get_tab_dom: { icon: DomIcon, one: 'DOM read', many: 'DOM reads' },
+  get_tab_clickables: {
+    icon: ClickablesIcon,
+    one: 'element scan',
+    many: 'element scans'
+  },
+  get_tab_console_logs: {
+    icon: ConsoleIcon,
+    one: 'console read',
+    many: 'console reads'
+  },
+  get_tab_url: { icon: UrlIcon, one: 'URL check', many: 'URL checks' },
+  create_browser_tab: { icon: NewTabIcon, one: 'new tab', many: 'new tabs' },
+  list_browser_tabs: { icon: TabListIcon, one: 'tab list', many: 'tab lists' },
+  show_cursor: { icon: CursorIcon, one: 'cursor move', many: 'cursor moves' },
+  create_shell: { icon: BashIcon, one: 'shell', many: 'shells' },
+  read_shell_output: {
+    icon: TaskOutputIcon,
+    one: 'shell read',
+    many: 'shell reads'
+  },
+  list_shells: { icon: ListIcon, one: 'shell list', many: 'shell lists' },
+  kill_shell: { icon: ShellKillIcon, one: 'shell kill', many: 'shell kills' },
+  create_worktree: { icon: BranchIcon, one: 'worktree', many: 'worktrees' },
+  list_worktrees: { icon: ListIcon, one: 'worktree list', many: 'worktree lists' },
+  list_repos: { icon: ListIcon, one: 'repo list', many: 'repo lists' },
+  rename_worktree: { icon: RenameIcon, one: 'rename', many: 'renames' },
+  set_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
+  clear_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
+  send_message: { icon: MessageIcon, one: 'message', many: 'messages' }
+}
+
+/** Resolve a tool name to its action, or null when we have no
+ *  per-action knowledge of it (every non-ness-control tool today). */
+export function getToolAction(name: string | undefined): ToolAction | null {
+  if (!isNessControl(name) || !name) return null
+  const parsed = parseMcpToolName(name)
+  if (!parsed) return null
+  return NESS_ACTIONS[parsed.tool] ?? null
+}
+
+/** "1 click" / "4 clicks". */
+export function formatActionCount(action: ToolAction, count: number): string {
+  return `${count} ${count === 1 ? action.one : action.many}`
 }
 
 // Back-compat shim — earlier code called prettyToolName(name) to get

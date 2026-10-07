@@ -1,22 +1,98 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { Brain } from 'lucide-react'
-import { getToolDisplay, isNessControl } from './index'
+import { getToolAction, getToolDisplay, isNessControl } from './index'
+import {
+  buildTimeline,
+  summarizeTools,
+  type TimelineRow
+} from './tool-timeline'
+import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
 
-export interface ToolGroupRow {
-  key: string
+export interface ToolGroupRow extends TimelineRow {
   node: ReactNode
-  toolName?: string
-  hasError?: boolean
   hasPendingApproval?: boolean
-  /** This row's tool returned an image (a browser screenshot). Opens the
-   *  group by default so the screenshot is visible in the transcript
-   *  rather than buried behind a chevron. */
-  hasImages?: boolean
-  /** Thinking blocks ride along in the same group as adjacent tool_use
-   *  rows since they're both agent work between user-facing replies.
-   *  ToolGroup counts them under their own label so the header isn't
-   *  misleading ("5 tool calls" when 2 of them are actually thoughts). */
-  isThinking?: boolean
+}
+
+/** Max steps drawn in the collapsed timeline before it gives up and
+ *  appends a "+N". Thumbnails are wide, so this is a layout bound as
+ *  much as a legibility one. Runs are folded first (see buildTimeline),
+ *  so hitting this cap takes a genuinely long session. */
+const MAX_TIMELINE_STEPS = 14
+
+/** A left-to-right record of what the agent did in this group:
+ *  thumbnails for the steps that produced a screenshot, tool icons for
+ *  everything in between — so a browser session reads as
+ *  `[shot] click scroll type [shot]` without expanding anything. */
+function ToolTimeline({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
+  const steps = buildTimeline(rows)
+  const shown = steps.slice(0, MAX_TIMELINE_STEPS)
+  const moreCount = steps.length - shown.length
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
+      {shown.map((s) => {
+        if (s.kind === 'images') {
+          return (
+            <Fragment key={s.key}>
+              {s.images.map((img) => (
+                <JsonModeChatImageThumb
+                  key={img.path}
+                  path={img.path}
+                  mediaType={img.mediaType}
+                  shape="wide"
+                  size="sm"
+                />
+              ))}
+            </Fragment>
+          )
+        }
+        const display = getToolDisplay(s.toolName)
+        // Prefer the action icon: a browser run is all ness-control, so
+        // the brand mark would repeat down the whole strip.
+        const Icon = getToolAction(s.toolName)?.icon ?? display.icon
+        return (
+          <span
+            key={s.key}
+            title={
+              s.count > 1
+                ? `${display.compactLabel} ×${s.count}`
+                : display.compactLabel
+            }
+            className={`h-6 shrink-0 rounded border flex items-center justify-center gap-0.5 ${
+              s.count > 1 ? 'px-1' : 'w-6'
+            } ${
+              s.hasError
+                ? 'border-danger/50 text-danger bg-danger/10'
+                : 'border-border/60 text-muted bg-app/40'
+            }`}
+          >
+            {Icon ? (
+              <Icon className="icon-xs" />
+            ) : (
+              <span style={{ fontSize: 'var(--chat-meta-text)' }}>
+                {display.compactLabel.slice(0, 1)}
+              </span>
+            )}
+            {s.count > 1 && (
+              <span
+                className="tabular-nums"
+                style={{ fontSize: 'var(--chat-meta-text)' }}
+              >
+                {s.count}
+              </span>
+            )}
+          </span>
+        )
+      })}
+      {moreCount > 0 && (
+        <span
+          className="text-muted shrink-0 pl-0.5"
+          style={{ fontSize: 'var(--chat-meta-text)' }}
+        >
+          +{moreCount}
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
@@ -27,22 +103,35 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   const anyBrand = rows.some(
     (r) => !r.isThinking && isNessControl(r.toolName)
   )
-  // Auto-expand for pending approvals (they need user action) and for
-  // screenshots (they're the payload, not a detail). Errors get a header
-  // badge but stay collapsed; user can drill in.
+  // Auto-expand only for pending approvals — they need user action.
+  // Errors get a header badge but stay collapsed; user can drill in.
+  // Screenshots used to force-expand too, which meant any group
+  // containing one could never sit collapsed; they now ride along in
+  // the collapsed timeline strip instead.
   //
   // null means "no explicit choice yet, follow autoExpand" — so a group
   // opens when an approval lands and closes again once it resolves,
-  // while a click pins it either way. Tracking the user's choice as its
-  // own state (rather than reverting via an effect) is what lets a
-  // screenshot group be collapsed at all: hasImages never goes back to
-  // false, so an effect-driven revert would immediately re-open it.
-  const autoExpand = hasPending || rows.some((r) => r.hasImages)
+  // while a click pins it either way.
+  const autoExpand = hasPending
   const [userChoice, setUserChoice] = useState<boolean | null>(null)
   const expanded = userChoice ?? autoExpand
 
   const toolRows = rows.filter((r) => !r.isThinking)
   const thinkingCount = rows.length - toolRows.length
+
+  // The timeline earns its row of vertical space only when there are
+  // real screenshots in it. Browser use on its own doesn't qualify — a
+  // strip of bare action icons says nothing the count label
+  // ("4 clicks · 2 scrolls") doesn't already say in words.
+  const allNamed =
+    toolRows.length > 0 && toolRows.every((r) => getToolAction(r.toolName))
+  const hasImages = rows.some((r) => (r.images?.length ?? 0) > 0)
+  const showTimeline = !expanded && hasImages
+  // Chips repeat what the count label already spells out once every
+  // call is named ("4 clicks · 2 screenshots"), and the timeline says
+  // it a third time. Keep them for mixed groups, where the label's
+  // "N more calls" remainder is vague on its own.
+  const showChips = !showTimeline && !allNamed
 
   const displays = toolRows.map((r) => getToolDisplay(r.toolName))
   const visibleDisplays = displays.slice(0, 6)
@@ -65,17 +154,13 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
     </>
   )
 
-  // Count label: "3 tool calls", "2 thoughts", or "2 thoughts · 3 tools"
-  // when mixed. Singular gets singular ("1 thought", "1 tool call").
-  const toolLabel =
-    toolRows.length > 0
-      ? `${toolRows.length} tool${toolRows.length === 1 ? ' call' : ' calls'}`
-      : ''
   const thinkingLabel =
     thinkingCount > 0
       ? `${thinkingCount} thought${thinkingCount === 1 ? '' : 's'}`
       : ''
-  const countLabel = [thinkingLabel, toolLabel].filter(Boolean).join(' · ')
+  const countLabel = [thinkingLabel, ...summarizeTools(toolRows)]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div
@@ -105,11 +190,14 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
         >
           {countLabel}
         </span>
+        {/* Stays in the tree even when empty — it's the flex-1 spacer
+            that keeps the badges on the right from shifting as chips
+            come and go. */}
         <span
           className="opacity-60 truncate flex-1 min-w-0 flex items-center gap-1.5"
           style={{ fontFamily: 'var(--chat-tool-name-family)' }}
         >
-          {summary}
+          {showChips ? summary : null}
         </span>
         {hasPending && (
           <span
@@ -128,6 +216,7 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
           </span>
         )}
       </button>
+      {showTimeline && <ToolTimeline rows={rows} />}
       {expanded && (
         <div className="px-2">
           {rows.map((r) => (
