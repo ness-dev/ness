@@ -62,6 +62,26 @@ function sanitizePartition(worktreePath: string): string {
   return worktreePath.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120)
 }
 
+/** Captures run one at a time (see `capturePage`), so every await inside one
+ * has to be bounded — a capture that never settles would otherwise wedge the
+ * queue and take every later screenshot down with it. */
+async function withCaptureTimeout<T>(work: Promise<T>, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${what} timed out after ${CAPTURE_TIMEOUT_MS}ms`)),
+          CAPTURE_TIMEOUT_MS
+        )
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const SPECIAL_KEYS: Record<string, string> = {
   enter: 'Return',
   return: 'Return',
@@ -219,6 +239,8 @@ export class BrowserManager implements BrowserManagerLike {
   private store: Store | null = null
   private parkWindow: BrowserWindow | null = null
   private quitGuardInstalled = false
+  /** Tail of the serialized capture chain — see `capturePage`. */
+  private captureQueue: Promise<unknown> = Promise.resolve()
 
   setStore(store: Store): void {
     this.store = store
@@ -869,35 +891,39 @@ export class BrowserManager implements BrowserManagerLike {
 
   /** Render a view that isn't on screen.
    *
-   * `webContents.capturePage()` reads the compositor surface, which a hidden
-   * view doesn't have — it throws, or worse returns the last frame from before
-   * the tab was hidden. CDP's Page.captureScreenshot with `fromSurface: false`
-   * renders in the renderer process instead, so it stays correct for a parked
-   * tab. It does still need the view to be parented, hence the park window.
+   * `webContents.capturePage()` on a *parentless* view has nothing to read —
+   * it reports 0×0 and throws — which is what the park window fixes. Once the
+   * view is parented, CDP's Page.captureScreenshot gets us a frame without the
+   * tab ever being displayed.
+   *
+   * `fromSurface` must stay **true**. It reads the requesting view's own
+   * compositor surface. `fromSurface: false` instead routes through
+   * `RenderWidgetHostImpl::GetSnapshotFromBrowser`, which on macOS grabs the
+   * *native window* and crops it to the view's rect — so a capture of tab A
+   * can come back holding tab B's pixels whenever B is also composited into
+   * the shared park window. That's not theoretical: with one tab visible under
+   * an emulated viewport taller than its pane (so capturing it parks it
+   * briefly) and a concurrent capture of a parked sibling, the sibling
+   * returned the visible tab's page every time. Same root cause as captures
+   * coming back as a frozen older frame — what the window held, not what the
+   * tab was showing. Surface capture is also what the on-screen path
+   * (`capturePage()`) uses, so both paths now agree.
    */
   private async captureOffscreen(inst: BrowserInstance): Promise<NativeImage> {
     const dbg = inst.view.webContents.debugger
     const wasAttached = dbg.isAttached()
     if (!wasAttached) dbg.attach('1.3')
-    let timer: NodeJS.Timeout | undefined
     try {
-      const shot = dbg.sendCommand('Page.captureScreenshot', {
-        format: 'png',
-        fromSurface: false,
-        captureBeyondViewport: false
-      }) as Promise<{ data?: string }>
-      const result = await Promise.race([
-        shot,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`Page.captureScreenshot timed out after ${CAPTURE_TIMEOUT_MS}ms`)),
-            CAPTURE_TIMEOUT_MS
-          )
-        })
-      ])
+      const result = await withCaptureTimeout(
+        dbg.sendCommand('Page.captureScreenshot', {
+          format: 'png',
+          fromSurface: true,
+          captureBeyondViewport: false
+        }) as Promise<{ data?: string }>,
+        'Page.captureScreenshot'
+      )
       return nativeImage.createFromBuffer(Buffer.from(result?.data ?? '', 'base64'))
     } finally {
-      clearTimeout(timer)
       // Leaving the debugger attached would block DevTools on this tab.
       if (!wasAttached && dbg.isAttached()) {
         try {
@@ -909,7 +935,24 @@ export class BrowserManager implements BrowserManagerLike {
     }
   }
 
+  /** Capturing a tab can move its view between windows (see `restoreTo`
+   * below), so two captures in flight at once means one is reparenting the
+   * other's host mid-shot. Run them one at a time: a screenshot is ~100ms and
+   * agents rarely want two at once, which is a cheap price for every capture
+   * seeing a settled view tree. */
   async capturePage(
+    tabId: string,
+    opts?: { format?: 'jpeg' | 'png'; quality?: number }
+  ): Promise<CaptureResult | null> {
+    const turn = this.captureQueue.then(
+      () => this.captureNow(tabId, opts),
+      () => this.captureNow(tabId, opts)
+    )
+    this.captureQueue = turn.catch(() => {})
+    return turn
+  }
+
+  private async captureNow(
     tabId: string,
     opts?: { format?: 'jpeg' | 'png'; quality?: number }
   ): Promise<CaptureResult | null> {
@@ -941,7 +984,10 @@ export class BrowserManager implements BrowserManagerLike {
       let image: NativeImage | null = null
       if (inst.visible) {
         try {
-          image = await inst.view.webContents.capturePage()
+          image = await withCaptureTimeout(
+            inst.view.webContents.capturePage(),
+            'capturePage'
+          )
         } catch (err) {
           // Minimized / occluded windows lose their surface too; the offscreen
           // path below still works because the view is parented.
