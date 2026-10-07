@@ -201,6 +201,15 @@ const FILE_CACHE = new Map<string, { files: string[]; ts: number }>()
 const FILE_CACHE_TTL_MS = 10_000
 const MAX_MENTION_RESULTS = 50
 
+// How many top-level entries the transcript renders by default, and how many
+// more each "show earlier" click reveals. Sized so a normal session never
+// hits the window at all — the cap only exists to stop an exceptionally long
+// chat from paying O(entries) reconciliation on every streaming delta and
+// holding the whole history's DOM resident. Raising it trades memory for
+// fewer clicks when scrolling back through a long history.
+const TRANSCRIPT_WINDOW_SIZE = 150
+const TRANSCRIPT_WINDOW_STEP = 150
+
 // `@worktree:<repo>/<branch>` is what a worktree mention inserts. The prefix
 // keeps the token from reading as a relative file path — without it the
 // agent tries to Read the branch name off disk before guessing it meant a
@@ -1416,6 +1425,40 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const isProgrammaticScroll = useRef(false)
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
   const [showJumpToPrompt, setShowJumpToPrompt] = useState(false)
+  // How many trailing top-level entries the transcript renders. Per-client
+  // view state, not slice state — two viewers of the same session scroll
+  // back independently, and the window is meaningless after a reload.
+  const [windowSize, setWindowSize] = useState(TRANSCRIPT_WINDOW_SIZE)
+  // Distance from the bottom of the content, captured before a window
+  // expansion prepends rows. Restored in the layout effect below.
+  const pendingPrependAnchor = useRef<number | null>(null)
+
+  useEffect(() => {
+    setWindowSize(TRANSCRIPT_WINDOW_SIZE)
+  }, [sessionId])
+
+  const showEarlierEntries = useCallback((count: number): void => {
+    const el = scrollRef.current
+    // scrollHeight - scrollTop is invariant under a prepend: everything
+    // below the viewport top is unchanged, so restoring it after the commit
+    // keeps whatever the user was reading in place. The browser can't do
+    // this for us — the container sets overflowAnchor: 'none'.
+    if (el) pendingPrependAnchor.current = el.scrollHeight - el.scrollTop
+    setWindowSize((n) => n + count)
+  }, [])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const anchor = pendingPrependAnchor.current
+    if (!el || anchor == null) return
+    pendingPrependAnchor.current = null
+    isProgrammaticScroll.current = true
+    el.scrollTop = el.scrollHeight - anchor
+    lastScrollTop.current = el.scrollTop
+    requestAnimationFrame(() => {
+      isProgrammaticScroll.current = false
+    })
+  }, [windowSize])
 
   // Reset both pill flags when the setting toggles. The useLayoutEffect
   // that follows re-runs on toggle and snaps the view to the new target;
@@ -1688,6 +1731,18 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const entriesHydrated = session?.entriesHydrated ?? false
   const deferredEntries = useDeferredValue(entries)
   const find = useFindController(entries, scrollRef)
+  // Find's corpus comes from entries[], not the DOM, so it counts matches in
+  // the windowed-out head — and it cycles by indexing into the rendered
+  // <mark> list (JsonModeChatFind: marks[hitIndex]), which only lines up with
+  // the corpus when every hit is actually rendered. So a search lifts the
+  // window for the rest of the tab's life rather than bypassing it per-render:
+  // collapsing back on close would teleport a user who scrolled up to read an
+  // old match. entries.length is an upper bound on the top-level count, so
+  // this always covers the whole transcript.
+  useEffect(() => {
+    if (!find.isOpen || find.query.length === 0) return
+    setWindowSize((n) => Math.max(n, entries.length))
+  }, [find.isOpen, find.query, entries.length])
   const outerDivRef = useRef<HTMLDivElement | null>(null)
   // Document-level Cmd+F so the shortcut works from anywhere in the app —
   // sidebar, composer, tab bar, etc. Every mounted JsonModeChat installs
@@ -1734,7 +1789,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [find])
-  const rows = useMemo(() => {
+  const { rows, hiddenEntryCount } = useMemo(() => {
     // Sub-agent nesting pre-pass: split the flat entries array into a
     // top-level transcript and a children-by-parent map so the Task
     // case in renderEntries can recursively render nested activity.
@@ -1756,43 +1811,71 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
         }
       }
     }
-    return renderEntries(topLevelEntries, {
-      resultsByToolUseId,
-      childrenByParentToolUseId,
-      backgroundAgents,
-      approvalCard: renderApprovalForToolUseId,
-      pendingToolUseIds,
-      autoApprovedDecisions,
-      sessionAllowedDecisions,
-      onCancelQueued: (entryId) =>
-        backend.cancelQueuedJsonClaudeMessage(sessionId, entryId),
-      sessionId,
-      worktreePath,
-      isExited: session?.state === 'exited',
-      onOpenLoginTab: () => {
-        // One-click sign-in: main spawns the bundled claude binary's
-        // `auth login` subcommand in a fresh shell tab. The tab runs
-        // the OAuth handshake to completion and exits cleanly. Both
-        // the bundled binary and the json-mode subprocess share
-        // ~/.claude/, so credentials written by the login tab are
-        // visible on the next Retry.
-        void backend.openJsonClaudeAuthLoginTab(worktreePath)
-      },
-      onRetryAuth: () => {
-        // Same restart sequence as the "Reconnect" button on the exited-
-        // session banner: kill (no-op if already gone) then start, which
-        // re-attaches with whatever auth state is now in ~/.claude/.
-        void (async () => {
-          await backend.killJsonClaude(sessionId)
-          await backend.startJsonClaude(sessionId, worktreePath)
-        })()
-      }
-    })
+    // Tail windowing. This memo's deps include deferredEntries, so it
+    // invalidates on every coalesced streaming delta — which means an
+    // unwindowed transcript rebuilds JSX for all N entries and makes React
+    // reconcile all N rows per delta, on top of keeping every row's DOM
+    // resident for the life of the tab. Rendering only the tail caps both
+    // the per-delta cost and the node count; the hidden head is reachable
+    // via the "show earlier" header.
+    //
+    // Slicing here rather than at `entries` is what makes this safe: both
+    // maps above are built over the full array, so a visible tool_use still
+    // finds its result and a visible Task still finds its children even
+    // when those live outside the window.
+    //
+    // tool_result entries are dropped first because renderEntries folds
+    // them into their tool_use card and emits no row for them (see its
+    // tail), so they'd otherwise burn window budget on nothing — one per
+    // tool call, which on a tool-heavy transcript is most of it — and
+    // inflate the "earlier messages" count past what expanding reveals.
+    const renderableEntries = topLevelEntries.filter(
+      (e) => e.kind !== 'tool_result'
+    )
+    const windowStart = Math.max(0, renderableEntries.length - windowSize)
+    const windowedEntries =
+      windowStart === 0 ? renderableEntries : renderableEntries.slice(windowStart)
+    return {
+      hiddenEntryCount: windowStart,
+      rows: renderEntries(windowedEntries, {
+        resultsByToolUseId,
+        childrenByParentToolUseId,
+        backgroundAgents,
+        approvalCard: renderApprovalForToolUseId,
+        pendingToolUseIds,
+        autoApprovedDecisions,
+        sessionAllowedDecisions,
+        onCancelQueued: (entryId) =>
+          backend.cancelQueuedJsonClaudeMessage(sessionId, entryId),
+        sessionId,
+        worktreePath,
+        isExited: session?.state === 'exited',
+        onOpenLoginTab: () => {
+          // One-click sign-in: main spawns the bundled claude binary's
+          // `auth login` subcommand in a fresh shell tab. The tab runs
+          // the OAuth handshake to completion and exits cleanly. Both
+          // the bundled binary and the json-mode subprocess share
+          // ~/.claude/, so credentials written by the login tab are
+          // visible on the next Retry.
+          void backend.openJsonClaudeAuthLoginTab(worktreePath)
+        },
+        onRetryAuth: () => {
+          // Same restart sequence as the "Reconnect" button on the exited-
+          // session banner: kill (no-op if already gone) then start, which
+          // re-attaches with whatever auth state is now in ~/.claude/.
+          void (async () => {
+            await backend.killJsonClaude(sessionId)
+            await backend.startJsonClaude(sessionId, worktreePath)
+          })()
+        }
+      })
+    }
     // approvalByToolUseId already depends on pending; pendingToolUseIds
     // also derives from pending.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     deferredEntries,
+    windowSize,
     approvalByToolUseId,
     pendingToolUseIds,
     autoApprovedDecisions,
@@ -2672,6 +2755,28 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             ) : null
           ) : (
           <div className="px-4 py-3 space-y-3">
+            {hiddenEntryCount > 0 && (
+              <div className="flex items-center justify-center gap-2 pb-1">
+                <button
+                  onClick={() => showEarlierEntries(TRANSCRIPT_WINDOW_STEP)}
+                  className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
+                >
+                  Show {Math.min(hiddenEntryCount, TRANSCRIPT_WINDOW_STEP)}{' '}
+                  earlier{' '}
+                  {Math.min(hiddenEntryCount, TRANSCRIPT_WINDOW_STEP) === 1
+                    ? 'message'
+                    : 'messages'}
+                </button>
+                {hiddenEntryCount > TRANSCRIPT_WINDOW_STEP && (
+                  <button
+                    onClick={() => showEarlierEntries(hiddenEntryCount)}
+                    className="text-xs text-muted hover:text-fg cursor-pointer"
+                  >
+                    Show all ({hiddenEntryCount})
+                  </button>
+                )}
+              </div>
+            )}
             {groupedItems.map((g) => {
               // Rewind is only meaningful on assistant rows — right-
               // clicking a user bubble or any other kind of row falls
