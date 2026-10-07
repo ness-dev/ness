@@ -9,6 +9,7 @@
 // into modules that don't otherwise need it. The Electron implementation
 // narrows it back to `BrowserWindow` at the implementation site.
 
+import type { BrowserViewport } from '../shared/browser-viewport'
 import type { Store } from './store'
 
 export interface ConsoleLog {
@@ -31,7 +32,21 @@ export interface BrowserManagerLike {
   getWorktreePath(tabId: string): string | null
   getConsoleLogs(tabId: string): ConsoleLog[]
   getUrl(tabId: string): string | null
-  getTabInfo(tabId: string): { id: string; url: string; title: string } | null
+  getTabInfo(tabId: string): {
+    id: string
+    url: string
+    title: string
+    viewport: BrowserViewport | null
+  } | null
+  getViewport(tabId: string): BrowserViewport | null
+  /** Emulate `viewport` for this tab, or pass null to go back to rendering at
+   * the pane's size. `reload` re-navigates afterwards, which is what pages that
+   * sniff touch support or the UA at load time need to pick the change up. */
+  setViewport(
+    tabId: string,
+    viewport: BrowserViewport | null,
+    opts?: { reload?: boolean }
+  ): Promise<void>
   create(tabId: string, worktreePath: string, url: string): void
   destroy(tabId: string): void
   destroyAll(): void

@@ -6,6 +6,7 @@ import { normalizeAlias } from '../shared/state/aliases'
 import { isValidBranchName, sanitizeBranchInput } from '../shared/branch-name'
 import { agentDisplayName, supportsConversationFork } from '../shared/agent-registry'
 import type { GroupKey } from '../shared/worktree-sort'
+import { normalizeViewport, type BrowserViewport } from '../shared/browser-viewport'
 import type { PRStatus } from '../shared/state/prs'
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
@@ -16,6 +17,8 @@ export interface BrowserTabSummary {
   id: string
   url: string
   title: string
+  /** Emulated viewport, when the tab isn't rendering at its pane size. */
+  viewport?: BrowserViewport | null
 }
 
 export interface BrowserQueries {
@@ -45,6 +48,11 @@ export interface BrowserQueries {
   typeTab: (tabId: string, text: string, key?: string) => void
   scrollTab: (tabId: string, deltaX: number, deltaY: number) => Promise<void>
   showCursor: (tabId: string, x: number, y: number) => Promise<void>
+  setTabViewport: (
+    tabId: string,
+    viewport: BrowserViewport | null,
+    opts?: { reload?: boolean }
+  ) => Promise<void>
 }
 
 export interface ShellTabSummary {
@@ -650,6 +658,27 @@ async function handleRequest(
     if (req.method === 'POST' && path === '/browser/reload') {
       deps.browser.reloadTab(tabId)
       return sendJson(res, 200, { ok: true })
+    }
+    if (req.method === 'POST' && path === '/browser/viewport') {
+      // `viewport: null` (or omitted) clears the emulation and goes back to
+      // rendering at the pane's size.
+      const reload = body.reload === true
+      if (body.viewport == null) {
+        await deps.browser.setTabViewport(tabId, null, { reload })
+        return sendJson(res, 200, { ok: true, viewport: null })
+      }
+      const parsed = normalizeViewport(body.viewport)
+      if (!parsed.viewport) {
+        return sendJson(res, 400, { error: parsed.error ?? 'invalid viewport' })
+      }
+      try {
+        await deps.browser.setTabViewport(tabId, parsed.viewport, { reload })
+      } catch (err) {
+        return sendJson(res, 500, {
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+      return sendJson(res, 200, { ok: true, viewport: parsed.viewport })
     }
     if (req.method === 'POST' && path === '/browser/click') {
       const x = Number(body.x)

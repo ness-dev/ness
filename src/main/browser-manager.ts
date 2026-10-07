@@ -10,6 +10,8 @@ import {
 } from './browser-screenshot'
 import { normalizeBrowserUrl } from './browser-url'
 import { evalWithTimeout, evalBlockedReason } from './browser-eval'
+import { canSurfaceCapture, emulatedViewRect } from './browser-layout'
+import type { BrowserViewport } from '../shared/browser-viewport'
 
 export type { ConsoleLog }
 
@@ -25,9 +27,20 @@ export interface BrowserInstance {
   visible: boolean
   /** True while the view sits in the offscreen park window. */
   parked: boolean
-  /** Viewport to give the view while parked — the size it last had on screen,
-   * or the default for a tab that has never been displayed. */
-  parkedSize: { width: number; height: number }
+  /** The pane rect the renderer last reported, or a default for a tab that has
+   * never been displayed. The view fills it unless a viewport is emulated. */
+  paneRect: { x: number; y: number; width: number; height: number }
+  /** Emulated viewport (device mode), or null to render at the pane size. */
+  viewport: BrowserViewport | null
+  /** Last `attached` value pushed to the store, so the 150ms bounds loop only
+   * dispatches when it actually changes. */
+  attachedReported: boolean
+  /** True while we hold a debugger attachment for the emulation overrides.
+   * They only survive for as long as the session does, so this stays attached
+   * until the emulation is cleared. */
+  emulationAttached: boolean
+  /** True once we've replaced the user agent, so clearing knows to restore. */
+  uaOverridden: boolean
   /** True once any document has committed in the main frame. */
   hasDocument: boolean
   /** Description of the last main-frame load failure, cleared on commit. */
@@ -136,6 +149,17 @@ const CLICKABLES_SCRIPT = `(() => {
     if (!isNaN(op) && op === 0) return false;
     return true;
   }
+  // Under mobile emulation a page without a viewport meta tag lays out at 980
+  // CSS px and is scaled down to fit the device width, so layout-viewport
+  // coordinates (what getBoundingClientRect returns) are not the coordinates
+  // click_tab takes or the screenshot shows. Map everything into visual-viewport
+  // space, which is the screenshot's space. Identity when nothing is zoomed.
+  const vv = window.visualViewport;
+  const vs = vv ? vv.scale : 1;
+  const vox = vv ? vv.offsetLeft : 0;
+  const voy = vv ? vv.offsetTop : 0;
+  const vw = vv ? vv.width : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
   const queue = [document];
   const items = [];
   const seen = new Set();
@@ -149,14 +173,14 @@ const CLICKABLES_SCRIPT = `(() => {
       const r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) continue;
       if (!isVisible(el)) continue;
-      if (r.bottom <= 0 || r.right <= 0 || r.top >= window.innerHeight || r.left >= window.innerWidth) continue;
+      if (r.bottom <= voy || r.right <= vox || r.top >= voy + vh || r.left >= vox + vw) continue;
       items.push({
         role: getRole(el),
         name: getName(el),
-        cx: Math.round(r.left + r.width / 2),
-        cy: Math.round(r.top + r.height / 2),
-        w: Math.round(r.width),
-        h: Math.round(r.height)
+        cx: Math.round((r.left + r.width / 2 - vox) * vs),
+        cy: Math.round((r.top + r.height / 2 - voy) * vs),
+        w: Math.round(r.width * vs),
+        h: Math.round(r.height * vs)
       });
       if (items.length >= MAX) { truncated = true; break outer; }
     }
@@ -166,7 +190,7 @@ const CLICKABLES_SCRIPT = `(() => {
     }
   }
   return {
-    viewport: { w: window.innerWidth, h: window.innerHeight },
+    viewport: { w: Math.round(vw * vs), h: Math.round(vh * vs), scale: vs },
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
     pageHeight: Math.round(document.documentElement.scrollHeight),
     items,
@@ -257,23 +281,30 @@ export class BrowserManager implements BrowserManagerLike {
     win.destroy()
   }
 
+  /** The size a parked view should render at: the emulated viewport when one
+   * is set, otherwise whatever the pane last measured. */
+  private renderSize(inst: BrowserInstance): { width: number; height: number } {
+    if (inst.viewport) {
+      return { width: inst.viewport.width, height: inst.viewport.height }
+    }
+    return { width: inst.paneRect.width, height: inst.paneRect.height }
+  }
+
   /** Put a hidden view into the park window so it keeps a viewport + surface. */
-  private park(inst: BrowserInstance): void {
-    if (inst.parked && this.parkWindow && !this.parkWindow.isDestroyed()) return
+  private park(inst: BrowserInstance, force = false): void {
+    if (!force && inst.parked && this.parkWindow && !this.parkWindow.isDestroyed()) return
     const host = this.ensureParkWindow()
     if (!host) return
+    const size = this.renderSize(inst)
     try {
       // A view only paints the part of itself that fits inside its host window,
       // so a tab parked at pane size in a smaller host comes back half black.
       const { width, height } = host.getContentBounds()
-      if (width < inst.parkedSize.width || height < inst.parkedSize.height) {
-        host.setContentSize(
-          Math.max(width, inst.parkedSize.width),
-          Math.max(height, inst.parkedSize.height)
-        )
+      if (width < size.width || height < size.height) {
+        host.setContentSize(Math.max(width, size.width), Math.max(height, size.height))
       }
       host.contentView.addChildView(inst.view)
-      inst.view.setBounds({ x: 0, y: 0, ...inst.parkedSize })
+      inst.view.setBounds({ x: 0, y: 0, ...size })
       inst.parked = true
     } catch (err) {
       inst.parked = false
@@ -347,7 +378,11 @@ export class BrowserManager implements BrowserManagerLike {
       lastBounds: null,
       visible: false,
       parked: false,
-      parkedSize: { ...DEFAULT_VIEW_SIZE },
+      paneRect: { x: 0, y: 0, ...DEFAULT_VIEW_SIZE },
+      viewport: null,
+      attachedReported: false,
+      emulationAttached: false,
+      uaOverridden: false,
       hasDocument: false,
       lastLoadError: null,
       crashReason: null
@@ -380,6 +415,12 @@ export class BrowserManager implements BrowserManagerLike {
       inst.hasDocument = true
       inst.lastLoadError = null
       inst.crashReason = null
+      // Emulation survives ordinary navigations, but not a renderer that was
+      // replaced after a crash. Re-asserting it is one idempotent CDP call on
+      // the few tabs that have an override at all.
+      if (inst.viewport) {
+        void this.applyEmulation(inst).catch(() => {})
+      }
     })
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
       // ERR_ABORTED means a newer navigation superseded this one, not a failure.
@@ -419,7 +460,18 @@ export class BrowserManager implements BrowserManagerLike {
     })
   }
 
-  private dispatchState(tabId: string, patch: Partial<{ url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean }>): void {
+  private dispatchState(
+    tabId: string,
+    patch: Partial<{
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+      loading: boolean
+      attached: boolean
+      viewport: BrowserViewport | null
+    }>
+  ): void {
     this.store?.dispatch({
       type: 'browser/tabStateChanged',
       payload: { tabId, state: patch }
@@ -430,7 +482,15 @@ export class BrowserManager implements BrowserManagerLike {
     const inst = this.instances.get(tabId)
     if (!inst) return
     log('browser', `destroy tab=${tabId}`)
-    this.detachView(inst)
+    this.detachView(tabId, inst)
+    if (inst.emulationAttached) {
+      inst.emulationAttached = false
+      try {
+        if (inst.view.webContents.debugger.isAttached()) inst.view.webContents.debugger.detach()
+      } catch {
+        // already gone
+      }
+    }
     try {
       inst.view.webContents.close()
     } catch {
@@ -486,6 +546,111 @@ export class BrowserManager implements BrowserManagerLike {
     }
   }
 
+  getViewport(tabId: string): BrowserViewport | null {
+    return this.instances.get(tabId)?.viewport ?? null
+  }
+
+  /**
+   * Emulate a viewport (device mode) for this tab, or clear it with null.
+   *
+   * This is Chromium's own device emulation over CDP, not a window resize: the
+   * page lays out at exactly `viewport` no matter how big the pane is, honours
+   * `<meta name="viewport">` when `mobile` is set, and reports the emulated
+   * size to `window.innerWidth` — which is what makes get_tab_clickables and
+   * screenshots agree with each other.
+   *
+   * The overrides live on the CDP session, so the debugger attachment is held
+   * for as long as the emulation is active and dropped when it's cleared.
+   */
+  async setViewport(
+    tabId: string,
+    viewport: BrowserViewport | null,
+    opts?: { reload?: boolean }
+  ): Promise<void> {
+    const inst = this.instances.get(tabId)
+    if (!inst) throw new Error('tab not found')
+    const prev = inst.viewport
+    // The UA and touch support are read by pages at load time, so the document
+    // already on screen won't reflect either until it is fetched again — which
+    // is the difference between seeing a site's mobile page and seeing its
+    // desktop page shrunk into a phone-sized window.
+    const needsReload =
+      (prev?.userAgent ?? '') !== (viewport?.userAgent ?? '') ||
+      (prev?.mobile ?? false) !== (viewport?.mobile ?? false)
+    inst.viewport = viewport
+    await this.applyEmulation(inst)
+    this.dispatchState(tabId, { viewport })
+    // Re-letterbox (or restore) the native view under the new size.
+    if (inst.visible && inst.attachedWindow) {
+      this.setBounds(tabId, inst.attachedWindow, inst.paneRect)
+    } else {
+      this.park(inst, true)
+    }
+    if (opts?.reload || needsReload) inst.view.webContents.reload()
+  }
+
+  private async applyEmulation(inst: BrowserInstance): Promise<void> {
+    const wc = inst.view.webContents
+    if (wc.isDestroyed()) return
+    const dbg = wc.debugger
+    const vp = inst.viewport
+
+    if (!vp) {
+      if (!inst.emulationAttached) return
+      try {
+        if (dbg.isAttached()) {
+          await dbg.sendCommand('Emulation.clearDeviceMetricsOverride')
+          await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
+          if (inst.uaOverridden) {
+            await dbg.sendCommand('Emulation.setUserAgentOverride', {
+              userAgent: wc.getUserAgent()
+            })
+          }
+        }
+      } finally {
+        inst.emulationAttached = false
+        inst.uaOverridden = false
+        try {
+          if (dbg.isAttached()) dbg.detach()
+        } catch {
+          // webContents already gone
+        }
+      }
+      return
+    }
+
+    if (!dbg.isAttached()) {
+      try {
+        dbg.attach('1.3')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        throw new Error(
+          `could not start viewport emulation (${message}) — close this tab's DevTools and retry`
+        )
+      }
+    }
+    inst.emulationAttached = true
+    await dbg.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width: vp.width,
+      height: vp.height,
+      deviceScaleFactor: vp.deviceScaleFactor,
+      mobile: vp.mobile,
+      screenWidth: vp.width,
+      screenHeight: vp.height
+    })
+    await dbg.sendCommand('Emulation.setTouchEmulationEnabled', {
+      enabled: vp.mobile,
+      maxTouchPoints: vp.mobile ? 5 : 1
+    })
+    if (vp.userAgent) {
+      await dbg.sendCommand('Emulation.setUserAgentOverride', { userAgent: vp.userAgent })
+      inst.uaOverridden = true
+    } else if (inst.uaOverridden) {
+      await dbg.sendCommand('Emulation.setUserAgentOverride', { userAgent: wc.getUserAgent() })
+      inst.uaOverridden = false
+    }
+  }
+
   setBounds(
     tabId: string,
     targetWindow: unknown,
@@ -494,21 +659,22 @@ export class BrowserManager implements BrowserManagerLike {
     const inst = this.instances.get(tabId)
     if (!inst) return
     const win = targetWindow as BrowserWindow
-    const rounded = {
+    const pane = {
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
       width: Math.max(0, Math.round(bounds.width)),
       height: Math.max(0, Math.round(bounds.height))
     }
     if (!inst.visible || inst.attachedWindow !== win) {
-      this.detachView(inst)
+      this.detachView(tabId, inst)
       win.contentView.addChildView(inst.view)
       inst.attachedWindow = win
       inst.visible = true
     }
-    if (rounded.width >= 1 && rounded.height >= 1) {
-      inst.parkedSize = { width: rounded.width, height: rounded.height }
+    if (pane.width >= 1 && pane.height >= 1) {
+      inst.paneRect = pane
     }
+    const rounded = emulatedViewRect(pane, inst.viewport)
     if (
       !inst.lastBounds ||
       inst.lastBounds.x !== rounded.x ||
@@ -519,16 +685,26 @@ export class BrowserManager implements BrowserManagerLike {
       inst.view.setBounds(rounded)
       inst.lastBounds = rounded
     }
+    this.reportAttached(tabId, inst, true)
   }
 
   hide(tabId: string): void {
     const inst = this.instances.get(tabId)
     if (!inst) return
-    this.detachView(inst)
+    this.detachView(tabId, inst)
     this.park(inst)
   }
 
-  private detachView(inst: BrowserInstance): void {
+  /** Report whether the native view is currently parented to a real window.
+   * Dispatches only on change — setBounds runs several times a second. */
+  private reportAttached(tabId: string, inst: BrowserInstance, attached: boolean): void {
+    if (inst.attachedReported === attached) return
+    inst.attachedReported = attached
+    this.dispatchState(tabId, { attached })
+  }
+
+  private detachView(tabId: string, inst: BrowserInstance): void {
+    this.reportAttached(tabId, inst, false)
     this.unpark(inst)
     if (!inst.visible || !inst.attachedWindow) return
     try {
@@ -742,11 +918,24 @@ export class BrowserManager implements BrowserManagerLike {
     // Self-heal a tab whose park window went away (macOS closes all windows
     // without quitting) so capture isn't permanently broken afterwards.
     if (!inst.visible) this.park(inst)
-    const bounds = inst.view.getBounds()
+    const vp = inst.viewport
+    // Under emulation the page is the emulated size, not the widget's.
+    const bounds = vp ? { width: vp.width, height: vp.height } : inst.view.getBounds()
     const viewportError = viewportCaptureError(bounds)
     if (viewportError) {
       log('browser', `capturePage unusable tab=${tabId}`, viewportError)
       return { error: viewportError }
+    }
+    // An emulated viewport taller than the pane only paints down to the window
+    // edge, so an on-screen capture would come back part blank. Park it in the
+    // offscreen window (which grows to fit) for the shot and hand it back after.
+    const restoreTo =
+      inst.visible && !canSurfaceCapture(inst.view.getBounds(), vp)
+        ? { win: inst.attachedWindow, rect: inst.paneRect }
+        : null
+    if (restoreTo) {
+      this.detachView(tabId, inst)
+      this.park(inst, true)
     }
     try {
       let image: NativeImage | null = null
@@ -784,6 +973,10 @@ export class BrowserManager implements BrowserManagerLike {
       const message = err instanceof Error ? err.message : String(err)
       log('browser', `capturePage failed tab=${tabId}`, message)
       return { error: `capture failed: ${message}` }
+    } finally {
+      if (restoreTo?.win && !restoreTo.win.isDestroyed()) {
+        this.setBounds(tabId, restoreTo.win, restoreTo.rect)
+      }
     }
   }
 
@@ -799,13 +992,19 @@ export class BrowserManager implements BrowserManagerLike {
     return typeof result === 'string' ? result : null
   }
 
-  getTabInfo(tabId: string): { id: string; url: string; title: string } | null {
+  getTabInfo(tabId: string): {
+    id: string
+    url: string
+    title: string
+    viewport: BrowserViewport | null
+  } | null {
     const inst = this.instances.get(tabId)
     if (!inst) return null
     return {
       id: tabId,
       url: inst.view.webContents.getURL(),
-      title: inst.view.webContents.getTitle()
+      title: inst.view.webContents.getTitle(),
+      viewport: inst.viewport
     }
   }
 

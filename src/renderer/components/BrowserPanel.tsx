@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { ArrowLeft, ArrowRight, RotateCw, Wrench, Loader2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, PauseCircle, RotateCw, Wrench, Loader2 } from 'lucide-react'
 import { useBrowser } from '../store'
 import { useBackend } from '../backend'
 import { Tooltip } from './Tooltip'
 import { useActiveBackend } from '../store'
 import { RemoteBrowserView } from './RemoteBrowserView'
+import { ViewportPicker } from './ViewportPicker'
+import type { BrowserViewport } from '../../shared/browser-viewport'
 
 interface BrowserPanelProps {
   tabId: string
@@ -27,9 +29,20 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
   const canGoBack = tabState?.canGoBack ?? false
   const canGoForward = tabState?.canGoForward ?? false
 
+  const viewport = tabState?.viewport ?? null
+  const attached = tabState?.attached ?? false
+
   const [draftUrl, setDraftUrl] = useState(currentUrl)
   const [editing, setEditing] = useState(false)
+  // The native view paints above the DOM, so the picker's dropdown is only
+  // visible while the view is detached.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [viewportError, setViewportError] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  // Routine transitions (switching to this tab, a resize) detach and re-attach
+  // the view within a frame or two. Only call it paused once it has stayed
+  // that way, or the notice strobes on every tab switch.
+  const [detachedAWhile, setDetachedAWhile] = useState(false)
 
   // Keep the URL bar text in sync with the actual page URL when not editing.
   useEffect(() => {
@@ -47,7 +60,7 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
   const pushBounds = useCallback(() => {
     const el = bodyRef.current
     if (!el) return
-    if (!visible) {
+    if (!visible || pickerOpen) {
       backend.browserHide(tabId)
       return
     }
@@ -62,12 +75,12 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
       width: r.width,
       height: r.height
     })
-  }, [tabId, visible])
+  }, [tabId, visible, pickerOpen])
 
   useEffect(() => {
     if (webMode) return
     pushBounds()
-    if (!visible) return
+    if (!visible || pickerOpen) return
     const el = bodyRef.current
     if (!el) return
     const ro = new ResizeObserver(() => pushBounds())
@@ -82,7 +95,7 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
       window.removeEventListener('resize', onWinResize)
       clearInterval(interval)
     }
-  }, [pushBounds, visible, webMode])
+  }, [pushBounds, visible, pickerOpen, webMode])
 
   useEffect(() => {
     if (webMode) return
@@ -90,6 +103,28 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
       backend.browserHide(tabId)
     }
   }, [tabId, webMode])
+
+  const applyViewport = (next: BrowserViewport | null): void => {
+    setViewportError(null)
+    void backend
+      .browserSetViewport(tabId, next)
+      .then((r) => {
+        if (r && r.ok === false) setViewportError(r.error ?? 'could not set viewport')
+      })
+      .catch((err: unknown) => {
+        setViewportError(err instanceof Error ? err.message : String(err))
+      })
+  }
+
+  useEffect(() => {
+    if (webMode || !visible) return
+    if (!attached) {
+      const t = window.setTimeout(() => setDetachedAWhile(true), 250)
+      return () => window.clearTimeout(t)
+    }
+    setDetachedAWhile(false)
+    return
+  }, [attached, visible, webMode])
 
   const submitNav = (): void => {
     setEditing(false)
@@ -146,6 +181,11 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
           spellCheck={false}
           className="flex-1 h-7 px-2 text-xs bg-app border border-border rounded text-fg focus:outline-none focus:border-accent"
         />
+        <ViewportPicker
+          viewport={viewport}
+          onChange={applyViewport}
+          onOverlayChange={setPickerOpen}
+        />
         <Tooltip label="DevTools">
           <button
             onClick={() => void backend.browserOpenDevTools(tabId)}
@@ -155,8 +195,28 @@ export function BrowserPanel({ tabId, visible, initialUrl }: BrowserPanelProps):
           </button>
         </Tooltip>
       </div>
+      {viewportError && (
+        <div className="shrink-0 px-2 py-1 text-xs text-red-500 border-b border-border bg-panel">
+          {viewportError}
+        </div>
+      )}
       <div ref={bodyRef} className="flex-1 min-h-0 bg-app relative">
         {webMode && <RemoteBrowserView tabId={tabId} visible={visible} />}
+        {!webMode && visible && !attached && (pickerOpen || detachedAWhile) && (
+          // The native view composites above the DOM, so anything that needs to
+          // draw over the page — this panel's own menu, an off-screen capture —
+          // has to detach it first. Without a notice the empty pane reads as a
+          // crashed page.
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center px-6 pointer-events-none">
+            <PauseCircle className="icon-lg text-faint" />
+            <div className="text-sm text-fg">Page paused</div>
+            <div className="text-xs text-faint">
+              {pickerOpen
+                ? "It's still loaded — it comes back when you close this menu."
+                : "It's still loaded — it comes back in a moment."}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
