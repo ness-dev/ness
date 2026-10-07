@@ -9,9 +9,14 @@ import { useBackend } from '../backend'
 
 interface BranchCommitsPanelProps {
   worktreePath: string | null
+  /** Opens one file's changes within a commit as a diff tab. */
+  onOpenCommitFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
 }
 
-export function BranchCommitsPanel({ worktreePath }: BranchCommitsPanelProps): JSX.Element | null {
+export function BranchCommitsPanel({
+  worktreePath,
+  onOpenCommitFileDiff
+}: BranchCommitsPanelProps): JSX.Element | null {
   const backend = useBackend()
   const fetcher = useCallback((path: string) => backend.getBranchCommits(path), [backend])
   // Commit-info popover (reuses the terminal's CommitInfoModal). Tracks the
@@ -149,6 +154,15 @@ export function BranchCommitsPanel({ worktreePath }: BranchCommitsPanelProps): J
           hasPrev: popover.index > 0,
           hasNext: popover.index < commits.length - 1
         }}
+        onOpenFileDiff={
+          onOpenCommitFileDiff
+            ? (filePath) => {
+                const c = commits[popover.index]
+                onOpenCommitFileDiff(c.hash, c.shortHash, filePath)
+                setPopover(null)
+              }
+            : undefined
+        }
         onClose={() => setPopover(null)}
       />
     )}

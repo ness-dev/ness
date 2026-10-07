@@ -37,6 +37,7 @@ interface RightColumnProps {
   onMerged: () => void
   onRemoveWorktree: (path: string) => void
   onOpenDiff: ChangedFilesPanelProps['onOpenDiff']
+  onOpenCommitFileDiff: (commitHash: string, shortHash: string, filePath: string) => void
   onOpenFile: AllFilesPanelProps['onOpenFile']
   onSendToAgent: (worktreePath: string, text: string) => void
   onOpenPR: (url: string) => void
@@ -59,6 +60,7 @@ export function RightColumn({
   onMerged,
   onRemoveWorktree,
   onOpenDiff,
+  onOpenCommitFileDiff,
   onOpenFile,
   onSendToAgent,
   onOpenPR,
@@ -117,7 +119,13 @@ export function RightColumn({
       case 'todos':
         return <JsonClaudeTodosPanel key="todos" focusedTabId={focusedTabId} />
       case 'commits':
-        return <BranchCommitsPanel key="commits" worktreePath={activeWorktreeId} />
+        return (
+          <BranchCommitsPanel
+            key="commits"
+            worktreePath={activeWorktreeId}
+            onOpenCommitFileDiff={onOpenCommitFileDiff}
+          />
+        )
       case 'changedFiles':
         return (
           <ChangedFilesPanel

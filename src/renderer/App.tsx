@@ -724,7 +724,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleSplitPane,
     handleSendToAgent,
     handleOpenFile,
-    handleOpenDiff
+    handleOpenDiff,
+    handleOpenCommitFileDiff
   } = useTabHandlers({
     panes,
     activePaneId,
@@ -1788,6 +1789,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onMerged={refreshMergedStatus}
             onRemoveWorktree={handleDeleteWorktree}
             onOpenDiff={handleOpenDiff}
+            onOpenCommitFileDiff={handleOpenCommitFileDiff}
             onOpenFile={handleOpenFile}
             onSendToAgent={handleSendToAgent}
             onOpenPR={(url) => {
@@ -1814,6 +1816,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setCommandPaletteMode('files')
               setShowCommandPalette(true)
             }}
+            onOpenCommitFileDiff={handleOpenCommitFileDiff}
           /></div></div>
         )}
         <QuakeTerminal

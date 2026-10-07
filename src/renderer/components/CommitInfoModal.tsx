@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { GitCommitHorizontal, Copy, Check, X, Loader2, ChevronUp, ChevronDown } from 'lucide-react'
+import {
+  GitCommitHorizontal,
+  Copy,
+  Check,
+  X,
+  Loader2,
+  ChevronUp,
+  ChevronDown,
+  FileDiff
+} from 'lucide-react'
 import { getBackend } from '../backend'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import type { ChangedFile, CommitMeta } from '../types'
 
 /** Optional prev/next navigation through a surrounding list of commits.
@@ -24,6 +34,10 @@ interface CommitInfoModalProps {
   placement?: 'cursor' | 'right-edge'
   /** When present, renders up/down controls (and binds ↑/↓) to walk the list. */
   nav?: CommitNav
+  /** When present, each file row gains an open-diff button and a right-click
+   *  "Open diff" item that opens this commit's changes to that file in a tab.
+   *  Omitted by the terminal popovers, which have no tab context. */
+  onOpenFileDiff?: (filePath: string) => void
   onClose: () => void
 }
 
@@ -46,31 +60,29 @@ const STATUS_COLOR: Record<ChangedFile['status'], string> = {
   untracked: 'text-dim'
 }
 
-function FileRow({ file }: { file: ChangedFile }): JSX.Element {
+function FileRow({
+  file,
+  copied,
+  onCopyPath,
+  onOpenDiff,
+  onContextMenu
+}: {
+  file: ChangedFile
+  copied: boolean
+  onCopyPath: () => void
+  onOpenDiff?: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}): JSX.Element {
   const lastSlash = file.path.lastIndexOf('/')
   const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : ''
   const name = lastSlash >= 0 ? file.path.slice(lastSlash + 1) : file.path
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<number | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (timer.current !== null) window.clearTimeout(timer.current)
-    }
-  }, [])
-
-  const copyPath = (): void => {
-    void navigator.clipboard?.writeText(file.path).then(() => {
-      setCopied(true)
-      if (timer.current !== null) window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => setCopied(false), 1200)
-    })
-  }
 
   return (
-    <button
-      type="button"
-      onClick={copyPath}
+    // A div rather than a button: the open-diff affordance is itself a
+    // button, and nesting those is invalid.
+    <div
+      onClick={onCopyPath}
+      onContextMenu={onContextMenu}
       title="Copy path"
       className="group flex w-full items-center gap-2 py-0.5 text-xs text-left rounded hover:bg-surface-hover cursor-pointer"
     >
@@ -81,6 +93,19 @@ function FileRow({ file }: { file: ChangedFile }): JSX.Element {
         {dir && <span className="text-faint">{dir}</span>}
         <span className="text-fg">{name}</span>
       </span>
+      {onOpenDiff && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenDiff()
+          }}
+          title="Open diff for this file in a tab"
+          className="shrink-0 opacity-0 group-hover:opacity-70 hover:!opacity-100 text-faint hover:text-fg-bright cursor-pointer"
+        >
+          <FileDiff className="icon-2xs" />
+        </button>
+      )}
       {copied ? (
         <Check className="icon-2xs shrink-0 text-success" />
       ) : (
@@ -92,7 +117,7 @@ function FileRow({ file }: { file: ChangedFile }): JSX.Element {
           {file.deletions ? <span className="text-danger ml-1">−{file.deletions}</span> : null}
         </span>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -102,12 +127,30 @@ export function CommitInfoModal({
   anchor,
   placement = 'cursor',
   nav,
+  onOpenFileDiff,
   onClose
 }: CommitInfoModalProps): JSX.Element {
   const [meta, setMeta] = useState<CommitMeta | null>(null)
   const [files, setFiles] = useState<ChangedFile[]>([])
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [copied, setCopied] = useState(false)
+  const [copiedPath, setCopiedPath] = useState<string | null>(null)
+  const [fileMenu, setFileMenu] = useState<{ x: number; y: number; path: string } | null>(null)
+  const pathTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (pathTimer.current !== null) window.clearTimeout(pathTimer.current)
+    }
+  }, [])
+
+  const copyPath = (path: string): void => {
+    void navigator.clipboard?.writeText(path).then(() => {
+      setCopiedPath(path)
+      if (pathTimer.current !== null) window.clearTimeout(pathTimer.current)
+      pathTimer.current = window.setTimeout(() => setCopiedPath(null), 1200)
+    })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -142,7 +185,9 @@ export function CommitInfoModal({
         // Consume it: the terminal still has focus, so without stopping
         // propagation the Escape would also be sent to the agent/PTY.
         e.stopPropagation()
-        onClose()
+        // An open file menu is the innermost layer — dismiss that first.
+        if (fileMenu) setFileMenu(null)
+        else onClose()
       } else if (nav && e.key === 'ArrowUp' && nav.hasPrev) {
         e.preventDefault()
         e.stopPropagation()
@@ -158,7 +203,7 @@ export function CommitInfoModal({
     // the terminal is focused. Capturing runs us first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose, nav])
+  }, [onClose, nav, fileMenu])
 
   const copySha = (): void => {
     const full = meta?.hash ?? sha
@@ -166,6 +211,15 @@ export function CommitInfoModal({
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1200)
     })
+  }
+
+  const fileMenuItems = (path: string): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = []
+    if (onOpenFileDiff) {
+      items.push({ label: 'Open diff in tab', onClick: () => onOpenFileDiff(path) })
+    }
+    items.push({ label: 'Copy path', onClick: () => copyPath(path) })
+    return items
   }
 
   const shortSha = meta?.shortHash ?? sha.slice(0, 10)
@@ -268,12 +322,32 @@ export function CommitInfoModal({
                 {files.length} {files.length === 1 ? 'file' : 'files'} changed
               </div>
               {files.map((file) => (
-                <FileRow key={file.path} file={file} />
+                <FileRow
+                  key={file.path}
+                  file={file}
+                  copied={copiedPath === file.path}
+                  onCopyPath={() => copyPath(file.path)}
+                  onOpenDiff={onOpenFileDiff ? () => onOpenFileDiff(file.path) : undefined}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setFileMenu({ x: e.clientX, y: e.clientY, path: file.path })
+                  }}
+                />
               ))}
             </div>
           </div>
         )}
       </div>
+      {/* Sibling of the popover, not a child: the popover clips its own
+          overflow, and the menu needs to escape those bounds. */}
+      {fileMenu && (
+        <ContextMenu
+          x={fileMenu.x}
+          y={fileMenu.y}
+          items={fileMenuItems(fileMenu.path)}
+          onClose={() => setFileMenu(null)}
+        />
+      )}
     </div>
   )
 }

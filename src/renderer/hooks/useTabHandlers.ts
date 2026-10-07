@@ -250,6 +250,32 @@ export function useTabHandlers({
     [activeWorktreeId, panes, handleSelectTab, appendTabToPane]
   )
 
+  // One file's slice of a commit (<hash>^ … <hash>), as opposed to
+  // handleOpenCommit's whole-commit text view. Distinct tab id prefix so
+  // both can be open for the same commit at once.
+  const handleOpenCommitFileDiff = useCallback(
+    (commitHash: string, shortHash: string, filePath: string) => {
+      if (!activeWorktreeId) return
+      const tabId = `diff-commit-${shortHash}-${filePath}`
+      const tree = panes[activeWorktreeId]
+      const existingLeaf = tree ? findLeafByTabId(tree, tabId) : null
+      if (existingLeaf) {
+        handleSelectTab(activeWorktreeId, existingLeaf.id, tabId)
+        return
+      }
+      const fileName = filePath.split('/').pop() || filePath
+      const tab: TerminalTab = {
+        id: tabId,
+        type: 'diff',
+        label: `${fileName} @ ${shortHash}`,
+        filePath,
+        commitHash
+      }
+      appendTabToPane(activeWorktreeId, tab)
+    },
+    [activeWorktreeId, panes, handleSelectTab, appendTabToPane]
+  )
+
   const handleReorderTabs = useCallback(
     (worktreePath: string, paneId: string, fromId: string, toId: string) => {
       if (fromId === toId) return
@@ -388,6 +414,7 @@ export function useTabHandlers({
     handleSleepTab,
     handleOpenPR,
     handleOpenCommit,
+    handleOpenCommitFileDiff,
     handleReorderTabs,
     handleMoveTabToPane,
     handleSplitPane,
