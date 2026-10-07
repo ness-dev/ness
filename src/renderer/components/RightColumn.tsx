@@ -1,10 +1,16 @@
-import type { PRStatus, Worktree, RepoConfig } from '../types'
+import { useCallback, useMemo } from 'react'
+import type { PRStatus, Worktree, RepoConfig, ToolSpec } from '../types'
 import {
   effectiveHiddenRightPanels,
   effectiveRightPanelOrder,
+  isCustomToolPanelKey,
+  toolPanelKey,
   type HiddenRightPanels,
   type RightPanelKey
 } from '../../shared/state/repo-configs'
+import { BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT } from '../../shared/tools'
+import { useWatchedQuery } from '../hooks/useWatchedQuery'
+import { CustomToolPanel } from './CustomToolPanel'
 import { PRStatusPanel, MergeLocallyPanel } from './PRStatusPanel'
 import { BranchCommitsPanel } from './BranchCommitsPanel'
 import { ChangedFilesPanel } from './ChangedFilesPanel'
@@ -42,6 +48,9 @@ interface RightColumnProps {
   onOpenPR: (url: string) => void
   onOpenReview: () => void
   onCollapse: () => void
+  /** Opens the new-worktree screen pre-filled with a branch name and the
+   * custom-tool authoring contract as the kickoff prompt. */
+  onBuildCustomTool: (branch: string, prompt: string) => void
 }
 
 export function RightColumn({
@@ -63,11 +72,29 @@ export function RightColumn({
   onSendToAgent,
   onOpenPR,
   onOpenReview,
-  onCollapse
+  onCollapse,
+  onBuildCustomTool
 }: RightColumnProps): JSX.Element {
   const backend = useBackend()
+
+  const toolsFetcher = useCallback(
+    (path: string) => backend.listTools(path),
+    [backend]
+  )
+  const { data: toolsData } = useWatchedQuery<ToolSpec[]>({
+    worktreePath: activeWorktreeId,
+    cacheKey: 'tools',
+    fetcher: toolsFetcher
+  })
+  const tools = useMemo(() => toolsData ?? [], [toolsData])
+  const toolKeys = useMemo(() => tools.map((t) => toolPanelKey(t.id)), [tools])
+  const toolLabels = useMemo(
+    () => Object.fromEntries(tools.map((t) => [toolPanelKey(t.id), t.title])),
+    [tools]
+  )
+
   const hidden = effectiveHiddenRightPanels(activeRepoConfig)
-  const order = effectiveRightPanelOrder(activeRepoConfig)
+  const order = effectiveRightPanelOrder(activeRepoConfig, toolKeys)
 
   const handleChangeHidden = (next: HiddenRightPanels): void => {
     if (!activeRepoRoot) return
@@ -89,6 +116,21 @@ export function RightColumn({
 
   const renderPanel = (key: RightPanelKey): JSX.Element | null => {
     if (hidden[key]) return null
+    if (isCustomToolPanelKey(key)) {
+      const spec = tools.find((t) => toolPanelKey(t.id) === key)
+      if (!spec) return null
+      return (
+        <CustomToolPanel
+          key={key}
+          spec={spec}
+          worktreePath={activeWorktreeId}
+          onSendToAgent={
+            activeWorktreeId ? (text) => onSendToAgent(activeWorktreeId, text) : undefined
+          }
+          onOpenFile={onOpenFile}
+        />
+      )
+    }
     switch (key) {
       case 'merge':
         return (
@@ -159,9 +201,13 @@ export function RightColumn({
       <RightColumnToolbar
         hidden={hidden}
         order={order}
+        customLabels={toolLabels}
         onChangeHidden={handleChangeHidden}
         onChangeOrder={handleChangeOrder}
         onCollapse={onCollapse}
+        onBuildCustomTool={() =>
+          onBuildCustomTool(BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT)
+        }
         canConfigure={!!activeRepoRoot}
       />
       {order.map((key) => renderPanel(key))}

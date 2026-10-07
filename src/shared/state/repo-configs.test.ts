@@ -174,6 +174,32 @@ describe('repoConfigsReducer', () => {
     expect(result).toHaveLength(DEFAULT_RIGHT_PANEL_ORDER.length)
   })
 
+  it('effectiveRightPanelOrder appends newly discovered tools at the end', () => {
+    const result = effectiveRightPanelOrder({ rightPanelOrder: ['pr'] as never }, [
+      'tool:pr-comments'
+    ])
+    expect(result[0]).toBe('pr')
+    expect(result[result.length - 1]).toBe('tool:pr-comments')
+    expect(result).toHaveLength(DEFAULT_RIGHT_PANEL_ORDER.length + 1)
+  })
+
+  it('effectiveRightPanelOrder honors a saved position for a custom tool', () => {
+    const result = effectiveRightPanelOrder(
+      { rightPanelOrder: ['tool:pr-comments', 'pr'] as never },
+      ['tool:pr-comments']
+    )
+    expect(result[0]).toBe('tool:pr-comments')
+    expect(result[1]).toBe('pr')
+  })
+
+  it('effectiveRightPanelOrder drops a saved tool that no longer exists', () => {
+    const result = effectiveRightPanelOrder({
+      rightPanelOrder: ['tool:deleted', 'pr'] as never
+    })
+    expect(result).not.toContain('tool:deleted')
+    expect(result).toHaveLength(DEFAULT_RIGHT_PANEL_ORDER.length)
+  })
+
   it('effectiveHiddenRightPanels handles null/empty config', () => {
     expect(effectiveHiddenRightPanels(null)).toEqual({ scratchpad: true })
     expect(effectiveHiddenRightPanels(undefined)).toEqual({ scratchpad: true })

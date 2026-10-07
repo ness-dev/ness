@@ -57,6 +57,11 @@ interface NewWorktreeScreenProps {
   /** When set, the new worktree's first agent tab resumes a copy of this
    *  conversation instead of starting empty. */
   forkSource?: ForkSource
+  /** Pre-fill the branch name and kickoff prompt, for entry points that
+   * already know the task (e.g. "Build a custom tool"). Both stay
+   * editable — the point is to show the user what's about to run. */
+  initialBranch?: string
+  initialPrompt?: string
 }
 
 /** Sort + clean the local-branch list from the backend. The backend already
@@ -123,12 +128,12 @@ const STARTER_PROMPTS = [
 const KBD_CHIP = 'text-xs text-faint bg-bg px-1.5 py-0.5 rounded border border-border font-mono'
 const KBD_CHIP_ON_ACCENT = 'text-xs text-white bg-white/20 px-1.5 py-0.5 rounded border border-white/30 font-mono'
 
-export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, defaultRepoRoot, initialPRNumber, forkSource }: NewWorktreeScreenProps): JSX.Element {
+export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, defaultRepoRoot, initialPRNumber, forkSource, initialBranch, initialPrompt }: NewWorktreeScreenProps): JSX.Element {
   const [mode, setMode] = useState<'fresh' | 'teleport' | 'pr'>(initialPRNumber ? 'pr' : 'fresh')
   const [selectedRepo, setSelectedRepo] = useState<string>(
     defaultRepoRoot && repoRoots.includes(defaultRepoRoot) ? defaultRepoRoot : repoRoots[0] || ''
   )
-  const [branch, setBranch] = useState('')
+  const [branch, setBranch] = useState(initialBranch ?? '')
   const [existingBranch, setExistingBranch] = useState<string | null>(null)
   // Free-text ref: commit SHA, tag, remote-tracking ref (`origin/foo`), etc.
   // Used as the base the new branch (`refBranch`) is forked from — the
@@ -138,7 +143,7 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
   // The name of the new branch to create at `refValue` on the Ref tab.
   const [refBranch, setRefBranch] = useState('')
   const [branchTab, setBranchTab] = useState<'new' | 'existing' | 'ref'>('new')
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(initialPrompt ?? '')
   const settings = useSettings()
   const [reviewPrompt, setReviewPrompt] = useState(settings.prReviewPrompt)
   const [teleportInput, setTeleportInput] = useState('')

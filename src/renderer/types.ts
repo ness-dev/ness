@@ -7,6 +7,9 @@ export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 import type { RepoConfig } from '../shared/state/repo-configs'
 export type { RepoConfig }
 
+import type { ToolSpec, ToolRunResult } from '../shared/tools'
+export type { ToolSpec, ToolRunResult }
+
 import type { WeeklyStats, TopWorktree } from '../shared/weekly-stats'
 export type { WeeklyStats, TopWorktree }
 
@@ -309,6 +312,8 @@ export interface ElectronAPI {
 
   getWeeklyStats(): Promise<WeeklyStats>
   getBranchCommits(worktreePath: string): Promise<BranchCommit[]>
+  listTools(worktreePath: string): Promise<ToolSpec[]>
+  runTool(worktreePath: string, toolId: string): Promise<ToolRunResult>
   getCommitDiff(worktreePath: string, hash: string): Promise<CommitDiff | null>
   getCommitMeta(worktreePath: string, hash: string): Promise<CommitMeta | null>
   getCommitChangedFiles(worktreePath: string, hash: string): Promise<ChangedFile[]>

@@ -60,7 +60,7 @@ export function saveRepoConfig(repoRoot: string, next: RepoConfig): RepoConfig {
   if (next.mergeStrategy) cleaned.mergeStrategy = next.mergeStrategy
   // Migrate legacy hideMergePanel / hidePrPanel into hiddenRightPanels
   // on write. Only the new field is persisted going forward.
-  const hidden: Record<string, boolean> = { ...(next.hiddenRightPanels || {}) }
+  const hidden: Record<string, boolean | undefined> = { ...(next.hiddenRightPanels || {}) }
   if (next.hideMergePanel && hidden.merge === undefined) hidden.merge = true
   if (next.hidePrPanel && hidden.pr === undefined) hidden.pr = true
   // Compact: drop `false` entries that match the default visibility

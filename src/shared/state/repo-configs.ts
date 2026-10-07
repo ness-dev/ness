@@ -1,4 +1,4 @@
-export type RightPanelKey =
+export type BuiltinRightPanelKey =
   | 'merge'
   | 'pr'
   | 'todos'
@@ -9,7 +9,21 @@ export type RightPanelKey =
   | 'context'
   | 'scratchpad'
 
-export const DEFAULT_RIGHT_PANEL_ORDER: RightPanelKey[] = [
+/** Custom tools discovered from `.harness/tools/<id>/` are namespaced so
+ * they can never collide with a builtin key. */
+export type CustomToolPanelKey = `tool:${string}`
+
+export type RightPanelKey = BuiltinRightPanelKey | CustomToolPanelKey
+
+export function isCustomToolPanelKey(key: string): key is CustomToolPanelKey {
+  return key.startsWith('tool:')
+}
+
+export function toolPanelKey(toolId: string): CustomToolPanelKey {
+  return `tool:${toolId}`
+}
+
+export const DEFAULT_RIGHT_PANEL_ORDER: BuiltinRightPanelKey[] = [
   'merge',
   'pr',
   'commits',
@@ -49,12 +63,20 @@ export interface RepoConfig {
 
 /** Read an effective panel order, filling in any keys missing from the
  * saved order with the canonical default order (appended at the end)
- * and dropping any unknown keys. Always returns all six keys exactly
- * once. */
-export function effectiveRightPanelOrder(config: RepoConfig | null | undefined): RightPanelKey[] {
+ * and dropping any unknown keys. Always returns every builtin key plus
+ * every currently-discovered custom tool key exactly once.
+ *
+ * `customKeys` comes from tool discovery, so a saved order referencing a
+ * tool that has since been deleted drops out naturally, and a newly
+ * added tool appears at the end without needing a config write. */
+export function effectiveRightPanelOrder(
+  config: RepoConfig | null | undefined,
+  customKeys: readonly RightPanelKey[] = []
+): RightPanelKey[] {
+  const canonical: RightPanelKey[] = [...DEFAULT_RIGHT_PANEL_ORDER, ...customKeys]
   const saved = config?.rightPanelOrder
-  if (!saved || saved.length === 0) return [...DEFAULT_RIGHT_PANEL_ORDER]
-  const known = new Set<RightPanelKey>(DEFAULT_RIGHT_PANEL_ORDER)
+  if (!saved || saved.length === 0) return canonical
+  const known = new Set<RightPanelKey>(canonical)
   const seen = new Set<RightPanelKey>()
   const out: RightPanelKey[] = []
   for (const k of saved) {
@@ -63,7 +85,7 @@ export function effectiveRightPanelOrder(config: RepoConfig | null | undefined):
       seen.add(k)
     }
   }
-  for (const k of DEFAULT_RIGHT_PANEL_ORDER) {
+  for (const k of canonical) {
     if (!seen.has(k)) out.push(k)
   }
   return out

@@ -55,6 +55,7 @@ import { WorktreeWatcher } from './worktree-watcher'
 import { FileContentWatcher } from './file-content-watcher'
 import { SnoozeTimer } from './snooze-timer'
 import { getWeeklyStats } from './weekly-stats'
+import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
 import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, symlinkClaudeSettings, pruneWorktrees, type MergeStrategy } from './worktree'
@@ -1934,6 +1935,18 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('worktree:branchCommits', async (_ctx, worktreePath: string) => {
     return getBranchCommits(worktreePath)
+  })
+
+  transport.onRequest('tools:list', async (_ctx, worktreePath: string) => {
+    return discoverTools(worktreePath)
+  })
+
+  transport.onRequest('tools:run', async (_ctx, worktreePath: string, toolId: string) => {
+    const wt = store.getSnapshot().state.worktrees.list.find((w) => w.path === worktreePath)
+    return runTool(worktreePath, toolId, {
+      branch: wt?.branch ?? '',
+      repoRoot: wt?.repoRoot ?? worktreePath
+    })
   })
 
   transport.onRequest('worktree:commitDiff', async (_ctx, worktreePath: string, hash: string) => {
