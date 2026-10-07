@@ -27,6 +27,8 @@ import {
   DEFAULT_LIGHT_THEME,
   DEFAULT_DARK_THEME,
   DEFAULT_PR_REVIEW_PROMPT,
+  DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
+  MAX_JSON_MODE_TRANSCRIPT_WINDOW,
   DEFAULT_SIDEBAR_DETAILS,
   BOTTOM_ICON_KEYS,
   resolveBottomIconOrder,
@@ -174,6 +176,15 @@ export function buildInitialAppState(
       )
         ? config.jsonModeDefaultPermissionMode
         : 'acceptEdits',
+      jsonModeTranscriptWindow:
+        typeof config.jsonModeTranscriptWindow === 'number' &&
+        Number.isFinite(config.jsonModeTranscriptWindow) &&
+        config.jsonModeTranscriptWindow >= 0
+          ? Math.min(
+              MAX_JSON_MODE_TRANSCRIPT_WINDOW,
+              Math.floor(config.jsonModeTranscriptWindow)
+            )
+          : DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
       autoSleepMinutes:
         typeof config.autoSleepMinutes === 'number' &&
         Number.isFinite(config.autoSleepMinutes) &&

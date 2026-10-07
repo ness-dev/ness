@@ -304,6 +304,8 @@ export function buildBackend(
       req('config:setAutoScrollToBottom', enabled),
     setJsonModeDefaultPermissionMode: (value: JsonClaudePermissionMode) =>
       req('config:setJsonModeDefaultPermissionMode', value),
+    setJsonModeTranscriptWindow: (value: number) =>
+      req('config:setJsonModeTranscriptWindow', value),
     setAutoSleepMinutes: (value: number) => req('config:setAutoSleepMinutes', value),
     setPreventSleepMode: (value: PreventSleepMode) =>
       req('config:setPreventSleepMode', value),

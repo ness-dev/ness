@@ -389,6 +389,7 @@ export interface ElectronAPI {
   setJsonModeDefaultPermissionMode(
     value: JsonClaudePermissionMode
   ): Promise<boolean>
+  setJsonModeTranscriptWindow(value: number): Promise<boolean>
   setAutoSleepMinutes(value: number): Promise<boolean>
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
   setPreventSleepUntil(value: number | null): Promise<boolean>

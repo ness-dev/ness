@@ -318,6 +318,9 @@ export interface Config {
   // Existing sessions keep whatever mode they were last in. Default
   // 'acceptEdits' (auto-allow Edit/Write, still ask for Bash etc.).
   jsonModeDefaultPermissionMode?: JsonClaudePermissionMode
+  // Trailing messages a json-mode transcript renders before collapsing the
+  // rest behind a "show earlier" header. 0 renders everything. Default 150.
+  jsonModeTranscriptWindow?: number
   // Minutes a json-mode tab can sit at 'waiting' before the auto-sleep
   // monitor tears its subprocess down. 0 disables auto-sleep. Default 30.
   autoSleepMinutes?: number

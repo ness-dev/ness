@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
@@ -200,15 +201,6 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
 const FILE_CACHE = new Map<string, { files: string[]; ts: number }>()
 const FILE_CACHE_TTL_MS = 10_000
 const MAX_MENTION_RESULTS = 50
-
-// How many top-level entries the transcript renders by default, and how many
-// more each "show earlier" click reveals. Sized so a normal session never
-// hits the window at all — the cap only exists to stop an exceptionally long
-// chat from paying O(entries) reconciliation on every streaming delta and
-// holding the whole history's DOM resident. Raising it trades memory for
-// fewer clicks when scrolling back through a long history.
-const TRANSCRIPT_WINDOW_SIZE = 150
-const TRANSCRIPT_WINDOW_STEP = 150
 
 // `@worktree:<repo>/<branch>` is what a worktree mention inserts. The prefix
 // keeps the token from reading as a relative file path — without it the
@@ -1266,6 +1258,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     jsonModeChatDensity: density,
     jsonModeSendOnEnter: sendOnEnter,
     autoScrollToBottom,
+    jsonModeTranscriptWindow,
     defaultClaudeTabType,
     conversationForkEnabled,
     worktreeMessagingEnabled
@@ -1425,17 +1418,26 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const isProgrammaticScroll = useRef(false)
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
   const [showJumpToPrompt, setShowJumpToPrompt] = useState(false)
+  // The setting's 0 means "render everything"; Infinity expresses that
+  // without a second code path through the window arithmetic below.
+  const configuredWindow =
+    jsonModeTranscriptWindow > 0 ? jsonModeTranscriptWindow : Infinity
+  // Each "show earlier" click reveals one more window's worth.
+  const windowStep = Number.isFinite(configuredWindow)
+    ? configuredWindow
+    : DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW
   // How many trailing top-level entries the transcript renders. Per-client
-  // view state, not slice state — two viewers of the same session scroll
-  // back independently, and the window is meaningless after a reload.
-  const [windowSize, setWindowSize] = useState(TRANSCRIPT_WINDOW_SIZE)
+  // view state, not slice state — the setting is the starting point, but two
+  // viewers of the same session scroll back independently from there, and the
+  // expansion is meaningless after a reload.
+  const [windowSize, setWindowSize] = useState(configuredWindow)
   // Distance from the bottom of the content, captured before a window
   // expansion prepends rows. Restored in the layout effect below.
   const pendingPrependAnchor = useRef<number | null>(null)
 
   useEffect(() => {
-    setWindowSize(TRANSCRIPT_WINDOW_SIZE)
-  }, [sessionId])
+    setWindowSize(configuredWindow)
+  }, [sessionId, configuredWindow])
 
   const showEarlierEntries = useCallback((count: number): void => {
     const el = scrollRef.current
@@ -2758,16 +2760,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             {hiddenEntryCount > 0 && (
               <div className="flex items-center justify-center gap-2 pb-1">
                 <button
-                  onClick={() => showEarlierEntries(TRANSCRIPT_WINDOW_STEP)}
+                  onClick={() => showEarlierEntries(windowStep)}
                   className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
                 >
-                  Show {Math.min(hiddenEntryCount, TRANSCRIPT_WINDOW_STEP)}{' '}
-                  earlier{' '}
-                  {Math.min(hiddenEntryCount, TRANSCRIPT_WINDOW_STEP) === 1
+                  Show {Math.min(hiddenEntryCount, windowStep)} earlier{' '}
+                  {Math.min(hiddenEntryCount, windowStep) === 1
                     ? 'message'
                     : 'messages'}
                 </button>
-                {hiddenEntryCount > TRANSCRIPT_WINDOW_STEP && (
+                {hiddenEntryCount > windowStep && (
                   <button
                     onClick={() => showEarlierEntries(hiddenEntryCount)}
                     className="text-xs text-muted hover:text-fg cursor-pointer"

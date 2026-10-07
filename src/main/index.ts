@@ -113,6 +113,8 @@ import {
   DEFAULT_LIGHT_THEME,
   DEFAULT_DARK_THEME,
   DEFAULT_PR_REVIEW_PROMPT,
+  DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
+  MAX_JSON_MODE_TRANSCRIPT_WINDOW,
   DEFAULT_SIDEBAR_DETAILS,
   DEFAULT_NESSIE_COLOR,
   nessieColorById,
@@ -4145,6 +4147,28 @@ function registerIpcHandlers(): void {
       store.dispatch({
         type: 'settings/jsonModeDefaultPermissionModeChanged',
         payload: next
+      })
+      return true
+    }
+  )
+
+  transport.onRequest(
+    'config:setJsonModeTranscriptWindow',
+    (_ctx, value: number) => {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > MAX_JSON_MODE_TRANSCRIPT_WINDOW) {
+        return false
+      }
+      const rounded = Math.floor(n)
+      if (rounded === DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW) {
+        delete config.jsonModeTranscriptWindow
+      } else {
+        config.jsonModeTranscriptWindow = rounded
+      }
+      saveConfig(config)
+      store.dispatch({
+        type: 'settings/jsonModeTranscriptWindowChanged',
+        payload: rounded
       })
       return true
     }

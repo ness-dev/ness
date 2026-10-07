@@ -24,7 +24,11 @@ import { SEMANTIC_KEYS } from '../theme-apply'
 import { NESS_MARK_MASK } from './NessMark'
 import { NESSIE_COLORS } from '../../shared/state/settings'
 import type { CustomTheme, UiScale } from '../../shared/state/settings'
-import { SCALES, scaleSpec } from '../../shared/state/settings'
+import {
+  SCALES,
+  scaleSpec,
+  MAX_JSON_MODE_TRANSCRIPT_WINDOW
+} from '../../shared/state/settings'
 import { isJsonClaudePermissionMode } from '../../shared/state/json-claude'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -400,6 +404,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     jsonModeSendOnEnter,
     autoScrollToBottom,
     jsonModeDefaultPermissionMode,
+    jsonModeTranscriptWindow,
     autoSleepMinutes,
     autoApprovePermissions,
     autoApproveSteerInstructions,
@@ -625,6 +630,29 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     const clamped = Math.max(8, Math.min(48, Math.round(value)))
     void backend.setTerminalFontSize(clamped)
   }, [])
+
+  const [transcriptWindowDraft, setTranscriptWindowDraft] = useState<string>(
+    String(jsonModeTranscriptWindow)
+  )
+  useEffect(() => {
+    setTranscriptWindowDraft(String(jsonModeTranscriptWindow))
+  }, [jsonModeTranscriptWindow])
+  const commitTranscriptWindow = useCallback(() => {
+    const n = Number(transcriptWindowDraft)
+    if (!Number.isFinite(n) || n < 0) {
+      setTranscriptWindowDraft(String(jsonModeTranscriptWindow))
+      return
+    }
+    const clamped = Math.max(
+      0,
+      Math.min(MAX_JSON_MODE_TRANSCRIPT_WINDOW, Math.floor(n))
+    )
+    if (clamped !== jsonModeTranscriptWindow) {
+      void backend.setJsonModeTranscriptWindow(clamped)
+    } else {
+      setTranscriptWindowDraft(String(clamped))
+    }
+  }, [transcriptWindowDraft, jsonModeTranscriptWindow])
 
   const [autoSleepDraft, setAutoSleepDraft] = useState<string>(
     String(autoSleepMinutes)
@@ -2271,6 +2299,38 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       Auto — Claude decides what's safe to run and only asks about risky calls
                     </option>
                   </select>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Messages rendered per chat
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    Only the most recent messages stay in the DOM; older
+                    ones collapse behind a “show earlier” button you can
+                    click to reveal them. A very long chat renders and
+                    re-renders every visible message as a reply streams
+                    in, so a bigger window costs memory and smoothness.
+                    Set to 0 to always render the whole transcript.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={MAX_JSON_MODE_TRANSCRIPT_WINDOW}
+                      step={50}
+                      value={transcriptWindowDraft}
+                      onChange={(e) => setTranscriptWindowDraft(e.target.value)}
+                      onBlur={commitTranscriptWindow}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.currentTarget.blur()
+                        }
+                      }}
+                      className="bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg w-24"
+                    />
+                    <span className="text-xs text-dim">messages</span>
+                  </div>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-border">
