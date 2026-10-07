@@ -729,6 +729,19 @@ store.subscribe((event) => {
   }
 })
 
+// Persist pins through to disk so the Pinned section survives restart.
+store.subscribe((event) => {
+  if (event.type.startsWith('pinned/')) {
+    const byPath = store.getSnapshot().state.pinned.byPath
+    if (Object.keys(byPath).length === 0) {
+      delete config.pinned
+    } else {
+      config.pinned = byPath
+    }
+    saveConfig(config)
+  }
+})
+
 // When a session ID is discovered from a hook event (e.g. Codex assigns
 // its own session ID), persist panes immediately so the ID survives a quit.
 store.subscribe((event) => {
@@ -1376,6 +1389,19 @@ store.subscribe((event) => {
   for (const path of Object.keys(byPath)) {
     if (!live.has(path)) {
       store.dispatch({ type: 'ciNotify/clear', payload: path })
+    }
+  }
+})
+
+// Same for pins — a removed worktree must not leave an orphan entry
+// keeping an empty Pinned section alive.
+store.subscribe((event) => {
+  if (event.type !== 'worktrees/listChanged') return
+  const live = new Set(store.getSnapshot().state.worktrees.list.map((w) => w.path))
+  const byPath = store.getSnapshot().state.pinned.byPath
+  for (const path of Object.keys(byPath)) {
+    if (!live.has(path)) {
+      store.dispatch({ type: 'pinned/clear', payload: path })
     }
   }
 })
@@ -4609,6 +4635,18 @@ function registerIpcHandlers(): void {
   transport.onRequest('snooze:unsnooze', (_ctx, path: string) => {
     if (typeof path !== 'string' || !path) return false
     store.dispatch({ type: 'snooze/clear', payload: path })
+    return true
+  })
+
+  transport.onRequest('pinned:pin', (_ctx, path: string) => {
+    if (typeof path !== 'string' || !path) return false
+    store.dispatch({ type: 'pinned/set', payload: path })
+    return true
+  })
+
+  transport.onRequest('pinned:unpin', (_ctx, path: string) => {
+    if (typeof path !== 'string' || !path) return false
+    store.dispatch({ type: 'pinned/clear', payload: path })
     return true
   })
 

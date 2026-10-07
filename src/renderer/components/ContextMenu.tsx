@@ -18,10 +18,18 @@ export interface ContextMenuItem {
   submenu?: ContextMenuSubItem[]
 }
 
+/** A horizontal rule fencing off a run of entries — used to keep the
+ *  irreversible actions away from the everyday ones. */
+export interface ContextMenuSeparator {
+  separator: true
+}
+
+export type ContextMenuEntry = ContextMenuItem | ContextMenuSeparator
+
 interface ContextMenuProps {
   x: number
   y: number
-  items: ContextMenuItem[]
+  items: ContextMenuEntry[]
   onClose: () => void
 }
 
@@ -94,7 +102,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((item, i) =>
-        item.submenu ? (
+        'separator' in item ? (
+          <div key={i} role="separator" className="my-1 border-t border-border-strong" />
+        ) : item.submenu ? (
           <div
             key={i}
             className="relative"

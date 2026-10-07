@@ -332,6 +332,8 @@ export interface Config {
   // Snoozed worktrees keyed by absolute path. Wakes when wakeAt is reached
   // or when the worktree's effective state transitions to 'processing'.
   snooze?: Record<string, SnoozeEntry>
+  /** Worktree paths the user has pinned to the top of the sidebar. */
+  pinned?: Record<string, true>
   // Default duration (days) for plain-click snooze. Min 1, default 7.
   snoozeDefaultDays?: number
   // Per-worktree overrides for the "notify agent chat on CI failure"

@@ -770,6 +770,10 @@ export function useAssignedPRs() {
   return useAppState((s) => s.assignedPRs)
 }
 
+export function usePinned() {
+  return useAppState((s) => s.pinned)
+}
+
 function editorScopesFor(
   s: AppState,
   worktreePath: string | null,

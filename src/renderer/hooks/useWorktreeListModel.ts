@@ -6,6 +6,7 @@ import {
   useTerminals,
   usePrs,
   useSnooze,
+  usePinned,
   useAliases,
   useAssignedPRs
 } from '../store'
@@ -44,6 +45,7 @@ export function useWorktreeListModel(
   const terminals = useTerminals()
   const prs = usePrs()
   const snooze = useSnooze()
+  const pinned = usePinned()
   const aliases = useAliases()
   const assignedPRs = useAssignedPRs()
   const viewerLogin = useAppState((s) => s.settings.viewerLogin)
@@ -65,6 +67,7 @@ export function useWorktreeListModel(
         prStatuses: prs.byPath,
         mergedPaths: prs.mergedByPath,
         snoozeByPath: snooze.byPath,
+        pinnedPaths: pinned.byPath,
         aliases: aliases.byPath,
         viewerLogin,
         assignedPRsByRepo: assignedPRs.byRepo,
@@ -85,6 +88,7 @@ export function useWorktreeListModel(
       prs.byPath,
       prs.mergedByPath,
       snooze.byPath,
+      pinned.byPath,
       aliases.byPath,
       viewerLogin,
       assignedPRs.byRepo,

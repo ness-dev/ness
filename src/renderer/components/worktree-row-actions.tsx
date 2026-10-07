@@ -1,5 +1,5 @@
 import type { ComponentType, MouseEvent } from 'react'
-import { RotateCw, Moon, AlarmClock, Trash2, Tag, X } from 'lucide-react'
+import { RotateCw, Moon, AlarmClock, Trash2, Tag, X, Pin, PinOff } from 'lucide-react'
 import { isPRMerged } from '../../shared/state/prs'
 import { formatWakeAt } from '../../shared/state/snooze'
 import type { WorktreeRowModel } from '../worktree-list-model'
@@ -30,6 +30,7 @@ export interface WorktreeRowActionHandlers {
   onUnsnooze?: () => void
   onPrune?: () => void
   onDelete?: () => void
+  onTogglePin?: () => void
 }
 
 export interface WorktreeAliasActionHandlers {
@@ -56,9 +57,25 @@ export function buildRowActions(
     })
   }
 
-  if ((handlers.onSnooze || handlers.onUnsnooze) && !worktree.isMain) {
-    if (row.isSnoozed) {
-      actions.push({
+  actions.push(...buildPinActions(row, handlers))
+
+  actions.push(...buildSnoozeActions(row, handlers))
+  actions.push(...buildDestructiveActions(row, handlers))
+
+  return actions
+}
+
+/** Snooze / wake. Never offered for the main worktree — it has no lifecycle
+ *  of its own to pause. */
+export function buildSnoozeActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onSnooze' | 'onUnsnooze'>
+): WorktreeRowAction[] {
+  if (!handlers.onSnooze && !handlers.onUnsnooze) return []
+  if (row.worktree.isMain) return []
+  if (row.isSnoozed) {
+    return [
+      {
         key: 'unsnooze',
         label:
           typeof row.snoozeWakeAt === 'number'
@@ -67,40 +84,51 @@ export function buildRowActions(
         icon: AlarmClock,
         tone: 'accent',
         onSelect: () => handlers.onUnsnooze?.()
-      })
-    } else {
-      actions.push({
-        key: 'snooze',
-        label: 'Snooze',
-        icon: Moon,
-        tone: 'accent',
-        tooltipExtra: ' (⌥-click to pick a date)',
-        onSelect: (e) => handlers.onSnooze?.(e)
-      })
+      }
+    ]
+  }
+  return [
+    {
+      key: 'snooze',
+      label: 'Snooze',
+      icon: Moon,
+      tone: 'accent',
+      tooltipExtra: ' (⌥-click to pick a date)',
+      onSelect: (e) => handlers.onSnooze?.(e)
     }
-  }
+  ]
+}
 
+/** Prune / remove — the irreversible ones. Mutually exclusive: a prunable
+ *  worktree is already gone from disk, so it gets prune instead of remove. */
+export function buildDestructiveActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onPrune' | 'onDelete'>
+): WorktreeRowAction[] {
+  const { worktree } = row
   if (handlers.onPrune && worktree.prunable) {
-    actions.push({
-      key: 'prune',
-      label: 'Prune stale worktree (git worktree prune)',
-      icon: Trash2,
-      tone: 'warning',
-      onSelect: () => handlers.onPrune!()
-    })
+    return [
+      {
+        key: 'prune',
+        label: 'Prune stale worktree (git worktree prune)',
+        icon: Trash2,
+        tone: 'warning',
+        onSelect: () => handlers.onPrune!()
+      }
+    ]
   }
-
   if (handlers.onDelete && !worktree.prunable) {
-    actions.push({
-      key: 'delete',
-      label: 'Remove worktree',
-      icon: Trash2,
-      tone: 'danger',
-      onSelect: () => handlers.onDelete!()
-    })
+    return [
+      {
+        key: 'delete',
+        label: 'Remove worktree',
+        icon: Trash2,
+        tone: 'danger',
+        onSelect: () => handlers.onDelete!()
+      }
+    ]
   }
-
-  return actions
+  return []
 }
 
 /** Alias edit / clear. Desktop surfaces these through the right-click context
@@ -127,4 +155,62 @@ export function buildAliasActions(
     })
   }
   return actions
+}
+
+/** Pin / unpin. Unlike the other row actions this is also fed to the desktop
+ *  right-click menu, so pinning is reachable without hunting for the hover
+ *  icon. Available on every worktree including main — pinning is an
+ *  organisational choice, not a lifecycle action. */
+export function buildPinActions(
+  row: WorktreeRowModel,
+  handlers: Pick<WorktreeRowActionHandlers, 'onTogglePin'>
+): WorktreeRowAction[] {
+  if (!handlers.onTogglePin) return []
+  return [
+    row.isPinned
+      ? {
+          key: 'unpin',
+          label: 'Unpin Worktree',
+          icon: PinOff,
+          tone: 'accent',
+          onSelect: () => handlers.onTogglePin!()
+        }
+      : {
+          key: 'pin',
+          label: 'Pin Worktree',
+          icon: Pin,
+          tone: 'accent',
+          onSelect: () => handlers.onTogglePin!()
+        }
+  ]
+}
+
+/** A divider between two runs of menu entries. */
+export interface WorktreeMenuSeparator {
+  separator: true
+}
+
+export type WorktreeMenuEntry = WorktreeRowAction | WorktreeMenuSeparator
+
+/** The desktop right-click menu: pin, snooze and alias, then the
+ *  irreversible actions fenced off below a divider. Deliberately narrower
+ *  than `buildRowActions` — "continue on a new branch" stays a hover icon,
+ *  because it opens an inline form rather than acting immediately.
+ *
+ *  The divider is only emitted when there is something on both sides of it,
+ *  so a row with nothing destructive to offer doesn't end in a stray rule. */
+export function buildRowMenuEntries(
+  row: WorktreeRowModel,
+  handlers: WorktreeRowActionHandlers,
+  aliasHandlers: WorktreeAliasActionHandlers
+): WorktreeMenuEntry[] {
+  const primary = [
+    ...buildPinActions(row, handlers),
+    ...buildSnoozeActions(row, handlers),
+    ...buildAliasActions(row, aliasHandlers)
+  ]
+  const destructive = buildDestructiveActions(row, handlers)
+  if (primary.length === 0) return destructive
+  if (destructive.length === 0) return primary
+  return [...primary, { separator: true }, ...destructive]
 }

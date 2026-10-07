@@ -8,7 +8,7 @@ import { STATUS_COLORS, STATUS_LABELS, prIconStyle } from '../worktree-row-style
 import { repoNameColor } from './RepoIcon'
 import { fuzzyMatch } from '../fuzzy'
 import { useBackend } from '../backend'
-import { useSettings, useSnooze, useAliases } from '../store'
+import { useSettings, useSnooze, useAliases, usePinned } from '../store'
 import {
   CHANGED_STATUS_COLOR,
   CHANGED_STATUS_LABEL,
@@ -255,9 +255,10 @@ export function CommandPalette({
     for (const p of Object.keys(snoozeByPath)) m[p] = true
     return m
   }, [snoozeByPath])
+  const pinnedPaths = usePinned().byPath
   const groups = useMemo(
-    () => groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin),
-    [worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin]
+    () => groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths),
+    [worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, pinnedPaths]
   )
 
   const actionItems = useMemo(() => {

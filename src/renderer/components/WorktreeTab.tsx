@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal } from 'lucide-react'
+import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { repoNameColor } from './RepoIcon'
@@ -7,7 +7,7 @@ import { SubtitleDetail } from './WorktreeSubtitleDetail'
 import { formatPendingTool } from '../pending-tool'
 import { HotkeyBadge } from './HotkeyBadge'
 import type { Action } from '../hotkeys'
-import { ContextMenu, type ContextMenuSubItem } from './ContextMenu'
+import { ContextMenu, type ContextMenuEntry, type ContextMenuSubItem } from './ContextMenu'
 import { useBackend } from '../backend'
 import { useAvailableEditors } from '../hooks/useAvailableEditors'
 import { useEditorOverrideScope, useResolvedEditorId } from '../store'
@@ -18,6 +18,7 @@ import type { WorktreeRowModel } from '../worktree-list-model'
 import {
   buildRowActions,
   buildAliasActions,
+  buildRowMenuEntries,
   type WorktreeRowAction,
   type WorktreeRowActionHandlers
 } from './worktree-row-actions'
@@ -56,7 +57,7 @@ export function WorktreeTab({
 }: WorktreeTabProps): JSX.Element {
   const backend = useBackend()
   const touch = variant === 'touch'
-  const { worktree, prStatus, displayStatus, pendingTool, shellActive, deleting, alias } = row
+  const { worktree, prStatus, displayStatus, pendingTool, shellActive, deleting, alias, isPinned } = row
   const label = displayLabel(worktree, alias, metaHeld)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -71,6 +72,10 @@ export function WorktreeTab({
     onClearAlias: () => void backend.clearAlias(worktree.path)
   })
   const rowActions = buildRowActions(row, deleting ? {} : actions)
+  const menuEntries = buildRowMenuEntries(row, deleting ? {} : actions, {
+    onEditAlias: onStartAliasEdit,
+    onClearAlias: () => void backend.clearAlias(worktree.path)
+  })
 
   // Editor submenu. Every sidebar row mounts this component, so all three
   // hooks are gated on the menu actually being open — a closed row passes
@@ -109,6 +114,21 @@ export function WorktreeTab({
       ]
     : []
 
+  // `buildRowMenuEntries` owns the ordering, so "Open in" is spliced into the
+  // everyday run ahead of the divider rather than appended — appending would
+  // strand it below "Remove worktree" on the destructive side of the rule.
+  const mappedEntries: ContextMenuEntry[] = menuEntries.map((e) =>
+    'separator' in e
+      ? { separator: true as const }
+      : { label: e.label, onClick: () => e.onSelect(), danger: e.tone === 'danger' }
+  )
+  const dividerAt = mappedEntries.findIndex((e) => 'separator' in e)
+  const openIn = { label: 'Open in', submenu: editorSubmenu }
+  const menuItems: ContextMenuEntry[] =
+    dividerAt === -1
+      ? [...mappedEntries, openIn]
+      : [...mappedEntries.slice(0, dividerAt), openIn, ...mappedEntries.slice(dividerAt)]
+
   return (
     <div
       onClick={onClick}
@@ -137,6 +157,11 @@ export function WorktreeTab({
       )}
       {shellActive && (
         <Loader2 className="icon-xs animate-spin text-fg-bright shrink-0" aria-label="Shell activity" />
+      )}
+      {isPinned && (
+        <span className="shrink-0 inline-flex group-hover:hidden" title="Pinned" aria-label="Pinned">
+          <Pin className="icon-xs text-accent" />
+        </span>
       )}
       {prStatus && (
         <span className="relative shrink-0" title={prIconTitle(prStatus)}>
@@ -232,10 +257,7 @@ export function WorktreeTab({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={[
-            ...aliasActions.map((a) => ({ label: a.label, onClick: () => a.onSelect() })),
-            { label: 'Open in', submenu: editorSubmenu }
-          ]}
+          items={menuItems}
           onClose={() => setMenu(null)}
         />
       )}
