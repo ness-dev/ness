@@ -22,6 +22,7 @@ import {
 } from './tool-display'
 import type { ToolIcon } from './tool-icons'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
+import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
 
 export { extractArgs, getToolDisplay, isNessControl, prettyToolName }
 export type { ArgEntry }
@@ -59,6 +60,42 @@ export function trunc(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/** Half-size thumbnails that stay visible while a card / group is
+ *  collapsed, so a screenshot is never fully hidden behind a chevron
+ *  and the card doesn't have to force itself open to prove it exists.
+ *  Lives outside the header <button> — a nested button would be invalid
+ *  markup and would swallow the click-to-zoom. */
+export function CollapsedImageStrip({
+  images
+}: {
+  images: JsonClaudeImageRef[]
+}): JSX.Element | null {
+  if (images.length === 0) return null
+  const shown = images.slice(0, 8)
+  const moreCount = images.length - shown.length
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
+      {shown.map((img) => (
+        <JsonModeChatImageThumb
+          key={img.path}
+          path={img.path}
+          mediaType={img.mediaType}
+          shape="wide"
+          size="sm"
+        />
+      ))}
+      {moreCount > 0 && (
+        <span
+          className="text-muted shrink-0 pl-0.5"
+          style={{ fontSize: 'var(--chat-meta-text)' }}
+        >
+          +{moreCount}
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function ToolCardChrome({
   id,
   name,
@@ -70,6 +107,7 @@ export function ToolCardChrome({
   autoApproved,
   sessionAllowed,
   autoExpand = false,
+  collapsedImages,
   children
 }: {
   /** Stable id for find-integration. When Cmd+F cycles to a match inside
@@ -77,10 +115,15 @@ export function ToolCardChrome({
    *  card renders as expanded regardless of local state. */
   id?: string
   /** Open the card without a click until the user says otherwise. Set
-   *  for results worth seeing at a glance (browser screenshots). Read on
-   *  every render rather than as an initial useState value, because the
-   *  tool_result lands after the card first mounts. */
+   *  for results needing user action. Read on every render rather than
+   *  as an initial useState value, because the tool_result lands after
+   *  the card first mounts. Deliberately NOT set for screenshots —
+   *  those surface via `collapsedImages` instead, so an image doesn't
+   *  override the user's expectation that tool cards start closed. */
   autoExpand?: boolean
+  /** Images to show as half-size thumbnails under the header while the
+   *  card is collapsed. */
+  collapsedImages?: JsonClaudeImageRef[]
   name: string
   /** Accepts a ReactNode so cards whose primary render is the subtitle
    *  (Grep/Glob's pattern field) can pass a <HighlightedText> here. */
@@ -179,6 +222,9 @@ export function ToolCardChrome({
           </span>
         )}
       </button>
+      {!isOpen && collapsedImages && (
+        <CollapsedImageStrip images={collapsedImages} />
+      )}
       {isOpen && children}
     </div>
   )

@@ -62,7 +62,8 @@ import {
   QUESTION_TOOL_NAME,
   type JsonClaudeAutomationSource,
   type JsonClaudeBackgroundAgent,
-  type JsonClaudeChatEntry
+  type JsonClaudeChatEntry,
+  type JsonClaudeImageRef
 } from '../../shared/state/json-claude'
 import {
   COMPACT_BODY_TEXT,
@@ -300,10 +301,11 @@ interface RenderedRow {
   toolName?: string
   hasError?: boolean
   hasPendingApproval?: boolean
-  /** This row's tool returned an image (a browser screenshot). Bubbles
-   *  up to ToolGroup so the group opens far enough to show it — a
-   *  screenshot behind two collapsed chevrons may as well not be there. */
-  hasImages?: boolean
+  /** Images this row's tool returned (browser screenshots). Bubbles up
+   *  to ToolGroup, which draws them as half-size thumbnails in the
+   *  collapsed timeline strip — visible without expanding, so a
+   *  screenshot no longer has to force the group open. */
+  images?: JsonClaudeImageRef[]
   /** Marks this row as a thinking card. Lives in the 'tool' bucket so
    *  it groups with adjacent tool_use rows (thinking + tools are both
    *  agent work between user-facing replies), but ToolGroup counts it
@@ -1141,7 +1143,7 @@ function renderEntries(
             type: 'tool',
             toolName: block.name,
             hasError: !!result?.isError,
-            hasImages: !!result?.images && result.images.length > 0,
+            images: result?.images,
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,

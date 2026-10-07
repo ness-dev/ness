@@ -37,12 +37,18 @@ interface Props {
    *  'wide' keeps the aspect ratio at 128px tall, for browser
    *  screenshots where a centre-crop would throw away the page. */
   shape?: 'square' | 'wide'
+  /** 'sm' is half the linear size of 'base' — used for the strip that
+   *  rides along in a collapsed tool card / tool group header, where the
+   *  thumbnail is a "there's a screenshot here" marker rather than
+   *  something to read. */
+  size?: 'base' | 'sm'
 }
 
 export function JsonModeChatImageThumb({
   path,
   mediaType,
-  shape = 'square'
+  shape = 'square',
+  size = 'base'
 }: Props): JSX.Element {
   const [dataUrl, setDataUrl] = useState<string | null>(
     CACHE.has(path) ? CACHE.get(path)! : null
@@ -78,11 +84,21 @@ export function JsonModeChatImageThumb({
   }, [showFull])
 
   const name = path.split('/').pop() || path
-  const boxClass = shape === 'wide' ? 'h-32 w-48' : 'h-16 w-16'
+  const sm = size === 'sm'
+  const boxClass =
+    shape === 'wide'
+      ? sm
+        ? 'h-16 w-24'
+        : 'h-32 w-48'
+      : sm
+        ? 'h-8 w-8'
+        : 'h-16 w-16'
   const imgClass =
     shape === 'wide'
-      ? 'h-32 w-auto max-w-full object-contain bg-app'
-      : 'h-16 w-16 object-cover'
+      ? `${sm ? 'h-16' : 'h-32'} w-auto max-w-full object-contain bg-app`
+      : sm
+        ? 'h-8 w-8 object-cover'
+        : 'h-16 w-16 object-cover'
 
   if (pending) {
     return (
@@ -98,7 +114,7 @@ export function JsonModeChatImageThumb({
         className={`${boxClass} rounded bg-panel border border-border flex items-center justify-center text-faint`}
         title={`${path} (no longer on disk)`}
       >
-        <ImageOff className="icon-base" />
+        <ImageOff className={sm ? 'icon-xs' : 'icon-base'} />
       </div>
     )
   }
