@@ -40,13 +40,20 @@ import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
 import { JsonClaudeQuestionCard } from './JsonClaudeQuestionCard'
 import { Tooltip } from './Tooltip'
-import { dispatchToolCard, ToolCardChrome } from './json-mode-cards'
+import { dispatchToolCard, ToolCardChrome, type ToolResultView } from './json-mode-cards'
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TaskCard } from './json-mode-cards/TaskCard'
 import { buildChildrenMap, isSubAgentToolName } from './json-mode-cards/grouping'
 import { JsonModeMentionPopover, type MentionPopoverItem } from './JsonModeMentionPopover'
 import { JsonModeChatImageThumb } from './JsonModeChatImageThumb'
+import { ResizeHandle } from './ResizeHandle'
+import {
+  clampComposerHeight,
+  composerHeightKey,
+  readComposerHeight,
+  MIN_COMPOSER_HEIGHT
+} from './composer-height'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import { CLAUDE_MODELS } from '../../shared/agent-registry'
@@ -292,6 +299,10 @@ interface RenderedRow {
   toolName?: string
   hasError?: boolean
   hasPendingApproval?: boolean
+  /** This row's tool returned an image (a browser screenshot). Bubbles
+   *  up to ToolGroup so the group opens far enough to show it — a
+   *  screenshot behind two collapsed chevrons may as well not be there. */
+  hasImages?: boolean
   /** Marks this row as a thinking card. Lives in the 'tool' bucket so
    *  it groups with adjacent tool_use rows (thinking + tools are both
    *  agent work between user-facing replies), but ToolGroup counts it
@@ -855,7 +866,7 @@ function AutomatedTurnCard({
 }
 
 interface RenderContext {
-  resultsByToolUseId: Map<string, { content: string; isError: boolean }>
+  resultsByToolUseId: Map<string, ToolResultView>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
   approvalCard: (toolUseId: string | undefined) => ReactNode
   pendingToolUseIds: Set<string>
@@ -1129,6 +1140,7 @@ function renderEntries(
             type: 'tool',
             toolName: block.name,
             hasError: !!result?.isError,
+            hasImages: !!result?.images && result.images.length > 0,
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,
@@ -1301,16 +1313,45 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     }>
   >([])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // px = null means never resized, so the composer auto-grows with content.
+  // Once the user drags the divider it becomes a fixed height and auto-grow
+  // stops; double-clicking the divider returns it to null.
+  //
+  // `sid` tags which session the height belongs to. MobileApp renders this
+  // component unkeyed, so sessionId can change without a remount — without
+  // the tag the persist effect below would write the outgoing tab's height
+  // under the incoming tab's key.
+  const [composerBox, setComposerBox] = useState<{
+    sid: string
+    px: number | null
+  }>(() => ({ sid: sessionId, px: readComposerHeight(sessionId) }))
+  const composerHeight = composerBox.sid === sessionId ? composerBox.px : null
+  useEffect(() => {
+    if (composerBox.sid !== sessionId) {
+      setComposerBox({ sid: sessionId, px: readComposerHeight(sessionId) })
+    }
+  }, [sessionId, composerBox.sid])
+  useEffect(() => {
+    if (composerBox.sid !== sessionId) return
+    const key = composerHeightKey(sessionId)
+    if (composerBox.px == null) localStorage.removeItem(key)
+    else localStorage.setItem(key, String(composerBox.px))
+  }, [composerBox, sessionId])
   // Auto-grow composer with content. CSS max-h caps the rendered height
   // (~8 lines at text-sm + py-1.5); beyond that the textarea scrolls
   // internally. Setting height='auto' first lets the browser recompute
   // scrollHeight when the user deletes text so the box shrinks back.
+  // A user-set height short-circuits all of that.
   useLayoutEffect(() => {
     const ta = textareaRef.current
     if (!ta) return
+    if (composerHeight != null) {
+      ta.style.height = `${composerHeight}px`
+      return
+    }
     ta.style.height = 'auto'
     ta.style.height = `${ta.scrollHeight}px`
-  }, [draft])
+  }, [draft, composerHeight])
   // Wake-on-typing: first keystroke into a slept tab fires the wake IPC;
   // subsequent keystrokes only refresh lastActive (debounced 5s) so the
   // auto-sleep monitor can't re-sleep this worktree mid-composition.
@@ -1332,6 +1373,27 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   }, [backend, mode, sessionId, worktreePath])
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const findInputRef = useRef<HTMLInputElement>(null)
+  // First drag seeds from the textarea's current rendered height so the box
+  // doesn't jump when auto-grow hands over to a fixed height.
+  const handleComposerResize = useCallback(
+    (deltaY: number): void => {
+      setComposerBox((prev) => {
+        const current =
+          (prev.sid === sessionId ? prev.px : null) ??
+          textareaRef.current?.getBoundingClientRect().height ??
+          MIN_COMPOSER_HEIGHT
+        const transcriptPx = scrollRef.current?.clientHeight ?? 0
+        return {
+          sid: sessionId,
+          px: clampComposerHeight(current, deltaY, transcriptPx)
+        }
+      })
+    },
+    [sessionId]
+  )
+  const resetComposerHeight = useCallback((): void => {
+    setComposerBox({ sid: sessionId, px: null })
+  }, [sessionId])
   // dragenter fires for every child element entered, dragleave for every
   // child exited — so a naive boolean flickers as the cursor moves over
   // nested nodes. Counter pattern: increment on enter, decrement on
@@ -1681,17 +1743,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // tool_use_id → tool_result lookup built once over the full
     // entries array (results live in top-level tool_result entries
     // even when their corresponding tool_use was a sub-agent's call).
-    const resultsByToolUseId = new Map<
-      string,
-      { content: string; isError: boolean }
-    >()
+    const resultsByToolUseId = new Map<string, ToolResultView>()
     for (const entry of deferredEntries) {
       if (entry.kind !== 'tool_result' || !entry.blocks) continue
       for (const b of entry.blocks) {
         if (b.type === 'tool_result' && b.toolUseId) {
           resultsByToolUseId.set(b.toolUseId, {
             content: b.content || '',
-            isError: !!b.isError
+            isError: !!b.isError,
+            ...(b.images && b.images.length > 0 ? { images: b.images } : {})
           })
         }
       }
@@ -2722,7 +2782,14 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           </button>
         </div>
       )}
-      <div className="shrink-0 border-t border-border p-2">
+      <div className="shrink-0">
+        <ResizeHandle
+          axis="y"
+          onDelta={handleComposerResize}
+          onDoubleClick={resetComposerHeight}
+          title="Drag to resize the prompt · double-click to reset"
+        />
+        <div className="p-2">
         <div className="relative rounded-md border border-border bg-panel focus-within:border-accent transition-colors">
           {mentionItems.length > 0 && (
             <JsonModeMentionPopover
@@ -2872,6 +2939,13 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             // the viewport when the textarea takes focus. text-sm on
             // desktop keeps the chat dense.
             className="block w-full bg-transparent border-0 px-2.5 pt-2 pb-1 text-base sm:text-sm resize-none outline-none placeholder:text-faint min-h-[60px] max-h-[200px]"
+            // A user-dragged height has to beat the 200px class cap, or
+            // dragging past 8 lines would silently do nothing.
+            style={
+              composerHeight != null
+                ? { maxHeight: `${composerHeight}px` }
+                : undefined
+            }
             rows={2}
             // Never disabled — sleep kills the subprocess and dispatches
             // state='exited', and the wake transition arrives as separate
@@ -2933,6 +3007,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
               <span className="opacity-60 ml-1">{sendHotkeyLabel}</span>
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>

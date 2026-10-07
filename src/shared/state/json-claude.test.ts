@@ -476,6 +476,24 @@ describe('jsonClaudeReducer', () => {
     expect(state.sessions[SID].entries).toHaveLength(1)
     expect(state.sessions[SID].entries[0].kind).toBe('tool_result')
     expect(state.sessions[SID].entries[0].blocks?.[0].toolUseId).toBe('toolu_abc')
+    expect(state.sessions[SID].entries[0].blocks?.[0].images).toBeUndefined()
+  })
+
+  it('toolResultAttached carries screenshot image refs onto the block', () => {
+    let state = seedSession(initialJsonClaude)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/toolResultAttached',
+      payload: {
+        sessionId: SID,
+        toolUseId: 'toolu_shot',
+        content: '',
+        isError: false,
+        images: [{ path: '/tmp/harness-attachments/result-abc.jpg', mediaType: 'image/jpeg' }]
+      }
+    })
+    expect(state.sessions[SID].entries[0].blocks?.[0].images).toEqual([
+      { path: '/tmp/harness-attachments/result-abc.jpg', mediaType: 'image/jpeg' }
+    ])
   })
 
   it('busyChanged toggles the busy flag', () => {

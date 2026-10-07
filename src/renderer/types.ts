@@ -7,6 +7,9 @@ export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 import type { RepoConfig } from '../shared/state/repo-configs'
 export type { RepoConfig }
 
+import type { ToolSpec, ToolRunResult } from '../shared/tools'
+export type { ToolSpec, ToolRunResult }
+
 import type { WeeklyStats, TopWorktree } from '../shared/weekly-stats'
 export type { WeeklyStats, TopWorktree }
 
@@ -309,6 +312,8 @@ export interface ElectronAPI {
 
   getWeeklyStats(): Promise<WeeklyStats>
   getBranchCommits(worktreePath: string): Promise<BranchCommit[]>
+  listTools(worktreePath: string): Promise<ToolSpec[]>
+  runTool(worktreePath: string, toolId: string): Promise<ToolRunResult>
   getCommitDiff(worktreePath: string, hash: string): Promise<CommitDiff | null>
   getCommitMeta(worktreePath: string, hash: string): Promise<CommitMeta | null>
   getCommitChangedFiles(worktreePath: string, hash: string): Promise<ChangedFile[]>
@@ -445,6 +450,10 @@ export interface ElectronAPI {
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
   setEditor(editorId: string): Promise<boolean>
+  /** Set (or clear, with `null`) the per-repo editor override. */
+  setRepoEditor(repoRoot: string, editorId: string | null): Promise<boolean>
+  /** Set (or clear, with `null`) the per-worktree editor override. */
+  setWorktreeEditor(worktreePath: string, editorId: string | null): Promise<boolean>
   getAvailableEditors(): Promise<{ id: string; name: string }[]>
   snooze(path: string, wakeAt: number): Promise<boolean>
   unsnooze(path: string): Promise<boolean>

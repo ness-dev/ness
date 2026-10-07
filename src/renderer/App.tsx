@@ -242,11 +242,18 @@ function DesktopApp(): JSX.Element {
   // Cleared alongside the repo when the modal closes.
   const [newWorktreeInitialPRNumber, setNewWorktreeInitialPRNumber] = useState<number | undefined>(undefined)
   const [newWorktreeForkSource, setNewWorktreeForkSource] = useState<ForkSource | undefined>(undefined)
+  // Set by "Build a custom tool" in the right column so the screen opens
+  // with a branch name and kickoff prompt already filled in. Same
+  // transient lifetime as the two above.
+  const [newWorktreePrefill, setNewWorktreePrefill] = useState<
+    { branch: string; prompt: string } | undefined
+  >(undefined)
   useEffect(() => {
     if (!showNewWorktree) {
       setNewWorktreeRepo(undefined)
       setNewWorktreeInitialPRNumber(undefined)
       setNewWorktreeForkSource(undefined)
+      setNewWorktreePrefill(undefined)
     }
   }, [showNewWorktree])
   // Chat's "Fork into new worktree" opens the create screen with the
@@ -1656,6 +1663,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
             defaultRepoRoot={newWorktreeRepo ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined)}
             initialPRNumber={newWorktreeInitialPRNumber}
             forkSource={newWorktreeForkSource}
+            initialBranch={newWorktreePrefill?.branch}
+            initialPrompt={newWorktreePrefill?.prompt}
           />
         )}
         {reportIssueState !== null && (
@@ -1797,6 +1806,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
               if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
             }}
             onCollapse={() => setRightColumnHidden(true)}
+            onBuildCustomTool={(branch, prompt) => {
+              setNewWorktreePrefill({ branch, prompt })
+              setShowNewWorktree(true)
+            }}
           /></div></div>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (

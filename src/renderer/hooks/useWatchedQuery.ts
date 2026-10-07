@@ -48,7 +48,12 @@ export interface UseWatchedQueryOptions<T> {
    *  must not be served by an in-flight request that started before the
    *  change. Fetchers that dedup should honour it. */
   fetcher: (path: string, opts: { force: boolean }) => Promise<T>
+  /** 0 disables background polling — the query then only runs on mount,
+   * on worktree switch, and on an explicit refresh(). */
   fallbackPollMs?: number
+  /** When false, a git change in the worktree doesn't trigger a refetch.
+   * Needed for queries whose fetcher is expensive or hits the network. */
+  revalidateOnFileChange?: boolean
 }
 
 export interface UseWatchedQueryResult<T> {
@@ -60,7 +65,13 @@ export interface UseWatchedQueryResult<T> {
 export function useWatchedQuery<T>(
   opts: UseWatchedQueryOptions<T>
 ): UseWatchedQueryResult<T> {
-  const { worktreePath, cacheKey, fetcher, fallbackPollMs = 30000 } = opts
+  const {
+    worktreePath,
+    cacheKey,
+    fetcher,
+    fallbackPollMs = 30000,
+    revalidateOnFileChange = true
+  } = opts
   const backend = useBackend()
 
   const [data, setData] = useState<T | null>(() =>
@@ -118,19 +129,24 @@ export function useWatchedQuery<T>(
 
   useEffect(() => {
     if (!worktreePath) return
+    const interval = fallbackPollMs > 0 ? setInterval(() => refresh(), fallbackPollMs) : null
+    if (!revalidateOnFileChange) {
+      return () => {
+        if (interval) clearInterval(interval)
+      }
+    }
     backend.watchChangedFiles(worktreePath)
     const offInvalidated = backend.onChangedFilesInvalidated((path) => {
       if (path !== worktreePath) return
       cacheDelete(cacheKey, worktreePath)
       refresh({ force: true })
     })
-    const interval = setInterval(() => refresh(), fallbackPollMs)
     return () => {
-      clearInterval(interval)
+      if (interval) clearInterval(interval)
       offInvalidated()
       backend.unwatchChangedFiles(worktreePath)
     }
-  }, [worktreePath, cacheKey, refresh, fallbackPollMs, backend])
+  }, [worktreePath, cacheKey, refresh, fallbackPollMs, revalidateOnFileChange, backend])
 
   return { data, loading, refresh }
 }

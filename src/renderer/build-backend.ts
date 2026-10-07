@@ -206,6 +206,8 @@ export function buildBackend(
       mode?: 'working' | 'branch'
     ) => req('worktree:fileDiffSides', worktreePath, filePath, staged, mode),
     getBranchCommits: (worktreePath: string) => req('worktree:branchCommits', worktreePath),
+    listTools: (worktreePath: string) => req('tools:list', worktreePath),
+    runTool: (worktreePath: string, toolId: string) => req('tools:run', worktreePath, toolId),
     getCommitDiff: (worktreePath: string, hash: string) =>
       req('worktree:commitDiff', worktreePath, hash),
     getCommitMeta: (worktreePath: string, hash: string) =>
@@ -427,6 +429,10 @@ export function buildBackend(
       req('config:setBottomIconOrder', order),
 
     setEditor: (editorId: string) => req('config:setEditor', editorId),
+    setRepoEditor: (repoRoot: string, editorId: string | null) =>
+      req('config:setRepoEditor', repoRoot, editorId),
+    setWorktreeEditor: (worktreePath: string, editorId: string | null) =>
+      req('config:setWorktreeEditor', worktreePath, editorId),
     getAvailableEditors: () => req('config:getAvailableEditors'),
 
     snooze: (path: string, wakeAt: number) => req('snooze:snooze', path, wakeAt),

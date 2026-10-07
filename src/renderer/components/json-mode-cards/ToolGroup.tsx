@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { Brain } from 'lucide-react'
 import { getToolDisplay, isNessControl } from './index'
 
@@ -8,6 +8,10 @@ export interface ToolGroupRow {
   toolName?: string
   hasError?: boolean
   hasPendingApproval?: boolean
+  /** This row's tool returned an image (a browser screenshot). Opens the
+   *  group by default so the screenshot is visible in the transcript
+   *  rather than buried behind a chevron. */
+  hasImages?: boolean
   /** Thinking blocks ride along in the same group as adjacent tool_use
    *  rows since they're both agent work between user-facing replies.
    *  ToolGroup counts them under their own label so the header isn't
@@ -23,19 +27,19 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   const anyBrand = rows.some(
     (r) => !r.isThinking && isNessControl(r.toolName)
   )
-  // Auto-expand only for pending approvals — those need user action.
-  // Errors get a header badge but stay collapsed; user can drill in.
-  const wasAutoExpandedRef = useRef(hasPending)
-  const [expanded, setExpanded] = useState<boolean>(hasPending)
-  useEffect(() => {
-    if (hasPending && !expanded) {
-      wasAutoExpandedRef.current = true
-      setExpanded(true)
-    } else if (!hasPending && wasAutoExpandedRef.current && expanded) {
-      wasAutoExpandedRef.current = false
-      setExpanded(false)
-    }
-  }, [hasPending, expanded])
+  // Auto-expand for pending approvals (they need user action) and for
+  // screenshots (they're the payload, not a detail). Errors get a header
+  // badge but stay collapsed; user can drill in.
+  //
+  // null means "no explicit choice yet, follow autoExpand" — so a group
+  // opens when an approval lands and closes again once it resolves,
+  // while a click pins it either way. Tracking the user's choice as its
+  // own state (rather than reverting via an effect) is what lets a
+  // screenshot group be collapsed at all: hasImages never goes back to
+  // false, so an effect-driven revert would immediately re-open it.
+  const autoExpand = hasPending || rows.some((r) => r.hasImages)
+  const [userChoice, setUserChoice] = useState<boolean | null>(null)
+  const expanded = userChoice ?? autoExpand
 
   const toolRows = rows.filter((r) => !r.isThinking)
   const thinkingCount = rows.length - toolRows.length
@@ -81,10 +85,7 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
       {anyBrand && <div className="brand-gradient-bg h-0.5" />}
       <button
         type="button"
-        onClick={() => {
-          wasAutoExpandedRef.current = false
-          setExpanded((v) => !v)
-        }}
+        onClick={() => setUserChoice(!expanded)}
         className={`${anyBrand ? 'group' : ''} w-full flex items-center gap-2 cursor-pointer hover:bg-app/60 transition-colors text-left`}
         style={{
           paddingInline: 'var(--chat-chrome-px)',

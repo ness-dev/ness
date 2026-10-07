@@ -13,7 +13,7 @@
 import { writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 const ATTACHMENT_DIR = join(tmpdir(), 'harness-attachments')
 
@@ -57,5 +57,23 @@ export function writeAttachmentImage(
   const ext = EXT_BY_MEDIA_TYPE[mediaType.toLowerCase()] || 'bin'
   const path = join(ATTACHMENT_DIR, `${randomUUID()}.${ext}`)
   writeFileSync(path, Buffer.from(base64Data, 'base64'), { mode: 0o600 })
+  return path
+}
+
+/** Same as writeAttachmentImage but keyed by content hash, so extracting
+ *  the same image twice yields the same path and writes once. Tool-result
+ *  images (browser screenshots) need this: resuming a session replays the
+ *  whole transcript through the extractor, and uuid names would leak a
+ *  fresh copy of every screenshot on every resume. */
+export function writeResultImage(base64Data: string, mediaType: string): string {
+  if (!existsSync(ATTACHMENT_DIR)) {
+    mkdirSync(ATTACHMENT_DIR, { recursive: true, mode: 0o700 })
+  }
+  const ext = EXT_BY_MEDIA_TYPE[mediaType.toLowerCase()] || 'bin'
+  const hash = createHash('sha256').update(base64Data).digest('hex').slice(0, 32)
+  const path = join(ATTACHMENT_DIR, `result-${hash}.${ext}`)
+  if (!existsSync(path)) {
+    writeFileSync(path, Buffer.from(base64Data, 'base64'), { mode: 0o600 })
+  }
   return path
 }

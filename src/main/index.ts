@@ -55,11 +55,13 @@ import { WorktreeWatcher } from './worktree-watcher'
 import { FileContentWatcher } from './file-content-watcher'
 import { SnoozeTimer } from './snooze-timer'
 import { getWeeklyStats } from './weekly-stats'
+import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
 import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, symlinkClaudeSettings, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
+import { resolveEditorId } from '../shared/editor-resolve'
 import { setSecret, getSecret, hasSecret, deleteSecret } from './secrets'
 import { resolveGitHubToken, getTokenSource, invalidateTokenCache, getCachedToken } from './github-auth'
 import {
@@ -1735,6 +1737,9 @@ function registerIpcHandlers(): void {
       delete config.locallyMerged[wt.branch]
       saveConfig(config)
     }
+    // Drop any per-worktree editor override so a future worktree reusing this
+    // path doesn't silently inherit it.
+    if (config.worktreeEditors?.[path]) setEditorOverride('worktree', path, null)
     // Capture final stats *before* the working tree is gone.
     const diffStats = await getBranchDiffStats(path)
     if (wt) touchActivityMeta(path, { branch: wt.branch, repoRoot })
@@ -1830,6 +1835,9 @@ function registerIpcHandlers(): void {
       delete config.panes[repoRoot]
     }
     saveConfig(config)
+    // Same for any editor override — otherwise Settings keeps listing the
+    // removed repo under "Overridden in …" with no way to clear it.
+    if (config.repoEditors?.[repoRoot]) setEditorOverride('repo', repoRoot, null)
     worktreesFSM.dispatchRepos([...config.repoRoots])
     store.dispatch({ type: 'repoConfigs/removed', payload: repoRoot })
     void worktreesFSM.refreshList()
@@ -1953,6 +1961,18 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('worktree:branchCommits', async (_ctx, worktreePath: string) => {
     return getBranchCommits(worktreePath)
+  })
+
+  transport.onRequest('tools:list', async (_ctx, worktreePath: string) => {
+    return discoverTools(worktreePath)
+  })
+
+  transport.onRequest('tools:run', async (_ctx, worktreePath: string, toolId: string) => {
+    const wt = store.getSnapshot().state.worktrees.list.find((w) => w.path === worktreePath)
+    return runTool(worktreePath, toolId, {
+      branch: wt?.branch ?? '',
+      repoRoot: wt?.repoRoot ?? worktreePath
+    })
   })
 
   transport.onRequest('worktree:commitDiff', async (_ctx, worktreePath: string, hash: string) => {
@@ -2901,6 +2921,44 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  // Set (or clear, with editorId === null) one per-repo / per-worktree editor
+  // override. Both maps live in config.json — see the note on Config.repoEditors
+  // for why these deliberately aren't in the repo's committed .ness.json.
+  function setEditorOverride(
+    scope: 'repo' | 'worktree',
+    key: string,
+    editorId: string | null
+  ): boolean {
+    if (editorId !== null && !AVAILABLE_EDITORS.some((e) => e.id === editorId)) return false
+    const field = scope === 'repo' ? 'repoEditors' : 'worktreeEditors'
+    const map = { ...(config[field] || {}) }
+    if (editorId === null) delete map[key]
+    else map[key] = editorId
+    if (Object.keys(map).length === 0) delete config[field]
+    else config[field] = map
+    saveConfig(config)
+    store.dispatch({
+      type: scope === 'repo' ? 'settings/repoEditorChanged' : 'settings/worktreeEditorChanged',
+      payload: { key, editorId }
+    })
+    return true
+  }
+
+  // Run the shared worktree → repo → global chain. The worktree's repoRoot
+  // comes from the store rather than the caller so every existing
+  // `openInEditor(worktreePath, …)` callsite picks up overrides unchanged.
+  function resolveEditorForWorktree(worktreePath: string): string {
+    const { state } = store.getSnapshot()
+    const repoRoot = state.worktrees.list.find((w) => w.path === worktreePath)?.repoRoot
+    return resolveEditorId({
+      globalEditor: state.settings.editor,
+      repoEditors: state.settings.repoEditors,
+      worktreeEditors: state.settings.worktreeEditors,
+      repoRoot,
+      worktreePath
+    })
+  }
+
   transport.onRequest('config:setEditor', (_ctx, editorId: string) => {
     if (!AVAILABLE_EDITORS.some((e) => e.id === editorId)) return false
     if (editorId === DEFAULT_EDITOR_ID) {
@@ -2913,13 +2971,22 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setRepoEditor', (_ctx, repoRoot: string, editorId: string | null) =>
+    setEditorOverride('repo', repoRoot, editorId)
+  )
+
+  transport.onRequest(
+    'config:setWorktreeEditor',
+    (_ctx, worktreePath: string, editorId: string | null) =>
+      setEditorOverride('worktree', worktreePath, editorId)
+  )
+
   transport.onRequest('config:getAvailableEditors', (_ctx) => {
     return AVAILABLE_EDITORS.map(({ id, name }) => ({ id, name }))
   })
 
   transport.onRequest('editor:open', (_ctx, worktreePath: string, filePath?: string) => {
-    const editorId = config.editor || DEFAULT_EDITOR_ID
-    return openInEditor(editorId, worktreePath, filePath)
+    return openInEditor(resolveEditorForWorktree(worktreePath), worktreePath, filePath)
   })
 
   transport.onRequest('config:setWorktreeBase', (_ctx, mode: 'remote' | 'local') => {

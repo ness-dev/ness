@@ -26,11 +26,13 @@ import { isPackaged, resolveBundledMcpScript } from './paths'
 import type { Store } from './store'
 import type {
   JsonClaudeChatEntry,
+  JsonClaudeImageRef,
   JsonClaudeMessageBlock,
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
 import { shellQuote } from './shell-quote'
@@ -475,7 +477,8 @@ export class JsonClaudeManager {
                   type: 'tool_result',
                   toolUseId: r.toolUseId,
                   content: r.content,
-                  isError: r.isError
+                  isError: r.isError,
+                  ...(r.images ? { images: r.images } : {})
                 }
               ]
             })
@@ -1714,7 +1717,8 @@ export class JsonClaudeManager {
             sessionId: instance.sessionId,
             toolUseId: r.toolUseId,
             content: r.content,
-            isError: r.isError
+            isError: r.isError,
+            ...(r.images ? { images: r.images } : {})
           }
         })
       }
@@ -2277,19 +2281,43 @@ function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageB
   return out
 }
 
-function extractToolResults(
-  ev: Record<string, unknown>
-): Array<{ toolUseId: string; content: string; isError: boolean }> {
+interface ExtractedToolResult {
+  toolUseId: string
+  content: string
+  isError: boolean
+  images?: JsonClaudeImageRef[]
+}
+
+function extractToolResults(ev: Record<string, unknown>): ExtractedToolResult[] {
   const message = ev['message'] as { content?: unknown } | undefined
   const content = message?.content
   if (!Array.isArray(content)) return []
   return extractToolResultsFromArray(content)
 }
 
-function extractToolResultsFromArray(
-  content: unknown[]
-): Array<{ toolUseId: string; content: string; isError: boolean }> {
-  const out: Array<{ toolUseId: string; content: string; isError: boolean }> = []
+/** MCP tools that return images (browser screenshots) surface them as
+ *  Anthropic-shaped blocks: {type:'image', source:{type:'base64',
+ *  media_type, data}}. Spill the bytes to a temp file and keep only the
+ *  path — a PNG screenshot is megabytes of base64, and everything in a
+ *  state event gets re-broadcast to every connected client. */
+function extractResultImage(part: Record<string, unknown>): JsonClaudeImageRef | null {
+  if (part['type'] !== 'image') return null
+  const source = part['source']
+  if (!source || typeof source !== 'object') return null
+  const s = source as Record<string, unknown>
+  const data = s['data']
+  const mediaType = s['media_type']
+  if (typeof data !== 'string' || !data) return null
+  if (typeof mediaType !== 'string' || !mediaType.startsWith('image/')) return null
+  try {
+    return { path: writeResultImage(data, mediaType), mediaType }
+  } catch {
+    return null
+  }
+}
+
+function extractToolResultsFromArray(content: unknown[]): ExtractedToolResult[] {
+  const out: ExtractedToolResult[] = []
   for (const raw of content) {
     if (!raw || typeof raw !== 'object') continue
     const b = raw as Record<string, unknown>
@@ -2297,23 +2325,31 @@ function extractToolResultsFromArray(
     const id = typeof b['tool_use_id'] === 'string' ? (b['tool_use_id'] as string) : ''
     if (!id) continue
     const rawContent = b['content']
+    const images: JsonClaudeImageRef[] = []
     const text =
       typeof rawContent === 'string'
         ? rawContent
         : Array.isArray(rawContent)
           ? rawContent
               .map((p) => {
-                if (typeof p === 'object' && p && 'text' in (p as Record<string, unknown>)) {
-                  return String((p as Record<string, unknown>)['text'])
+                if (!p || typeof p !== 'object') return ''
+                const part = p as Record<string, unknown>
+                const img = extractResultImage(part)
+                if (img) {
+                  images.push(img)
+                  return ''
                 }
+                if ('text' in part) return String(part['text'])
                 return ''
               })
+              .filter((s) => s !== '')
               .join('\n')
           : JSON.stringify(rawContent)
     out.push({
       toolUseId: id,
       content: text,
-      isError: Boolean(b['is_error'])
+      isError: Boolean(b['is_error']),
+      ...(images.length > 0 ? { images } : {})
     })
   }
   return out

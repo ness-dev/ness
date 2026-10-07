@@ -7,8 +7,10 @@ import { SubtitleDetail } from './WorktreeSubtitleDetail'
 import { formatPendingTool } from '../pending-tool'
 import { HotkeyBadge } from './HotkeyBadge'
 import type { Action } from '../hotkeys'
-import { ContextMenu } from './ContextMenu'
+import { ContextMenu, type ContextMenuEntry, type ContextMenuSubItem } from './ContextMenu'
 import { useBackend } from '../backend'
+import { useAvailableEditors } from '../hooks/useAvailableEditors'
+import { useEditorOverrideScope, useResolvedEditorId } from '../store'
 import { displayLabel } from '../worktree-display'
 import { ALIAS_MAX_LEN } from '../../shared/state/aliases'
 import { STATUS_COLORS, STATUS_LABELS, detachedLikeTooltip, prIconStyle, prIconTitle } from '../worktree-row-style'
@@ -74,6 +76,58 @@ export function WorktreeTab({
     onEditAlias: onStartAliasEdit,
     onClearAlias: () => void backend.clearAlias(worktree.path)
   })
+
+  // Editor submenu. Every sidebar row mounts this component, so all three
+  // hooks are gated on the menu actually being open — a closed row passes
+  // null and the selectors short-circuit instead of re-resolving on every
+  // store event. repoRoot is handed over directly so neither selector has
+  // to scan worktrees.list.
+  const menuOpen = menu !== null
+  const editors = useAvailableEditors(menuOpen)
+  const editorPath = menuOpen ? worktree.path : null
+  const activeEditorId = useResolvedEditorId(editorPath, worktree.repoRoot)
+  const editorScope = useEditorOverrideScope(editorPath, worktree.repoRoot)
+  const editorSubmenu: ContextMenuSubItem[] = menuOpen
+    ? [
+        ...editors.map((ed) => ({
+          label: ed.name,
+          checked: ed.id === activeEditorId,
+          onClick: () => {
+            // Await the override before launching: openInEditor resolves the
+            // chain main-side, so firing both at once can race and open the
+            // editor this worktree was pinned to a moment ago.
+            void backend
+              .setWorktreeEditor(worktree.path, ed.id)
+              .then(() => backend.openInEditor(worktree.path))
+          }
+        })),
+        {
+          label:
+            editorScope === 'worktree'
+              ? 'Clear override'
+              : editorScope === 'repo'
+                ? 'Using repo default'
+                : 'Using global default',
+          disabled: editorScope !== 'worktree',
+          onClick: () => void backend.setWorktreeEditor(worktree.path, null)
+        }
+      ]
+    : []
+
+  // `buildRowMenuEntries` owns the ordering, so "Open in" is spliced into the
+  // everyday run ahead of the divider rather than appended — appending would
+  // strand it below "Remove worktree" on the destructive side of the rule.
+  const mappedEntries: ContextMenuEntry[] = menuEntries.map((e) =>
+    'separator' in e
+      ? { separator: true as const }
+      : { label: e.label, onClick: () => e.onSelect(), danger: e.tone === 'danger' }
+  )
+  const dividerAt = mappedEntries.findIndex((e) => 'separator' in e)
+  const openIn = { label: 'Open in', submenu: editorSubmenu }
+  const menuItems: ContextMenuEntry[] =
+    dividerAt === -1
+      ? [...mappedEntries, openIn]
+      : [...mappedEntries.slice(0, dividerAt), openIn, ...mappedEntries.slice(dividerAt)]
 
   return (
     <div
@@ -203,11 +257,7 @@ export function WorktreeTab({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={menuEntries.map((e) =>
-            'separator' in e
-              ? { separator: true as const }
-              : { label: e.label, onClick: () => e.onSelect(), danger: e.tone === 'danger' }
-          )}
+          items={menuItems}
           onClose={() => setMenu(null)}
         />
       )}

@@ -235,6 +235,64 @@ describe('settingsReducer', () => {
     expect(next.editor).toBe('zed')
   })
 
+  it('repoEditorChanged sets and clears a per-repo override', () => {
+    const set = apply(initialSettings, {
+      type: 'settings/repoEditorChanged',
+      payload: { key: '/repo', editorId: 'idea' }
+    })
+    expect(set.repoEditors).toEqual({ '/repo': 'idea' })
+    const cleared = apply(set, {
+      type: 'settings/repoEditorChanged',
+      payload: { key: '/repo', editorId: null }
+    })
+    expect(cleared.repoEditors).toEqual({})
+  })
+
+  it('repoEditorChanged leaves other repos untouched', () => {
+    const one = apply(initialSettings, {
+      type: 'settings/repoEditorChanged',
+      payload: { key: '/a', editorId: 'idea' }
+    })
+    const two = apply(one, {
+      type: 'settings/repoEditorChanged',
+      payload: { key: '/b', editorId: 'zed' }
+    })
+    expect(two.repoEditors).toEqual({ '/a': 'idea', '/b': 'zed' })
+  })
+
+  it('repoEditorChanged preserves reference identity when clearing an absent key', () => {
+    const next = apply(initialSettings, {
+      type: 'settings/repoEditorChanged',
+      payload: { key: '/nope', editorId: null }
+    })
+    expect(next).toBe(initialSettings)
+  })
+
+  it('worktreeEditorChanged sets and clears a per-worktree override', () => {
+    const set = apply(initialSettings, {
+      type: 'settings/worktreeEditorChanged',
+      payload: { key: '/repo/wt', editorId: 'pycharm' }
+    })
+    expect(set.worktreeEditors).toEqual({ '/repo/wt': 'pycharm' })
+    const cleared = apply(set, {
+      type: 'settings/worktreeEditorChanged',
+      payload: { key: '/repo/wt', editorId: null }
+    })
+    expect(cleared.worktreeEditors).toEqual({})
+  })
+
+  it('worktreeEditorChanged preserves reference identity on a no-op set', () => {
+    const set = apply(initialSettings, {
+      type: 'settings/worktreeEditorChanged',
+      payload: { key: '/repo/wt', editorId: 'pycharm' }
+    })
+    const again = apply(set, {
+      type: 'settings/worktreeEditorChanged',
+      payload: { key: '/repo/wt', editorId: 'pycharm' }
+    })
+    expect(again).toBe(set)
+  })
+
   it('worktreeBaseChanged sets base mode', () => {
     const next = apply(initialSettings, {
       type: 'settings/worktreeBaseChanged',
