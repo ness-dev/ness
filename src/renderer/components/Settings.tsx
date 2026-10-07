@@ -18,6 +18,8 @@ import { DEFAULT_HOTKEYS, ACTION_LABELS, ACTION_CATEGORIES, bindingToString, eve
 import { Tooltip } from './Tooltip'
 import { HotkeyBadge } from './HotkeyBadge'
 import { AGENT_REGISTRY, agentDisplayName, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '../../shared/agent-registry'
+import { getToolDisplay } from './json-mode-cards/tool-display'
+import type { StoredPermissionRule } from '../../shared/permission-match'
 import { AgentIcon } from './AgentIcon'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
@@ -159,6 +161,46 @@ function highlightMatch(text: string, query: string): React.ReactNode {
       </mark>
       {text.slice(idx + query.length)}
     </>
+  )
+}
+
+/** One saved "Always allow" grant. Renders the tool through the same
+ *  `getToolDisplay` the chat tool cards use, so `mcp__ness-control__type_tab`
+ *  reads as "Ness Control · Type tab" with the server's icon instead of the
+ *  raw wire name. The scoping half of the rule (`git status:*`, `/repo/**`)
+ *  stays monospace — it's a pattern, not prose. */
+function PermissionRuleRow({
+  rule,
+  onRemove
+}: {
+  rule: StoredPermissionRule
+  onRemove: () => void
+}): JSX.Element {
+  const display = getToolDisplay(rule.toolName)
+  const Icon = display.icon
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      {Icon ? (
+        <Icon className="icon-sm shrink-0 text-dim" />
+      ) : (
+        <span className="icon-sm shrink-0" />
+      )}
+      <span className="text-xs text-fg-bright truncate shrink-0">
+        {display.label}
+      </span>
+      {rule.ruleContent && (
+        <code className="text-xs text-dim font-mono truncate min-w-0" title={rule.ruleContent}>
+          {rule.ruleContent}
+        </code>
+      )}
+      <button
+        onClick={onRemove}
+        title={`Remove ${rule.ruleContent ? `${rule.toolName}(${rule.ruleContent})` : rule.toolName}`}
+        className="text-xs text-dim hover:text-danger shrink-0 cursor-pointer ml-auto"
+      >
+        Remove
+      </button>
+    </div>
   )
 }
 
@@ -2038,45 +2080,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 )}
               </div>
 
-              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Always-allowed tools</h3>
-              <p className="text-xs text-dim mb-3">
-                Grants from "Always allow" on a chat approval card. Ness
-                stores these itself rather than in each worktree's{' '}
-                <code className="bg-panel-raised px-1 rounded text-xs">.claude/settings.local.json</code>,
-                so one grant applies to every worktree and repo. Chat
-                tabs only — terminal tabs prompt in Claude's own UI and
-                keep their own list.
-              </p>
-              {permissionRules.length === 0 ? (
-                <p className="text-xs text-faint">No saved grants yet.</p>
-              ) : (
-                <>
-                  <div className="border border-border rounded divide-y divide-border">
-                    {permissionRules.map((rule) => (
-                      <div key={rule.id} className="flex items-center gap-3 px-3 py-2">
-                        <code className="text-xs text-fg-bright font-mono truncate flex-1 min-w-0">
-                          {rule.ruleContent
-                            ? `${rule.toolName}(${rule.ruleContent})`
-                            : rule.toolName}
-                        </code>
-                        <button
-                          onClick={() => { void backend.revokePermission(rule.id) }}
-                          className="text-xs text-dim hover:text-danger shrink-0 cursor-pointer"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => { void backend.clearPermissions() }}
-                    className="text-xs text-dim hover:text-danger mt-2 cursor-pointer"
-                  >
-                    Remove all {permissionRules.length}
-                  </button>
-                </>
-              )}
-
               <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">
                 Status hooks
               </h3>
@@ -2488,6 +2491,40 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       </div>
                     </div>
                   </label>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Always-allowed tools
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    Grants from "Always allow" on an approval card. Ness
+                    stores these itself rather than in each worktree's{' '}
+                    <code className="bg-panel px-1 rounded">.claude/settings.local.json</code>,
+                    so one grant covers every worktree and repo. Terminal
+                    tabs prompt in Claude's own UI and keep a separate list.
+                  </div>
+                  {permissionRules.length === 0 ? (
+                    <div className="text-xs text-faint">No saved grants yet.</div>
+                  ) : (
+                    <>
+                      <div className="border border-border rounded divide-y divide-border bg-panel">
+                        {permissionRules.map((rule) => (
+                          <PermissionRuleRow
+                            key={rule.id}
+                            rule={rule}
+                            onRemove={() => { void backend.revokePermission(rule.id) }}
+                          />
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => { void backend.clearPermissions() }}
+                        className="text-xs text-dim hover:text-danger mt-2 cursor-pointer"
+                      >
+                        Remove all {permissionRules.length}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

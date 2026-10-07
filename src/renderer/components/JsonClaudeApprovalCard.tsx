@@ -397,7 +397,7 @@ export function JsonClaudeApprovalCard({
           <div className="text-xs text-muted">
             Pick how broadly to allow future matching calls. The rule is
             saved in Ness and applies to chat tabs in every worktree and
-            repo. Manage saved rules in Settings → Agents.
+            repo. Manage saved rules in Settings → Agent → Chat interface.
           </div>
           <div className="space-y-1">
             {suggestions.map((s) => (
