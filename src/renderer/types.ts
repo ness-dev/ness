@@ -157,6 +157,7 @@ import type { PRSummary, PRMetadata, PRLookupResult } from '../shared/github-typ
 export type { PRSummary, PRMetadata, PRLookupResult }
 
 import type { BrowserState, BrowserTabState } from '../shared/state/browser'
+import type { BrowserViewport } from '../shared/browser-viewport'
 export type { BrowserState, BrowserTabState }
 
 import type {
@@ -596,6 +597,12 @@ export interface ElectronAPI {
   browserForward(tabId: string): Promise<boolean>
   browserReload(tabId: string): Promise<boolean>
   browserOpenDevTools(tabId: string): Promise<boolean>
+  /** Emulate a viewport (device mode) for a browser tab; null clears it. */
+  browserSetViewport(
+    tabId: string,
+    viewport: BrowserViewport | null,
+    opts?: { reload?: boolean }
+  ): Promise<{ ok: boolean; error?: string; viewport?: BrowserViewport | null }>
   browserSetBounds(
     tabId: string,
     bounds: { x: number; y: number; width: number; height: number } | null

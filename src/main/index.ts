@@ -33,6 +33,7 @@ import { fixPathFromLoginShell } from './path-fix'
 import { parseCliFlags, USAGE, type CliFlags } from './cli-args'
 import { PlaywrightBrowserManager } from './browser-manager-playwright'
 import type { BrowserManagerLike } from './browser-manager-types'
+import { normalizeViewport } from '../shared/browser-viewport'
 import { PerfMonitor, formatRendererSample } from './perf-monitor'
 import type { RendererPerfSample } from '../shared/perf-types'
 import {
@@ -138,7 +139,7 @@ import { listDir as fsListDir, resolveHome as fsResolveHome } from './fs-listing
 import { listConfiguredHosts } from './ssh-config'
 import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
-import { startControlServer } from './control-server'
+import { startControlServer, type BrowserTabSummary } from './control-server'
 import {
   deliverToWorktreeChat,
   describeWorktree,
@@ -3553,6 +3554,28 @@ function registerIpcHandlers(): void {
     browserManager.openDevTools(tabId)
     return true
   })
+  // Device-mode emulation. Null clears it. Validation lives in the shared
+  // helper so the renderer picker and the MCP tool can't disagree about what
+  // a legal viewport is.
+  transport.onRequest(
+    'browser:setViewport',
+    async (_ctx, tabId: string, viewport: unknown, opts?: { reload?: boolean }) => {
+      if (viewport == null) {
+        await browserManager.setViewport(tabId, null, opts)
+        return { ok: true, viewport: null }
+      }
+      const parsed = normalizeViewport(viewport)
+      if (!parsed.viewport) {
+        return { ok: false, error: parsed.error ?? 'invalid viewport' }
+      }
+      try {
+        await browserManager.setViewport(tabId, parsed.viewport, opts)
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+      return { ok: true, viewport: parsed.viewport }
+    }
+  )
   transport.onSignal('browser:hide', (_ctx, tabId: string) => {
     browserManager.hide(tabId)
   })
@@ -5018,7 +5041,7 @@ async function runBoot(): Promise<void> {
     browser: {
       listTabsForWorktree: (wtPath) => {
         const ids = browserManager.listTabsForWorktree(wtPath)
-        const out: Array<{ id: string; url: string; title: string }> = []
+        const out: BrowserTabSummary[] = []
         for (const id of ids) {
           const info = browserManager.getTabInfo(id)
           if (info) out.push(info)
@@ -5049,7 +5072,9 @@ async function runBoot(): Promise<void> {
       clickTab: (tabId, x, y, options) => browserManager.clickTab(tabId, x, y, options),
       typeTab: (tabId, text, key) => browserManager.typeTab(tabId, text, key),
       scrollTab: (tabId, dx, dy) => browserManager.scrollTab(tabId, dx, dy),
-      showCursor: (tabId, x, y) => browserManager.showCursor(tabId, x, y)
+      showCursor: (tabId, x, y) => browserManager.showCursor(tabId, x, y),
+      setTabViewport: (tabId, viewport, opts) =>
+        browserManager.setViewport(tabId, viewport, opts)
     },
     shell: {
       listShellsForWorktree: (wtPath) => {

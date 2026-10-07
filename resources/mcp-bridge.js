@@ -535,6 +535,36 @@ const TOOLS = [
     }
   },
   {
+    name: 'set_tab_viewport',
+    description:
+      "Emulate a viewport size for a browser tab — this is how you test a page's mobile layout. Chromium lays the page out at exactly the size you ask for no matter how big the user's pane is, so get_tab_clickables coordinates and screenshot_tab dimensions both come back in the emulated size. Widths of 600px or less also turn on mobile emulation: the page honours <meta name=viewport>, touch events work, and an iPhone user agent is sent so UA-sniffing sites (google.com and friends) serve their mobile page — the tab reloads once so that actually takes effect. Pass `mobile: false` for a narrow desktop window instead, or `user_agent: \"\"` to keep the real desktop UA. Call it with no width/height to go back to rendering at the pane's size. Common sizes: iPhone SE 375x667, iPhone 15 393x852, Pixel 8 412x915, iPad mini 768x1024, laptop 1280x800.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string', description: 'Browser tab id from list_browser_tabs.' },
+        width: { type: 'number', description: 'Viewport width in CSS pixels (50-4096). Omit together with height to clear the emulation.' },
+        height: { type: 'number', description: 'Viewport height in CSS pixels (50-4096).' },
+        mobile: {
+          type: 'boolean',
+          description: "Mobile emulation: honour the page's viewport meta tag, enable touch events, report a device-sized screen. Defaults to true at 600px wide or less."
+        },
+        device_scale_factor: {
+          type: 'number',
+          description: 'devicePixelRatio to report (0.5-4, default 1). Screenshots are still normalized to CSS pixels so click coords stay usable.'
+        },
+        user_agent: {
+          type: 'string',
+          description: 'Replace navigator.userAgent and the UA request header. Defaults to an iPhone UA under mobile emulation; pass an empty string to keep the real desktop UA instead.'
+        },
+        reload: {
+          type: 'boolean',
+          description: 'Force a reload after applying. Not usually needed — the tab already reloads by itself whenever the user agent or mobile flag changes, which is what pages that sniff either at load time require.'
+        }
+      },
+      required: ['tab_id']
+    }
+  },
+  {
     name: 'list_shells',
     description:
       "List shell tabs in the caller's worktree. Each entry includes id, label, command (if started with one), cwd, and alive (whether its PTY is still running). Use the returned id with read_shell_output/kill_shell. Prefer reading an existing shell over spawning a new one when you just want to inspect recent output.",
@@ -614,7 +644,8 @@ const VIEW_BROWSER_TOOLS = new Set([
   'navigate_tab',
   'back_tab',
   'forward_tab',
-  'reload_tab'
+  'reload_tab',
+  'set_tab_viewport'
 ])
 const FULL_CONTROL_BROWSER_TOOLS = new Set([
   'click_tab',
@@ -931,6 +962,35 @@ async function handleToolCall(name, args) {
       y: args.y
     })
     return 'cursor at (' + args.x + ', ' + args.y + ') in ' + args.tab_id
+  }
+  if (name === 'set_tab_viewport') {
+    if (!args || !args.tab_id) throw new Error('tab_id is required')
+    const hasSize = typeof args.width === 'number' || typeof args.height === 'number'
+    const viewport = hasSize
+      ? {
+          width: args.width,
+          height: args.height,
+          mobile: args.mobile,
+          deviceScaleFactor: args.device_scale_factor,
+          userAgent: args.user_agent
+        }
+      : null
+    const r = await callControl('POST', '/browser/viewport', {
+      tabId: args.tab_id,
+      viewport,
+      reload: args.reload === true
+    })
+    if (!r || !r.viewport) return 'viewport cleared on ' + args.tab_id + ' — back to the pane size'
+    return (
+      'viewport of ' +
+      args.tab_id +
+      ' set to ' +
+      r.viewport.width +
+      'x' +
+      r.viewport.height +
+      (r.viewport.mobile ? ' (mobile emulation on)' : '') +
+      (r.viewport.deviceScaleFactor !== 1 ? ' @' + r.viewport.deviceScaleFactor + 'x' : '')
+    )
   }
   if (name === 'list_shells') {
     const r = await callControl('GET', '/shells')

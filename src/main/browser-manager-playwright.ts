@@ -20,8 +20,9 @@
 // bundle a Chromium download — the headless build stays small.
 
 import { createRequire } from 'module'
-import type { Browser, BrowserContext, Page } from 'playwright-core'
+import type { Browser, BrowserContext, CDPSession, Page } from 'playwright-core'
 import type { BrowserManagerLike, CaptureResult, ConsoleLog } from './browser-manager-types'
+import type { BrowserViewport } from '../shared/browser-viewport'
 import type { Store } from './store'
 import { log } from './debug'
 import { normalizeBrowserUrl } from './browser-url'
@@ -94,6 +95,17 @@ const CLICKABLES_SCRIPT = `(() => {
     if (!isNaN(op) && op === 0) return false;
     return true;
   }
+  // Under mobile emulation a page without a viewport meta tag lays out at 980
+  // CSS px and is scaled down to fit the device width, so layout-viewport
+  // coordinates (what getBoundingClientRect returns) are not the coordinates
+  // click_tab takes or the screenshot shows. Map everything into visual-viewport
+  // space, which is the screenshot's space. Identity when nothing is zoomed.
+  const vv = window.visualViewport;
+  const vs = vv ? vv.scale : 1;
+  const vox = vv ? vv.offsetLeft : 0;
+  const voy = vv ? vv.offsetTop : 0;
+  const vw = vv ? vv.width : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
   const queue = [document];
   const items = [];
   const seen = new Set();
@@ -107,14 +119,14 @@ const CLICKABLES_SCRIPT = `(() => {
       const r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) continue;
       if (!isVisible(el)) continue;
-      if (r.bottom <= 0 || r.right <= 0 || r.top >= window.innerHeight || r.left >= window.innerWidth) continue;
+      if (r.bottom <= voy || r.right <= vox || r.top >= voy + vh || r.left >= vox + vw) continue;
       items.push({
         role: getRole(el),
         name: getName(el),
-        cx: Math.round(r.left + r.width / 2),
-        cy: Math.round(r.top + r.height / 2),
-        w: Math.round(r.width),
-        h: Math.round(r.height)
+        cx: Math.round((r.left + r.width / 2 - vox) * vs),
+        cy: Math.round((r.top + r.height / 2 - voy) * vs),
+        w: Math.round(r.width * vs),
+        h: Math.round(r.height * vs)
       });
       if (items.length >= MAX) { truncated = true; break outer; }
     }
@@ -124,7 +136,7 @@ const CLICKABLES_SCRIPT = `(() => {
     }
   }
   return {
-    viewport: { w: window.innerWidth, h: window.innerHeight },
+    viewport: { w: Math.round(vw * vs), h: Math.round(vh * vs), scale: vs },
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
     pageHeight: Math.round(document.documentElement.scrollHeight),
     items,
@@ -197,6 +209,14 @@ interface BrowserInstance {
   worktreePath: string
   logs: ConsoleLog[]
   lastTitle: string
+  /** Emulated viewport (device mode), or null for the default VIEWPORT. */
+  viewport: BrowserViewport | null
+  /** Held for as long as an emulation is active — the overrides live on the
+   * session, so dropping it would drop them. */
+  cdp: CDPSession | null
+  /** The page's real UA, captured before the first override so clearing can
+   * put it back. */
+  defaultUserAgent: string | null
 }
 
 type PlaywrightModule = typeof import('playwright-core')
@@ -257,7 +277,12 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
     }
   }
 
-  getTabInfo(tabId: string): { id: string; url: string; title: string } | null {
+  getTabInfo(tabId: string): {
+    id: string
+    url: string
+    title: string
+    viewport: BrowserViewport | null
+  } | null {
     const inst = this.instances.get(tabId)
     if (!inst) return null
     let url = ''
@@ -266,7 +291,93 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
     } catch {
       url = ''
     }
-    return { id: tabId, url, title: inst.lastTitle }
+    return { id: tabId, url, title: inst.lastTitle, viewport: inst.viewport }
+  }
+
+  getViewport(tabId: string): BrowserViewport | null {
+    return this.instances.get(tabId)?.viewport ?? null
+  }
+
+  /**
+   * Resize the page, and for mobile emulation go through CDP.
+   *
+   * Playwright models `isMobile` / `deviceScaleFactor` / `userAgent` as
+   * BrowserContext options fixed at creation, and recreating the context to
+   * change them would throw away the tab's cookies and localStorage mid-session.
+   * So the size goes through `setViewportSize` (which keeps Playwright's own
+   * screenshot bookkeeping correct) and the device-mode flags go through a CDP
+   * session held open for as long as the emulation is active — the same shape
+   * the Electron backend uses.
+   */
+  async setViewport(
+    tabId: string,
+    viewport: BrowserViewport | null,
+    opts?: { reload?: boolean }
+  ): Promise<void> {
+    const inst = this.instances.get(tabId)
+    if (!inst) throw new Error('tab not found')
+    const prev = inst.viewport
+    // See the Electron backend: UA + touch only take effect on the next load.
+    const needsReload =
+      (prev?.userAgent ?? '') !== (viewport?.userAgent ?? '') ||
+      (prev?.mobile ?? false) !== (viewport?.mobile ?? false)
+    const size = viewport ?? VIEWPORT
+    await inst.page.setViewportSize({ width: size.width, height: size.height })
+
+    if (viewport) {
+      if (!inst.cdp) inst.cdp = await inst.context.newCDPSession(inst.page)
+      await inst.cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: viewport.deviceScaleFactor,
+        mobile: viewport.mobile,
+        screenWidth: viewport.width,
+        screenHeight: viewport.height
+      })
+      await inst.cdp.send('Emulation.setTouchEmulationEnabled', {
+        enabled: viewport.mobile,
+        maxTouchPoints: viewport.mobile ? 5 : 1
+      })
+      if (viewport.userAgent) {
+        if (!inst.defaultUserAgent) {
+          inst.defaultUserAgent = await inst.page
+            .evaluate(() => navigator.userAgent)
+            .catch(() => null)
+        }
+        await inst.cdp.send('Emulation.setUserAgentOverride', {
+          userAgent: viewport.userAgent
+        })
+      } else if (inst.defaultUserAgent) {
+        await inst.cdp.send('Emulation.setUserAgentOverride', {
+          userAgent: inst.defaultUserAgent
+        })
+      }
+    } else if (inst.cdp) {
+      const cdp = inst.cdp
+      inst.cdp = null
+      try {
+        await cdp.send('Emulation.clearDeviceMetricsOverride')
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+        if (inst.defaultUserAgent) {
+          await cdp.send('Emulation.setUserAgentOverride', {
+            userAgent: inst.defaultUserAgent
+          })
+        }
+        await cdp.detach()
+      } catch (err) {
+        log(
+          'browser-playwright',
+          `clear emulation failed tab=${tabId}`,
+          err instanceof Error ? err.message : err
+        )
+      }
+      // clearDeviceMetricsOverride drops Playwright's viewport too.
+      await inst.page.setViewportSize({ width: VIEWPORT.width, height: VIEWPORT.height })
+    }
+
+    inst.viewport = viewport
+    this.dispatchState(tabId, { viewport })
+    if (opts?.reload || needsReload) await inst.page.reload().catch(() => {})
   }
 
   private async ensureBrowser(): Promise<Browser> {
@@ -358,7 +469,10 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
       page,
       worktreePath,
       logs: [],
-      lastTitle: ''
+      lastTitle: '',
+      viewport: null,
+      cdp: null,
+      defaultUserAgent: null
     }
     this.instances.set(tabId, inst)
     this.pendingTabIds.delete(tabId)
@@ -422,6 +536,7 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
       canGoForward: boolean
       loading: boolean
       error: string | undefined
+      viewport: BrowserViewport | null
     }>
   ): void {
     this.store?.dispatch({
@@ -515,8 +630,9 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
     _targetWindow: unknown,
     _bounds: { x: number; y: number; width: number; height: number }
   ): void {
-    // Viewport stays at the fixed VIEWPORT size; renderer scales
-    // screenshots to the panel area.
+    // There is no native overlay to position: the page sits at VIEWPORT (or
+    // whatever setViewport emulated) and the renderer scales the polled
+    // screenshot into the panel area.
   }
 
   clickTab(

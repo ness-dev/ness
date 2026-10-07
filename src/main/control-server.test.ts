@@ -95,7 +95,8 @@ const deps: ControlServerDeps = {
     clickTab: () => {},
     typeTab: () => {},
     scrollTab: async () => {},
-    showCursor: async () => {}
+    showCursor: async () => {},
+    setTabViewport: async () => {}
   },
   shell: {
     listShellsForWorktree: () => [],

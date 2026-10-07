@@ -21,6 +21,53 @@ describe('browserReducer', () => {
     expect(state.byTab.b1.loading).toBe(false)
   })
 
+  it('tabStateChanged carries the emulated viewport and can clear it', () => {
+    let state: BrowserState = initialBrowser
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { url: 'https://example.com' } }
+    })
+    expect(state.byTab.b1.viewport).toBeNull()
+
+    const viewport = { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { viewport } }
+    })
+    expect(state.byTab.b1.viewport).toEqual(viewport)
+    // An unrelated patch must not drop it.
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { loading: true } }
+    })
+    expect(state.byTab.b1.viewport).toEqual(viewport)
+
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { viewport: null } }
+    })
+    expect(state.byTab.b1.viewport).toBeNull()
+  })
+
+  it('tabStateChanged tracks whether the native view is attached', () => {
+    let state: BrowserState = initialBrowser
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { url: 'x' } }
+    })
+    expect(state.byTab.b1.attached).toBe(false)
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { attached: true } }
+    })
+    expect(state.byTab.b1.attached).toBe(true)
+    state = browserReducer(state, {
+      type: 'browser/tabStateChanged',
+      payload: { tabId: 'b1', state: { attached: false } }
+    })
+    expect(state.byTab.b1.attached).toBe(false)
+  })
+
   it('tabRemoved drops the entry', () => {
     let state: BrowserState = initialBrowser
     state = browserReducer(state, {

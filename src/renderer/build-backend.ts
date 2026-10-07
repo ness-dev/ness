@@ -41,6 +41,7 @@ import type {
 import type { ElectronAPI, AgentKind } from './types'
 import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
+import type { BrowserViewport } from '../shared/browser-viewport'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 import type {
   SidebarDetailPrefsByMode,
@@ -576,6 +577,11 @@ export function buildBackend(
     browserForward: (tabId: string) => req('browser:forward', tabId),
     browserReload: (tabId: string) => req('browser:reload', tabId),
     browserOpenDevTools: (tabId: string) => req('browser:openDevTools', tabId),
+    browserSetViewport: (
+      tabId: string,
+      viewport: BrowserViewport | null,
+      opts?: { reload?: boolean }
+    ) => req('browser:setViewport', tabId, viewport, opts),
     browserSetBounds: (
       tabId: string,
       bounds: { x: number; y: number; width: number; height: number } | null
