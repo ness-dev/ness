@@ -37,6 +37,12 @@ import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import type { LocalTransportHandle, BackendConnection } from './types'
 import type { BootstrapProgress, SshBootstrapState } from '../shared/state/ssh-bootstrap'
+import {
+  resolveEditorId,
+  editorOverrideScope,
+  type EditorScope,
+  type EditorScopes
+} from '../shared/editor-resolve'
 import { WebSocketClientTransport } from '../shared/transport/transport-websocket'
 import { initBackend, getBackend } from './backend'
 
@@ -762,6 +768,45 @@ export function useCiNotify() {
 
 export function useAssignedPRs() {
   return useAppState((s) => s.assignedPRs)
+}
+
+function editorScopesFor(
+  s: AppState,
+  worktreePath: string | null,
+  repoRoot: string | undefined
+): EditorScopes {
+  return {
+    globalEditor: s.settings.editor,
+    repoEditors: s.settings.repoEditors,
+    worktreeEditors: s.settings.worktreeEditors,
+    repoRoot,
+    worktreePath: worktreePath ?? undefined
+  }
+}
+
+/** The editor that "Open in editor" will actually launch for this worktree,
+ *  running the same worktree → repo → global chain main runs.
+ *
+ *  Two constraints, both load-bearing: returns a SCALAR so the
+ *  `useSyncExternalStore` snapshot stays reference-stable (an object here
+ *  would loop), and takes `repoRoot` from the caller rather than looking it
+ *  up in `worktrees.list`. Every sidebar row calls this, and the selector
+ *  re-runs on every store event — an O(N) find inside would make the
+ *  sidebar O(rows x worktrees) per event while an agent streams. */
+export function useResolvedEditorId(
+  worktreePath: string | null,
+  repoRoot?: string
+): string {
+  return useAppState((s) => resolveEditorId(editorScopesFor(s, worktreePath, repoRoot)))
+}
+
+/** Which scope that editor came from — drives the "Use repo default" item
+ *  in the picker. Scalar for the same reason as above. */
+export function useEditorOverrideScope(
+  worktreePath: string | null,
+  repoRoot?: string
+): EditorScope {
+  return useAppState((s) => editorOverrideScope(editorScopesFor(s, worktreePath, repoRoot)))
 }
 
 /** Scratchpad text for one worktree. Per-id selector — only re-renders

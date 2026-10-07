@@ -445,6 +445,10 @@ export interface ElectronAPI {
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
   setEditor(editorId: string): Promise<boolean>
+  /** Set (or clear, with `null`) the per-repo editor override. */
+  setRepoEditor(repoRoot: string, editorId: string | null): Promise<boolean>
+  /** Set (or clear, with `null`) the per-worktree editor override. */
+  setWorktreeEditor(worktreePath: string, editorId: string | null): Promise<boolean>
   getAvailableEditors(): Promise<{ id: string; name: string }[]>
   snooze(path: string, wakeAt: number): Promise<boolean>
   unsnooze(path: string): Promise<boolean>
