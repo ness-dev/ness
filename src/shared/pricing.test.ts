@@ -34,8 +34,12 @@ describe('rateFor', () => {
     expect(rateFor('claude-opus-4-0')).toEqual({ in: 15, out: 75 })
   })
 
-  it('returns Sonnet 5 introductory rates', () => {
+  it('bills Sonnet 5 and 5.5 at $2/$10', () => {
+    // $2/$10 shipped as introductory pricing "through Aug 31 2026", but
+    // the scheduled Sep 1 increase to $3/$15 was cancelled and $2/$10 is
+    // now standard. This pins that so nobody "expires" it.
     expect(rateFor('claude-sonnet-5')).toEqual({ in: 2, out: 10 })
+    expect(rateFor('claude-sonnet-5-5')).toEqual({ in: 2, out: 10 })
   })
 
   it('returns null for unknown models', () => {
@@ -66,5 +70,86 @@ describe('priceFor', () => {
 
   it('returns 0 for unknown models', () => {
     expect(priceFor('mystery-model', { input_tokens: 100 })).toBe(0)
+  })
+})
+
+// One million tokens, so each expectation reads as the published $/MTok
+// figure from Anthropic's pricing page.
+const MTOK = 1_000_000
+
+describe('Claude Opus 5.5', () => {
+  it('bills base input and output at $4 / $20 per MTok', () => {
+    expect(priceFor('claude-opus-5-5', { input_tokens: MTOK })).toBeCloseTo(4, 6)
+    expect(priceFor('claude-opus-5-5', { output_tokens: MTOK })).toBeCloseTo(20, 6)
+  })
+
+  it('bills cache reads at $0.20 per MTok (0.05x input, not the usual 0.1x)', () => {
+    expect(
+      priceFor('claude-opus-5-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.2, 6)
+  })
+
+  it('bills 5m cache writes at $5 per MTok (1.25x input)', () => {
+    expect(
+      priceFor('claude-opus-5-5', { cache_creation_input_tokens: MTOK })
+    ).toBeCloseTo(5, 6)
+  })
+
+  it('does not let a dated 5.5 id fall through to Opus 5 rates', () => {
+    // 'claude-opus-5' is a prefix of 'claude-opus-5-5', so if the keys were
+    // ordered the other way rateFor's insertion-order scan would bill a
+    // dated 5.5 id at $5/$25 instead of $4/$20.
+    expect(rateFor('claude-opus-5-5-20260922')).toEqual(
+      rateFor('claude-opus-5-5')
+    )
+    expect(rateFor('claude-opus-5-5-20260922')?.in).toBe(4)
+  })
+
+  it('leaves the standard-multiplier models on 0.1x reads', () => {
+    // Haiku 4.5 is $1/MTok input -> $0.10/MTok; Sonnet 5 is $2 -> $0.20.
+    expect(
+      priceFor('claude-haiku-4-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.1, 6)
+    expect(
+      priceFor('claude-sonnet-5', { cache_read_input_tokens: MTOK })
+    ).toBeCloseTo(0.2, 6)
+  })
+})
+
+// The `fable` and `best` aliases both resolve to Fable 5.1, so these rates
+// are what a user picking either of those actually gets billed at.
+describe('Fable / Mythos 5.1', () => {
+  it('bills cache reads at $0.25 per MTok (0.025x input)', () => {
+    // Without its own RATES key, 'claude-fable-5-1' prefix-matches
+    // 'claude-fable-5' and inherits 0.1x -> $1/MTok, a 4x overstatement
+    // on exactly the reads that dominate an agent session.
+    for (const id of ['claude-fable-5-1', 'claude-mythos-5-1']) {
+      expect(
+        priceFor(id, { cache_read_input_tokens: MTOK }),
+        `${id} should read at 0.025x, not the inherited 0.1x`
+      ).toBeCloseTo(0.25, 6)
+    }
+  })
+
+  it('keeps base input and output at $10 / $50 per MTok', () => {
+    for (const id of ['claude-fable-5-1', 'claude-mythos-5-1']) {
+      expect(priceFor(id, { input_tokens: MTOK })).toBeCloseTo(10, 6)
+      expect(priceFor(id, { output_tokens: MTOK })).toBeCloseTo(50, 6)
+    }
+  })
+
+  it('leaves the 5.0 generation on the standard 0.1x read multiplier', () => {
+    for (const id of ['claude-fable-5', 'claude-mythos-5']) {
+      expect(
+        priceFor(id, { cache_read_input_tokens: MTOK })
+      ).toBeCloseTo(1, 6)
+    }
+  })
+
+  it('does not let a dated 5.1 id fall through to 5.0 rates', () => {
+    expect(rateFor('claude-fable-5-1-20261013')).toEqual(
+      rateFor('claude-fable-5-1')
+    )
+    expect(rateFor('claude-fable-5-1-20261013')?.cacheReadMult).toBe(0.025)
   })
 })

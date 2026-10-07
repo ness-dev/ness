@@ -6,6 +6,17 @@
 // forget it):
 //   cache read  = input rate x 0.10   (90% discount)
 //   cache write = input rate x 1.25   (25% surcharge)
+//
+// The 0.10 cache-read multiplier is not universal any more. Opus 5.5
+// discounts reads to 0.05x, and Fable/Mythos 5.1 to 0.025x; set
+// `cacheReadMult` per model to override it. Getting this wrong overstates
+// a cache-heavy agent session by 2x (Opus 5.5) or 4x (Fable 5.1), where
+// reads dominate token volume.
+//
+// A model whose cache-read multiplier differs from its same-family
+// predecessor MUST get its own RATES key. The prefix fallback would
+// otherwise inherit the predecessor's multiplier silently, which reads as
+// a plausible number rather than an obvious $0.
 
 export interface TokenUsage {
   input_tokens?: number
@@ -20,6 +31,8 @@ interface ModelRate {
   in: number
   out: number
   reasoning?: number
+  /** Cache-read discount as a multiple of the input rate. Defaults to 0.10. */
+  cacheReadMult?: number
 }
 
 const RATES: Record<string, ModelRate> = {
@@ -30,15 +43,24 @@ const RATES: Record<string, ModelRate> = {
   // matters: rateFor's prefix fallback iterates in insertion order, so
   // the specific opus keys must precede the bare 'claude-opus-4' or
   // dated ids like claude-opus-4-8-20260527 would bill at old rates.
+  // Same rule puts 'claude-opus-5-5' ahead of 'claude-opus-5', which is
+  // a prefix of it — otherwise a dated 5.5 id would bill at Opus 5 rates,
+  // and likewise for the -5-1 / -5-5 keys below.
+  'claude-fable-5-1': { in: 10, out: 50, cacheReadMult: 0.025 },
   'claude-fable-5': { in: 10, out: 50 },
+  'claude-mythos-5-1': { in: 10, out: 50, cacheReadMult: 0.025 },
   'claude-mythos-5': { in: 10, out: 50 },
+  'claude-opus-5-5': { in: 4, out: 20, cacheReadMult: 0.05 },
   'claude-opus-5': { in: 5, out: 25 },
   'claude-opus-4-8': { in: 5, out: 25 },
   'claude-opus-4-7': { in: 5, out: 25 },
   'claude-opus-4-6': { in: 5, out: 25 },
   'claude-opus-4-5': { in: 5, out: 25 },
   'claude-opus-4': { in: 15, out: 75 },
-  // Sonnet 5 introductory pricing through Aug 31 2026; $3/$15 from Sep 1 2026.
+  // Sonnet 5's $2/$10 launched as introductory pricing through Aug 31
+  // 2026, but Anthropic cancelled the scheduled Sep 1 increase to $3/$15
+  // and made $2/$10 standard. Don't "expire" these back to $3/$15.
+  'claude-sonnet-5-5': { in: 2, out: 10 },
   'claude-sonnet-5': { in: 2, out: 10 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-sonnet-4-5': { in: 3, out: 15 },
@@ -75,7 +97,7 @@ export function priceFor(model: string, usage: TokenUsage): number {
     (inTok * rate.in +
       (outTok - reasoningTok) * rate.out +
       reasoningTok * reasoningRate +
-      cacheRead * rate.in * 0.1 +
+      cacheRead * rate.in * (rate.cacheReadMult ?? 0.1) +
       cacheWrite * rate.in * 1.25) /
     1_000_000
   )
