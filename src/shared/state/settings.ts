@@ -157,6 +157,13 @@ export const EMPTY_CUSTOM_THEMES: CustomTheme[] = []
 export const DEFAULT_LIGHT_THEME = 'solarized-light'
 export const DEFAULT_DARK_THEME = 'dark'
 
+/** Default for `jsonModeTranscriptWindow`. Sized so a normal session never
+ *  hits the window at all. */
+export const DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW = 150
+/** Upper bound accepted by the setter. Past this the window stops being a
+ *  window, so the UI steers you to 0 ("render everything") instead. */
+export const MAX_JSON_MODE_TRANSCRIPT_WINDOW = 10000
+
 /** A Nessie colour preset — the app's *brand* colour.
  *
  *  Deliberately scoped narrower than "the primary colour". It fills the
@@ -415,6 +422,14 @@ export interface SettingsState {
    *  don't get a wall of approval cards for routine edits; Bash and
    *  other risky tools still surface approvals. */
   jsonModeDefaultPermissionMode: JsonClaudePermissionMode
+  /** How many trailing messages a json-mode transcript renders before
+   *  collapsing the rest behind a "show earlier" header. The cap exists
+   *  because the transcript rebuilds its JSX on every streaming delta, so
+   *  an unwindowed history pays O(messages) reconciliation per token and
+   *  keeps every row's DOM resident. Raising it trades memory and
+   *  streaming smoothness for fewer clicks when scrolling back; 0 renders
+   *  the whole transcript. */
+  jsonModeTranscriptWindow: number
   /** Minutes a json-mode tab can sit at the yellow "waiting" dot before
    *  the auto-sleep monitor tears its subprocess down. The slept tab
    *  stays in the tree (history intact) and re-spawns on click. 0
@@ -538,6 +553,7 @@ export type SettingsEvent =
       type: 'settings/jsonModeDefaultPermissionModeChanged'
       payload: JsonClaudePermissionMode
     }
+  | { type: 'settings/jsonModeTranscriptWindowChanged'; payload: number }
   | { type: 'settings/autoSleepMinutesChanged'; payload: number }
   | { type: 'settings/snoozeDefaultDaysChanged'; payload: number }
   | { type: 'settings/notifyChatOnCiFailureChanged'; payload: boolean }
@@ -614,6 +630,7 @@ export const initialSettings: SettingsState = {
   jsonModeSendOnEnter: false,
   autoScrollToBottom: true,
   jsonModeDefaultPermissionMode: 'acceptEdits',
+  jsonModeTranscriptWindow: DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
   autoSleepMinutes: 30,
   snoozeDefaultDays: 7,
   notifyChatOnCiFailure: false,
@@ -791,6 +808,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, autoScrollToBottom: event.payload }
     case 'settings/jsonModeDefaultPermissionModeChanged':
       return { ...state, jsonModeDefaultPermissionMode: event.payload }
+    case 'settings/jsonModeTranscriptWindowChanged':
+      return { ...state, jsonModeTranscriptWindow: event.payload }
     case 'settings/autoSleepMinutesChanged':
       return { ...state, autoSleepMinutes: event.payload }
     case 'settings/snoozeDefaultDaysChanged':

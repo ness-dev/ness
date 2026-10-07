@@ -784,6 +784,20 @@ describe('settingsReducer', () => {
     expect(off.useSystemClaudeForJsonMode).toBe(false)
   })
 
+  it('jsonModeTranscriptWindowChanged sets the window size', () => {
+    expect(initialSettings.jsonModeTranscriptWindow).toBe(150)
+    const next = apply(initialSettings, {
+      type: 'settings/jsonModeTranscriptWindowChanged',
+      payload: 500
+    })
+    expect(next.jsonModeTranscriptWindow).toBe(500)
+    const unlimited = apply(next, {
+      type: 'settings/jsonModeTranscriptWindowChanged',
+      payload: 0
+    })
+    expect(unlimited.jsonModeTranscriptWindow).toBe(0)
+  })
+
   it('autoSleepMinutesChanged sets the threshold', () => {
     const next = apply(initialSettings, {
       type: 'settings/autoSleepMinutesChanged',
