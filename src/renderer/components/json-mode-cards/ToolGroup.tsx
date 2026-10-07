@@ -119,14 +119,14 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   const toolRows = rows.filter((r) => !r.isThinking)
   const thinkingCount = rows.length - toolRows.length
 
-  // The timeline earns its space when there's something visual to show,
-  // or when every call is one we have an action icon for (a browser
-  // run) — a group of plain Reads reads better as the text chips.
+  // The timeline earns its row of vertical space only when there are
+  // real screenshots in it. Browser use on its own doesn't qualify — a
+  // strip of bare action icons says nothing the count label
+  // ("4 clicks · 2 scrolls") doesn't already say in words.
   const allNamed =
     toolRows.length > 0 && toolRows.every((r) => getToolAction(r.toolName))
   const hasImages = rows.some((r) => (r.images?.length ?? 0) > 0)
-  const showTimeline =
-    !expanded && (hasImages || (allNamed && toolRows.length > 1))
+  const showTimeline = !expanded && hasImages
   // Chips repeat what the count label already spells out once every
   // call is named ("4 clicks · 2 screenshots"), and the timeline says
   // it a third time. Keep them for mixed groups, where the label's
