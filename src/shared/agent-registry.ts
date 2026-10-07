@@ -49,18 +49,21 @@ export interface ModelOption {
   tier: 'alias' | 'current' | 'legacy'
 }
 
-/** Family aliases the `claude` CLI resolves at launch. Verified against
- *  the real binary: `opus` → Opus 5.5, `sonnet` → Sonnet 5, `haiku` →
- *  Haiku 4.5, `fable` → Fable 5.1, `best` → Fable 5.1, `opusplan` → Opus
- *  while planning then Sonnet. An unknown alias is rejected at startup
- *  with a clear message.
+/** Family aliases the `claude` CLI resolves at launch. Resolution read
+ *  out of the bundled binary's own `init` event (2.1.285): `opus` → Opus
+ *  5.5, `sonnet` → Sonnet 5.5, `haiku` → Haiku 4.5, `fable` → Fable 5.1,
+ *  `best` → Fable 5.1, `opusplan` → Opus while planning then Sonnet 5.5.
+ *
+ *  Whatever an alias resolves to needs a pricing entry: the resolved id
+ *  is what lands in the transcript and what priceFor() bills against, so
+ *  a new family version with a different cache-read multiplier silently
+ *  inherits its predecessor's. See the header comment in pricing.ts.
  *
  *  Must stay within the intersection of the two CLIs Harness spawns:
  *  Terminal tabs use the user's PATH `claude`, Chat tabs use the pinned
- *  bundled one. The bundled build is the narrower of the two and does not
- *  validate --model at startup, so an alias it doesn't know wouldn't fail
- *  fast — it would blow up later at API-call time. agent-registry.test.ts
- *  enforces this; re-derive its list after bumping the pin.
+ *  bundled one. The bundled build is the narrower of the two, so it's the
+ *  binding constraint. agent-registry.test.ts enforces this; re-derive
+ *  its list after bumping the pin.
  *
  *  `mythos` is deliberately omitted: it exists in the alias table but is
  *  invitation-only (Project Glasswing), so it would 404 for most users.
@@ -84,6 +87,8 @@ export const CLAUDE_MODEL_ALIASES: ModelOption[] = [
 export const CLAUDE_MODELS: ModelOption[] = [
   ...CLAUDE_MODEL_ALIASES,
   { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', tier: 'current' },
+  { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5', tier: 'current' },
+  { id: 'claude-fable-5-1', displayName: 'Claude Fable 5.1', tier: 'current' },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', tier: 'current' },
   { id: 'claude-opus-5', displayName: 'Claude Opus 5', tier: 'current' },
   { id: 'claude-opus-4-8', displayName: 'Claude Opus 4.8', tier: 'current' },
