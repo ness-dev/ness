@@ -904,6 +904,12 @@ export function useAliasForPath(path: string | null | undefined): string | undef
   return useAppState((s) => (path ? s.aliases.byPath[path] : undefined))
 }
 
+/** The global "Always allow" tool grants. Only the Settings panel reads
+ *  the whole list — the matcher that consults it lives in main. */
+export function usePermissionRules() {
+  return useAppState((s) => s.permissions.rules)
+}
+
 export function useBrowser() {
   return useAppState((s) => s.browser)
 }

@@ -22,6 +22,8 @@ import { initialSshBootstrap } from '../shared/state/ssh-bootstrap'
 import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
+import { initialPermissions } from '../shared/state/permissions'
+import { ruleKey, type StoredPermissionRule } from '../shared/permission-match'
 import {
   initialSettings,
   nessieColorById,
@@ -48,6 +50,35 @@ import {
   type Config
 } from './persistence'
 import { DEFAULT_EDITOR_ID } from './editor'
+
+/** Drop malformed entries and duplicate rules from the persisted
+ *  allowlist. `config.json` is user-editable and a bad entry here would
+ *  either over-allow (a rule with no toolName matches via `*` semantics
+ *  we don't want to infer) or crash the matcher. */
+function sanitizePermissionRules(raw: unknown[]): StoredPermissionRule[] {
+  const seen = new Set<string>()
+  const out: StoredPermissionRule[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    if (typeof e.toolName !== 'string' || !e.toolName) continue
+    const ruleContent =
+      typeof e.ruleContent === 'string' && e.ruleContent ? e.ruleContent : undefined
+    const key = ruleKey({ toolName: e.toolName, ruleContent })
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      id: typeof e.id === 'string' && e.id ? e.id : key,
+      toolName: e.toolName,
+      ...(ruleContent ? { ruleContent } : {}),
+      grantedAt: typeof e.grantedAt === 'number' ? e.grantedAt : 0,
+      ...(typeof e.grantedFrom === 'string' && e.grantedFrom
+        ? { grantedFrom: e.grantedFrom }
+        : {})
+    })
+  }
+  return out
+}
 
 /** Flatten the nested `repoRoot → worktreePath → text` shape on disk
  *  into the flat `worktreePath → text` map the slice carries in memory.
@@ -101,6 +132,9 @@ export function buildInitialAppState(
     aliases: config.aliases
       ? { byPath: { ...config.aliases } }
       : initialAliases,
+    permissions: config.permissionRules
+      ? { rules: sanitizePermissionRules(config.permissionRules) }
+      : initialPermissions,
     settings: {
       ...initialSettings,
       themeMode:
@@ -145,7 +179,6 @@ export function buildInitialAppState(
       terminalPlainClickOpensInApp: config.terminalPlainClickOpensInApp === true,
       newWorktreeAdvancedOpen: config.newWorktreeAdvancedOpen === true,
       starterTasksDismissed: config.starterTasksDismissed === true,
-      shareClaudeSettings: config.shareClaudeSettings !== false,
       harnessSystemPromptEnabled: config.harnessSystemPromptEnabled !== false,
       harnessSystemPrompt: config.harnessSystemPrompt || DEFAULT_HARNESS_SYSTEM_PROMPT,
       harnessSystemPromptMain: config.harnessSystemPromptMain || DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,

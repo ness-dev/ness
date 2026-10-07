@@ -15,7 +15,6 @@ import { useBackend } from '../backend'
 import { useViewport } from '../hooks/useViewport'
 import {
   suggestPermissionPatterns,
-  isFileToolCrossCwd,
   type PermissionPatternSuggestion
 } from '../../shared/permission-patterns'
 import {
@@ -116,10 +115,9 @@ export function JsonClaudeApprovalCard({
   const cwd = session?.worktreePath
 
   const suggestions = useMemo(
-    () => suggestPermissionPatterns(approval.toolName, approval.input, cwd),
-    [approval.toolName, approval.input, cwd]
+    () => suggestPermissionPatterns(approval.toolName, approval.input),
+    [approval.toolName, approval.input]
   )
-  const crossCwd = isFileToolCrossCwd(approval.toolName, approval.input, cwd)
   // Identify suggestions by their display label since the rule shape is an
   // object — labels are unique within a single tool's suggestion list.
   const [selectedLabel, setSelectedLabel] = useState<string>(
@@ -215,28 +213,16 @@ export function JsonClaudeApprovalCard({
 
   function alwaysAllow(): void {
     if (!selectedSuggestion) return
-    // Wire shape from the bundled claude-code binary's discriminated union:
-    //   { type:'addRules',
-    //     rules:[{toolName, ruleContent?}],
-    //     behavior:'allow',
-    //     destination:'localSettings' }
-    // A bare {toolName} (no ruleContent) means "any invocation"; a
-    // ruleContent like 'git status:*' or '/repo/src/**' or 'domain:host'
-    // matches a subset. Sending plain string rules or omitting `behavior`
-    // makes claude log "Malformed updatedPermissions … ignored" and skip
-    // persistence silently.
-    onResolve({
-      behavior: 'allow',
-      updatedInput: approval.input,
-      updatedPermissions: [
-        {
-          type: 'addRules',
-          rules: [selectedSuggestion.rule],
-          behavior: 'allow',
-          destination: 'localSettings'
-        }
-      ]
-    })
+    // The rule goes into Ness's own global allowlist, NOT back to Claude
+    // via `updatedPermissions`. Two reasons the old path didn't work:
+    // Claude persists to `<worktree>/.claude/settings.local.json`, which
+    // no sibling worktree reads; and symlinking those together to
+    // compensate fails outright because Claude's settings writer refuses
+    // to write through a symlink. Ness is the --permission-prompt-tool
+    // here, so it can just enforce the grant itself on the next request.
+    // See shared/permission-match.ts.
+    void backend.grantPermission(selectedSuggestion.rule, cwd)
+    onResolve({ behavior: 'allow', updatedInput: approval.input })
   }
 
   const autoReview = approval.autoReview
@@ -388,7 +374,7 @@ export function JsonClaudeApprovalCard({
             </button>
             <button
               onClick={() => setMode('always')}
-              title="Persist a rule to .claude/settings.local.json so future matching tool calls in this worktree skip the prompt — across sessions and app restarts."
+              title="Save a rule in Ness so future matching tool calls skip the prompt — across sessions, app restarts, and every worktree."
               className={BTN_NEUTRAL}
             >
               Always allow…
@@ -410,19 +396,9 @@ export function JsonClaudeApprovalCard({
         <div className="px-3 py-2 space-y-2">
           <div className="text-xs text-muted">
             Pick how broadly to allow future matching calls. The rule is
-            written to <span className="font-mono">.claude/settings.local.json</span>{' '}
-            and applies across sessions in this worktree.
+            saved in Ness and applies to chat tabs in every worktree and
+            repo. Manage saved rules in Settings → Agents.
           </div>
-          {crossCwd && (
-            <div className="text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
-              This file is outside the worktree. Claude only persists
-              path-specific rules relative to the project root, so the
-              only option that will actually fire is allowing every{' '}
-              <span className="font-mono">{approval.toolName}</span> call
-              regardless of path. Use "Allow once" instead if you want
-              this single write only.
-            </div>
-          )}
           <div className="space-y-1">
             {suggestions.map((s) => (
               <label

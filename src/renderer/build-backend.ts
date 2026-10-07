@@ -320,7 +320,10 @@ export function buildBackend(
       req('config:setExpandedDiagnosticLoggingEnabled', enabled),
     setShowAssignedPRs: (enabled: boolean) => req('config:setShowAssignedPRs', enabled),
     refreshAssignedPRs: () => req('prs:refreshAssigned'),
-    setShareClaudeSettings: (enabled: boolean) => req('config:setShareClaudeSettings', enabled),
+    grantPermission: (rule: { toolName: string; ruleContent?: string }, grantedFrom?: string) =>
+      req('permissions:grant', rule, grantedFrom),
+    revokePermission: (id: string) => req('permissions:revoke', id),
+    clearPermissions: () => req('permissions:clear'),
     setNewWorktreeAdvancedOpen: (open: boolean) =>
       req('config:setNewWorktreeAdvancedOpen', open),
     setStarterTasksDismissed: (dismissed: boolean) =>

@@ -162,17 +162,6 @@ describe('settingsReducer', () => {
     expect(off.terminalPlainClickOpensInApp).toBe(false)
   })
 
-  it('shareClaudeSettingsChanged toggles the share flag', () => {
-    expect(initialSettings.shareClaudeSettings).toBe(true)
-    const off = apply(initialSettings, {
-      type: 'settings/shareClaudeSettingsChanged',
-      payload: false
-    })
-    expect(off.shareClaudeSettings).toBe(false)
-    const on = apply(off, { type: 'settings/shareClaudeSettingsChanged', payload: true })
-    expect(on.shareClaudeSettings).toBe(true)
-  })
-
   it('newWorktreeAdvancedOpenChanged remembers the disclosure state', () => {
     expect(initialSettings.newWorktreeAdvancedOpen).toBe(false)
     const open = apply(initialSettings, {

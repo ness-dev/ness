@@ -157,11 +157,15 @@ export function TaskCard({
         )}
         {sessionAllowed && (
           <span
-            title={`allowed by session policy · ${sessionAllowed.toolName}`}
+            title={
+              sessionAllowed.rule
+                ? `allowed by saved rule · ${sessionAllowed.rule}`
+                : `allowed by session policy · ${sessionAllowed.toolName}`
+            }
             className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
-            session
+            {sessionAllowed.rule ? 'always' : 'session'}
           </span>
         )}
         {subAgentDescendantHasPendingApproval && (

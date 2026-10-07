@@ -14,24 +14,19 @@
 //
 // Heuristics (narrow → broad):
 //   Bash      → ruleContent "<head> <arg1>:*" / "<head>:*" / bare
-//   Read,Write,Edit,MultiEdit → exact path / "<dir>/**" / bare  (only if path is inside cwd)
+//   Read,Write,Edit,MultiEdit → exact path / "<dir>/**" / bare
 //   Grep,Glob → pattern / bare
 //   WebFetch  → url / "domain:<host>" / bare
 //   mcp__*    → bare toolName (input shapes vary too much to glob)
 //   default   → bare toolName
 //
-// Cross-cwd file-path caveat: claude's permission matcher anchors
-// path-based rules to the destination's root (cwd for localSettings,
-// home for userSettings) and skips any path that resolves to a
-// relative `..` path against that anchor. Result: a rule like
-// Write(/tmp/**) written to a worktree's .claude/settings.local.json
-// silently won't fire when the worktree is anywhere outside /tmp.
-// `additionalDirectories` widens path-access boundaries but does NOT
-// affect rule matching. The only persistent grant that actually fires
-// for a cross-cwd file-tool path is the bare-tool rule (`Write` etc.,
-// no parens) — same as TUI claude's "Yes, don't ask again" path. So
-// when the request's file_path is outside the supplied cwd, we drop
-// narrow/medium and only emit the bare grant.
+// Rules are enforced by Ness itself (shared/permission-match.ts), not
+// handed to Claude's settings writer, so there is no destination root to
+// anchor path rules against and no cross-cwd restriction: a
+// Write(/tmp/**) grant fires for a worktree anywhere on disk. This used
+// to be the opposite — claude's own matcher skips any path-based rule
+// that resolves to `..` against its anchor, so a cross-cwd grant
+// silently never fired and the only useful option was the bare-tool
 
 export interface PermissionRule {
   toolName: string
@@ -99,18 +94,10 @@ function bashSuggestions(
 
 function fileToolSuggestions(
   toolName: string,
-  input: Record<string, unknown> | undefined,
-  cwd: string | undefined
+  input: Record<string, unknown> | undefined
 ): PermissionPatternSuggestion[] {
   const filePath = strField(input, 'file_path')
   if (!filePath) {
-    return [{ rule: { toolName }, label: toolName, scope: 'broad' }]
-  }
-  // Cross-cwd path: narrow + medium would silently never fire (matcher
-  // skips any rule whose anchor-relative path starts with `..`). Drop
-  // them and only offer the bare-tool grant, which is what TUI claude
-  // also persists for the equivalent "Yes, don't ask again" path.
-  if (cwd && !isPathInsideCwd(filePath, cwd)) {
     return [{ rule: { toolName }, label: toolName, scope: 'broad' }]
   }
   const out: PermissionPatternSuggestion[] = []
@@ -123,34 +110,6 @@ function fileToolSuggestions(
   }
   out.push({ rule: { toolName }, label: toolName, scope: 'broad' })
   return out
-}
-
-const FILE_TOOLS_INTERNAL = ['Read', 'Write', 'Edit', 'MultiEdit'] as const
-
-function isPathInsideCwd(filePath: string, cwd: string): boolean {
-  // Both paths are compared as raw strings — no symlink resolution
-  // (the renderer can't realpath synchronously). Relative file paths
-  // are treated as inside cwd: tools resolve them against cwd anyway.
-  if (!filePath.startsWith('/')) return true
-  const cwdNorm = cwd.endsWith('/') ? cwd.slice(0, -1) : cwd
-  return filePath === cwdNorm || filePath.startsWith(cwdNorm + '/')
-}
-
-/** True when the given approval is a file-tool call with an absolute
- *  file_path that resolves outside the worktree. The card uses this to
- *  render a one-line explainer ("file is outside this worktree — only a
- *  broad grant can persist") so the user understands why narrow/medium
- *  options aren't on offer. Returns false when cwd is unknown. */
-export function isFileToolCrossCwd(
-  toolName: string,
-  input: Record<string, unknown> | undefined,
-  cwd: string | undefined
-): boolean {
-  if (!cwd) return false
-  if (!(FILE_TOOLS_INTERNAL as readonly string[]).includes(toolName)) return false
-  const filePath = strField(input, 'file_path')
-  if (!filePath) return false
-  return !isPathInsideCwd(filePath, cwd)
 }
 
 function searchToolSuggestions(
@@ -198,14 +157,13 @@ const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 
 export function suggestPermissionPatterns(
   toolName: string,
-  input: Record<string, unknown> | undefined,
-  cwd?: string
+  input: Record<string, unknown> | undefined
 ): PermissionPatternSuggestion[] {
   if (!toolName) {
     return [{ rule: { toolName: '*' }, label: '* (any tool)', scope: 'broad' }]
   }
   if (toolName === 'Bash') return bashSuggestions(input)
-  if (FILE_TOOLS.has(toolName)) return fileToolSuggestions(toolName, input, cwd)
+  if (FILE_TOOLS.has(toolName)) return fileToolSuggestions(toolName, input)
   if (SEARCH_TOOLS.has(toolName)) return searchToolSuggestions(toolName, input)
   if (toolName === 'WebFetch') return webFetchSuggestions(input)
   // MCP tools and unknown tools: input shape varies, just allow the tool.

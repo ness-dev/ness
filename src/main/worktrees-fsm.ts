@@ -5,7 +5,6 @@ import {
   listWorktrees,
   localBranchExists,
   runWorktreeScript,
-  symlinkClaudeSettings,
   type WorktreeInfo
 } from './worktree'
 import { getPRMetadata } from './github'
@@ -331,8 +330,8 @@ export class WorktreesFSM {
     }
   }
 
-  /** Shared post-creation steps: setup script + .claude symlink +
-   * onWorktreeCreated callback + refreshList + final pending outcome. */
+  /** Shared post-creation steps: setup script + onWorktreeCreated
+   * callback + refreshList + final pending outcome. */
   private async finishCreate(args: {
     id: string
     repoRoot: string
@@ -392,8 +391,6 @@ export class WorktreesFSM {
       })
     }
 
-    this.applySharedClaudeSettings(repoRoot, created.path)
-
     // Awaited: a conversation fork has to copy the transcript and probe git
     // for the relocation preamble before the first agent tab spawns.
     await this.opts.onWorktreeCreated({
@@ -420,12 +417,8 @@ export class WorktreesFSM {
   }
 
   /** Post-creation work for externally-created worktrees (e.g. the MCP
-   * create_worktree tool): symlink shared Claude settings synchronously,
-   * then run the setup script. The symlink runs before the first await
-   * so callers can fire-and-forget and still rely on it being in place
-   * before they spawn the Claude tab. */
+   * create_worktree tool): run the setup script. */
   async runWorktreeSetup(ctx: { repoRoot: string; worktreePath: string; branch: string }): Promise<void> {
-    this.applySharedClaudeSettings(ctx.repoRoot, ctx.worktreePath)
     const setupCmd = this.resolveSetupCmd(ctx.repoRoot)
     if (!setupCmd) return
     await runWorktreeScript('setup', setupCmd, {
@@ -433,25 +426,6 @@ export class WorktreesFSM {
       branch: ctx.branch,
       repoRoot: ctx.repoRoot
     })
-  }
-
-  /** Symlink the new worktree's .claude/settings.local.json to main's copy
-   * when `shareClaudeSettings` is enabled. Synchronous — callers should
-   * invoke this BEFORE spawning the Claude tab so it sees shared settings
-   * from its first read. */
-  applySharedClaudeSettings(repoRoot: string, worktreePath: string): void {
-    const snapshot = this.store.getSnapshot().state
-    if (!snapshot.settings.shareClaudeSettings) return
-    try {
-      const mainWt = snapshot.worktrees.list.find(
-        (w) => w.repoRoot === repoRoot && w.isMain
-      )
-      if (mainWt && mainWt.path !== worktreePath) {
-        symlinkClaudeSettings(mainWt.path, worktreePath)
-      }
-    } catch (err) {
-      log('hooks', `symlinkClaudeSettings failed for ${worktreePath}`, err instanceof Error ? err.message : err)
-    }
   }
 
   private resolveSetupCmd(repoRoot: string): string {

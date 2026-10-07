@@ -7,7 +7,8 @@ import {
   useUpdater,
   useRepoConfigs,
   useRepoConfigFilename,
-  useHooks
+  useHooks,
+  usePermissionRules
 } from '../store'
 import { useBackend } from '../backend'
 import { LEGACY_REPO_CONFIG_FILENAME } from '../../shared/state/repo-configs'
@@ -351,6 +352,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
   // All long-lived settings live in the main-process store; this hook
   // re-renders Settings whenever any client updates any of them.
   const settings = useSettings()
+  const permissionRules = usePermissionRules()
   const {
     themeMode,
     themeLight,
@@ -382,7 +384,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     githubAuthSource: authSource,
     harnessStarred,
     worktreeScripts,
-    shareClaudeSettings,
     autoUpdateEnabled,
     warnBeforeQuitting,
     harnessSystemPromptEnabled,
@@ -2037,6 +2038,45 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 )}
               </div>
 
+              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Always-allowed tools</h3>
+              <p className="text-xs text-dim mb-3">
+                Grants from "Always allow" on a chat approval card. Ness
+                stores these itself rather than in each worktree's{' '}
+                <code className="bg-panel-raised px-1 rounded text-xs">.claude/settings.local.json</code>,
+                so one grant applies to every worktree and repo. Chat
+                tabs only — terminal tabs prompt in Claude's own UI and
+                keep their own list.
+              </p>
+              {permissionRules.length === 0 ? (
+                <p className="text-xs text-faint">No saved grants yet.</p>
+              ) : (
+                <>
+                  <div className="border border-border rounded divide-y divide-border">
+                    {permissionRules.map((rule) => (
+                      <div key={rule.id} className="flex items-center gap-3 px-3 py-2">
+                        <code className="text-xs text-fg-bright font-mono truncate flex-1 min-w-0">
+                          {rule.ruleContent
+                            ? `${rule.toolName}(${rule.ruleContent})`
+                            : rule.toolName}
+                        </code>
+                        <button
+                          onClick={() => { void backend.revokePermission(rule.id) }}
+                          className="text-xs text-dim hover:text-danger shrink-0 cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => { void backend.clearPermissions() }}
+                    className="text-xs text-dim hover:text-danger mt-2 cursor-pointer"
+                  >
+                    Remove all {permissionRules.length}
+                  </button>
+                </>
+              )}
+
               <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">
                 Status hooks
               </h3>
@@ -3109,25 +3149,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     </span>
                   </label>
 
-                  <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Share Claude Code permissions</h3>
-                  <p className="text-xs text-dim mb-3">
-                    Symlink each worktree's{' '}
-                    <code className="bg-panel-raised px-1 rounded text-xs">.claude/settings.local.json</code>{' '}
-                    to the main worktree's copy so "Don't ask again"
-                    permissions granted in any worktree apply everywhere.
-                    Only takes effect for worktrees created while enabled
-                    (plus a one-shot boot migration of existing ones).
-                  </p>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={shareClaudeSettings}
-                      onChange={(e) => { void backend.setShareClaudeSettings(e.target.checked) }}
-                      className="accent-current icon-base cursor-pointer" />
-                    <span className="text-sm text-fg">
-                      Share settings.local.json across worktrees
-                    </span>
-                  </label>
 
                   <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">PR review prompt</h3>
                   <p className="text-xs text-dim mb-3">
