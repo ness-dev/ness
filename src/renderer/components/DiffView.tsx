@@ -18,6 +18,9 @@ interface DiffViewProps {
 }
 
 export function DiffView(props: DiffViewProps): JSX.Element {
+  // commitHash + filePath = one file's changes within that commit (Monaco,
+  // side-by-side). commitHash alone = the whole commit as raw diff text.
+  if (props.commitHash && props.filePath) return <FileDiffView {...props} />
   if (props.commitHash) return <CommitDiffView {...props} />
   if (props.filePath) return <FileDiffView {...props} />
   return (
@@ -32,6 +35,7 @@ function FileDiffView({
   filePath,
   staged,
   branchDiff,
+  commitHash,
   onSendToAgent
 }: DiffViewProps): JSX.Element {
   const backend = useBackend()
@@ -50,8 +54,8 @@ function FileDiffView({
 
   // Only unstaged working diffs have a modified side that IS the working
   // tree — the only place edits can meaningfully land. Everything else
-  // (staged / branch) is read-only.
-  const editable = !staged && !branchDiff
+  // (staged / branch / a historical commit) is read-only.
+  const editable = !staged && !branchDiff && !commitHash
   const dirty = editable && modifiedValue !== savedValue
 
   useEffect(() => {
@@ -63,8 +67,15 @@ function FileDiffView({
     setSaveError(null)
     setWordWrap(false)
     if (!filePath) return
-    backend
-      .getFileDiffSides(worktreePath, filePath, staged ?? false, branchDiff ? 'branch' : 'working')
+    const request = commitHash
+      ? backend.getCommitFileDiffSides(worktreePath, commitHash, filePath)
+      : backend.getFileDiffSides(
+          worktreePath,
+          filePath,
+          staged ?? false,
+          branchDiff ? 'branch' : 'working'
+        )
+    request
       .then((r) => {
         if (cancelled) return
         setSides(r)
@@ -75,7 +86,7 @@ function FileDiffView({
     return () => {
       cancelled = true
     }
-  }, [worktreePath, filePath, staged, branchDiff])
+  }, [worktreePath, filePath, staged, branchDiff, commitHash])
 
   const save = useCallback(async () => {
     if (!filePath || !editable) return
@@ -125,6 +136,17 @@ function FileDiffView({
     )
   }
 
+  // Both sides missing means the path isn't in the commit at all — most
+  // likely a rename we resolved to the wrong side. Say so rather than
+  // falling through to the generic "No changes".
+  if (commitHash && !sides.originalExists && !sides.modifiedExists) {
+    return (
+      <div className="flex items-center justify-center h-full text-faint text-sm">
+        Not found in commit {commitHash.slice(0, 10)}.
+      </div>
+    )
+  }
+
   if (!dirty && sides.original === sides.modified) {
     return (
       <div className="flex items-center justify-center h-full text-faint text-sm">
@@ -133,11 +155,13 @@ function FileDiffView({
     )
   }
 
-  const readOnlyBanner = branchDiff
-    ? 'Viewing branch diff (base…HEAD) — read-only.'
-    : staged
-      ? 'Viewing staged diff — read-only. Unstage the file to edit here.'
-      : null
+  const readOnlyBanner = commitHash
+    ? `Viewing this file as changed by commit ${commitHash.slice(0, 10)} — read-only.`
+    : branchDiff
+      ? 'Viewing branch diff (base…HEAD) — read-only.'
+      : staged
+        ? 'Viewing staged diff — read-only. Unstage the file to edit here.'
+        : null
 
   return (
     <div className="h-full flex flex-col bg-app">
@@ -155,8 +179,11 @@ function FileDiffView({
             {saveError}
           </span>
         )}
-        {staged && !branchDiff && <span className="shrink-0 text-info">staged</span>}
-        {branchDiff && <span className="shrink-0 text-info">branch</span>}
+        {commitHash && (
+          <span className="shrink-0 font-mono text-info">{commitHash.slice(0, 10)}</span>
+        )}
+        {!commitHash && staged && !branchDiff && <span className="shrink-0 text-info">staged</span>}
+        {!commitHash && branchDiff && <span className="shrink-0 text-info">branch</span>}
         {!sides.originalExists && <span className="shrink-0 text-success">new file</span>}
         {!sides.modifiedExists && <span className="shrink-0 text-danger">deleted</span>}
         <Tooltip label={wordWrap ? 'No wrap' : 'Word wrap'}>

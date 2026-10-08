@@ -46,6 +46,8 @@ interface CollapsedRightPanelProps {
   /** Opens the fuzzy file-open palette (same overlay as the Cmd+P
    *  fileQuickOpen hotkey). */
   onFileQuickOpen: () => void
+  /** Opens one file's changes within a commit as a diff tab. */
+  onOpenCommitFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
 }
 
 const WIDTH = 48
@@ -70,7 +72,8 @@ export function CollapsedRightPanel({
   onExpand,
   onOpenPR,
   onReview,
-  onFileQuickOpen
+  onFileQuickOpen,
+  onOpenCommitFileDiff
 }: CollapsedRightPanelProps): JSX.Element {
   const backend = useBackend()
   const activeBackend = useActiveBackend()
@@ -514,6 +517,15 @@ export function CollapsedRightPanel({
           hasPrev: commitPopover.index > 0,
           hasNext: commitPopover.index < commitsCount - 1
         }}
+        onOpenFileDiff={
+          onOpenCommitFileDiff
+            ? (filePath) => {
+                const c = commitsData[commitPopover.index]
+                onOpenCommitFileDiff(c.hash, c.shortHash, filePath)
+                setCommitPopover(null)
+              }
+            : undefined
+        }
         onClose={() => setCommitPopover(null)}
       />
     )}
