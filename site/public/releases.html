@@ -102,6 +102,56 @@
   <!-- Releases -->
   <div class="max-w-3xl mx-auto px-6 pb-24">
 
+    <!-- v2.17.0 -->
+    <section id="v2.17.0" class="release-section py-10">
+      <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
+        <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.17.0" class="release-anchor">v2.17.0<span class="anchor-icon">🔗</span></a></h2>
+        <span class="text-sm text-neutral-500">October 9, 2026</span>
+      </div>
+      <a href="https://github.com/ness-dev/ness/releases/tag/v2.17.0" class="text-sm text-amber-400/80 hover:text-amber-300 transition-colors">Download &rarr;</a>
+      <p class="text-neutral-400 mt-4 mb-4 leading-relaxed">A big one: custom right-column panels backed by your own script, pinned worktrees, browser viewport emulation, and per-repo editor overrides — plus Opus 5.5 support and a wide set of chat, browser, and worktree reliability fixes.</p>
+      <div class="note-body">
+        <h4>New features</h4>
+        <ul>
+          <li><strong>Custom right-column panels</strong> — build your own right-column panel backed by a script that emits markdown, for whatever project-specific info you want visible alongside your worktrees.</li>
+          <li><strong>Pin worktrees</strong> — pin any worktree to keep it at the top of the sidebar, with a new Pin/Unpin action.</li>
+          <li><strong>Emulate viewport sizes in browser tabs</strong> — test responsive layouts by emulating specific device viewport sizes in browser tabs.</li>
+          <li><strong>Per-repo and per-worktree editor overrides</strong> — override Ness's default code editor on a per-repo or per-worktree basis.</li>
+          <li><strong>Claude Opus 5.5 support</strong> — Opus 5.5 is now available in the model picker, Ness prefers your CLI's model aliases, and the bundled Claude Code has been updated. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/308" class="text-amber-400/80 hover:text-amber-300">#308</a>)</em></li>
+          <li><strong>Open a per-file diff tab from a commit</strong> — click a file in a commit's file list to open a dedicated diff tab for just that file. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/318" class="text-amber-400/80 hover:text-amber-300">#318</a>)</em></li>
+          <li><strong>Browser screenshots in the chat transcript</strong> — screenshots taken by an agent's browser tool now appear inline in the chat transcript.</li>
+          <li><strong>Resize the chat prompt box</strong> — drag the divider above the chat input to resize the prompt box. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/310" class="text-amber-400/80 hover:text-amber-300">#310</a>)</em></li>
+          <li><strong>Hand PR merge conflicts to the agent</strong> — a new button lets you hand a pull request's merge conflicts directly to the agent to resolve.</li>
+          <li><strong>Swap click / ⌘-click for terminal links</strong> — a new setting lets you swap which modifier opens links clicked in the terminal.</li>
+          <li><strong>Worktrees named from the kickoff prompt</strong> — new worktrees are now automatically named based on the kickoff prompt you give them.</li>
+        </ul>
+        <h4>Improvements</h4>
+        <ul>
+          <li><strong>Ness owns its own "Always allow" list</strong> — Ness now manages the "Always allow" permission list itself instead of writing to Claude Code's settings files, for more reliable permission handling.</li>
+          <li><strong>Faster worktree switching</strong> — switching between worktrees is faster, thanks to capped and deferred git reads.</li>
+          <li><strong>Brighter diff colors</strong> — diff colors are brighter and easier to read. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/307" class="text-amber-400/80 hover:text-amber-300">#307</a>)</em></li>
+          <li><strong>Faster activity tracking</strong> — activity history saves are now async and debounced, and a removed worktree's activity is retained for 90 days instead of being dropped immediately.</li>
+          <li><strong>Compact screenshot timeline</strong> — screenshot timelines in collapsed tool-call groups are now more compact.</li>
+          <li><strong>Faster long chat transcripts</strong> — Chat now renders only the visible tail of a long transcript, with a configurable window, instead of the entire history.</li>
+        </ul>
+        <h4>Fixes</h4>
+        <ul>
+          <li>Browser tool actions now capture the tab that was actually asked for, instead of occasionally grabbing a hidden parking window.</li>
+          <li>The installed PWA's home-screen icon no longer shows the old Harness artwork.</li>
+          <li>The macOS app menu now says "Ness" instead of "harness". <em class="text-neutral-500">(thanks <a href="https://github.com/blindpirate" class="text-amber-400/80 hover:text-amber-300">@blindpirate</a>, <a href="https://github.com/ness-dev/ness/pull/300" class="text-amber-400/80 hover:text-amber-300">#300</a>)</em></li>
+          <li>Fixed three renderer performance metrics that were reporting misleading values, along with the underlying bug they were hiding.</li>
+          <li>Browser tool evaluations no longer hang a tool call forever.</li>
+          <li>Restored shell tabs no longer re-run their last command on reopen.</li>
+          <li>The <code>rename_worktree</code> MCP tool no longer refuses to rename freshly created worktrees.</li>
+          <li>Worktrees no longer flicker in and out of the Needs Attention group when GitHub reports an unknown mergeability state.</li>
+          <li>Deleting a worktree that contains submodules now works correctly. <em class="text-neutral-500">(thanks <a href="https://github.com/blindpirate" class="text-amber-400/80 hover:text-amber-300">@blindpirate</a>, <a href="https://github.com/ness-dev/ness/pull/285" class="text-amber-400/80 hover:text-amber-300">#285</a>)</em></li>
+          <li>Hotkeys no longer steal keystrokes while typing in a text input.</li>
+          <li>The context panel is now capped in height, with its category list scrolling instead of pushing other content off-screen.</li>
+        </ul>
+        <p class="text-neutral-400 text-sm mt-6 leading-relaxed">Huge thanks to <a href="https://github.com/blindpirate" class="text-amber-400/80 hover:text-amber-300">@blindpirate</a> and <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a> for their contributions to this release.</p>
+      </div>
+    </section>
+
     <!-- v2.16.0 -->
     <section id="v2.16.0" class="release-section py-10">
       <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
