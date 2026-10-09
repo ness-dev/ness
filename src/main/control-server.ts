@@ -11,6 +11,7 @@ import type { PRStatus } from '../shared/state/prs'
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
+import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
 
 export interface BrowserTabSummary {
@@ -619,10 +620,23 @@ async function handleRequest(
           error: result?.error ?? 'capture failed: tab is no longer available'
         })
       }
+      const mimeType = result.format === 'png' ? 'image/png' : 'image/jpeg'
+      // Spill the capture to disk and hand the path back, so the agent can
+      // embed the screenshot in its reply (`![](path)`) to show the user
+      // what it just verified. The write is content-hash keyed, so this is
+      // the same file the chat transcript's tool-result extractor derives
+      // from the image block — one copy, not two.
+      let path: string | undefined
+      try {
+        path = writeResultImage(result.data, mimeType)
+      } catch (err) {
+        log('browser', `screenshot spill-to-disk failed: ${String(err)}`)
+      }
       return sendJson(res, 200, {
         data: result.data,
         format: result.format,
-        mimeType: result.format === 'png' ? 'image/png' : 'image/jpeg',
+        mimeType,
+        path,
         // Kept for older MCP bridge versions. New bridges read `data`+`format`.
         pngBase64: result.format === 'png' ? result.data : undefined
       })

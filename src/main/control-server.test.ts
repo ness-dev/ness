@@ -549,6 +549,14 @@ describe('control-server /browser/screenshot endpoint', () => {
     expect(r.json).toMatchObject({ data: 'AAAA', format: 'jpeg', mimeType: 'image/jpeg' })
   })
 
+  it('returns the on-disk path, hash-keyed so a repeat capture reuses the file', async () => {
+    captureResult = { data: 'AAAA', format: 'jpeg' }
+    const first = await get(`/browser/screenshot?tabId=${BROWSER_TAB}`)
+    expect(first.json.path).toMatch(/harness-attachments\/result-[0-9a-f]+\.jpg$/)
+    const second = await get(`/browser/screenshot?tabId=${BROWSER_TAB}`)
+    expect(second.json.path).toBe(first.json.path)
+  })
+
   it('surfaces the capture failure reason verbatim as a 500', async () => {
     captureResult = { error: 'tab viewport is 0x0 — nothing to capture' }
     const r = await get(`/browser/screenshot?tabId=${BROWSER_TAB}`)

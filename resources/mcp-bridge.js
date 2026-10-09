@@ -350,7 +350,7 @@ const TOOLS = [
   {
     name: 'screenshot_tab',
     description:
-      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Tab id comes from list_browser_tabs.",
+      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Also returns the path the capture was saved to: embed that path as markdown (`![](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show the user a UI change you just made. Tab id comes from list_browser_tabs.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -851,9 +851,18 @@ async function handleToolCall(name, args) {
     if (!data) throw new Error(r && r.error ? r.error : 'screenshot failed')
     const mimeType =
       r.mimeType || (r.format === 'jpeg' ? 'image/jpeg' : 'image/png')
-    return {
-      content: [{ type: 'image', data, mimeType }]
+    const content = [{ type: 'image', data, mimeType }]
+    if (r.path) {
+      // One terse line, not a paragraph: this rides along with every
+      // screenshot (context cost + it shows in the tool card). How to use
+      // the path lives in the tool description, which is in the system
+      // prompt anyway.
+      content.push({
+        type: 'text',
+        text: 'Saved to ' + r.path + ' — embed as ![](' + r.path + ') to show it in your reply.'
+      })
     }
+    return { content }
   }
   if (name === 'get_tab_dom') {
     if (!args || !args.tab_id) throw new Error('tab_id is required')
