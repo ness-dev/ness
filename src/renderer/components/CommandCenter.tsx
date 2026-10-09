@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, GitPullRequest, ChevronDown, ChevronRight, Layers, Rows3 } from 'lucide-react'
-import { useSettings, useSnooze } from '../store'
+import { useSettings, useSnooze, usePinned } from '../store'
 import { useBackend } from '../backend'
 import type {
   Worktree,
@@ -214,23 +214,33 @@ export function CommandCenter({
     for (const p of Object.keys(snoozeByPath)) m[p] = true
     return m
   }, [snoozeByPath])
+  const pinnedPaths = usePinned().byPath
   const sections = useMemo<Section[]>(() => {
+    const group = (wts: Worktree[]): Section['groups'] =>
+      groupWorktrees(wts, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths)
     if (unifiedRepos || repoRoots.length <= 1) {
-      return [{
-        scope: '__unified__',
-        repoLabel: '',
-        groups: groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin)
-      }]
+      return [{ scope: '__unified__', repoLabel: '', groups: group(worktrees) }]
     }
+    // Split mode: pinned worktrees from every repo share one section above
+    // the per-repo sections, rather than a Pinned group inside each repo.
+    // It reuses the unified scope so its collapse state matches unified mode.
+    const pinned: Worktree[] = []
     const byRepo = new Map<string, Worktree[]>()
     for (const root of repoRoots) byRepo.set(root, [])
-    for (const wt of worktrees) byRepo.get(wt.repoRoot)!.push(wt)
-    return repoRoots.map((root) => ({
-      scope: root,
-      repoLabel: root.split('/').pop() || root,
-      groups: groupWorktrees(byRepo.get(root) || [], prStatuses, mergedPaths, snoozedPaths, viewerLogin)
-    }))
-  }, [unifiedRepos, repoRoots, worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin])
+    for (const wt of worktrees) {
+      if (pinnedPaths[wt.path]) pinned.push(wt)
+      else byRepo.get(wt.repoRoot)!.push(wt)
+    }
+    const repoSections = repoRoots
+      .filter((root) => byRepo.get(root)!.length > 0)
+      .map((root) => ({
+        scope: root,
+        repoLabel: root.split('/').pop() || root,
+        groups: group(byRepo.get(root)!)
+      }))
+    if (pinned.length === 0) return repoSections
+    return [{ scope: '__unified__', repoLabel: '', groups: group(pinned) }, ...repoSections]
+  }, [unifiedRepos, repoRoots, worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, pinnedPaths])
 
   const totalCards = useMemo(
     () => sections.reduce((acc, s) => acc + s.groups.reduce((a, g) => a + g.worktrees.length, 0), 0),
