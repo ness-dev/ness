@@ -350,7 +350,7 @@ const TOOLS = [
   {
     name: 'screenshot_tab',
     description:
-      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Also returns the path the capture was saved to: embed that path as markdown (`![](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show the user a UI change you just made. Tab id comes from list_browser_tabs.",
+      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Also returns the path the capture was saved to: embed that path as markdown (`![](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show the user a UI change you just made. Set the display size with a spec after a pipe in the alt text — `![login form|500](path)` for 500px wide, `![x|50%](path)` to fill half the column, `![x|400x300](path)` for both dimensions; with no spec it renders at a default size. Tab id comes from list_browser_tabs.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -859,7 +859,14 @@ async function handleToolCall(name, args) {
       // prompt anyway.
       content.push({
         type: 'text',
-        text: 'Saved to ' + r.path + ' — embed as ![](' + r.path + ') to show it in your reply.'
+        text:
+          'Saved to ' +
+          r.path +
+          ' — embed as ![](' +
+          r.path +
+          ') to show it in your reply, or ![|600](' +
+          r.path +
+          ') to set its width.'
       })
     }
     return { content }
