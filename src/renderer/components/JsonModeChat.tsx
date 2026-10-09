@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import { rehypeHighlightShared } from '../rehype-highlight-shared'
 import remarkGfm from 'remark-gfm'
 import { remarkInsight } from '../remark-insight'
@@ -58,6 +58,7 @@ import {
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import { CLAUDE_MODELS } from '../../shared/agent-registry'
+import { resolveLocalImageSrc } from '../../shared/chat-image-src'
 import {
   QUESTION_TOOL_NAME,
   type JsonClaudeAutomationSource,
@@ -79,10 +80,60 @@ import {
 const REMARK_PLUGINS = [remarkGfm, remarkInsight]
 const REHYPE_PLUGINS = [rehypeHighlightShared, rehypeColorHex]
 
+/** Markdown `![alt](…)` in a message. An agent that just took a browser
+ *  screenshot can embed it in its prose to show the thing it built — the
+ *  file is on the machine running the session, so it loads over the
+ *  attachment-read IPC rather than as a page-origin URL. Remote srcs are
+ *  left to the browser (react-markdown's urlTransform has already
+ *  sanitized the protocol by the time we see them). */
+function MarkdownImage({
+  src,
+  alt,
+  title
+}: {
+  src?: string
+  alt?: string
+  title?: string
+}): JSX.Element | null {
+  const local = resolveLocalImageSrc(src)
+  if (local) {
+    return (
+      <JsonModeChatImageThumb
+        path={local.path}
+        mediaType={local.mediaType}
+        shape="inline"
+        alt={alt}
+      />
+    )
+  }
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      alt={alt ?? ''}
+      title={title}
+      loading="lazy"
+      className="max-w-full max-h-96 rounded"
+    />
+  )
+}
+
 // react-markdown v10's Components type only lists known HTML tag names,
 // but the runtime accepts any string tag; cast to register our custom
 // <insight-card> element.
-const MARKDOWN_COMPONENTS = { 'insight-card': InsightCard } as unknown as Components
+const MARKDOWN_COMPONENTS = {
+  'insight-card': InsightCard,
+  img: MarkdownImage
+} as unknown as Components
+
+// react-markdown's default transform blanks any src whose protocol isn't
+// http(s)/mailto/xmpp/irc, which includes the file:// form of a local
+// screenshot. Let those through — MarkdownImage decides what's local, and
+// a bare absolute path (the form we tell agents to use) already survives
+// the default transform untouched.
+function chatUrlTransform(url: string): string {
+  return /^file:\/\//i.test(url) ? url : defaultUrlTransform(url)
+}
 
 // Matches color literals we want to swatch:
 //   - #RRGGBB and #RRGGBBAA hex. 3-hex (#fff) and 4-hex (#ffff) are
@@ -190,6 +241,7 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
       remarkPlugins={REMARK_PLUGINS}
       rehypePlugins={rehypePlugins}
       components={MARKDOWN_COMPONENTS}
+      urlTransform={chatUrlTransform}
     >
       {children}
     </ReactMarkdown>
