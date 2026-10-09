@@ -58,7 +58,11 @@ import {
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import { CLAUDE_MODELS } from '../../shared/agent-registry'
-import { resolveLocalImageSrc } from '../../shared/chat-image-src'
+import {
+  parseImageAlt,
+  parseImageTitle,
+  resolveLocalImageSrc
+} from '../../shared/chat-image-src'
 import {
   QUESTION_TOOL_NAME,
   type JsonClaudeAutomationSource,
@@ -85,7 +89,10 @@ const REHYPE_PLUGINS = [rehypeHighlightShared, rehypeColorHex]
  *  file is on the machine running the session, so it loads over the
  *  attachment-read IPC rather than as a page-origin URL. Remote srcs are
  *  left to the browser (react-markdown's urlTransform has already
- *  sanitized the protocol by the time we see them). */
+ *  sanitized the protocol by the time we see them).
+ *
+ *  Display size comes from a spec in the alt (`![panel|400](…)`) or the
+ *  title (`![panel](… "=400x300")`) — see shared/chat-image-src. */
 function MarkdownImage({
   src,
   alt,
@@ -95,14 +102,18 @@ function MarkdownImage({
   alt?: string
   title?: string
 }): JSX.Element | null {
+  const parsedAlt = parseImageAlt(alt)
+  const parsedTitle = parseImageTitle(title)
   const local = resolveLocalImageSrc(src)
+  const dimensions = parsedAlt.size ?? parsedTitle.size ?? local?.size ?? undefined
   if (local) {
     return (
       <JsonModeChatImageThumb
         path={local.path}
         mediaType={local.mediaType}
         shape="inline"
-        alt={alt}
+        alt={parsedAlt.alt || undefined}
+        dimensions={dimensions}
       />
     )
   }
@@ -110,10 +121,22 @@ function MarkdownImage({
   return (
     <img
       src={src}
-      alt={alt ?? ''}
-      title={title}
+      alt={parsedAlt.alt}
+      title={parsedTitle.title}
       loading="lazy"
-      className="max-w-full max-h-96 rounded"
+      style={
+        dimensions
+          ? {
+              width: dimensions.widthPercent
+                ? `${dimensions.widthPercent}%`
+                : dimensions.width
+                  ? `${dimensions.width}px`
+                  : undefined,
+              height: dimensions.height ? `${dimensions.height}px` : undefined
+            }
+          : undefined
+      }
+      className={dimensions ? 'max-w-full rounded' : 'max-h-64 max-w-lg rounded'}
     />
   )
 }

@@ -46,6 +46,10 @@ interface Props {
   size?: 'base' | 'sm'
   /** Alt text, when the embedder has one (markdown `![alt](path)`). */
   alt?: string
+  /** Explicit display size from the embed's size spec. Only honoured for
+   *  shape 'inline' — the other shapes are fixed-size chrome. Width still
+   *  can't exceed the column. */
+  dimensions?: { width?: number; height?: number; widthPercent?: number }
 }
 
 export function JsonModeChatImageThumb({
@@ -53,7 +57,8 @@ export function JsonModeChatImageThumb({
   mediaType,
   shape = 'square',
   size = 'base',
-  alt
+  alt,
+  dimensions
 }: Props): JSX.Element {
   const [dataUrl, setDataUrl] = useState<string | null>(
     CACHE.has(path) ? CACHE.get(path)! : null
@@ -90,9 +95,25 @@ export function JsonModeChatImageThumb({
 
   const name = alt || path.split('/').pop() || path
   const sm = size === 'sm'
+  // An explicit size replaces the inline default rather than adding to it,
+  // so `![x|800](…)` can go wider than the 24rem default cap. max-width
+  // still wins, so nothing overflows the column.
+  const sized = shape === 'inline' && dimensions ? dimensions : null
+  const sizedStyle = sized
+    ? {
+        width: sized.widthPercent
+          ? `${sized.widthPercent}%`
+          : sized.width
+            ? `${sized.width}px`
+            : undefined,
+        height: sized.height ? `${sized.height}px` : undefined
+      }
+    : undefined
   const boxClass =
     shape === 'inline'
-      ? 'h-48 w-full max-w-lg'
+      ? sized
+        ? 'max-w-full'
+        : 'h-40 w-full max-w-md'
       : shape === 'wide'
         ? sm
           ? 'h-16 w-24'
@@ -102,17 +123,27 @@ export function JsonModeChatImageThumb({
           : 'h-16 w-16'
   const imgClass =
     shape === 'inline'
-      ? 'max-h-96 w-auto max-w-full object-contain bg-app'
+      ? sized
+        ? 'max-w-full object-contain bg-app'
+        : // Unsized default: a glanceable 16rem-tall preview, click to
+          // zoom. Bigger than this and one screenshot owns the viewport.
+          'max-h-64 max-w-lg w-auto object-contain bg-app'
       : shape === 'wide'
         ? `${sm ? 'h-16' : 'h-32'} w-auto max-w-full object-contain bg-app`
         : sm
           ? 'h-8 w-8 object-cover'
           : 'h-16 w-16 object-cover'
+  // Reserve the requested box while loading / when the file is gone, so the
+  // transcript doesn't reflow once the bytes arrive.
+  const placeholderStyle = sized
+    ? { ...sizedStyle, height: sizedStyle?.height ?? '10rem' }
+    : undefined
 
   if (pending) {
     return (
       <div
         className={`${boxClass} rounded bg-panel border border-border animate-pulse`}
+        style={placeholderStyle}
         title={path}
       />
     )
@@ -121,6 +152,7 @@ export function JsonModeChatImageThumb({
     return (
       <div
         className={`${boxClass} rounded bg-panel border border-border flex items-center justify-center gap-2 text-faint`}
+        style={placeholderStyle}
         title={`${path} (no longer on disk)`}
       >
         <ImageOff className={sm ? 'icon-xs' : 'icon-base'} />
@@ -141,6 +173,7 @@ export function JsonModeChatImageThumb({
         <img
           src={dataUrl}
           alt={name}
+          style={sizedStyle}
           className={`${imgClass} rounded border border-border hover:border-accent transition-colors`}
         />
       </button>
