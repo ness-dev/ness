@@ -106,6 +106,13 @@ export function parseWorktreeListPorcelain(
   let current: Partial<WorktreeInfo> = {}
   const flush = (): void => {
     if (!current.path) return
+    // `git worktree list` never marks a locked entry prunable, and `git
+    // worktree prune` skips it, so a locked worktree whose directory was
+    // deleted out from under it would otherwise look healthy forever.
+    if (current.locked && !current.prunable && !existsSync(current.path)) {
+      current.prunable = true
+      current.prunableReason = 'locked, and its directory no longer exists'
+    }
     worktrees.push({
       path: current.path,
       branch: current.branch || '(detached)',
@@ -115,7 +122,9 @@ export function parseWorktreeListPorcelain(
       createdAt: getCreatedAt(current.path),
       repoRoot,
       ...(current.prunable ? { prunable: true } : {}),
-      ...(current.prunableReason ? { prunableReason: current.prunableReason } : {})
+      ...(current.prunableReason ? { prunableReason: current.prunableReason } : {}),
+      ...(current.locked ? { locked: true } : {}),
+      ...(current.lockedReason ? { lockedReason: current.lockedReason } : {})
     })
     current = {}
   }
@@ -136,6 +145,10 @@ export function parseWorktreeListPorcelain(
       current.prunable = true
       const rest = line.slice('prunable'.length).trim()
       if (rest) current.prunableReason = rest
+    } else if (line === 'locked' || line.startsWith('locked ')) {
+      current.locked = true
+      const rest = line.slice('locked'.length).trim()
+      if (rest) current.lockedReason = rest
     } else if (line === '') {
       flush()
     }
@@ -2008,14 +2021,31 @@ export function readClaudeAllowEntries(worktreePath: string): string[] {
 export async function removeWorktree(repoRoot: string, path: string, force?: boolean): Promise<void> {
   log('worktree', `removing worktree: path=${path} force=${force}`)
   const args = ['worktree', 'remove', path]
-  if (force) args.push('--force')
+  // Git needs --force twice to remove a locked worktree. When the directory
+  // is already gone there's nothing left to lose, so override any lock
+  // rather than failing on an entry nobody can use anymore.
+  if (!existsSync(path)) args.push('--force', '--force')
+  else if (force) args.push('--force')
   await execFileAsync('git', args, { cwd: repoRoot })
+}
+
+export async function unlockWorktree(repoRoot: string, path: string): Promise<void> {
+  log('worktree', `unlocking worktree: path=${path}`)
+  await execFileAsync('git', ['worktree', 'unlock', path], { cwd: repoRoot })
 }
 
 /** Drop `.git/worktrees/<name>` entries whose on-disk directory no
  *  longer exists. Same as running `git worktree prune` by hand — this
- *  is the recovery action wired to the "Stale" badge in the sidebar. */
+ *  is the recovery action wired to the "Stale" badge in the sidebar.
+ *  `git worktree prune` skips locked entries, so missing-directory ones
+ *  are unlocked first. Locked entries whose directory still exists are
+ *  left alone: someone locked those on purpose. */
 export async function pruneWorktrees(repoRoot: string): Promise<void> {
   log('worktree', `pruning stale worktrees at repoRoot=${repoRoot}`)
+  const trees = await listWorktrees(repoRoot)
+  for (const wt of trees) {
+    if (!wt.locked || wt.isMain || existsSync(wt.path)) continue
+    await unlockWorktree(repoRoot, wt.path)
+  }
   await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot })
 }

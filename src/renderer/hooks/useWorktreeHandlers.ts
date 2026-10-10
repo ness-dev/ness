@@ -303,6 +303,16 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
 
   const handleDeleteWorktree = useCallback(
     async (path: string) => {
+      const target = worktrees.find((w) => w.path === path)
+      const overrideLock = Boolean(target?.locked && !target.prunable)
+      if (overrideLock) {
+        const reason = target?.lockedReason ? `\n\nLock reason: ${target.lockedReason}` : ''
+        const confirmed = window.confirm(
+          `This worktree is locked (git worktree lock), usually because another Claude session is using it.${reason}\n\nForce remove it anyway?`
+        )
+        if (!confirmed) return
+      }
+
       // Check for dirty changes — git tracked + per-worktree scratchpad
       // notes are reported separately so the dialog can name exactly
       // what's about to be lost.
@@ -344,7 +354,8 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         repoRoot,
         path,
         dirty.git,
-        pr ? { prNumber: pr.number, prState: pr.state } : undefined
+        pr ? { prNumber: pr.number, prState: pr.state } : undefined,
+        overrideLock ? { overrideLock } : undefined
       )
       if (path === activeWorktreeId) {
         const next = worktrees.find((w) => w.path !== path)

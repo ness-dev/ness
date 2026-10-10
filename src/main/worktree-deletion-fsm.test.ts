@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('./debug', () => ({ log: () => {} }))
 
@@ -9,6 +12,7 @@ vi.mock('./repo-config', () => ({
 vi.mock('./worktree', () => ({
   removeWorktree: vi.fn(async () => {}),
   pruneWorktrees: vi.fn(async () => {}),
+  unlockWorktree: vi.fn(async () => {}),
   runWorktreeScript: vi.fn(async (_kind, _cmd, _ctx, onChunk) => {
     if (onChunk) onChunk('stdout', 'teardown-output')
     return { ok: true, exitCode: 0, stdout: '', stderr: '' }
@@ -25,7 +29,7 @@ vi.mock('./worktree-trash', () => ({
 
 import { Store } from './store'
 import { WorktreeDeletionFSM } from './worktree-deletion-fsm'
-import { removeWorktree, pruneWorktrees, runWorktreeScript } from './worktree'
+import { removeWorktree, pruneWorktrees, runWorktreeScript, unlockWorktree } from './worktree'
 import {
   deleteWorktreeDirectory,
   isSameVolume,
@@ -180,5 +184,69 @@ describe('WorktreeDeletionFSM — failure surface', () => {
         e.payload.patch.phase === 'failed'
     )
     expect(failed).toBeTruthy()
+  })
+})
+
+describe('WorktreeDeletionFSM — locked worktrees', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(loadRepoConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({})
+    ;(isSameVolume as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true)
+    ;(moveWorktreeToTrash as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      '/trash/uuid'
+    )
+  })
+
+  function withDir(fn: (dir: string) => Promise<void>): Promise<void> {
+    const dir = mkdtempSync(join(tmpdir(), 'wt-fsm-locked-'))
+    return fn(dir).finally(() => rmSync(dir, { recursive: true, force: true }))
+  }
+
+  it('refuses a locked worktree whose directory exists without an override, before teardown', () =>
+    withDir(async (dir) => {
+      ;(loadRepoConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        teardownCommand: 'echo bye'
+      })
+      const { fsm, events } = makeFsm()
+
+      fsm.enqueue({ repoRoot: '/repo', path: dir, branch: 'x', locked: true, lockedReason: 'claude agent' })
+      await new Promise((r) => setImmediate(r))
+
+      const failed = events.find(
+        (e) => e.type === 'worktrees/pendingDeletionUpdated' && e.payload.patch.phase === 'failed'
+      )
+      expect(failed && failed.type === 'worktrees/pendingDeletionUpdated' && failed.payload.patch.error).toMatch(
+        /locked \(claude agent\)/
+      )
+      expect(runWorktreeScript).not.toHaveBeenCalled()
+      expect(unlockWorktree).not.toHaveBeenCalled()
+      expect(moveWorktreeToTrash).not.toHaveBeenCalled()
+    }))
+
+  it('unlocks before trashing when the lock is overridden', () =>
+    withDir(async (dir) => {
+      const { fsm, events } = makeFsm()
+
+      fsm.enqueue({ repoRoot: '/repo', path: dir, branch: 'x', locked: true, overrideLock: true })
+      await new Promise((r) => setImmediate(r))
+
+      expect(unlockWorktree).toHaveBeenCalledWith('/repo', dir)
+      const unlockOrder = (unlockWorktree as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+      const moveOrder = (moveWorktreeToTrash as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+      expect(unlockOrder).toBeLessThan(moveOrder)
+      expect(events.some((e) => e.type === 'worktrees/pendingDeletionRemoved')).toBe(true)
+    }))
+
+  it('removes a locked worktree whose directory is already gone without an override', async () => {
+    ;(isSameVolume as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false)
+    ;(removeWorktree as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined)
+    const { fsm, events } = makeFsm()
+
+    fsm.enqueue({ repoRoot: '/repo', path: '/gone/wt92', branch: 'sec-9.2-fix', locked: true })
+    await new Promise((r) => setImmediate(r))
+
+    expect(unlockWorktree).not.toHaveBeenCalled()
+    expect(removeWorktree).toHaveBeenCalledWith('/repo', '/gone/wt92', undefined)
+    expect(events.some((e) => e.type === 'worktrees/pendingDeletionRemoved')).toBe(true)
   })
 })

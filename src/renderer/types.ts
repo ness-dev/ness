@@ -264,7 +264,8 @@ export interface ElectronAPI {
     repoRoot: string,
     path: string,
     force?: boolean,
-    removeMeta?: { prNumber?: number; prState?: PRStatus['state'] }
+    removeMeta?: { prNumber?: number; prState?: PRStatus['state'] },
+    opts?: { overrideLock?: boolean }
   ): Promise<{ queued: true }>
   dismissPendingDeletion(path: string): Promise<boolean>
   pruneWorktrees(repoRoot: string): Promise<boolean>

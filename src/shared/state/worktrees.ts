@@ -21,6 +21,14 @@ export interface Worktree {
    *  points to non-existent location"). Optional — shown as a tooltip
    *  next to the stale badge. */
   prunableReason?: string
+  /** True when git has the entry locked (`git worktree lock`). Claude
+   *  Code's own worktree isolation locks the worktrees it creates in its
+   *  scratchpad, so a locked entry usually means another session owns it.
+   *  A locked entry whose directory is gone is also reported as
+   *  `prunable`, since git itself won't flag it. */
+  locked?: boolean
+  /** Reason passed to `git worktree lock --reason`, if any. */
+  lockedReason?: string
 }
 
 /** Handle for a worktree in agent-facing text: `<repo>/<branch>`. Branch
@@ -84,7 +92,9 @@ export function worktreeListsEqual(a: Worktree[], b: Worktree[]): boolean {
       x.createdAt !== y.createdAt ||
       x.repoRoot !== y.repoRoot ||
       x.prunable !== y.prunable ||
-      x.prunableReason !== y.prunableReason
+      x.prunableReason !== y.prunableReason ||
+      x.locked !== y.locked ||
+      x.lockedReason !== y.lockedReason
     ) {
       return false
     }

@@ -259,3 +259,43 @@ describe('unsymlinkClaudeSettings', () => {
     }
   })
 })
+
+describe('parseWorktreeListPorcelain — locked entries', () => {
+  it('records the lock and its reason', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wt-parse-locked-'))
+    try {
+      const stdout = [
+        `worktree ${dir}`,
+        'HEAD 1234567',
+        'branch refs/heads/agent',
+        'locked claude agent',
+        ''
+      ].join('\n')
+
+      const [wt] = parseWorktreeListPorcelain(stdout, '/Users/x/repo')
+
+      expect(wt.locked).toBe(true)
+      expect(wt.lockedReason).toBe('claude agent')
+      expect(wt.prunable).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('marks a locked entry with a missing directory prunable, since git does not', () => {
+    const stdout = [
+      'worktree /Users/x/does-not-exist/wt92',
+      'HEAD 1234567',
+      'branch refs/heads/sec-9.2-fix',
+      'locked',
+      ''
+    ].join('\n')
+
+    const [wt] = parseWorktreeListPorcelain(stdout, '/Users/x/repo')
+
+    expect(wt.locked).toBe(true)
+    expect(wt.lockedReason).toBeUndefined()
+    expect(wt.prunable).toBe(true)
+    expect(wt.prunableReason).toMatch(/locked/)
+  })
+})
