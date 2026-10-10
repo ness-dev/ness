@@ -72,7 +72,15 @@ export function resolveLocalImageSrc(src: string | null | undefined): LocalImage
   if (hash > 0) {
     const head = path.slice(0, hash)
     if (imageMediaType(head)) {
-      const parsed = parseImageSizeSpec(path.slice(hash + 1))
+      // The markdown parser percent-encodes the URL on the way through, so
+      // a `#w=50%` written by an agent arrives as `#w=50%25`.
+      let tail = path.slice(hash + 1)
+      try {
+        tail = decodeURIComponent(tail)
+      } catch {
+        /* malformed escape — parse what was written */
+      }
+      const parsed = parseImageSizeSpec(tail)
       if (parsed) {
         path = head
         size = parsed
