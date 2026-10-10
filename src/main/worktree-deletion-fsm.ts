@@ -1,4 +1,5 @@
-import { pruneWorktrees, removeWorktree, runWorktreeScript } from './worktree'
+import { existsSync } from 'node:fs'
+import { pruneWorktrees, removeWorktree, runWorktreeScript, unlockWorktree } from './worktree'
 import {
   deleteWorktreeDirectory,
   isSameVolume,
@@ -49,6 +50,9 @@ export class WorktreeDeletionFSM {
     path: string
     branch: string
     force?: boolean
+    locked?: boolean
+    lockedReason?: string
+    overrideLock?: boolean
   }): void {
     void this.run(params)
   }
@@ -62,8 +66,11 @@ export class WorktreeDeletionFSM {
     path: string
     branch: string
     force?: boolean
+    locked?: boolean
+    lockedReason?: string
+    overrideLock?: boolean
   }): Promise<void> {
-    const { repoRoot, path, branch, force } = params
+    const { repoRoot, path, branch, force, locked, lockedReason, overrideLock } = params
     const repoCfg = loadRepoConfig(repoRoot)
     const teardownCmd = repoCfg.teardownCommand || this.opts.getGlobalTeardownCmd() || ''
     const hasTeardown = Boolean(teardownCmd.trim())
@@ -78,6 +85,21 @@ export class WorktreeDeletionFSM {
     this.store.dispatch({ type: 'worktrees/pendingDeletionStarted', payload: initial })
 
     try {
+      // A locked worktree whose directory still exists was locked on
+      // purpose (usually by another Claude session), so it takes an
+      // explicit override. Checked before teardown so a refusal doesn't
+      // half-dismantle it. A missing directory has nothing left to
+      // protect — removeWorktree/pruneWorktrees clear those on their own.
+      if (locked && existsSync(path)) {
+        if (!overrideLock) {
+          throw new Error(
+            `The worktree is locked${lockedReason ? ` (${lockedReason})` : ''}. ` +
+              'Unlock it with `git worktree unlock`, or delete it again from the sidebar and confirm the force remove.'
+          )
+        }
+        await unlockWorktree(repoRoot, path)
+      }
+
       if (hasTeardown) {
         let buffered = ''
         const result = await runWorktreeScript(
@@ -109,15 +131,9 @@ export class WorktreeDeletionFSM {
       // bookkeeping, background-unlink. `isSameVolume` returns false
       // if either stat throws (e.g. path is already gone) — the fast
       // path is skipped in that case, which is what we want.
-      //
-      // Note on locked worktrees: `git worktree remove` refuses to
-      // remove a locked entry without --force. `mv` doesn't care about
-      // git's lock, so the fast path is silently *more* forgiving —
-      // once the working dir is renamed out, `git worktree prune`
-      // happily reaps the bookkeeping. If we ever want to preserve
-      // the old "locked" guardrail we'd need to inspect git's lock
-      // files here; today the deletion FSM's callers already gate on
-      // dirty/locked in the UI so this widening is fine.
+      // Locked worktrees were unlocked above, which matters here too:
+      // `git worktree prune` skips locked entries, so renaming a locked
+      // dir out would leave a ghost entry behind.
       if (isSameVolume(path, worktreeTrashDir())) {
         const trashPath = await moveWorktreeToTrash(path)
         await pruneWorktrees(repoRoot)
