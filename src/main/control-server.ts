@@ -128,6 +128,11 @@ export interface CallerScope {
   worktreePath: string
   repoRoot: string
   isMain: boolean
+  /** True when the caller's transcript is rendered as markdown (a Chat
+   *  tab). Terminal tabs are an xterm, so affordances that only exist in
+   *  the rendered transcript — embedding a screenshot in a reply — must
+   *  not be advertised to them. */
+  rendersMarkdown: boolean
 }
 
 export interface BrowserPerms {

@@ -45,7 +45,8 @@ const scope: CallerScope = {
   terminalId: CALLER_TERMINAL,
   worktreePath: CALLER_WORKTREE,
   repoRoot: '/repo',
-  isMain: false
+  isMain: false,
+  rendersMarkdown: true
 }
 
 /** Mutable so a test can flip the setting off without restarting the server —
@@ -128,12 +129,14 @@ let baseUrl: string
 let token: string
 
 async function get(
-  path: string
+  path: string,
+  extraHeaders?: Record<string, string>
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await fetch(`${baseUrl}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
-      'X-Harness-Terminal-Id': CALLER_TERMINAL
+      'X-Harness-Terminal-Id': CALLER_TERMINAL,
+      ...extraHeaders
     }
   })
   const text = await res.text()
@@ -531,6 +534,22 @@ describe('control-server /messages endpoint', () => {
       { terminalId: 'unknown-terminal' }
     )
     expect(r.status).toBe(404)
+  })
+})
+
+describe('control-server /scope endpoint', () => {
+  // The bridge gates screenshot_tab's "embed this in your reply" guidance
+  // on this flag — a terminal tab renders markdown as literal text, so it
+  // must not be told the affordance exists.
+  it('carries rendersMarkdown through to the caller', async () => {
+    const r = await get('/scope')
+    expect(r.status).toBe(200)
+    expect((r.json.scope as CallerScope).rendersMarkdown).toBe(true)
+  })
+
+  it('400s without a terminal id, rather than guessing', async () => {
+    const r = await get('/scope', { 'X-Harness-Terminal-Id': '' })
+    expect(r.status).toBe(400)
   })
 })
 

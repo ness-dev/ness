@@ -237,10 +237,13 @@ function resolveCallerScope(terminalId: string) {
   if (!terminalId) return null
   const panes = store.getSnapshot().state.terminals.panes
   let worktreePath: string | null = null
+  let tabType: TerminalTab['type'] | null = null
   for (const [wtPath, tree] of Object.entries(panes)) {
     for (const leaf of getLeaves(tree)) {
-      if (leaf.tabs.some((t) => t.id === terminalId)) {
+      const tab = leaf.tabs.find((t) => t.id === terminalId)
+      if (tab) {
         worktreePath = wtPath
+        tabType = tab.type
         break
       }
     }
@@ -255,7 +258,11 @@ function resolveCallerScope(terminalId: string) {
     terminalId,
     worktreePath,
     repoRoot: wt.repoRoot,
-    isMain: wt.isMain
+    isMain: wt.isMain,
+    // Chat tabs render their transcript as markdown; terminal tabs are an
+    // xterm, where an embedded image is just literal text. Tools that
+    // advertise rendering affordances gate on this.
+    rendersMarkdown: tabType === 'json-claude'
   }
 }
 

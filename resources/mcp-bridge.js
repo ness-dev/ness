@@ -166,6 +166,20 @@ function truncateDom(html, maxBytes) {
 const FORK_DESCRIPTION_SENTENCE =
   ' The new tab normally starts as a blank conversation seeded with initialPrompt; set forkConversation to instead hand it a copy of THIS conversation to continue from.'
 
+// Appended to screenshot_tab's description, and removed again by
+// stripEmbedAffordance for callers whose transcript isn't rendered markdown.
+// A terminal-tab agent that follows this advice writes markdown into an
+// xterm, where it is literal text. Same keep-it-in-one-constant reasoning as
+// FORK_DESCRIPTION_SENTENCE above.
+//
+// The documented size syntax is the `#w=` fragment rather than a `|` spec:
+// a pipe inside a markdown table cell is a column delimiter, so GFM splits
+// `![cap|300](path)` into two cells before any image is parsed and the embed
+// renders as the literal text `![cap` / `300](path)`. The fragment survives
+// table cells, lists, and blockquotes untouched.
+const EMBED_DESCRIPTION_SENTENCE =
+  ' Also returns the path the capture was saved to: embed that path as markdown (`![caption](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show a UI change you just made. Append a `#w=` fragment to set its displayed width — `![login form](path#w=500)` for 500px, `#w=50%` to fill half the column, `#w=400x300` for both dimensions; with no fragment it renders at a default size. Prefer the fragment over a `|` size spec: a pipe breaks the embed when it lands inside a markdown table cell.'
+
 const TOOLS = [
   {
     name: 'create_worktree',
@@ -350,7 +364,8 @@ const TOOLS = [
   {
     name: 'screenshot_tab',
     description:
-      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Also returns the path the capture was saved to: embed that path as markdown (`![](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show the user a UI change you just made. Set the display size with a spec after a pipe in the alt text — `![login form|500](path)` for 500px wide, `![x|50%](path)` to fill half the column, `![x|400x300](path)` for both dimensions; with no spec it renders at a default size. Tab id comes from list_browser_tabs.",
+      "Take a screenshot of a browser tab in this worktree at the viewport's CSS-pixel dimensions — so screenshot coords can be passed straight to click_tab. Returns a JPEG (quality 70) by default for context-efficiency; ask for PNG only when lossless matters. Screenshots are for visual verification, not for finding click targets — prefer get_tab_clickables for interaction. Tab id comes from list_browser_tabs." +
+      EMBED_DESCRIPTION_SENTENCE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -683,6 +698,15 @@ async function getConversationForkEnabled() {
   return s.conversationFork ? s.conversationFork.enabled === true : false
 }
 
+/** Whether the caller's transcript renders markdown (a Chat tab). Defaults
+ *  to true when /scope can't say — same permissive-on-failure posture as the
+ *  browser gates, and over-advertising costs a terminal agent a wasted
+ *  sentence where under-advertising hides the feature from a chat agent. */
+async function getRendersMarkdown() {
+  const s = await getScopeInfo()
+  return s.scope ? s.scope.rendersMarkdown !== false : true
+}
+
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (t.name === 'send_message') return perms.messaging.enabled
@@ -697,6 +721,14 @@ function filterToolsByPerms(tools, perms) {
 
 // Strip every trace of forking from create_worktree when it's disabled, rather
 // than advertising a parameter whose only outcome is a rejection.
+function stripEmbedAffordance(tools) {
+  return tools.map((t) =>
+    t.name === 'screenshot_tab'
+      ? { ...t, description: t.description.replace(EMBED_DESCRIPTION_SENTENCE, '') }
+      : t
+  )
+}
+
 function stripForkAffordance(tools) {
   return tools.map((t) => {
     if (t.name !== 'create_worktree') return t
@@ -856,17 +888,21 @@ async function handleToolCall(name, args) {
       // One terse line, not a paragraph: this rides along with every
       // screenshot (context cost + it shows in the tool card). How to use
       // the path lives in the tool description, which is in the system
-      // prompt anyway.
+      // prompt anyway. The path itself is worth having either way — it's
+      // the embed hint that's Chat-tab-only.
+      const embeddable = await getRendersMarkdown()
       content.push({
         type: 'text',
         text:
           'Saved to ' +
           r.path +
-          ' — embed as ![](' +
-          r.path +
-          ') to show it in your reply, or ![|600](' +
-          r.path +
-          ') to set its width.'
+          (embeddable
+            ? ' — embed as ![](' +
+              r.path +
+              ') to show it in your reply, or ![](' +
+              r.path +
+              '#w=600) to set its width.'
+            : '')
       })
     }
     return { content }
@@ -1067,6 +1103,7 @@ async function handle(msg) {
       const perms = await getToolPerms()
       let tools = filterToolsByPerms(TOOLS, perms)
       if (!(await getConversationForkEnabled())) tools = stripForkAffordance(tools)
+      if (!(await getRendersMarkdown())) tools = stripEmbedAffordance(tools)
       return { jsonrpc: '2.0', id, result: { tools } }
     }
     if (method === 'tools/call') {

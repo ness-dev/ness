@@ -178,3 +178,17 @@ describe('resolveLocalImageSrc — size fragment', () => {
     })
   })
 })
+
+describe('resolveLocalImageSrc — percent-encoded fragment', () => {
+  it('decodes before parsing, since markdown encodes % in the URL', () => {
+    expect(resolveLocalImageSrc('/tmp/a.png#w=50%25')?.size).toEqual({
+      widthPercent: 50
+    })
+  })
+
+  it('tolerates a malformed escape in the fragment', () => {
+    expect(resolveLocalImageSrc('/tmp/a.png#w=50%')?.size).toEqual({
+      widthPercent: 50
+    })
+  })
+})
