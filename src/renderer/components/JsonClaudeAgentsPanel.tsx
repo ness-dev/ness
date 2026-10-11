@@ -24,6 +24,9 @@ import { AgentStepLine } from './AgentStepLine'
  *  buys nothing, and the cap holds regardless of token rate. */
 const LIVE_REFRESH_MS = 500
 
+/** Finished agents shown before collapsing the rest behind a toggle. */
+const SETTLED_PREVIEW = 5
+
 /** One clock for the whole panel. Elapsed times are the only thing here
  *  that changes without a state event, so they get a single shared tick
  *  rather than a timer per row — and it only runs while something is
@@ -106,6 +109,7 @@ export function JsonClaudeAgentsPanel({
   const session = useJsonClaudeSession(focusedTabId ?? '')
   const pendingApprovals = useJsonClaudePendingApprovals()
   const [peekId, setPeekId] = useState<string | null>(null)
+  const [showAllSettled, setShowAllSettled] = useState(false)
 
   const pendingToolUseIds = useMemo(() => {
     const ids = new Set<string>()
@@ -129,11 +133,21 @@ export function JsonClaudeAgentsPanel({
   const sessionId = session?.sessionId
   const [tick, setTick] = useState(0)
 
-  const agents = useMemo(
-    () => collectAgents(sessionRef.current, pendingToolUseIds),
+  // Feeding the last result back lets settled agents be handed through
+  // by reference — see collectAgents. Without it, every tick rebuilds
+  // the step feed of every agent the session ever launched, and that
+  // list only grows.
+  const prevAgentsRef = useRef<readonly AgentSummary[]>([])
+  const agents = useMemo(() => {
+    const next = collectAgents(
+      sessionRef.current,
+      pendingToolUseIds,
+      prevAgentsRef.current
+    )
+    prevAgentsRef.current = next
+    return next
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, tick, entryCount, pendingToolUseIds]
-  )
+  }, [sessionId, tick, entryCount, pendingToolUseIds])
   const running = countRunningAgents(agents)
   // A background agent outlives its parent's turn, so `busy` alone would
   // stop ticking while one is still working.
@@ -154,6 +168,18 @@ export function JsonClaudeAgentsPanel({
 
   if (agents.length === 0) return null
 
+  // `agents` is sorted running-first, so this is a split, not a filter
+  // pass. Finished agents are history — the transcript keeps their Task
+  // cards — and a long session accumulates dozens, so only the most
+  // recent few are shown by default. Without this the live agents the
+  // panel exists to surface get pushed off the top.
+  const settledFrom = agents.findIndex((a) => a.status !== 'running')
+  const settledCount = settledFrom === -1 ? 0 : agents.length - settledFrom
+  const hiddenCount = showAllSettled
+    ? 0
+    : Math.max(0, settledCount - SETTLED_PREVIEW)
+  const shown = hiddenCount > 0 ? agents.slice(0, running + SETTLED_PREVIEW) : agents
+
   return (
     <>
       <RightPanel
@@ -167,7 +193,7 @@ export function JsonClaudeAgentsPanel({
         }
       >
         <ul className="py-1 text-xs overflow-y-auto">
-          {agents.map((a) => (
+          {shown.map((a) => (
             <AgentRow
               key={a.toolUseId}
               agent={a}
@@ -175,6 +201,19 @@ export function JsonClaudeAgentsPanel({
               onPeek={() => setPeekId(a.toolUseId)}
             />
           ))}
+          {(hiddenCount > 0 || showAllSettled) && settledCount > SETTLED_PREVIEW && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setShowAllSettled((v) => !v)}
+                className="w-full text-left px-3 py-1 text-faint hover:text-fg hover:bg-app/60 cursor-pointer"
+              >
+                {hiddenCount > 0
+                  ? `show ${hiddenCount} more finished`
+                  : 'show fewer'}
+              </button>
+            </li>
+          )}
         </ul>
       </RightPanel>
       {peeked && (

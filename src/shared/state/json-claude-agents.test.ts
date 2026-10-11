@@ -341,6 +341,115 @@ describe('collectAgents', () => {
   })
 })
 
+describe('collectAgents reuse of a previous result', () => {
+  it('hands a settled agent back by reference instead of rebuilding it', () => {
+    const entries = [
+      launch('t1', 'A'),
+      childWork('t1', [
+        { type: 'tool_use', id: 'x1', name: 'Read', input: { file_path: '/a' } }
+      ]),
+      toolResult('t1', 'done')
+    ]
+    const first = collectAgents(session(entries))
+    const second = collectAgents(session(entries), undefined, first)
+    expect(second[0]).toBe(first[0])
+    expect(second[0].steps).toBe(first[0].steps)
+  })
+
+  it('still rebuilds a running agent so its step feed stays live', () => {
+    const before = [launch('t1', 'A')]
+    const first = collectAgents(session(before))
+    const after = [
+      ...before,
+      childWork('t1', [
+        { type: 'tool_use', id: 'x1', name: 'Read', input: { file_path: '/a' } }
+      ])
+    ]
+    const second = collectAgents(session(after), undefined, first)
+    expect(second[0]).not.toBe(first[0])
+    expect(second[0].steps).toHaveLength(1)
+  })
+
+  it('does not reuse a settled background agent whose result has not landed', () => {
+    const bg = {
+      backgroundAgents: {
+        t1: {
+          agentId: 'a1',
+          toolUseId: 't1',
+          description: 'Bg',
+          status: 'completed' as const,
+          startedAt: 1000
+        }
+      }
+    }
+    // task_notification dispatches the settled status and the real
+    // summary separately; a snapshot between them must not be cached.
+    const before = [launch('t1', 'Bg', { background: true })]
+    const first = collectAgents(session(before, bg))
+    expect(first[0].result).toBeUndefined()
+
+    const after = [...before, toolResult('t1', 'the real report')]
+    const second = collectAgents(session(after, bg), undefined, first)
+    expect(second[0].result).toBe('the real report')
+  })
+
+  it('picks up an approval raised against a settled parent without mutating it', () => {
+    // A background child outlives its parent's turn, so a finished
+    // parent can still acquire a pending approval from below.
+    const before = [
+      launch('t1', 'Parent'),
+      toolResult('t1', 'parent done'),
+      launch('t2', 'Child', {
+        parentToolUseId: 't1',
+        entryId: 'e2',
+        background: true
+      })
+    ]
+    const first = collectAgents(session(before))
+    const parentBefore = first.find((a) => a.toolUseId === 't1')!
+    expect(parentBefore.hasPendingApproval).toBe(false)
+
+    const after = [
+      ...before,
+      childWork('t2', [
+        { type: 'tool_use', id: 'x9', name: 'Bash', input: { command: 'rm' } }
+      ])
+    ]
+    const second = collectAgents(session(after), new Set(['x9']), first)
+    expect(second.find((a) => a.toolUseId === 't1')!.hasPendingApproval).toBe(
+      true
+    )
+    // The cached object the caller still holds must not have been
+    // written through.
+    expect(parentBefore.hasPendingApproval).toBe(false)
+  })
+
+  it('drops agents that a rewind removed from entries', () => {
+    const before = [
+      launch('t1', 'A'),
+      toolResult('t1', 'done'),
+      launch('t2', 'B', { entryId: 'e2' }),
+      toolResult('t2', 'done')
+    ]
+    const first = collectAgents(session(before))
+    expect(first).toHaveLength(2)
+    const second = collectAgents(session(before.slice(0, 2)), undefined, first)
+    expect(second.map((a) => a.toolUseId)).toEqual(['t1'])
+  })
+
+  it('ignores a previous result from a different session', () => {
+    const first = collectAgents(
+      session([launch('t1', 'A'), toolResult('t1', 'done')])
+    )
+    const other = collectAgents(
+      session([launch('zz', 'Other')]),
+      undefined,
+      first
+    )
+    expect(other.map((a) => a.toolUseId)).toEqual(['zz'])
+  })
+})
+
 describe('agentElapsedMs', () => {
   it('measures to now while running', () => {
     const [a] = collectAgents(session([launch('t1', 'A', { at: 1000 })]))

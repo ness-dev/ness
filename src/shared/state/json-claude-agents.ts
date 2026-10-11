@@ -113,14 +113,39 @@ function describeLaunch(input: Record<string, unknown> | undefined): string {
  *  sits at the top and doesn't jump as siblings finish), then everything
  *  else newest-first. A nested agent still carries its `depth` and
  *  `parentDescription` so the panel can show the relationship without
- *  needing tree order. */
+ *  needing tree order.
+ *
+ *  `previous` is the caller's last result, and exists because this runs
+ *  on a timer while anything is live. A settled agent's steps are
+ *  immutable, so rebuilding them every tick is pure allocation churn
+ *  that grows with session length — the list of agents is never purged.
+ *  Passing the previous result back lets settled entries be handed
+ *  through by reference instead, which also keeps their object identity
+ *  stable so React skips re-rendering those rows. Omit it and the
+ *  function is exactly as it was: a full, self-contained derivation. */
 export function collectAgents(
   session: JsonClaudeSession | null | undefined,
-  pendingToolUseIds?: ReadonlySet<string>
+  pendingToolUseIds?: ReadonlySet<string>,
+  previous?: readonly AgentSummary[]
 ): AgentSummary[] {
   if (!session) return []
   const entries = session.entries
   if (!entries || entries.length === 0) return []
+
+  // Only agents that have genuinely finished are reusable. The result
+  // check matters for a background agent: `task_notification` dispatches
+  // the settled status and the real result as two events, so a snapshot
+  // taken between them would otherwise cache a completed agent with the
+  // launch stub as its report, forever.
+  const reusable = new Map<string, AgentSummary>()
+  if (previous) {
+    for (const p of previous) {
+      if (p.status === 'running') continue
+      if (p.result !== undefined || p.status === 'interrupted') {
+        reusable.set(p.toolUseId, p)
+      }
+    }
+  }
 
   const launches: LaunchSite[] = []
   const launchById = new Map<string, LaunchSite>()
@@ -195,6 +220,11 @@ export function collectAgents(
   }
 
   const summaries: AgentSummary[] = launches.map((site) => {
+    // Settled last time, and still present in entries — nothing about it
+    // can have changed, so skip rebuilding its step feed entirely.
+    const cached = reusable.get(site.toolUseId)
+    if (cached) return cached
+
     const childEntries = childEntriesByParent.get(site.toolUseId) ?? []
     const steps: AgentStep[] = []
     let toolCount = 0
@@ -301,22 +331,34 @@ export function collectAgents(
 
   // Pending approvals bubble up the launch chain — a parent whose
   // descendant is blocked is itself blocked, and that's what the panel
-  // needs to surface.
+  // needs to surface. Computed into a set and then applied, rather than
+  // assigned onto the summaries in place: a reused entry is the *same
+  // object* the caller is still holding, so mutating it would write
+  // through to the previous result and defeat the identity check below.
+  // (A settled parent can still acquire one this way — a background
+  // child outlives its parent's turn.)
   const byId = new Map(summaries.map((s) => [s.toolUseId, s]))
+  const blocked = new Set<string>()
   for (const s of summaries) {
     if (!s.hasPendingApproval) continue
+    blocked.add(s.toolUseId)
     let cursor = s.parentToolUseId
     const seen = new Set<string>([s.toolUseId])
     while (cursor && !seen.has(cursor)) {
       seen.add(cursor)
       const parent = byId.get(cursor)
       if (!parent) break
-      parent.hasPendingApproval = true
+      blocked.add(cursor)
       cursor = parent.parentToolUseId
     }
   }
 
-  return summaries.sort((a, b) => {
+  const resolved = summaries.map((s) => {
+    const want = blocked.has(s.toolUseId)
+    return s.hasPendingApproval === want ? s : { ...s, hasPendingApproval: want }
+  })
+
+  return resolved.sort((a, b) => {
     const aRunning = a.status === 'running'
     const bRunning = b.status === 'running'
     if (aRunning !== bRunning) return aRunning ? -1 : 1
