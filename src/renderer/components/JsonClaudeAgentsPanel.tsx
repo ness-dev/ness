@@ -27,6 +27,14 @@ const LIVE_REFRESH_MS = 500
 /** Finished agents shown before collapsing the rest behind a toggle. */
 const SETTLED_PREVIEW = 5
 
+/** Steps rendered inside an expanded row. The right column is narrow and
+ *  several rows can be open at once — the peek is where a full feed
+ *  belongs. */
+const INLINE_STEPS = 8
+
+/** Characters of an agent's report shown inline before truncating. */
+const INLINE_RESULT = 400
+
 /** One clock for the whole panel. Elapsed times are the only thing here
  *  that changes without a state event, so they get a single shared tick
  *  rather than a timer per row — and it only runs while something is
@@ -45,10 +53,14 @@ function useLiveClock(active: boolean): number {
 function AgentRow({
   agent,
   now,
+  expanded,
+  onToggle,
   onPeek
 }: {
   agent: AgentSummary
   now: number
+  expanded: boolean
+  onToggle: () => void
   onPeek: () => void
 }): JSX.Element {
   const lastStep = agent.steps.length
@@ -57,11 +69,16 @@ function AgentRow({
   const running = agent.status === 'running'
   const elapsed = formatElapsed(agentElapsedMs(agent, now))
   const kind = agent.subagentType ? `${agent.subagentType} agent` : 'agent'
+  // Newest steps are what matter mid-run, and the panel is narrow — show
+  // the tail and send anyone who wants the whole thing to the peek.
+  const hiddenSteps = Math.max(0, agent.steps.length - INLINE_STEPS)
+  const tail = hiddenSteps > 0 ? agent.steps.slice(-INLINE_STEPS) : agent.steps
   return (
     <li>
       <button
         type="button"
-        onClick={onPeek}
+        onClick={onToggle}
+        aria-expanded={expanded}
         title={
           `${agent.description}\n${kind} · ` +
           `${running ? `running for ${elapsed}` : `${agentStatusLabel(agent)} after ${elapsed}`}` +
@@ -69,11 +86,14 @@ function AgentRow({
           (agent.childAgentCount
             ? ` · ${agent.childAgentCount} nested`
             : '') +
-          '\n\nClick to peek inside'
+          `\n\nClick to ${expanded ? 'collapse' : 'expand'}`
         }
         className="w-full text-left px-3 py-1 hover:bg-app/60 cursor-pointer"
       >
         <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-muted w-2 shrink-0 select-none">
+            {expanded ? '▾' : '▸'}
+          </span>
           <AgentStatusDot agent={agent} />
           <span
             className={`truncate flex-1 min-w-0 ${
@@ -110,18 +130,61 @@ function AgentRow({
             doubles the panel's height for no information. A running
             nested agent is listed out of tree order, so it names its
             parent instead — that's the only place the hierarchy shows. */}
-        {running &&
-          (agent.parentDescription ? (
-            <div className="flex min-w-0 pl-4 text-xs text-faint truncate">
-              ↳ via {agent.parentDescription}
-            </div>
-          ) : null)}
-        {running && lastStep && (
-          <div className="flex min-w-0 pl-4 opacity-80 text-xs">
+        {running && agent.parentDescription && (
+          <div className="flex min-w-0 pl-6 text-xs text-faint truncate">
+            ↳ via {agent.parentDescription}
+          </div>
+        )}
+        {/* Collapsed running rows keep a one-line "currently" so the
+            panel is useful without expanding anything. Expanded, the
+            feed below ends on that same step — no need to say it twice. */}
+        {running && !expanded && lastStep && (
+          <div className="flex min-w-0 pl-6 opacity-80 text-xs">
             <AgentStepLine step={lastStep} dim />
           </div>
         )}
       </button>
+      {expanded && (
+        <div className="pl-6 pr-3 pb-1.5 text-xs">
+          {agent.steps.length === 0 ? (
+            <div className="py-1 text-muted italic">
+              {running ? 'starting…' : 'no activity recorded'}
+            </div>
+          ) : (
+            <>
+              {hiddenSteps > 0 && (
+                <div className="py-0.5 text-faint italic">
+                  +{hiddenSteps} earlier{' '}
+                  {hiddenSteps === 1 ? 'step' : 'steps'}
+                </div>
+              )}
+              {tail.map((step) => (
+                <div key={step.key} className="py-0.5">
+                  <AgentStepLine step={step} dim />
+                </div>
+              ))}
+            </>
+          )}
+          {agent.result && !running && (
+            <div
+              className={`mt-1 pt-1 border-t border-border/40 whitespace-pre-wrap ${
+                agent.resultIsError ? 'text-danger' : 'text-faint'
+              }`}
+            >
+              {agent.result.length > INLINE_RESULT
+                ? `${agent.result.slice(0, INLINE_RESULT).trimEnd()}…`
+                : agent.result}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onPeek}
+            className="mt-1 text-muted hover:text-fg-bright cursor-pointer underline decoration-dotted underline-offset-2"
+          >
+            open full view
+          </button>
+        </div>
+      )}
     </li>
   )
 }
@@ -135,6 +198,17 @@ export function JsonClaudeAgentsPanel({
   const pendingApprovals = useJsonClaudePendingApprovals()
   const [peekId, setPeekId] = useState<string | null>(null)
   const [showAllSettled, setShowAllSettled] = useState(false)
+  // A Set rather than a single id: comparing two running agents
+  // side-by-side is the main reason to expand one at all.
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const toggleExpanded = (id: string): void =>
+    setExpandedIds((cur) => {
+      const next = new Set(cur)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
 
   const pendingToolUseIds = useMemo(() => {
     const ids = new Set<string>()
@@ -217,7 +291,9 @@ export function JsonClaudeAgentsPanel({
       <RightPanel
         id="agents"
         title="Agents"
-        maxHeight="max-h-64"
+        // An expanded row is ~12 lines; at the collapsed height it would
+        // be a scrollbar showing three of them.
+        maxHeight={expandedIds.size > 0 ? 'max-h-96' : 'max-h-64'}
         actions={
           // A bare count reads as nothing in particular. The panel is
           // about what's live, so say so — and when nothing is, say that
@@ -233,6 +309,8 @@ export function JsonClaudeAgentsPanel({
               key={a.toolUseId}
               agent={a}
               now={now}
+              expanded={expandedIds.has(a.toolUseId)}
+              onToggle={() => toggleExpanded(a.toolUseId)}
               onPeek={() => setPeekId(a.toolUseId)}
             />
           ))}
