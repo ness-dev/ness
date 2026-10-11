@@ -9,6 +9,7 @@ import {
   type TaskRecord
 } from '../../shared/state/json-claude-tasks'
 import { RightPanel } from './RightPanel'
+import { useSessionRevision } from '../session-revision'
 
 interface JsonClaudeTodosPanelProps {
   focusedTabId: string | null
@@ -115,28 +116,24 @@ export function JsonClaudeTodosPanel({
 }: JsonClaudeTodosPanelProps): JSX.Element | null {
   const session = useJsonClaudeSession(focusedTabId ?? '')
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  // Derived off `entries.length` rather than the session object, which
-  // gets a new identity on every streamed token — `collectTasks` walks
-  // the whole array, and a per-token walk is CLAUDE.md anti-pattern #4.
-  // The list only ever changes on a TaskCreate/TaskUpdate call, and a
-  // tool call always appends an entry, so the count is a sound trigger.
-  //
-  // `sessionId` is in the deps because two different sessions can have
-  // the same entry count — without it, switching tabs between them would
-  // keep showing the previous session's list.
+  // Keyed on the revision rather than the session object, whose identity
+  // churns on every streamed token — both derivations walk the whole
+  // entries array, and a per-token walk is CLAUDE.md anti-pattern #4.
+  // NOT on entries.length: a TodoWrite / TaskCreate tool_use block is
+  // appended to the assistant entry already in flight, so the count
+  // doesn't move and the panel would stay empty for the entire turn.
   const sessionRef = useRef(session)
   sessionRef.current = session
-  const entryCount = session?.entries.length ?? 0
-  const sessionId = session?.sessionId
+  const revision = useSessionRevision(session)
   const tasks = useMemo(
     () => collectTasks(sessionRef.current),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, entryCount]
+    [revision]
   )
   const todos = useMemo(
     () => getLatestTodos(sessionRef.current),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, entryCount]
+    [revision]
   )
   const blockedIds = useMemo(() => {
     const byId = new Map(tasks.map((t) => [t.id, t]))

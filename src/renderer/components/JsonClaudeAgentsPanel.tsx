@@ -17,14 +17,7 @@ import { RightPanel } from './RightPanel'
 import { AgentPeek } from './AgentPeek'
 import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
-
-/** How often the panel re-derives while anything is live. `collectAgents`
- *  walks the whole entries array, and the focused session's object
- *  identity changes on every streamed token — deriving off that directly
- *  means one full walk per token, which is anti-pattern #4 in CLAUDE.md
- *  with extra allocations. This is a status display; sub-second freshness
- *  buys nothing, and the cap holds regardless of token rate. */
-const LIVE_REFRESH_MS = 500
+import { useSessionRevision } from '../session-revision'
 
 /** Top-level agents shown before collapsing the rest behind a toggle. */
 const SETTLED_PREVIEW = 5
@@ -195,21 +188,21 @@ export function JsonClaudeAgentsPanel({
   }, [pendingApprovals, session?.sessionId])
 
   // Read through a ref so the derivation isn't keyed on the session's
-  // identity (which churns per token). `entries.length` is the cheap
-  // structural signal — a launch, a tool call or a result always appends
-  // — and `tick` covers in-place mutation of an entry that's streaming.
+  // identity, which churns per streamed token. See useSessionRevision —
+  // notably it is NOT entries.length, because an Agent tool_use block is
+  // appended to the assistant entry already in flight.
   //
-  // `sessionId` is in the deps because two sessions can have the same
-  // entry count — without it, switching between them could keep showing
-  // the previous session's agents.
+  // `runningRef` keeps the poll alive for background agents, which
+  // outlive their parent's turn: `busy` alone would stop ticking while
+  // one is still working. Read from a ref because it's derived below
+  // from the very memo this feeds.
   const sessionRef = useRef(session)
   sessionRef.current = session
-  const entryCount = session?.entries.length ?? 0
-  const sessionId = session?.sessionId
-  const [tick, setTick] = useState(0)
+  const runningRef = useRef(0)
+  const revision = useSessionRevision(session, runningRef.current > 0)
 
   // Feeding the last result back lets settled agents be handed through
-  // by reference — see collectAgents. Without it, every tick rebuilds
+  // by reference — see collectAgents. Without it, every poll rebuilds
   // the step feed of every agent the session ever launched, and that
   // list only grows.
   const prevAgentsRef = useRef<readonly AgentSummary[]>([])
@@ -222,18 +215,11 @@ export function JsonClaudeAgentsPanel({
     prevAgentsRef.current = next
     return next
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, tick, entryCount, pendingToolUseIds])
+  }, [revision, pendingToolUseIds])
 
   const tree = useMemo(() => buildAgentTree(agents), [agents])
   const running = countRunningAgents(agents)
-  // A background agent outlives its parent's turn, so `busy` alone would
-  // stop ticking while one is still working.
-  const live = running > 0 || !!session?.busy
-  useEffect(() => {
-    if (!live) return
-    const id = setInterval(() => setTick((t) => t + 1), LIVE_REFRESH_MS)
-    return () => clearInterval(id)
-  }, [live])
+  runningRef.current = running
   const now = useLiveClock(running > 0)
 
   // Default open when something below is still running, so a live agent
