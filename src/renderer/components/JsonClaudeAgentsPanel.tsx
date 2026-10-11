@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CornerDownRight } from 'lucide-react'
 import {
   useJsonClaudePendingApprovals,
@@ -6,10 +6,12 @@ import {
 } from '../store'
 import {
   agentElapsedMs,
+  buildAgentTree,
   collectAgents,
   countRunningAgents,
   formatElapsed,
-  type AgentSummary
+  type AgentSummary,
+  type AgentTree
 } from '../../shared/state/json-claude-agents'
 import { RightPanel } from './RightPanel'
 import { AgentPeek } from './AgentPeek'
@@ -24,16 +26,8 @@ import { AgentStepLine } from './AgentStepLine'
  *  buys nothing, and the cap holds regardless of token rate. */
 const LIVE_REFRESH_MS = 500
 
-/** Finished agents shown before collapsing the rest behind a toggle. */
+/** Top-level agents shown before collapsing the rest behind a toggle. */
 const SETTLED_PREVIEW = 5
-
-/** Steps rendered inside an expanded row. The right column is narrow and
- *  several rows can be open at once — the peek is where a full feed
- *  belongs. */
-const INLINE_STEPS = 8
-
-/** Characters of an agent's report shown inline before truncating. */
-const INLINE_RESULT = 400
 
 /** One clock for the whole panel. Elapsed times are the only thing here
  *  that changes without a state event, so they get a single shared tick
@@ -50,140 +44,126 @@ function useLiveClock(active: boolean): number {
   return now
 }
 
+/** One agent, with its nested agents beneath it when expanded.
+ *
+ *  Two targets on the row: the ▸/▾ chevron reveals the children, the
+ *  rest of the row opens that agent's history in the peek. The standard
+ *  file-tree split — disclosure is structure, the label is the thing. */
 function AgentRow({
   agent,
+  tree,
   now,
-  expanded,
+  depth,
+  isExpanded,
   onToggle,
   onPeek
 }: {
   agent: AgentSummary
+  tree: AgentTree
   now: number
-  expanded: boolean
-  onToggle: () => void
-  onPeek: () => void
+  depth: number
+  isExpanded: (id: string) => boolean
+  onToggle: (id: string) => void
+  onPeek: (id: string) => void
 }): JSX.Element {
+  const children = tree.childrenByParent.get(agent.toolUseId) ?? []
+  const expanded = children.length > 0 && isExpanded(agent.toolUseId)
   const lastStep = agent.steps.length
     ? agent.steps[agent.steps.length - 1]
     : null
   const running = agent.status === 'running'
   const elapsed = formatElapsed(agentElapsedMs(agent, now))
   const kind = agent.subagentType ? `${agent.subagentType} agent` : 'agent'
-  // Newest steps are what matter mid-run, and the panel is narrow — show
-  // the tail and send anyone who wants the whole thing to the peek.
-  const hiddenSteps = Math.max(0, agent.steps.length - INLINE_STEPS)
-  const tail = hiddenSteps > 0 ? agent.steps.slice(-INLINE_STEPS) : agent.steps
   return (
     <li>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        title={
-          `${agent.description}\n${kind} · ` +
-          `${running ? `running for ${elapsed}` : `${agentStatusLabel(agent)} after ${elapsed}`}` +
-          `\n${agent.toolCount} tool ${agent.toolCount === 1 ? 'call' : 'calls'}` +
-          (agent.childAgentCount
-            ? ` · ${agent.childAgentCount} nested`
-            : '') +
-          `\n\nClick to ${expanded ? 'collapse' : 'expand'}`
-        }
-        className="w-full text-left px-3 py-1 hover:bg-app/60 cursor-pointer"
+      <div
+        className="flex items-start gap-1.5 min-w-0 pr-3 hover:bg-app/60"
+        style={{ paddingLeft: `${0.75 + Math.min(depth, 4) * 0.75}rem` }}
       >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-muted w-2 shrink-0 select-none">
-            {expanded ? '▾' : '▸'}
-          </span>
-          <AgentStatusDot agent={agent} />
-          <span
-            className={`truncate flex-1 min-w-0 ${
-              running ? 'text-fg-bright' : 'text-fg'
-            } ${agent.status === 'interrupted' ? 'opacity-60' : ''}`}
-          >
-            {agent.description}
-          </span>
-          {agent.childAgentCount > 0 && (
-            <span
-              title={`launched ${agent.childAgentCount} nested ${
-                agent.childAgentCount === 1 ? 'agent' : 'agents'
-              }`}
-              className="flex items-center gap-0.5 text-faint shrink-0 text-xs"
-            >
-              <CornerDownRight className="icon-2xs shrink-0" />
-              <span className="tabular-nums">{agent.childAgentCount}</span>
-            </span>
-          )}
-          {agent.isBackground && (
-            <span
-              title="detached — runs past the end of the turn"
-              className="text-faint uppercase tracking-wide shrink-0 text-xs"
-            >
-              bg
-            </span>
-          )}
-          <span className="text-faint tabular-nums shrink-0 text-xs">
-            {elapsed}
-          </span>
-        </div>
-        {/* Secondary line. Only for running agents: once one is done its
-            last step is trivia, and showing it on every settled row
-            doubles the panel's height for no information. A running
-            nested agent is listed out of tree order, so it names its
-            parent instead — that's the only place the hierarchy shows. */}
-        {running && agent.parentDescription && (
-          <div className="flex min-w-0 pl-6 text-xs text-faint truncate">
-            ↳ via {agent.parentDescription}
-          </div>
-        )}
-        {/* Collapsed running rows keep a one-line "currently" so the
-            panel is useful without expanding anything. Expanded, the
-            feed below ends on that same step — no need to say it twice. */}
-        {running && !expanded && lastStep && (
-          <div className="flex min-w-0 pl-6 opacity-80 text-xs">
-            <AgentStepLine step={lastStep} dim />
-          </div>
-        )}
-      </button>
-      {expanded && (
-        <div className="pl-6 pr-3 pb-1.5 text-xs">
-          {agent.steps.length === 0 ? (
-            <div className="py-1 text-muted italic">
-              {running ? 'starting…' : 'no activity recorded'}
-            </div>
-          ) : (
-            <>
-              {hiddenSteps > 0 && (
-                <div className="py-0.5 text-faint italic">
-                  +{hiddenSteps} earlier{' '}
-                  {hiddenSteps === 1 ? 'step' : 'steps'}
-                </div>
-              )}
-              {tail.map((step) => (
-                <div key={step.key} className="py-0.5">
-                  <AgentStepLine step={step} dim />
-                </div>
-              ))}
-            </>
-          )}
-          {agent.result && !running && (
-            <div
-              className={`mt-1 pt-1 border-t border-border/40 whitespace-pre-wrap ${
-                agent.resultIsError ? 'text-danger' : 'text-faint'
-              }`}
-            >
-              {agent.result.length > INLINE_RESULT
-                ? `${agent.result.slice(0, INLINE_RESULT).trimEnd()}…`
-                : agent.result}
-            </div>
-          )}
+        {children.length > 0 ? (
           <button
             type="button"
-            onClick={onPeek}
-            className="mt-1 text-muted hover:text-fg-bright cursor-pointer underline decoration-dotted underline-offset-2"
+            onClick={() => onToggle(agent.toolUseId)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Hide' : 'Show'} ${children.length} nested`}
+            title={`${children.length} nested ${
+              children.length === 1 ? 'agent' : 'agents'
+            }`}
+            className="text-muted hover:text-fg-bright w-3 shrink-0 select-none cursor-pointer py-1"
           >
-            open full view
+            {expanded ? '▾' : '▸'}
           </button>
-        </div>
+        ) : (
+          // Spacer, so labels line up with siblings that do have one.
+          <span className="w-3 shrink-0" aria-hidden="true" />
+        )}
+        <button
+          type="button"
+          onClick={() => onPeek(agent.toolUseId)}
+          title={
+            `${agent.description}\n${kind} · ` +
+            `${running ? `running for ${elapsed}` : `${agentStatusLabel(agent)} after ${elapsed}`}` +
+            `\n${agent.toolCount} tool ${agent.toolCount === 1 ? 'call' : 'calls'}` +
+            (children.length ? ` · ${children.length} nested` : '') +
+            '\n\nClick to open its history'
+          }
+          className="flex-1 min-w-0 text-left py-1 cursor-pointer"
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <AgentStatusDot agent={agent} />
+            <span
+              className={`truncate flex-1 min-w-0 ${
+                running ? 'text-fg-bright' : 'text-fg'
+              } ${agent.status === 'interrupted' ? 'opacity-60' : ''}`}
+            >
+              {agent.description}
+            </span>
+            {/* Only while collapsed — once open the children are right
+                there and the badge is just restating them. */}
+            {children.length > 0 && !expanded && (
+              <span className="flex items-center gap-0.5 text-faint shrink-0 text-xs">
+                <CornerDownRight className="icon-2xs shrink-0" />
+                <span className="tabular-nums">{children.length}</span>
+              </span>
+            )}
+            {agent.isBackground && (
+              <span
+                title="detached — runs past the end of the turn"
+                className="text-faint uppercase tracking-wide shrink-0 text-xs"
+              >
+                bg
+              </span>
+            )}
+            <span className="text-faint tabular-nums shrink-0 text-xs">
+              {elapsed}
+            </span>
+          </div>
+          {/* The one-line "currently", so the panel reads at a glance
+              without opening anything. Running agents only: once one is
+              done its last step is trivia, and showing it on every
+              settled row doubles the panel's height for no information. */}
+          {running && lastStep && (
+            <div className="flex min-w-0 opacity-80 text-xs">
+              <AgentStepLine step={lastStep} dim />
+            </div>
+          )}
+        </button>
+      </div>
+      {expanded && (
+        <ul>
+          {children.map((child) => (
+            <AgentRow
+              key={child.toolUseId}
+              agent={child}
+              tree={tree}
+              now={now}
+              depth={depth + 1}
+              isExpanded={isExpanded}
+              onToggle={onToggle}
+              onPeek={onPeek}
+            />
+          ))}
+        </ul>
       )}
     </li>
   )
@@ -198,17 +178,13 @@ export function JsonClaudeAgentsPanel({
   const pendingApprovals = useJsonClaudePendingApprovals()
   const [peekId, setPeekId] = useState<string | null>(null)
   const [showAllSettled, setShowAllSettled] = useState(false)
-  // A Set rather than a single id: comparing two running agents
-  // side-by-side is the main reason to expand one at all.
-  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
-    () => new Set()
+  // Explicit user choices only. Rows with a running descendant default to
+  // open (see `expandedFor`), so this records the overrides rather than
+  // the state — otherwise auto-expanding would fight anyone who closed a
+  // row while its child was still going.
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map()
   )
-  const toggleExpanded = (id: string): void =>
-    setExpandedIds((cur) => {
-      const next = new Set(cur)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
 
   const pendingToolUseIds = useMemo(() => {
     const ids = new Set<string>()
@@ -247,6 +223,8 @@ export function JsonClaudeAgentsPanel({
     return next
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, tick, entryCount, pendingToolUseIds])
+
+  const tree = useMemo(() => buildAgentTree(agents), [agents])
   const running = countRunningAgents(agents)
   // A background agent outlives its parent's turn, so `busy` alone would
   // stop ticking while one is still working.
@@ -258,6 +236,24 @@ export function JsonClaudeAgentsPanel({
   }, [live])
   const now = useLiveClock(running > 0)
 
+  // Default open when something below is still running, so a live agent
+  // is never buried inside a collapsed parent; the user's own click wins
+  // over that for as long as the panel is mounted.
+  const expandedFor = useCallback(
+    (id: string): boolean =>
+      overrides.get(id) ?? tree.hasRunningDescendant.has(id),
+    [overrides, tree]
+  )
+  const toggleExpanded = useCallback(
+    (id: string): void =>
+      setOverrides((cur) => {
+        const next = new Map(cur)
+        next.set(id, !(cur.get(id) ?? tree.hasRunningDescendant.has(id)))
+        return next
+      }),
+    [tree]
+  )
+
   // A peek whose agent vanished (session cleared, history truncated)
   // would render nothing and trap the overlay — drop it.
   const peeked = peekId ? agents.find((a) => a.toolUseId === peekId) : undefined
@@ -267,33 +263,26 @@ export function JsonClaudeAgentsPanel({
 
   if (agents.length === 0) return null
 
-  // Nested agents are not listed alongside their parents. Sorting is by
-  // status then recency, so a child routinely sorted *above* its parent
-  // — an indented row pointing at nothing, implying a tree the order
-  // doesn't deliver. Nesting is legible in the peek, which links through
-  // parent → child, so the list stays flat: top-level agents, plus
-  // anything still running at any depth (nothing live is ever hidden).
-  const listed = agents.filter((a) => a.depth === 0 || a.status === 'running')
-
-  // `listed` is sorted running-first, so this is a split, not a filter
-  // pass. Finished agents are history — the transcript keeps their Task
-  // cards — and a long session accumulates dozens, so only the most
-  // recent few are shown by default. Without this the live agents the
-  // panel exists to surface get pushed off the top.
-  const settledCount = listed.length - running
+  // Only top-level agents are capped — a nested one is revealed by its
+  // parent's chevron, so hiding it behind a second "show more" would
+  // make the tree lie about what it contains. `roots` keeps the
+  // running-first ordering, so this is a split, not a filter pass.
+  const runningRoots = tree.roots.filter((a) => a.status === 'running').length
+  const settledRoots = tree.roots.length - runningRoots
   const hiddenCount = showAllSettled
     ? 0
-    : Math.max(0, settledCount - SETTLED_PREVIEW)
-  const shown = hiddenCount > 0 ? listed.slice(0, running + SETTLED_PREVIEW) : listed
+    : Math.max(0, settledRoots - SETTLED_PREVIEW)
+  const shown =
+    hiddenCount > 0
+      ? tree.roots.slice(0, runningRoots + SETTLED_PREVIEW)
+      : tree.roots
 
   return (
     <>
       <RightPanel
         id="agents"
         title="Agents"
-        // An expanded row is ~12 lines; at the collapsed height it would
-        // be a scrollbar showing three of them.
-        maxHeight={expandedIds.size > 0 ? 'max-h-96' : 'max-h-64'}
+        maxHeight="max-h-72"
         actions={
           // A bare count reads as nothing in particular. The panel is
           // about what's live, so say so — and when nothing is, say that
@@ -308,13 +297,15 @@ export function JsonClaudeAgentsPanel({
             <AgentRow
               key={a.toolUseId}
               agent={a}
+              tree={tree}
               now={now}
-              expanded={expandedIds.has(a.toolUseId)}
-              onToggle={() => toggleExpanded(a.toolUseId)}
-              onPeek={() => setPeekId(a.toolUseId)}
+              depth={0}
+              isExpanded={expandedFor}
+              onToggle={toggleExpanded}
+              onPeek={setPeekId}
             />
           ))}
-          {(hiddenCount > 0 || showAllSettled) && settledCount > SETTLED_PREVIEW && (
+          {settledRoots > SETTLED_PREVIEW && (
             <li>
               <button
                 type="button"

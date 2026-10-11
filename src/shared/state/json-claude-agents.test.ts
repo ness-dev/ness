@@ -5,6 +5,7 @@ import type {
 } from './json-claude'
 import {
   agentElapsedMs,
+  buildAgentTree,
   collectAgents,
   countRunningAgents,
   formatElapsed
@@ -473,6 +474,105 @@ describe('collectAgents reuse of a previous result', () => {
       first
     )
     expect(other.map((a) => a.toolUseId)).toEqual(['zz'])
+  })
+})
+
+describe('buildAgentTree', () => {
+  it('is empty for no agents', () => {
+    const tree = buildAgentTree([])
+    expect(tree.roots).toEqual([])
+    expect(tree.childrenByParent.size).toBe(0)
+  })
+
+  it('nests children under their parent and keeps them out of roots', () => {
+    const tree = buildAgentTree(
+      collectAgents(
+        session([
+          launch('t1', 'Parent'),
+          launch('t2', 'Child', { parentToolUseId: 't1', entryId: 'e2' })
+        ])
+      )
+    )
+    expect(tree.roots.map((a) => a.toolUseId)).toEqual(['t1'])
+    expect(
+      tree.childrenByParent.get('t1')?.map((a) => a.toolUseId)
+    ).toEqual(['t2'])
+  })
+
+  it('nests to arbitrary depth', () => {
+    const tree = buildAgentTree(
+      collectAgents(
+        session([
+          launch('t1', 'A'),
+          launch('t2', 'B', { parentToolUseId: 't1', entryId: 'e2' }),
+          launch('t3', 'C', { parentToolUseId: 't2', entryId: 'e3' })
+        ])
+      )
+    )
+    expect(tree.roots.map((a) => a.toolUseId)).toEqual(['t1'])
+    expect(tree.childrenByParent.get('t2')?.[0].toolUseId).toBe('t3')
+  })
+
+  it('promotes an orphan to a root rather than losing it', () => {
+    // The parent Task call was truncated out of the entries buffer.
+    const tree = buildAgentTree(
+      collectAgents(
+        session([launch('t2', 'Child', { parentToolUseId: 'gone' })])
+      )
+    )
+    expect(tree.roots.map((a) => a.toolUseId)).toEqual(['t2'])
+  })
+
+  it('preserves the running-first ordering within a sibling group', () => {
+    const tree = buildAgentTree(
+      collectAgents(
+        session([
+          launch('p', 'Parent'),
+          launch('c1', 'done child', { parentToolUseId: 'p', entryId: 'e2' }),
+          launch('c2', 'live child', { parentToolUseId: 'p', entryId: 'e3' }),
+          toolResult('c1', 'finished')
+        ])
+      )
+    )
+    expect(tree.childrenByParent.get('p')?.map((a) => a.description)).toEqual([
+      'live child',
+      'done child'
+    ])
+  })
+
+  it('marks every ancestor of a running agent', () => {
+    const tree = buildAgentTree(
+      collectAgents(
+        session([
+          launch('t1', 'A'),
+          launch('t2', 'B', { parentToolUseId: 't1', entryId: 'e2' }),
+          launch('t3', 'C', { parentToolUseId: 't2', entryId: 'e3' })
+        ])
+      )
+    )
+    expect([...tree.hasRunningDescendant].sort()).toEqual(['t1', 't2'])
+  })
+
+  it('does not mark a parent whose children have all finished', () => {
+    const tree = buildAgentTree(
+      collectAgents(
+        session(
+          [
+            launch('t1', 'A'),
+            launch('t2', 'B', { parentToolUseId: 't1', entryId: 'e2' }),
+            toolResult('t1', 'done'),
+            toolResult('t2', 'done')
+          ],
+          { busy: false }
+        )
+      )
+    )
+    expect(tree.hasRunningDescendant.size).toBe(0)
+  })
+
+  it('does not mark a running agent as its own ancestor', () => {
+    const tree = buildAgentTree(collectAgents(session([launch('t1', 'A')])))
+    expect(tree.hasRunningDescendant.has('t1')).toBe(false)
   })
 })
 

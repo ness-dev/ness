@@ -374,6 +374,51 @@ export function collectAgents(
   })
 }
 
+export interface AgentTree {
+  /** Agents launched by the main session, plus any whose parent isn't in
+   *  the list (truncated out of the buffer) — an orphan still has to
+   *  appear somewhere rather than vanish. */
+  roots: AgentSummary[]
+  childrenByParent: Map<string, AgentSummary[]>
+  /** Ids with at least one running agent strictly below them. The panel
+   *  auto-expands these so a live agent is never hidden inside a
+   *  collapsed parent. */
+  hasRunningDescendant: ReadonlySet<string>
+}
+
+/** Regroups the flat `collectAgents` result into parent → children,
+ *  preserving its ordering within each sibling group. */
+export function buildAgentTree(agents: readonly AgentSummary[]): AgentTree {
+  const present = new Set(agents.map((a) => a.toolUseId))
+  const roots: AgentSummary[] = []
+  const childrenByParent = new Map<string, AgentSummary[]>()
+  for (const a of agents) {
+    const parent = a.parentToolUseId
+    if (!parent || !present.has(parent)) {
+      roots.push(a)
+      continue
+    }
+    const list = childrenByParent.get(parent)
+    if (list) list.push(a)
+    else childrenByParent.set(parent, [a])
+  }
+
+  const byId = new Map(agents.map((a) => [a.toolUseId, a]))
+  const hasRunningDescendant = new Set<string>()
+  for (const a of agents) {
+    if (a.status !== 'running') continue
+    let cursor = a.parentToolUseId
+    const seen = new Set<string>([a.toolUseId])
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor)
+      hasRunningDescendant.add(cursor)
+      cursor = byId.get(cursor)?.parentToolUseId
+    }
+  }
+
+  return { roots, childrenByParent, hasRunningDescendant }
+}
+
 export function countRunningAgents(agents: AgentSummary[]): number {
   let n = 0
   for (const a of agents) if (a.status === 'running') n += 1
