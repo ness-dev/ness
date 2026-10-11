@@ -270,7 +270,11 @@ export function collectAgents(
 
     const result = resultsByToolUseId.get(site.toolUseId)
     const bg = session.backgroundAgents?.[site.toolUseId]
-    const isBackground = !!bg || site.requestedBackground
+    // Only the caller's own `run_in_background` decides this. Claude Code
+    // emits system/task_started for EVERY sub-agent, synchronous ones
+    // included, so the presence of a lifecycle record says nothing about
+    // detachment — keying off it labelled every agent "background".
+    const isBackground = site.requestedBackground
 
     let status: AgentRunStatus
     let completedAt: number | undefined
@@ -290,12 +294,14 @@ export function collectAgents(
       }
     } else if (result) {
       status = result.isError ? 'failed' : 'completed'
-      // A synchronous agent has no completion event of its own; the
-      // arrival of its result is the best timestamp available, and the
-      // last child entry is the closest proxy for that.
-      completedAt = childEntries.length
-        ? childEntries[childEntries.length - 1].timestamp
-        : undefined
+      // A synchronous agent gets a task_notification too, so prefer its
+      // timestamp; the last child entry is the fallback when the record
+      // isn't there (seeded transcript).
+      completedAt =
+        bg?.completedAt ??
+        (childEntries.length
+          ? childEntries[childEntries.length - 1].timestamp
+          : undefined)
     } else {
       status = session.busy ? 'running' : 'interrupted'
     }

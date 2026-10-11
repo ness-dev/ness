@@ -225,6 +225,32 @@ describe('collectAgents', () => {
     expect(parent.steps[0].childAgentToolUseId).toBe('t2')
   })
 
+  it('does not call an agent background just because it has a lifecycle record', () => {
+    // Claude Code emits system/task_started for every sub-agent, sync
+    // ones included, so a record says nothing about detachment. Keying
+    // isBackground off it labelled every agent in the panel "BG".
+    const agents = collectAgents(
+      session([launch('t1', 'Sync'), toolResult('t1', 'done')], {
+        backgroundAgents: {
+          t1: {
+            agentId: 'a1',
+            toolUseId: 't1',
+            description: 'Sync',
+            status: 'completed',
+            startedAt: 1000,
+            completedAt: 4000,
+            usage: { totalTokens: 999, toolUses: 2, durationMs: 3000 }
+          }
+        }
+      })
+    )
+    expect(agents[0].isBackground).toBe(false)
+    expect(agents[0].status).toBe('completed')
+    // The record is still the best source for usage + completion time.
+    expect(agents[0].usage?.toolUses).toBe(2)
+    expect(agents[0].completedAt).toBe(4000)
+  })
+
   it('takes a background agent’s status from the lifecycle record, not its result', () => {
     const agents = collectAgents(
       session(

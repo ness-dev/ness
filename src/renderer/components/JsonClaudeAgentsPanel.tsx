@@ -13,7 +13,7 @@ import {
 } from '../../shared/state/json-claude-agents'
 import { RightPanel } from './RightPanel'
 import { AgentPeek } from './AgentPeek'
-import { AgentStatusDot } from './AgentStatusDot'
+import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
 
 /** How often the panel re-derives while anything is live. `collectAgents`
@@ -55,19 +55,25 @@ function AgentRow({
     ? agent.steps[agent.steps.length - 1]
     : null
   const running = agent.status === 'running'
+  const elapsed = formatElapsed(agentElapsedMs(agent, now))
+  const kind = agent.subagentType ? `${agent.subagentType} agent` : 'agent'
   return (
     <li>
       <button
         type="button"
         onClick={onPeek}
-        title={`${agent.description} — peek inside`}
+        title={
+          `${agent.description}\n${kind} · ` +
+          `${running ? `running for ${elapsed}` : `${agentStatusLabel(agent)} after ${elapsed}`}` +
+          `\n${agent.toolCount} tool ${agent.toolCount === 1 ? 'call' : 'calls'}` +
+          (agent.childAgentCount
+            ? ` · ${agent.childAgentCount} nested`
+            : '') +
+          '\n\nClick to peek inside'
+        }
         className="w-full text-left px-3 py-1 hover:bg-app/60 cursor-pointer"
-        style={{ paddingLeft: `${0.75 + Math.min(agent.depth, 3) * 0.75}rem` }}
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          {agent.depth > 0 && (
-            <CornerDownRight className="icon-2xs text-faint shrink-0" />
-          )}
           <AgentStatusDot agent={agent} />
           <span
             className={`truncate flex-1 min-w-0 ${
@@ -76,21 +82,40 @@ function AgentRow({
           >
             {agent.description}
           </span>
+          {agent.childAgentCount > 0 && (
+            <span
+              title={`launched ${agent.childAgentCount} nested ${
+                agent.childAgentCount === 1 ? 'agent' : 'agents'
+              }`}
+              className="flex items-center gap-0.5 text-faint shrink-0 text-xs"
+            >
+              <CornerDownRight className="icon-2xs shrink-0" />
+              <span className="tabular-nums">{agent.childAgentCount}</span>
+            </span>
+          )}
           {agent.isBackground && (
             <span
-              title="background agent"
+              title="detached — runs past the end of the turn"
               className="text-faint uppercase tracking-wide shrink-0 text-xs"
             >
               bg
             </span>
           )}
           <span className="text-faint tabular-nums shrink-0 text-xs">
-            {formatElapsed(agentElapsedMs(agent, now))}
+            {elapsed}
           </span>
         </div>
-        {/* The "currently" line. Only for running agents: once an agent is
-            done its last step is trivia, and showing it for every settled
-            row doubles the panel's height for no information. */}
+        {/* Secondary line. Only for running agents: once one is done its
+            last step is trivia, and showing it on every settled row
+            doubles the panel's height for no information. A running
+            nested agent is listed out of tree order, so it names its
+            parent instead — that's the only place the hierarchy shows. */}
+        {running &&
+          (agent.parentDescription ? (
+            <div className="flex min-w-0 pl-4 text-xs text-faint truncate">
+              ↳ via {agent.parentDescription}
+            </div>
+          ) : null)}
         {running && lastStep && (
           <div className="flex min-w-0 pl-4 opacity-80 text-xs">
             <AgentStepLine step={lastStep} dim />
@@ -168,17 +193,24 @@ export function JsonClaudeAgentsPanel({
 
   if (agents.length === 0) return null
 
-  // `agents` is sorted running-first, so this is a split, not a filter
+  // Nested agents are not listed alongside their parents. Sorting is by
+  // status then recency, so a child routinely sorted *above* its parent
+  // — an indented row pointing at nothing, implying a tree the order
+  // doesn't deliver. Nesting is legible in the peek, which links through
+  // parent → child, so the list stays flat: top-level agents, plus
+  // anything still running at any depth (nothing live is ever hidden).
+  const listed = agents.filter((a) => a.depth === 0 || a.status === 'running')
+
+  // `listed` is sorted running-first, so this is a split, not a filter
   // pass. Finished agents are history — the transcript keeps their Task
   // cards — and a long session accumulates dozens, so only the most
   // recent few are shown by default. Without this the live agents the
   // panel exists to surface get pushed off the top.
-  const settledFrom = agents.findIndex((a) => a.status !== 'running')
-  const settledCount = settledFrom === -1 ? 0 : agents.length - settledFrom
+  const settledCount = listed.length - running
   const hiddenCount = showAllSettled
     ? 0
     : Math.max(0, settledCount - SETTLED_PREVIEW)
-  const shown = hiddenCount > 0 ? agents.slice(0, running + SETTLED_PREVIEW) : agents
+  const shown = hiddenCount > 0 ? listed.slice(0, running + SETTLED_PREVIEW) : listed
 
   return (
     <>
@@ -187,8 +219,11 @@ export function JsonClaudeAgentsPanel({
         title="Agents"
         maxHeight="max-h-64"
         actions={
+          // A bare count reads as nothing in particular. The panel is
+          // about what's live, so say so — and when nothing is, say that
+          // instead of leaving a number to be guessed at.
           <span className="text-xs text-faint tabular-nums">
-            {running > 0 ? `${running} running` : `${agents.length}`}
+            {running > 0 ? `${running} running` : `${agents.length} done`}
           </span>
         }
       >

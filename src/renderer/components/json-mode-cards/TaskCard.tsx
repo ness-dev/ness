@@ -40,11 +40,20 @@ export function TaskCard({
         ? (input.subagent_type as string)
         : 'Task'
 
+  // Claude Code emits system/task_started for EVERY sub-agent, so a
+  // `backgroundAgent` record is not evidence of detachment — only the
+  // caller's own run_in_background is. Keying off the record's presence
+  // put a "background" badge on every Task card and drove the spinner
+  // from the wrong lifecycle.
+  const isBackground = input.run_in_background === true
+
   // A background agent's tool_result lands immediately (it's the launch
   // stub, not the answer), so `result` can't stand in for "still working"
   // the way it does for a synchronous sub-agent.
-  const backgroundRunning = backgroundAgent?.status === 'running'
-  const taskInFlight = backgroundAgent ? backgroundRunning : !result
+  const backgroundRunning =
+    isBackground && backgroundAgent?.status === 'running'
+  const taskInFlight =
+    isBackground && backgroundAgent ? backgroundRunning : !result
   const autoExpandTrigger =
     taskInFlight || subAgentDescendantHasPendingApproval
 
@@ -75,7 +84,8 @@ export function TaskCard({
     }
   }, [autoExpandTrigger, subAgentDescendantHasPendingApproval])
 
-  const isError = !!result?.isError || backgroundAgent?.status === 'failed'
+  const isError =
+    !!result?.isError || (isBackground && backgroundAgent?.status === 'failed')
   const countLabel =
     subAgentChildCount === 0
       ? taskInFlight
@@ -131,7 +141,7 @@ export function TaskCard({
         >
           {trunc(description, 120)}
         </span>
-        {backgroundAgent && (
+        {isBackground && backgroundAgent && (
           <span
             title={`background agent ${backgroundAgent.agentId}`}
             className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
