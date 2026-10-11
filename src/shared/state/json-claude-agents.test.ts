@@ -226,6 +226,86 @@ describe('collectAgents', () => {
     expect(parent.steps[0].childAgentToolUseId).toBe('t2')
   })
 
+  // Claude Code runs every sub-agent detached, so the Agent tool_result
+  // is ALWAYS this stub and arrives immediately. Reading it as a result
+  // showed a green tick the instant an agent launched.
+  const STUB =
+    'Async agent launched successfully. (This tool result is internal.)'
+
+  it('does not treat the launch stub as a finished result', () => {
+    const agents = collectAgents(
+      session([launch('t1', 'A'), toolResult('t1', STUB)])
+    )
+    expect(agents[0].status).toBe('running')
+    expect(agents[0].result).toBeUndefined()
+  })
+
+  it('reports running from the lifecycle record even with a stub present', () => {
+    const agents = collectAgents(
+      session([launch('t1', 'A'), toolResult('t1', STUB)], {
+        busy: false,
+        backgroundAgents: {
+          t1: {
+            agentId: 'a1',
+            toolUseId: 't1',
+            description: 'A',
+            status: 'running',
+            startedAt: 1000
+          }
+        }
+      })
+    )
+    expect(agents[0].status).toBe('running')
+  })
+
+  it('settles once the real report supersedes the stub', () => {
+    const agents = collectAgents(
+      session(
+        [
+          launch('t1', 'A'),
+          toolResult('t1', STUB),
+          toolResult('t1', 'here is what I found')
+        ],
+        {
+          backgroundAgents: {
+            t1: {
+              agentId: 'a1',
+              toolUseId: 't1',
+              description: 'A',
+              status: 'completed',
+              startedAt: 1000,
+              completedAt: 5000
+            }
+          }
+        }
+      )
+    )
+    expect(agents[0].status).toBe('completed')
+    expect(agents[0].result).toBe('here is what I found')
+  })
+
+  it('fails an agent whose launch itself errored, with no record to go on', () => {
+    // e.g. an unknown subagent_type — no task ever started, so the
+    // tool_result is a real error rather than a stub.
+    const agents = collectAgents(
+      session([
+        launch('t1', 'Bad'),
+        toolResult('t1', "Agent type 'nope' not found", true)
+      ])
+    )
+    expect(agents[0].status).toBe('failed')
+  })
+
+  it('never caches an interrupted agent, since that status is inferred', () => {
+    const entries = [launch('t1', 'A')]
+    const first = collectAgents(session(entries, { busy: false }))
+    expect(first[0].status).toBe('interrupted')
+    // Same agent, session busy again — it must be free to go back to
+    // running rather than being frozen by the reuse cache.
+    const second = collectAgents(session(entries, { busy: true }), undefined, first)
+    expect(second[0].status).toBe('running')
+  })
+
   it('does not call an agent background just because it has a lifecycle record', () => {
     // Claude Code emits system/task_started for every sub-agent, sync
     // ones included, so a record says nothing about detachment. Keying

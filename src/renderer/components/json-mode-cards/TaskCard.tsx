@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { trunc, type ToolCardProps } from './index'
+import { isLaunchStub } from '../../../shared/state/json-claude-agents'
 
 export interface TaskCardProps extends ToolCardProps {
   /** Pre-rendered ReactNode for the sub-agent's chronological activity.
@@ -40,20 +41,23 @@ export function TaskCard({
         ? (input.subagent_type as string)
         : 'Task'
 
-  // Claude Code emits system/task_started for EVERY sub-agent, so a
-  // `backgroundAgent` record is not evidence of detachment — only the
-  // caller's own run_in_background is. Keying off the record's presence
-  // put a "background" badge on every Task card and drove the spinner
-  // from the wrong lifecycle.
+  // Whether the user ASKED for detachment — that's all the badge means.
+  // A task_started record is not evidence of it: Claude Code emits one
+  // for every sub-agent, so keying the badge off that put "background"
+  // on all of them.
   const isBackground = input.run_in_background === true
 
-  // A background agent's tool_result lands immediately (it's the launch
-  // stub, not the answer), so `result` can't stand in for "still working"
-  // the way it does for a synchronous sub-agent.
-  const backgroundRunning =
-    isBackground && backgroundAgent?.status === 'running'
-  const taskInFlight =
-    isBackground && backgroundAgent ? backgroundRunning : !result
+  // Whether the agent has FINISHED is a separate question with a
+  // separate source. Every sub-agent runs detached, so the tool_result
+  // is always a launch stub that lands immediately and is superseded by
+  // the real answer on task_notification — treating its arrival as
+  // completion marked every agent done the moment it started.
+  const stubbed = isLaunchStub(result?.content)
+  const answer = stubbed ? undefined : result
+  const stillRunning = backgroundAgent
+    ? backgroundAgent.status === 'running'
+    : !answer
+  const taskInFlight = stillRunning
   const autoExpandTrigger =
     taskInFlight || subAgentDescendantHasPendingApproval
 
@@ -84,8 +88,7 @@ export function TaskCard({
     }
   }, [autoExpandTrigger, subAgentDescendantHasPendingApproval])
 
-  const isError =
-    !!result?.isError || (isBackground && backgroundAgent?.status === 'failed')
+  const isError = !!answer?.isError || backgroundAgent?.status === 'failed'
   const countLabel =
     subAgentChildCount === 0
       ? taskInFlight
@@ -212,16 +215,15 @@ export function TaskCard({
           ) : (
             subAgentBody
           )}
-          {/* While a background agent runs, `result` is still the launch
-              stub ("Async agent launched successfully…"), which is noise —
-              show it only once the real result has superseded it. */}
-          {result && !backgroundRunning && (
+          {/* `answer` is already stub-free, so this renders only once the
+              agent's real report has superseded the launch stub. */}
+          {answer && (
             <pre
               className={`my-1 px-2 py-1 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-auto rounded bg-app/40 ${
-                result.isError ? 'text-danger' : 'opacity-80'
+                answer.isError ? 'text-danger' : 'opacity-80'
               }`}
             >
-              {trunc(result.content, 3000)}
+              {trunc(answer.content, 3000)}
             </pre>
           )}
         </div>

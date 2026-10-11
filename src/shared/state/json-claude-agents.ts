@@ -91,6 +91,18 @@ interface LaunchSite {
   launchedBy?: string
 }
 
+/** Claude Code runs EVERY sub-agent detached: the Agent tool_result
+ *  resolves immediately with this stub and the real answer arrives later
+ *  on the task_notification, which supersedes it. So a tool_result is
+ *  not evidence that an agent finished — reading it as one reported a
+ *  green tick the instant an agent launched. Matched on text because
+ *  nothing in the payload distinguishes a stub structurally. */
+const LAUNCH_STUB = /Async agent launched successfully/
+
+export function isLaunchStub(content: string | undefined): boolean {
+  return !!content && LAUNCH_STUB.test(content)
+}
+
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }
@@ -132,18 +144,18 @@ export function collectAgents(
   const entries = session.entries
   if (!entries || entries.length === 0) return []
 
-  // Only agents that have genuinely finished are reusable. The result
-  // check matters for a background agent: `task_notification` dispatches
-  // the settled status and the real result as two events, so a snapshot
-  // taken between them would otherwise cache a completed agent with the
-  // launch stub as its report, forever.
+  // Only agents that have genuinely finished are reusable, and only once
+  // their report has landed: task_notification dispatches the settled
+  // status and the real summary as two events, so a snapshot taken
+  // between them would otherwise pin the launch stub as the report
+  // forever. `interrupted` is deliberately NOT cacheable — it's inferred
+  // from `!busy`, not reported, and caching an inference would freeze an
+  // agent that way permanently.
   const reusable = new Map<string, AgentSummary>()
   if (previous) {
     for (const p of previous) {
-      if (p.status === 'running') continue
-      if (p.result !== undefined || p.status === 'interrupted') {
-        reusable.set(p.toolUseId, p)
-      }
+      if (p.status !== 'completed' && p.status !== 'failed') continue
+      if (p.result !== undefined) reusable.set(p.toolUseId, p)
     }
   }
 
@@ -268,40 +280,34 @@ export function collectAgents(
       }
     }
 
-    const result = resultsByToolUseId.get(site.toolUseId)
+    const rawResult = resultsByToolUseId.get(site.toolUseId)
+    // The stub is not an answer. Drop it so a launched-but-unfinished
+    // agent reads as having no result at all.
+    const result =
+      rawResult && isLaunchStub(rawResult.content) ? undefined : rawResult
     const bg = session.backgroundAgents?.[site.toolUseId]
-    // Only the caller's own `run_in_background` decides this. Claude Code
-    // emits system/task_started for EVERY sub-agent, synchronous ones
-    // included, so the presence of a lifecycle record says nothing about
-    // detachment — keying off it labelled every agent "background".
+    // Two different questions, and conflating them is what broke this
+    // twice. Whether the user ASKED for detachment is `run_in_background`
+    // — that's the badge, and keying it off the record's presence put
+    // "background" on every agent. Whether the agent has FINISHED is the
+    // task_started/task_notification lifecycle, which every agent gets
+    // because they all run detached — keying that off the tool_result
+    // marked every agent complete the moment it launched.
     const isBackground = site.requestedBackground
 
     let status: AgentRunStatus
     let completedAt: number | undefined
-    if (isBackground) {
-      // The task_started / task_notification pair is the only honest
-      // lifecycle for a background agent — its tool_result resolves
-      // immediately with a launch stub, so `result` means nothing here.
-      if (bg) {
-        status = bg.status
-        completedAt = bg.completedAt
-      } else if (session.busy) {
-        status = 'running'
-      } else {
-        // Seeded from a transcript that predates the notification, or
-        // the process died before it arrived.
-        status = result ? 'completed' : 'interrupted'
-      }
+    if (bg) {
+      status = bg.status
+      completedAt = bg.completedAt
     } else if (result) {
+      // No lifecycle record: either a build that predates them, a
+      // transcript-seeded session, or a launch that failed outright
+      // (unknown subagent_type) and so never started a task.
       status = result.isError ? 'failed' : 'completed'
-      // A synchronous agent gets a task_notification too, so prefer its
-      // timestamp; the last child entry is the fallback when the record
-      // isn't there (seeded transcript).
-      completedAt =
-        bg?.completedAt ??
-        (childEntries.length
-          ? childEntries[childEntries.length - 1].timestamp
-          : undefined)
+      completedAt = childEntries.length
+        ? childEntries[childEntries.length - 1].timestamp
+        : undefined
     } else {
       status = session.busy ? 'running' : 'interrupted'
     }
