@@ -251,6 +251,7 @@ import { BashCard } from './BashCard'
 import { GrepCard } from './GrepCard'
 import { GlobCard } from './GlobCard'
 import { TodoWriteCard } from './TodoWriteCard'
+import { TaskMutationCard } from './TaskMutationCard'
 import { TaskCard } from './TaskCard'
 import { GenericToolCard } from './GenericToolCard'
 
@@ -272,6 +273,9 @@ export function dispatchToolCard(props: ToolCardProps): JSX.Element {
       return <GlobCard {...props} />
     case 'TodoWrite':
       return <TodoWriteCard {...props} />
+    case 'TaskCreate':
+    case 'TaskUpdate':
+      return <TaskMutationCard {...props} />
     // 'Task' (older Claude Code) and 'Agent' (2.1.126+) both route to
     // the subagent runner — render either as TaskCard.
     case 'Task':

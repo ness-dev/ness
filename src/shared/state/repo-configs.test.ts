@@ -126,6 +126,7 @@ describe('repoConfigsReducer', () => {
           'pr',
           'merge',
           'todos',
+          'agents',
           'commits',
           'changedFiles',
           'allFiles',
@@ -138,6 +139,7 @@ describe('repoConfigsReducer', () => {
       'pr',
       'merge',
       'todos',
+      'agents',
       'commits',
       'changedFiles',
       'allFiles',
@@ -160,6 +162,7 @@ describe('repoConfigsReducer', () => {
       'changedFiles',
       'allFiles',
       'todos',
+      'agents',
       'context',
       'scratchpad'
     ])

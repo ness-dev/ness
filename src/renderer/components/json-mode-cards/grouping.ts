@@ -1,14 +1,12 @@
 import type { JsonClaudeChatEntry } from '../../../shared/state/json-claude'
 
-/** Tool names that spawn a sub-agent. Claude Code 2.1.126+ renamed
- *  the historical "Task" tool to "Agent" but kept routing both names
- *  to the same subagent runner — match either so the nesting works
- *  across versions. */
-export const SUBAGENT_TOOL_NAMES = new Set<string>(['Task', 'Agent'])
-
-export function isSubAgentToolName(name: string | undefined): boolean {
-  return !!name && SUBAGENT_TOOL_NAMES.has(name)
-}
+// Re-exported from the shared agents module so the chat's nesting pre-pass
+// and the Agents panel can never disagree about what counts as a sub-agent.
+export {
+  SUBAGENT_TOOL_NAMES,
+  isSubAgentToolName
+} from '../../../shared/state/json-claude-agents'
+import { isSubAgentToolName } from '../../../shared/state/json-claude-agents'
 
 export interface BuildChildrenMapResult {
   topLevelEntries: JsonClaudeChatEntry[]

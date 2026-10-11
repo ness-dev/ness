@@ -11,6 +11,7 @@ const LABELS: Record<BuiltinRightPanelKey, string> = {
   merge: 'Merge Locally',
   pr: 'PR Status',
   todos: 'Todos',
+  agents: 'Agents',
   commits: 'Branch Commits',
   changedFiles: 'Changed Files',
   allFiles: 'All Files',

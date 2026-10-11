@@ -2,6 +2,7 @@ export type BuiltinRightPanelKey =
   | 'merge'
   | 'pr'
   | 'todos'
+  | 'agents'
   | 'commits'
   | 'changedFiles'
   | 'allFiles'
@@ -30,6 +31,7 @@ export const DEFAULT_RIGHT_PANEL_ORDER: BuiltinRightPanelKey[] = [
   'changedFiles',
   'allFiles',
   'todos',
+  'agents',
   'cost',
   'context',
   'scratchpad'

@@ -131,6 +131,12 @@ const BUILTIN_ICONS: Record<string, ToolIcon> = {
   Grep: GrepIcon,
   Glob: GlobIcon,
   TodoWrite: TodoIcon,
+  // The Tasks tool family — TodoWrite's structured successor. Same icon
+  // so a session that uses either reads the same way in the transcript.
+  TaskCreate: TodoIcon,
+  TaskUpdate: TodoIcon,
+  TaskList: TodoIcon,
+  TaskGet: TodoIcon,
   Task: TaskIcon,
   Agent: TaskIcon,
   WebFetch: WebIcon,
