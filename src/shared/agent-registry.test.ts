@@ -16,7 +16,7 @@ import { isKnownModel } from './pricing'
  *  a miss here costs a broken tab rather than a silent mischarge — still
  *  worth catching at build time.
  *
- *  Derived from @anthropic-ai/claude-code 2.1.285. Re-derive after
+ *  Derived from @anthropic-ai/claude-code 2.1.301. Re-derive after
  *  bumping the pin — stop at `;` rather than `]`, or the bracketed
  *  `sonnet[1m]` entries truncate the array mid-token:
  *    strings -a node_modules/@anthropic-ai/claude-code-*\/claude \
@@ -33,13 +33,13 @@ const BUNDLED_CLI_ALIASES = new Set([
   'opusplan'
 ])
 
-/** What each offered alias resolved to under the bundled 2.1.285 binary.
+/** What each offered alias resolved to under the bundled 2.1.301 binary.
  *  `opusplan` is listed at its non-planning model, which is what a normal
  *  turn bills against. */
 const ALIAS_RESOLVES_TO: Record<string, string> = {
   opus: 'claude-opus-5-5',
   sonnet: 'claude-sonnet-5-5',
-  haiku: 'claude-haiku-4-5-20251001',
+  haiku: 'claude-haiku-5-5',
   fable: 'claude-fable-5-1',
   best: 'claude-fable-5-1',
   opusplan: 'claude-sonnet-5-5'
@@ -72,7 +72,7 @@ describe('CLAUDE_MODEL_ALIASES', () => {
     // The alias is never what gets billed — the CLI resolves it and the
     // resolved id is what lands in the transcript and reaches priceFor.
     // So every alias target needs pricing, or a session silently costs $0.
-    // Read out of the bundled 2.1.285 binary's `init` event; re-derive
+    // Read out of the bundled 2.1.301 binary's `init` event; re-derive
     // after bumping the pin with:
     //   claude --model <alias> -p x --output-format stream-json --verbose
     for (const resolved of Object.values(ALIAS_RESOLVES_TO)) {

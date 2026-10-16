@@ -65,6 +65,12 @@ const RATES: Record<string, ModelRate> = {
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-sonnet-4-5': { in: 3, out: 15 },
   'claude-sonnet-4': { in: 3, out: 15 },
+  // Haiku 5.5 is the only model priced by prompt length: a request whose
+  // prompt exceeds 100k tokens bills at 5x these rates ($0.50/$2.50). We
+  // only carry the base tier — rateFor keys off the model id alone and has
+  // no access to the request's token count, so long-context Haiku sessions
+  // under-report. Accepted over billing $0 for an unpriced model.
+  'claude-haiku-5-5': { in: 0.10, out: 0.50 },
   'claude-haiku-4-5': { in: 1, out: 5 },
   // OpenAI (used by Codex)
   'o3': { in: 10, out: 40, reasoning: 40 },
