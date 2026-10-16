@@ -9,18 +9,19 @@
 // MCP server is the bundled out/main/permission-prompt-mcp.js (see
 // ApprovalBridge for the socket side of that).
 //
-// Memory isolation: Claude Code's auto-memory subsystem writes to
-// ~/.claude/projects/<cwd-encoded>/memory/ by default. Running this as a
-// child process would pollute the user's personal memory dir with
-// conversations they didn't have in their "real" Claude Code sessions.
-// We redirect that by setting CLAUDE_CONFIG_DIR to a per-session temp
-// dir so all project-dir-derived reads and writes land there instead.
+// Environment: the bundled binary is spawned without a login shell, so
+// the subprocess env is the one captured from the worktree's shell
+// (claude-env.ts) rather than Ness's own — that is what makes a
+// folder-scoped CLAUDE_CONFIG_DIR (mise, direnv) apply to chat tabs the
+// same way it applies to terminal tabs. Transcript paths resolve
+// through the same capture. Auto-memory is disabled per session via
+// CLAUDE_CODE_DISABLE_AUTO_MEMORY so chat tabs don't scribble into the
+// user's project memory.
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
-import { homedir } from 'os'
 import { dirname, join, sep } from 'path'
 import { isPackaged, resolveBundledMcpScript } from './paths'
 import type { Store } from './store'
@@ -37,6 +38,7 @@ import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
+import { cachedShellEnv, claudeProjectsDirFor } from './claude-env'
 
 interface JsonClaudeInstance {
   proc: ChildProcessWithoutNullStreams
@@ -184,9 +186,7 @@ export function bundledClaudeBinPath(): string {
 
 function transcriptPathFor(sessionId: string, worktreePath: string): string {
   return join(
-    homedir(),
-    '.claude',
-    'projects',
+    claudeProjectsDirFor(worktreePath),
     worktreePath.replace(/[^a-zA-Z0-9]/g, '-'),
     `${sessionId}.jsonl`
   )
@@ -686,12 +686,15 @@ export class JsonClaudeManager {
     )
 
     const envVars = this.opts.getClaudeEnvVars() || {}
-    // Build env for the subprocess. We start from process.env, scrub
-    // env vars that the user-scope Ness hooks key off of so the
-    // subprocess's hook firings don't masquerade as the parent agent
-    // tab, then layer on json-claude-specific vars.
+    // Build env for the subprocess. The bundled binary is spawned without
+    // a login shell, so start from the env a shell would produce in this
+    // worktree (folder-scoped CLAUDE_CONFIG_DIR, mise/direnv PATH, …) the
+    // way a terminal tab's `zsh -ilc` does — falling back to process.env
+    // when no capture exists yet. Scrub env vars that the user-scope Ness
+    // hooks key off of so the subprocess's hook firings don't masquerade
+    // as the parent agent tab, then layer on json-claude-specific vars.
     const childEnv: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
+    for (const [k, v] of Object.entries(cachedShellEnv(worktreePath) ?? process.env)) {
       if (typeof v === 'string') childEnv[k] = v
     }
     delete childEnv.CLAUDE_HARNESS_ID

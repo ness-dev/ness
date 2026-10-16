@@ -21,7 +21,7 @@
 // panel being open and measures 18-140ms on 9-50MB transcripts.
 
 import { existsSync, readFileSync, statSync } from 'fs'
-import { homedir } from 'os'
+import { claudeConfigDirFor, claudeProjectsDirFor } from './claude-env'
 import { join } from 'path'
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
@@ -40,9 +40,7 @@ import { log } from './debug'
 /** Same path encoding claude uses for its own session files. */
 function transcriptPathFor(worktreePath: string, sessionId: string): string {
   return join(
-    homedir(),
-    '.claude',
-    'projects',
+    claudeProjectsDirFor(worktreePath),
     worktreePath.replace(/[^a-zA-Z0-9]/g, '-'),
     `${sessionId}.jsonl`
   )
@@ -57,7 +55,7 @@ function memoryCharsFor(worktreePath: string): number {
   for (const p of [
     join(worktreePath, 'CLAUDE.md'),
     join(worktreePath, '.claude', 'CLAUDE.md'),
-    join(homedir(), '.claude', 'CLAUDE.md')
+    join(claudeConfigDirFor(worktreePath), 'CLAUDE.md')
   ]) {
     try {
       if (existsSync(p)) total += statSync(p).size

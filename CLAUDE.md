@@ -617,6 +617,22 @@ hard dependency on `gh`.
   undocumented `useSystemClaudeForJsonMode: true` setting in
   `config.json` flips json-mode back to PATH `claude` for diagnostics
   / version comparison — no UI, edit the JSON directly.
+- **Claude home is per worktree, not per Ness process.** Folder-scoped
+  env tooling (mise, direnv) can set `CLAUDE_CONFIG_DIR` for a directory
+  tree, and a login shell is the only thing that knows the answer.
+  Terminal tabs get it for free via `zsh -ilc`; everything else goes
+  through `src/main/claude-env.ts`, which runs the user's login shell in
+  the worktree once (sentinel-wrapped `env -0`, cached per path,
+  re-probed on spawn after a minute). Chat tabs spawn the bundled binary
+  with that captured env, and every `~/.claude/projects` lookup
+  (`--resume` decision, transcripts, context/cost trackers, fork) and
+  the hooks install resolve through `claudeConfigDirFor(cwd)` /
+  `knownClaudeConfigDirs()`. Never hardcode `homedir()/.claude` in main
+  — a worktree whose shell points elsewhere would silently lose resume,
+  status, and cost. The probe is a full shell startup (~1s on a heavy
+  rc file), so it must stay off the hot path: sync readers only read
+  the cache, and async entry points (`startJsonClaudeSession`, the
+  `agent:*` request handlers) are the ones that await it.
 
 ## Workflow conventions
 

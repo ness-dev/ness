@@ -31,7 +31,7 @@
 // outputs keep costing money as long as they sit in the context.
 
 import { readFileSync } from 'fs'
-import { homedir } from 'os'
+import { claudeProjectsDirFor } from './claude-env'
 import { join } from 'path'
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
@@ -246,9 +246,7 @@ export class CostTracker {
 
 function jsonClaudeTranscriptPath(worktreePath: string, sessionId: string): string {
   return join(
-    homedir(),
-    '.claude',
-    'projects',
+    claudeProjectsDirFor(worktreePath),
     worktreePath.replace(/[^a-zA-Z0-9]/g, '-'),
     `${sessionId}.jsonl`
   )

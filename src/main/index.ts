@@ -30,6 +30,12 @@ import type { Server as HttpServer } from 'http'
 import type { ServerTransport } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
+import {
+  knownClaudeConfigDirs,
+  resolveShellEnv,
+  setExplicitClaudeConfigDirSource,
+  warmShellEnv
+} from './claude-env'
 import { parseCliFlags, USAGE, type CliFlags } from './cli-args'
 import { PlaywrightBrowserManager } from './browser-manager-playwright'
 import type { BrowserManagerLike } from './browser-manager-types'
@@ -406,6 +412,9 @@ if (configLoadError && runtime !== 'electron') {
 
 const store = new Store(
   buildInitialAppState(config, { hasGithubToken: hasSecret('githubToken'), configLoadError })
+)
+setExplicitClaudeConfigDirSource(
+  () => store.getSnapshot().state.settings.claudeEnvVars?.CLAUDE_CONFIG_DIR || undefined
 )
 
 // Scan for user-authored themes once the store exists. Done as a
@@ -997,6 +1006,7 @@ const panesFSM = new PanesFSM(store, {
   },
   getLatestClaudeSessionId: async (wtPath) => {
     const kind = store.getSnapshot().state.settings.defaultAgent ?? 'claude'
+    if (kind === 'claude') await resolveShellEnv(wtPath)
     return getAgent(kind).latestSessionId(wtPath)
   },
   getDefaultAgentKind: () => toAgentKind(store.getSnapshot().state.settings.defaultAgent),
@@ -1010,15 +1020,16 @@ const panesFSM = new PanesFSM(store, {
   // could disconnect without intending to kill agents). Tab-close /
   // restart / clear events are the actual lifecycle boundary.
   killTabPty: (tabId) => ptyManager.kill(tabId),
-  killJsonClaude: (sessionId) => jsonClaudeManager.kill(sessionId),
+  killJsonClaude: (sessionId) => killJsonClaudeSession(sessionId),
   clearJsonClaudeSession: (sessionId) =>
     store.dispatch({ type: 'jsonClaude/sessionCleared', payload: { sessionId } }),
   startJsonClaudeWithPrompt: (sessionId, worktreePath, initialPrompt) => {
-    startJsonClaudeSession(sessionId, worktreePath)
-    if (initialPrompt) jsonClaudeManager.send(sessionId, initialPrompt)
+    void startJsonClaudeSession(sessionId, worktreePath).then((started) => {
+      if (started && initialPrompt) jsonClaudeManager.send(sessionId, initialPrompt)
+    })
   },
   startJsonClaude: (sessionId, worktreePath) => {
-    startJsonClaudeSession(sessionId, worktreePath)
+    void startJsonClaudeSession(sessionId, worktreePath)
   }
 })
 
@@ -1040,14 +1051,28 @@ function findJsonClaudeTabModel(sessionId: string): string | undefined {
   return undefined
 }
 
+const startingJsonClaude = new Map<string, { cancelled: boolean }>()
+
 /** Single source of truth for "spin up the json-claude subprocess for
  *  this sessionId". Used by the jsonClaude:start IPC handler, the
  *  panesFSM's startJsonClaudeWithPrompt + startJsonClaude options
  *  (kickoff + wake), so all paths produce the same dispatch + seed +
  *  create order. Idempotent — JsonClaudeManager.create() short-circuits
- *  if the instance is already running. */
-function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
-  if (jsonClaudeManager.hasSession(sessionId)) return
+ *  if the instance is already running, and a start already waiting on
+ *  the worktree's shell env absorbs a second call for the same id.
+ *  Resolves true once the subprocess was created. */
+async function startJsonClaudeSession(sessionId: string, worktreePath: string): Promise<boolean> {
+  if (jsonClaudeManager.hasSession(sessionId) || startingJsonClaude.has(sessionId)) return false
+  // Both the --resume decision and the subprocess env key off the Claude
+  // home the worktree's shell reports; resolve it before touching either.
+  const token = { cancelled: false }
+  startingJsonClaude.set(sessionId, token)
+  try {
+    await resolveShellEnv(worktreePath)
+  } finally {
+    if (startingJsonClaude.get(sessionId) === token) startingJsonClaude.delete(sessionId)
+  }
+  if (token.cancelled || jsonClaudeManager.hasSession(sessionId)) return false
   store.dispatch({
     type: 'jsonClaude/sessionStarted',
     payload: {
@@ -1062,6 +1087,18 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
     store.getSnapshot().state.jsonClaude.sessions[sessionId]?.permissionMode ||
     'default'
   jsonClaudeManager.create(sessionId, worktreePath, permMode, findJsonClaudeTabModel(sessionId))
+  return true
+}
+
+/** Kill a chat subprocess, or a start for it that is still waiting on the
+ *  shell-env probe — closing a tab in that window must not leave an orphan. */
+function killJsonClaudeSession(sessionId: string): void {
+  const pending = startingJsonClaude.get(sessionId)
+  if (pending) {
+    pending.cancelled = true
+    startingJsonClaude.delete(sessionId)
+  }
+  jsonClaudeManager.kill(sessionId)
 }
 
 /** Resolve what the new worktree's first agent tab should start from,
@@ -1077,6 +1114,7 @@ async function resolveForkedKickoff(args: {
   const { createdPath, initialPrompt, forkSource, baseRef } = args
   if (!forkSource) return { initialPrompt }
 
+  await Promise.all([resolveShellEnv(forkSource.worktreePath), resolveShellEnv(createdPath)])
   const outcome = forkTranscript({
     sourceSessionId: forkSource.sessionId,
     sourceWorktreePath: forkSource.worktreePath,
@@ -1225,6 +1263,29 @@ const autoSleepMonitor = new AutoSleepMonitor(store, panesFSM)
 // subscribes to the store, never owns slice state.
 const wakeLockController = new WakeLockController(store)
 
+// Folder-scoped env tooling (mise, direnv) can point a worktree at a
+// different Claude home. Probe each worktree's login shell once, so the
+// synchronous readers (transcript lookups, context + cost trackers) know
+// the home before the first tab spawns, and hook any home that is new.
+const hookedClaudeHomes = new Set<string>()
+
+function hookNewClaudeHomes(): void {
+  if (store.getSnapshot().state.hooks.consent !== 'accepted') return
+  const dirs = knownClaudeConfigDirs()
+  if (dirs.every((dir) => hookedClaudeHomes.has(dir))) return
+  getAgent('claude').installHooks()
+  for (const dir of dirs) hookedClaudeHomes.add(dir)
+}
+
+store.subscribe((event) => {
+  if (event.type !== 'worktrees/listChanged') return
+  // Sweeping the whole list is fine here: warmShellEnv is a cache hit for
+  // every path already probed, and listChanged is infrequent.
+  for (const wt of store.getSnapshot().state.worktrees.list) {
+    void warmShellEnv(wt.path).then(hookNewClaudeHomes)
+  }
+})
+
 /** Install agent status hooks at the user-scope settings file for both
  *  supported agents. Called once when consent flips to 'accepted'. The
  *  hook command is env-gated on $HARNESS_TERMINAL_ID, so it no-ops for
@@ -1236,9 +1297,11 @@ function installHooksGlobally(): void {
   for (const agent of [getAgent('claude'), getAgent('codex'), getAgent('cursor')]) {
     agent.installHooks()
   }
+  for (const dir of knownClaudeConfigDirs()) hookedClaudeHomes.add(dir)
 }
 
 function uninstallHooksGlobally(): void {
+  hookedClaudeHomes.clear()
   for (const agent of [getAgent('claude'), getAgent('codex'), getAgent('cursor')]) {
     agent.uninstallHooks()
   }
@@ -3396,26 +3459,31 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  transport.onRequest('agent:sessionFileExists', (_ctx, cwd: string, sessionId: string, agentKind?: string): boolean => {
+  transport.onRequest('agent:sessionFileExists', async (_ctx, cwd: string, sessionId: string, agentKind?: string): Promise<boolean> => {
     const kind = toAgentKind(agentKind)
+    if (kind === 'claude') await resolveShellEnv(cwd)
     return getAgent(kind).sessionFileExists(cwd, sessionId)
   })
 
-  transport.onRequest('agent:latestSessionId', (_ctx, cwd: string, agentKind?: string): string | null => {
+  transport.onRequest('agent:latestSessionId', async (_ctx, cwd: string, agentKind?: string): Promise<string | null> => {
     const kind = toAgentKind(agentKind)
+    if (kind === 'claude') await resolveShellEnv(cwd)
     return getAgent(kind).latestSessionId(cwd)
   })
 
   transport.onRequest(
     'agent:buildSpawnArgs',
-    (_ctx, agentKind: string, opts: {
+    async (_ctx, agentKind: string, opts: {
       terminalId: string; cwd: string; sessionId?: string;
       initialPrompt?: string; teleportSessionId?: string;
       sessionName?: string;
       modelOverride?: string
-    }): string => {
+    }): Promise<string> => {
       const kind = toAgentKind(agentKind)
       const agent = getAgent(kind)
+      // --resume vs --session-id is decided by looking for the transcript
+      // under the worktree's Claude home, which only the shell can tell us.
+      if (kind === 'claude') await resolveShellEnv(opts.cwd)
       const command =
         kind === 'claude'
           ? (config.claudeCommand || agent.defaultCommand)
@@ -3811,7 +3879,7 @@ function registerIpcHandlers(): void {
     // both JsonModeChats mount and both fire startJsonClaude.
     // startJsonClaudeSession's hasSession() short-circuit covers that —
     // no double-dispatch of sessionStarted, no double-spawn.
-    startJsonClaudeSession(sessionId, cwd)
+    void startJsonClaudeSession(sessionId, cwd)
     return true
   })
   transport.onSignal(
@@ -3832,7 +3900,7 @@ function registerIpcHandlers(): void {
     }
   )
   transport.onRequest('jsonClaude:kill', (_ctx, sessionId: string) => {
-    jsonClaudeManager.kill(sessionId)
+    killJsonClaudeSession(sessionId)
     return true
   })
   transport.onRequest('jsonClaude:interrupt', (_ctx, sessionId: string) => {
@@ -4081,8 +4149,8 @@ function registerIpcHandlers(): void {
       // startJsonClaudeSession is idempotent + reads the new tab.model
       // through findJsonClaudeTabModel, so the fresh spawn gets
       // --model <newValue> --resume <sessionId>.
-      jsonClaudeManager.kill(sessionId)
-      startJsonClaudeSession(sessionId, worktreePath)
+      killJsonClaudeSession(sessionId)
+      void startJsonClaudeSession(sessionId, worktreePath)
       return { ok: true }
     }
   )
