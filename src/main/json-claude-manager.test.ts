@@ -295,10 +295,13 @@ describe('JsonClaudeManager', () => {
     expect(call.args).toContain('r/b')
   })
 
-  // An approval is parked on a human, so Claude Code's default MCP idle
-  // timeout (1800s) would abandon the tool call while the sidebar dot is
-  // still waiting to be clicked. Scoped to ness-permissions only.
-  it('gives the ness-permissions MCP server a timeout long enough for a human', () => {
+  // Load-bearing absence: with no per-server `timeout`, Claude's default
+  // MCP idle timeout (1800s) aborts an approval nobody answered, and the
+  // agent works around the question instead of parking forever. Setting
+  // one here to keep an approval card alive longer would trade a
+  // self-healing agent for a blocked one — Ness reconciles the abort
+  // instead (see the stale-approval test below).
+  it('sets no timeout on the ness-permissions MCP server', () => {
     const store = new Store()
     const mgr = makeManager(store)
     store.dispatch({
@@ -313,10 +316,8 @@ describe('JsonClaudeManager', () => {
     const config = JSON.parse(call!.args[configIdx + 1]) as {
       mcpServers: Record<string, { timeout?: number }>
     }
-    const timeout = config.mcpServers['ness-permissions'].timeout
-    expect(timeout).toBeGreaterThan(60 * 60 * 1000)
-    // A larger delay than a Node timer can hold overflows to ~instant.
-    expect(timeout).toBeLessThan(2 ** 31 - 1)
+    expect(config.mcpServers['ness-permissions']).toBeDefined()
+    expect(config.mcpServers['ness-permissions'].timeout).toBeUndefined()
   })
 
   it('drops a stale approval when a tool_result lands for its tool_use', () => {

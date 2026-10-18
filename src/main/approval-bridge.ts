@@ -179,13 +179,15 @@ export class ApprovalBridge {
   }
 
   /** Claude Code abandoned the tool call we were asking about, so the
-   *  answer can no longer land anywhere. The common cause is its MCP
-   *  idle timeout firing on our `approve` call ("sent no response or
-   *  progress for Ns; aborting"), which it reports as an is_error
-   *  tool_result on the *original* tool_use — the approval socket stays
-   *  open and we never hear about it. Without this reconciliation the
-   *  pending entry outlives the turn, so the sidebar keeps a
-   *  needs-approval dot for a tool the chat already shows as skipped.
+   *  answer can no longer land anywhere. The usual cause is its MCP
+   *  idle timeout firing on our `approve` call after 1800s of silence
+   *  ("sent no response or progress for 1800s; aborting") — by design,
+   *  so an agent nobody answered works around the question instead of
+   *  blocking forever. It reports that as an is_error tool_result on
+   *  the *original* tool_use; the approval socket itself hears nothing.
+   *  So without this reconciliation the pending entry outlives the
+   *  turn, and the sidebar keeps a needs-approval dot for a tool the
+   *  chat already shows as skipped.
    *
    *  Called from the json-claude stream reader for every tool_result:
    *  a result means the call was decided, so any approval still pending

@@ -81,20 +81,6 @@ const PARTIAL_TEXT_FLUSH_MS = 30
  *  see. 4Hz still feels live if the card is expanded. */
 const PARTIAL_THINKING_FLUSH_MS = 250
 
-/** Per-server timeout (ms) for the ness-permissions MCP entry. Claude
- *  Code otherwise applies its default MCP idle timeout (1800s) to our
- *  `approve` call and aborts the tool with
- *  `sent no response or progress for 1800s`. That call is parked on a
- *  *human*, and the whole point of the sidebar's needs-approval dot is
- *  that you answer the tab when you get to it — half an hour is not a
- *  meaningful deadline, so give it a week. Must stay under
- *  2**31-1 (~24.8 days), the largest delay a Node timer can hold
- *  without overflowing and firing immediately. Scoped to this server
- *  only, so a genuinely hung ness-control tool still times out
- *  normally. The abort is still handled if it does fire — see
- *  cancelApprovalForToolUse. */
-const APPROVAL_MCP_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
-
 export interface JsonClaudeControlServerInfo {
   port: number
   token: string
@@ -613,18 +599,21 @@ export class JsonClaudeManager {
     // need a separate Node install in packaged builds.
     //   * ness-permissions: receives the per-tool approval requests
     //     Claude raises via --permission-prompt-tool. Tool is 'approve'.
+    //     Deliberately carries no per-server `timeout`, so Claude's
+    //     default MCP idle timeout (1800s) still aborts an approval
+    //     nobody answered. That's wanted: the agent gets an error
+    //     tool_result and can work around the question or move to
+    //     something else instead of parking forever. Ness reconciles
+    //     the abort via cancelApprovalForToolUse — setting a timeout
+    //     here to "fix" a vanishing approval card would trade a
+    //     self-healing agent for a blocked one.
     //   * ness-control: the same MCP bridge used by xterm-backed
     //     Claude tabs, exposing ness-control tools (worktree mgmt,
     //     browser tabs, shell tabs, etc.). Skipped when settings has
     //     harnessMcpEnabled=false or the control server isn't up.
     const mcpServers: Record<
       string,
-      {
-        command: string
-        args: string[]
-        env: Record<string, string>
-        timeout?: number
-      }
+      { command: string; args: string[]; env: Record<string, string> }
     > = {
       'ness-permissions': {
         command: process.execPath,
@@ -633,8 +622,7 @@ export class JsonClaudeManager {
           ELECTRON_RUN_AS_NODE: '1',
           HARNESS_APPROVAL_SOCKET: socketPath,
           HARNESS_JSON_CLAUDE_SESSION_ID: sessionId
-        },
-        timeout: APPROVAL_MCP_TIMEOUT_MS
+        }
       }
     }
     if (this.opts.isHarnessMcpEnabled()) {
