@@ -431,6 +431,8 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
     store.getSnapshot().state.settings.useSystemClaudeForJsonMode === true,
   getApprovalSocketPath: (sessionId) => approvalBridge.startSession(sessionId),
   closeApprovalSession: (sessionId) => approvalBridge.stopSession(sessionId),
+  cancelApprovalForToolUse: (sessionId, toolUseId) =>
+    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId),
   getClaudeEnvVars: () =>
     store.getSnapshot().state.settings.claudeEnvVars || {},
   getControlServer: () => getControlServerInfo(),

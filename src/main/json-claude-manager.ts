@@ -81,6 +81,20 @@ const PARTIAL_TEXT_FLUSH_MS = 30
  *  see. 4Hz still feels live if the card is expanded. */
 const PARTIAL_THINKING_FLUSH_MS = 250
 
+/** Per-server timeout (ms) for the ness-permissions MCP entry. Claude
+ *  Code otherwise applies its default MCP idle timeout (1800s) to our
+ *  `approve` call and aborts the tool with
+ *  `sent no response or progress for 1800s`. That call is parked on a
+ *  *human*, and the whole point of the sidebar's needs-approval dot is
+ *  that you answer the tab when you get to it — half an hour is not a
+ *  meaningful deadline, so give it a week. Must stay under
+ *  2**31-1 (~24.8 days), the largest delay a Node timer can hold
+ *  without overflowing and firing immediately. Scoped to this server
+ *  only, so a genuinely hung ness-control tool still times out
+ *  normally. The abort is still handled if it does fire — see
+ *  cancelApprovalForToolUse. */
+const APPROVAL_MCP_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
+
 export interface JsonClaudeControlServerInfo {
   port: number
   token: string
@@ -101,6 +115,11 @@ export interface JsonClaudeManagerOptions {
   getUseSystemClaude: () => boolean
   getApprovalSocketPath: (sessionId: string) => string
   closeApprovalSession: (sessionId: string) => void
+  /** Called for every tool_result we see so an approval still pending
+   *  for that tool_use id can be dropped — Claude Code aborting its
+   *  `approve` MCP call (idle timeout) is otherwise invisible to us.
+   *  See ApprovalBridge.cancelPendingForToolUse. */
+  cancelApprovalForToolUse: (sessionId: string, toolUseId: string) => void
   getClaudeEnvVars: () => Record<string, string>
   /** Looked up from main when building the inline MCP config. Returning
    *  null means the ness-control bridge isn't injected (settings flag
@@ -600,7 +619,12 @@ export class JsonClaudeManager {
     //     harnessMcpEnabled=false or the control server isn't up.
     const mcpServers: Record<
       string,
-      { command: string; args: string[]; env: Record<string, string> }
+      {
+        command: string
+        args: string[]
+        env: Record<string, string>
+        timeout?: number
+      }
     > = {
       'ness-permissions': {
         command: process.execPath,
@@ -609,7 +633,8 @@ export class JsonClaudeManager {
           ELECTRON_RUN_AS_NODE: '1',
           HARNESS_APPROVAL_SOCKET: socketPath,
           HARNESS_JSON_CLAUDE_SESSION_ID: sessionId
-        }
+        },
+        timeout: APPROVAL_MCP_TIMEOUT_MS
       }
     }
     if (this.opts.isHarnessMcpEnabled()) {
@@ -1711,6 +1736,10 @@ export class JsonClaudeManager {
     if (type === 'user') {
       const results = extractToolResults(parsed)
       for (const r of results) {
+        // A result means this tool call is decided, so an approval still
+        // pending for it can never be answered — drop it before the
+        // card and its needs-approval dot outlive the turn.
+        this.opts.cancelApprovalForToolUse(instance.sessionId, r.toolUseId)
         this.store.dispatch({
           type: 'jsonClaude/toolResultAttached',
           payload: {

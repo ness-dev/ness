@@ -178,6 +178,42 @@ export class ApprovalBridge {
     }
   }
 
+  /** Claude Code abandoned the tool call we were asking about, so the
+   *  answer can no longer land anywhere. The common cause is its MCP
+   *  idle timeout firing on our `approve` call ("sent no response or
+   *  progress for Ns; aborting"), which it reports as an is_error
+   *  tool_result on the *original* tool_use — the approval socket stays
+   *  open and we never hear about it. Without this reconciliation the
+   *  pending entry outlives the turn, so the sidebar keeps a
+   *  needs-approval dot for a tool the chat already shows as skipped.
+   *
+   *  Called from the json-claude stream reader for every tool_result:
+   *  a result means the call was decided, so any approval still pending
+   *  for that tool_use id is by definition stale. Answers the socket so
+   *  the MCP subprocess unwinds, then drops the card. */
+  cancelPendingForToolUse(
+    sessionId: string,
+    toolUseId: string,
+    reason = 'tool call abandoned before approval resolved'
+  ): boolean {
+    for (const [id, pending] of Array.from(this.pendingResponses.entries())) {
+      if (pending.sessionId !== sessionId) continue
+      if (pending.payload.toolUseId !== toolUseId) continue
+      this.writeResponse(pending.socket, id, { behavior: 'deny', message: reason })
+      this.pendingResponses.delete(id)
+      this.store.dispatch({
+        type: 'jsonClaude/approvalResolved',
+        payload: { requestId: id }
+      })
+      log(
+        'approval-bridge',
+        `stale approval dropped session=${sessionId} id=${id} tool=${pending.payload.toolName} toolUseId=${toolUseId} reason="${reason}"`
+      )
+      return true
+    }
+    return false
+  }
+
   /** Dispatched from the renderer-facing IPC handler. Push the user's
    *  chosen PermissionResult back out over the waiting socket. */
   resolveApproval(requestId: string, result: ApprovalResult): boolean {
