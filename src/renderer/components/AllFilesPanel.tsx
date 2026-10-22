@@ -1,61 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, AtSign, Code2, ChevronRight, Folder, FolderOpen, FileText } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, AtSign, Code2, FolderOpen, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { RightPanel } from './RightPanel'
+import { FileListViewToggle, TreeBranch, fileTreeIndent } from './FileTree'
+import { useFileListView } from '../hooks/useFileListView'
 import { useActiveBackend, useSettings } from '../store'
 import { useBackend } from '../backend'
 import { bindingToString, formatBindingGlyphs, resolveHotkeys } from '../hotkeys'
 import type { ChangedFile } from '../types'
+import { buildTree, sortChildren, type TreeNode } from '../file-tree'
 import {
   CHANGED_STATUS_COLOR,
   CHANGED_STATUS_LABEL,
   useChangedFilesSet,
 } from '../hooks/useChangedFilesSet'
 
+/** List view renders every row with no virtualization, so cap it. */
+const LIST_VIEW_LIMIT = 1000
+
 interface AllFilesPanelProps {
   worktreePath: string | null
   onOpenFile: (filePath: string) => void
   onSendToAgent?: (text: string) => void
-}
-
-interface TreeNode {
-  name: string
-  path: string
-  children?: Map<string, TreeNode>
-  isFile: boolean
-}
-
-function buildTree(files: string[]): TreeNode {
-  const root: TreeNode = { name: '', path: '', children: new Map(), isFile: false }
-  for (const file of files) {
-    const parts = file.split('/')
-    let node = root
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
-      const isLast = i === parts.length - 1
-      if (!node.children) node.children = new Map()
-      let child = node.children.get(part)
-      if (!child) {
-        child = {
-          name: part,
-          path: parts.slice(0, i + 1).join('/'),
-          isFile: isLast,
-          children: isLast ? undefined : new Map()
-        }
-        node.children.set(part, child)
-      }
-      node = child
-    }
-  }
-  return root
-}
-
-function sortChildren(node: TreeNode): TreeNode[] {
-  if (!node.children) return []
-  return Array.from(node.children.values()).sort((a, b) => {
-    if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
-    return a.name.localeCompare(b.name)
-  })
 }
 
 /** When the user has a filter typed, surface changed files above
@@ -98,6 +64,19 @@ export function AllFilesPanel({
   }, [settings.hotkeys])
   const changed = useChangedFilesSet(worktreePath)
 
+  // FileRow is memoized but the parent hands us fresh callbacks on most
+  // renders; route them through refs so row props stay stable.
+  const onOpenFileRef = useRef(onOpenFile)
+  const onSendToAgentRef = useRef(onSendToAgent)
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile
+    onSendToAgentRef.current = onSendToAgent
+  })
+  const openFile = useCallback((path: string) => onOpenFileRef.current(path), [])
+  const sendToAgent = useCallback((text: string) => onSendToAgentRef.current?.(text), [])
+  const rowSendToAgent = onSendToAgent ? sendToAgent : undefined
+  const [view, toggleView] = useFileListView('all-files', 'tree')
+
   const refresh = useCallback(async () => {
     if (!worktreePath) return
     try {
@@ -121,15 +100,31 @@ export function AllFilesPanel({
     refresh()
   }, [refresh])
 
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return files
-    const q = filter.toLowerCase()
-    return files.filter((f) => f.toLowerCase().includes(q))
-  }, [files, filter])
+  const sortedFiles = useMemo(
+    () => (view === 'list' ? [...files].sort((a, b) => a.localeCompare(b)) : files),
+    [files, view]
+  )
 
-  const tree = useMemo(() => buildTree(filtered), [filtered])
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return sortedFiles
+    const q = filter.toLowerCase()
+    return sortedFiles.filter((f) => f.toLowerCase().includes(q))
+  }, [sortedFiles, filter])
 
   const filtering = filter.trim().length > 0
+
+  const tree = useMemo(() => (view === 'tree' ? buildTree(filtered) : null), [filtered, view])
+
+  // Changed files refresh on nearly every edit; only depend on them while
+  // filtering, when they reorder the list.
+  const changedFirstBy = filtering ? changed.byPath : null
+  const listed = useMemo(() => {
+    if (view !== 'list') return []
+    if (!changedFirstBy || changedFirstBy.size === 0) return filtered.slice(0, LIST_VIEW_LIMIT)
+    const changedFiles = filtered.filter((f) => changedFirstBy.has(f))
+    const rest = filtered.filter((f) => !changedFirstBy.has(f))
+    return [...changedFiles, ...rest].slice(0, LIST_VIEW_LIMIT)
+  }, [filtered, view, changedFirstBy])
 
   const toggle = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -142,6 +137,7 @@ export function AllFilesPanel({
 
   const actions = (
     <>
+      <FileListViewToggle view={view} onToggle={toggleView} />
       {worktreePath && (
         <Tooltip label="Open worktree in editor" action="openInEditor">
           <button
@@ -201,20 +197,51 @@ export function AllFilesPanel({
         {worktreePath && filtering && filtered.length === 0 && files.length > 0 && (
           <div className="p-3 text-faint">No matches</div>
         )}
-        {worktreePath && filtered.length > 0 && (
+        {worktreePath && tree && filtered.length > 0 && (
           <TreeBranch
             node={tree}
             depth={0}
-            expanded={expanded}
-            forceExpanded={filtering}
-            worktreePath={worktreePath}
+            isOpen={(path) => filtering || expanded.has(path)}
             onToggle={toggle}
-            onOpenFile={onOpenFile}
-            onSendToAgent={onSendToAgent}
-            changedByPath={changed.byPath}
-            changedFolders={changed.folders}
-            changedFirst={filtering}
+            sortChildren={
+              filtering
+                ? (node) => sortChildrenChangedFirst(node, changed.byPath, changed.folders)
+                : sortChildren
+            }
+            hasChangedDescendant={(path) => changed.folders.has(path)}
+            renderFile={(node, depth) => (
+              <FileRow
+                name={node.name}
+                path={node.path}
+                depth={depth}
+                worktreePath={worktreePath}
+                onOpenFile={openFile}
+                onSendToAgent={rowSendToAgent}
+                changedStatus={changed.byPath.get(node.path)?.status}
+              />
+            )}
           />
+        )}
+        {worktreePath && view === 'list' && (
+          <>
+            {listed.map((path) => (
+              <FileRow
+                key={path}
+                name={path.slice(path.lastIndexOf('/') + 1)}
+                path={path}
+                depth={null}
+                worktreePath={worktreePath}
+                onOpenFile={openFile}
+                onSendToAgent={rowSendToAgent}
+                changedStatus={changed.byPath.get(path)?.status}
+              />
+            ))}
+            {filtered.length > listed.length && (
+              <div className="px-3 py-2 text-faint italic">
+                Showing first {listed.length} of {filtered.length} — filter to narrow
+              </div>
+            )}
+          </>
         )}
       </div>
       {files.length > 0 && (
@@ -230,126 +257,7 @@ export function AllFilesPanel({
   )
 }
 
-interface TreeBranchProps {
-  node: TreeNode
-  depth: number
-  expanded: Set<string>
-  forceExpanded: boolean
-  worktreePath: string
-  onToggle: (path: string) => void
-  onOpenFile: (filePath: string) => void
-  onSendToAgent?: (text: string) => void
-  changedByPath: Map<string, ChangedFile>
-  changedFolders: Set<string>
-  changedFirst: boolean
-}
-
-function TreeBranch({
-  node,
-  depth,
-  expanded,
-  forceExpanded,
-  worktreePath,
-  onToggle,
-  onOpenFile,
-  onSendToAgent,
-  changedByPath,
-  changedFolders,
-  changedFirst
-}: TreeBranchProps): JSX.Element {
-  const children = changedFirst
-    ? sortChildrenChangedFirst(node, changedByPath, changedFolders)
-    : sortChildren(node)
-  return (
-    <>
-      {children.map((child) => {
-        if (child.isFile) {
-          return (
-            <FileRow
-              key={child.path}
-              name={child.name}
-              path={child.path}
-              depth={depth}
-              worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
-              onSendToAgent={onSendToAgent}
-              changedStatus={changedByPath.get(child.path)?.status}
-            />
-          )
-        }
-        const isOpen = forceExpanded || expanded.has(child.path)
-        return (
-          <div key={child.path}>
-            <DirRow
-              name={child.name}
-              path={child.path}
-              depth={depth}
-              open={isOpen}
-              onToggle={() => onToggle(child.path)}
-              hasChangedDescendant={changedFolders.has(child.path)}
-            />
-            {isOpen && (
-              <TreeBranch
-                node={child}
-                depth={depth + 1}
-                expanded={expanded}
-                forceExpanded={forceExpanded}
-                worktreePath={worktreePath}
-                onToggle={onToggle}
-                onOpenFile={onOpenFile}
-                onSendToAgent={onSendToAgent}
-                changedByPath={changedByPath}
-                changedFolders={changedFolders}
-                changedFirst={changedFirst}
-              />
-            )}
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-function DirRow({
-  name,
-  depth,
-  open,
-  onToggle,
-  hasChangedDescendant
-}: {
-  name: string
-  path: string
-  depth: number
-  open: boolean
-  onToggle: () => void
-  hasChangedDescendant: boolean
-}): JSX.Element {
-  return (
-    <div
-      onClick={onToggle}
-      className="flex items-center gap-1 px-2 py-0.5 hover:bg-panel-raised cursor-pointer select-none"
-      style={{ paddingLeft: 8 + depth * 12 }}
-    >
-      <ChevronRight
-        className={`icon-2xs shrink-0 text-faint transition-transform ${open ? 'rotate-90' : ''}`} />
-      {open ? (
-        <FolderOpen className="icon-xs shrink-0 text-info" />
-      ) : (
-        <Folder className="icon-xs shrink-0 text-info" />
-      )}
-      <span className="truncate text-fg">{name}</span>
-      {hasChangedDescendant && (
-        <span
-          className="w-1 h-1 rounded-full bg-accent/50 shrink-0 ml-1"
-          title="Contains changes in this PR"
-          aria-hidden="true"
-        />
-      )}
-    </div>
-  )
-}
-
-function FileRow({
+const FileRow = memo(function FileRow({
   name,
   path,
   depth,
@@ -360,17 +268,19 @@ function FileRow({
 }: {
   name: string
   path: string
-  depth: number
+  /** Tree indent level, or null in list view to show the full path. */
+  depth: number | null
   worktreePath: string
   onOpenFile: (filePath: string) => void
   onSendToAgent?: (text: string) => void
   changedStatus?: ChangedFile['status']
 }): JSX.Element {
   const backend = useBackend()
+  const dir = depth === null ? path.slice(0, path.length - name.length) : ''
   return (
     <div
       className="flex items-center gap-1 px-2 py-0.5 hover:bg-panel-raised cursor-pointer group"
-      style={{ paddingLeft: 8 + depth * 12 + 10 }}
+      style={{ paddingLeft: depth === null ? 8 : fileTreeIndent(depth) }}
       onClick={() => onOpenFile(path)}
       draggable
       onDragStart={(e) => {
@@ -388,7 +298,16 @@ function FileRow({
       ) : (
         <FileText className="icon-xs shrink-0 text-faint" />
       )}
-      <span className="truncate min-w-0 flex-1 text-fg">{name}</span>
+      {depth === null ? (
+        <span className="truncate min-w-0 flex-1" style={{ direction: 'rtl', textAlign: 'left' }}>
+          <bdi>
+            {dir && <span className="text-faint">{dir}</span>}
+            <span className="text-fg">{name}</span>
+          </bdi>
+        </span>
+      ) : (
+        <span className="truncate min-w-0 flex-1 text-fg">{name}</span>
+      )}
       {onSendToAgent && (
         <Tooltip label="Reference in Claude" side="left">
           <button
@@ -415,4 +334,4 @@ function FileRow({
       </Tooltip>
     </div>
   )
-}
+})
