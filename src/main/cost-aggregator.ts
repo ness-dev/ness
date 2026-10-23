@@ -16,7 +16,7 @@
 // per-session breakdown attribution matches the live CostPanel exactly.
 
 import { readdir, stat, readFile } from 'fs/promises'
-import { homedir } from 'os'
+import { knownClaudeConfigDirs } from './claude-env'
 import { join } from 'path'
 import {
   newFoldState,
@@ -48,8 +48,20 @@ export function clearCostAggregatorCache(): void {
 export async function getAllSessionCosts(
   opts: { sinceMs?: number; projectsDir?: string } = {}
 ): Promise<SessionCostSummary[]> {
-  const projectsDir =
-    opts.projectsDir ?? join(homedir(), '.claude', 'projects')
+  const projectsDirs = opts.projectsDir
+    ? [opts.projectsDir]
+    : knownClaudeConfigDirs().map((dir) => join(dir, 'projects'))
+  const out: SessionCostSummary[] = []
+  for (const projectsDir of projectsDirs) {
+    out.push(...(await collectSessionCosts(projectsDir, opts.sinceMs)))
+  }
+  return out
+}
+
+async function collectSessionCosts(
+  projectsDir: string,
+  sinceMs: number | undefined
+): Promise<SessionCostSummary[]> {
   let dirs: string[]
   try {
     dirs = await readdir(projectsDir)
@@ -87,7 +99,7 @@ export async function getAllSessionCosts(
       if (!fileStat.isFile()) continue
 
       const mtimeMs = fileStat.mtimeMs
-      if (opts.sinceMs != null && mtimeMs < opts.sinceMs) continue
+      if (sinceMs != null && mtimeMs < sinceMs) continue
 
       const cached = cache.get(filePath)
       let summary: SessionCostSummary | null
@@ -107,7 +119,7 @@ export async function getAllSessionCosts(
       }
 
       if (!summary || summary.turns === 0) continue
-      if (opts.sinceMs != null && summary.lastAt < opts.sinceMs) continue
+      if (sinceMs != null && summary.lastAt < sinceMs) continue
       out.push(summary)
     }
   }
