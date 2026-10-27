@@ -18,6 +18,7 @@ import { detectInProgressOp } from './git-ops-state'
 import { cachedGitRead } from './git-poll-cache'
 import { runGitRead, type GitPriority } from './git-limiter'
 import type { Worktree } from '../shared/state/worktrees'
+import { destOf } from '../shared/git-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -691,13 +692,6 @@ function logGitOp(
       execParts: execParts.map((n) => +n.toFixed(1))
     }
   )
-}
-
-/** Renamed entries from `git status --porcelain` are stored as
- * "old -> new" — match numstat by the destination path. */
-function destOf(p: string): string {
-  const idx = p.indexOf(' -> ')
-  return idx >= 0 ? p.slice(idx + 4) : p
 }
 
 function applyCounts(file: ChangedFile, counts: NumstatCounts | undefined): void {
