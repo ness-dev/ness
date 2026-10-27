@@ -411,4 +411,18 @@ describe('pinned rows', () => {
     )
     expect(model.sections[0].groups[0].key).toBe('pinned')
   })
+
+  it('hides a snoozed pinned worktree in snoozed but keeps it pinned', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' })],
+        snoozeByPath: { '/w/a': { path: '/w/a', snoozedAt: 1, wakeAt: 999 } },
+        pinnedPaths: { '/w/a': true }
+      })
+    )
+    expect(findGroup(model, 0, 'pinned')).toBeUndefined()
+    const row = findGroup(model, 0, 'snoozed')!.rows[0]
+    expect(row.isSnoozed).toBe(true)
+    expect(row.isPinned).toBe(true)
+  })
 })
