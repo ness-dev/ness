@@ -26,7 +26,8 @@ export interface AgentModule {
    * assigns its own ID and Ness discovers it from the first hook event. */
   assignsSessionId: boolean
   /** Install status hooks at the agent's user-scope settings file
-   *  (~/.claude/settings.json for Claude, ~/.codex/hooks.json for Codex).
+   *  (settings.json in every Claude home a worktree resolves to — see
+   *  claude-env.ts — or ~/.codex/hooks.json for Codex).
    *  The hook command is gated on $HARNESS_TERMINAL_ID so sessions spawned
    *  outside Ness are untouched. */
   installHooks(): void
