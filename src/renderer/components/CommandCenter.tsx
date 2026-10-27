@@ -228,7 +228,7 @@ export function CommandCenter({
     const byRepo = new Map<string, Worktree[]>()
     for (const root of repoRoots) byRepo.set(root, [])
     for (const wt of worktrees) {
-      if (pinnedPaths[wt.path]) pinned.push(wt)
+      if (pinnedPaths[wt.path] && !snoozedPaths[wt.path]) pinned.push(wt)
       else byRepo.get(wt.repoRoot)!.push(wt)
     }
     const repoSections = repoRoots

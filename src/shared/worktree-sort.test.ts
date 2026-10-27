@@ -166,8 +166,12 @@ describe('worktree-sort snoozed group', () => {
     expect(getGroupKey(wt('/a'), mergedPR, true, true)).toBe('snoozed')
   })
 
-  it('pinned trumps snoozed', () => {
-    expect(getGroupKey(wt('/a'), mergedPR, true, true, null, true)).toBe('pinned')
+  it('snoozed trumps pinned', () => {
+    expect(getGroupKey(wt('/a'), mergedPR, true, true, null, true)).toBe('snoozed')
+  })
+
+  it('a pinned worktree returns to pinned once its snooze clears', () => {
+    expect(getGroupKey(wt('/a'), mergedPR, true, false, null, true)).toBe('pinned')
   })
 
   it('no-pr group lists merge-point worktrees (PR bases) above feature worktrees', () => {
@@ -224,22 +228,35 @@ describe('worktree-sort pinned group', () => {
     expect(keys.indexOf('pinned')).toBeLessThan(keys.indexOf('needs-attention'))
   })
 
-  it('pinned wins over merged, snoozed, and reviewing', () => {
+  it('pinned wins over merged and reviewing', () => {
     const groups = groupWorktrees(
-      [wt('/merged'), wt('/snoozed'), wt('/review')],
+      [wt('/merged'), wt('/review')],
       {
         '/merged': mergedPR,
-        '/snoozed': null,
         '/review': stubPRStatus({ author: { login: 'someone-else', avatarUrl: '' } })
       },
       { '/merged': true },
-      { '/snoozed': true },
+      {},
       'me',
       undefined,
-      { '/merged': true, '/snoozed': true, '/review': true }
+      { '/merged': true, '/review': true }
     )
     expect(groups.map((g) => g.key)).toEqual(['pinned'])
-    expect(groups[0].worktrees).toHaveLength(3)
+    expect(groups[0].worktrees).toHaveLength(2)
+  })
+
+  it('hides a snoozed pinned worktree in the snoozed group', () => {
+    const groups = groupWorktrees(
+      [wt('/a'), wt('/b')],
+      { '/a': null, '/b': null },
+      {},
+      { '/a': true },
+      null,
+      undefined,
+      { '/a': true, '/b': true }
+    )
+    expect(groups.find((g) => g.key === 'pinned')?.worktrees.map((w) => w.path)).toEqual(['/b'])
+    expect(groups.find((g) => g.key === 'snoozed')?.worktrees.map((w) => w.path)).toEqual(['/a'])
   })
 
   it('labels the group "Pinned"', () => {

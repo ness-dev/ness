@@ -25,10 +25,11 @@ export function getGroupKey(
   isPinned?: boolean
 ): GroupKey {
   void wt
-  // Pinned is an explicit user override, so it outranks every derived
-  // signal — a pinned worktree appears only in the Pinned section.
-  if (isPinned) return 'pinned'
+  // Snooze and pin are both explicit user overrides. Snooze wins so a pinned
+  // worktree can be put away; the pin survives the snooze, so it returns to
+  // Pinned on wake. Pin outranks every derived signal.
   if (isSnoozed) return 'snoozed'
+  if (isPinned) return 'pinned'
   if (locallyMerged) return 'merged'
   if (!pr) return 'no-pr'
   if (isPRMerged(pr)) return 'merged'
