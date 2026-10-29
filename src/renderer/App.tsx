@@ -748,6 +748,18 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setActivePaneId((prev) => (prev[wtPath] === paneId ? prev : { ...prev, [wtPath]: paneId }))
   }, [])
 
+  const handleSidebarSelectTab = useCallback(
+    (wtPath: string, paneId: string, tabId: string) => {
+      setShowNewWorktree(false)
+      setShowActivity(false)
+      setShowCleanup(false)
+      setShowCommandCenter(false)
+      setActiveWorktreeId(wtPath)
+      handleSelectTab(wtPath, paneId, tabId)
+    },
+    [handleSelectTab]
+  )
+
   const effectiveDefaultAgent = defaultAgent ?? 'claude'
   const handleAddAgentTabWithDefault = useCallback(
     (wtPath: string, kind: AgentKind | undefined, paneId?: string) => {
@@ -1522,6 +1534,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: effectiveSidebarWidth }}><div className="drag-region h-10 shrink-0 flex items-stretch border-b border-border-strong bg-panel titlebar-lead"><AppTitleSegment fillParent /></div><div className="flex-1 min-h-0 flex"><Sidebar
             model={worktreeListModel}
             activeWorktreeId={activeWorktreeId}
+            activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
             snoozeDefaultDays={settings.snoozeDefaultDays}
             prLoading={prLoading}
             onOpenAssignedPR={handleOpenAssignedPR}
@@ -1533,6 +1546,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowCommandCenter(false)
               setActiveWorktreeId(path)
             }}
+            onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {
               setNewWorktreeRepo(repoRoot)

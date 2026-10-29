@@ -141,10 +141,10 @@ export function WorktreeTab({
               setMenu({ x: e.clientX, y: e.clientY })
             }
       }
-      className={`group w-full text-left px-3 flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group px-1.5 rounded-md text-left flex items-center gap-2 transition-colors cursor-pointer ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${deleting ? 'opacity-60 italic' : ''} ${
-        isActive ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
+        isActive ? 'text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
       }`}
     >
       {deleting ? (
