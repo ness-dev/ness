@@ -66,6 +66,10 @@ import {
   RedisIcon,
   ReloadIcon,
   RenameIcon,
+  ReplyIcon,
+  ResolveIcon,
+  ReviewCommentIcon,
+  SubmitReviewIcon,
   SalesforceIcon,
   ScreenshotIcon,
   ScrollIcon,
@@ -413,7 +417,13 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   set_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
   clear_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
   set_tab_name: { icon: RenameIcon, one: 'rename', many: 'renames' },
-  send_message: { icon: MessageIcon, one: 'message', many: 'messages' }
+  send_message: { icon: MessageIcon, one: 'message', many: 'messages' },
+  list_tabs: { icon: TabListIcon, one: 'tab list', many: 'tab lists' },
+  list_review_comments: { icon: ListIcon, one: 'comment list', many: 'comment lists' },
+  add_review_comment: { icon: ReviewCommentIcon, one: 'review comment', many: 'review comments' },
+  reply_to_comment: { icon: ReplyIcon, one: 'reply', many: 'replies' },
+  resolve_comment: { icon: ResolveIcon, one: 'resolve', many: 'resolves' },
+  submit_review: { icon: SubmitReviewIcon, one: 'review', many: 'reviews' }
 }
 
 /** Resolve a tool name to its action, or null when we have no

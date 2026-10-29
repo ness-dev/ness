@@ -389,6 +389,8 @@ export interface Config {
   // session is processing | always. Default 'off'. The transient "+1h" timer
   // (preventSleepUntil) is session-only and deliberately NOT persisted here.
   preventSleepMode?: PreventSleepMode
+  /** Absent ⇒ 'draft'. */
+  agentReviewDelivery?: 'auto'
 }
 
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'

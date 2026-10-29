@@ -93,13 +93,15 @@ export type JsonClaudeAutomationSource =
   | 'worktree-message'
   | 'worktree-kickoff'
   | 'worktree-autoname'
+  | 'review'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
   'merge-conflict',
   'worktree-message',
   'worktree-kickoff',
-  'worktree-autoname'
+  'worktree-autoname',
+  'review'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -108,6 +110,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
  *  and agents treat it as authoritative — including the parts the parent
  *  guessed at. Naming the author is what buys back the license to push back. */
 const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> = {
+  review:
+    'Address this review. The id in [brackets] after each comment works with the ness-control MCP tools: call `reply_to_comment` to answer a comment or push back on it, and `resolve_comment` once you have fixed it, so the reviewer and the user can see where each one stands in the Review tab. A comment you disagree with deserves a reply rather than a silent change. If you do not have those tools, just address the feedback.',
   'worktree-kickoff':
     'This brief was written by another agent, not by the user. Treat it as a starting point rather than a spec: verify its claims about the codebase before acting on them, and say so instead of complying if the approach it describes looks wrong.',
   // The one source whose body IS the human's own words — the footer is the

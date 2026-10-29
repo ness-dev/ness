@@ -15,6 +15,8 @@ import {
   Bot,
   CalendarClock,
   Camera,
+  CircleCheck,
+  ClipboardCheck,
   Code,
   Crosshair,
   Database,
@@ -31,6 +33,8 @@ import {
   ListChecks,
   MessageCircleQuestion,
   MessageSquare,
+  MessageSquarePlus,
+  MessageSquareReply,
   MousePointer,
   MousePointerClick,
   MoveVertical,
@@ -157,6 +161,12 @@ export const ListIcon: ToolIcon = ({ className }) => <List className={className}
 export const BranchIcon: ToolIcon = ({ className }) => <GitBranch className={className} />
 export const RenameIcon: ToolIcon = ({ className }) => <Pencil className={className} />
 export const MessageIcon: ToolIcon = ({ className }) => <MessageSquare className={className} />
+export const ReviewCommentIcon: ToolIcon = ({ className }) => (
+  <MessageSquarePlus className={className} />
+)
+export const ReplyIcon: ToolIcon = ({ className }) => <MessageSquareReply className={className} />
+export const ResolveIcon: ToolIcon = ({ className }) => <CircleCheck className={className} />
+export const SubmitReviewIcon: ToolIcon = ({ className }) => <ClipboardCheck className={className} />
 
 // Brand icons — Simple Icons via react-icons. Brand-canonical colors
 // where they read in both light and dark themes; currentColor (text

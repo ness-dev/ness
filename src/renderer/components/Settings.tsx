@@ -65,6 +65,7 @@ type SubSectionId =
   | 'experimental-browser-control'
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
+  | 'experimental-agent-reviews'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
 
@@ -115,6 +116,7 @@ const SECTIONS: Section[] = [
     { id: 'experimental-browser-control', label: 'Browser control' },
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'experimental-agent-reviews', label: 'Agent reviews' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
   ]}
@@ -247,6 +249,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-browser-control': null,
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
+    'experimental-agent-reviews': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
   })
@@ -439,6 +442,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     conversationForkEnabled,
     worktreeMessagingEnabled,
     agentTabNamingEnabled,
+    agentReviewDelivery,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -4039,6 +4043,63 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     </div>
                   </div>
                 </label>
+              </div>
+
+              {/* Agent reviews sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['experimental-agent-reviews'] = el }}
+                id="experimental-agent-reviews"
+                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Agent reviews</h3>
+                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
+                    Experimental
+                  </span>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  An agent can review a worktree&apos;s branch through the
+                  ness-control review tools, leaving comments in the Review tab
+                  and then submitting the review. Choose what happens when it
+                  submits.
+                </p>
+                <fieldset className="grid grid-cols-2 gap-2">
+                  {([
+                    {
+                      id: 'draft',
+                      label: 'Hold as a draft',
+                      hint: 'Wait in the Review tab so you can edit or delete comments, then send it yourself.'
+                    },
+                    {
+                      id: 'auto',
+                      label: 'Send automatically',
+                      hint: "Deliver straight to the author's agent tab."
+                    }
+                  ] as const).map((opt) => {
+                    const isActive = agentReviewDelivery === opt.id
+                    return (
+                      <label
+                        key={opt.id}
+                        className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                          isActive
+                            ? 'bg-surface text-fg-bright border-fg'
+                            : 'bg-panel-raised text-muted border-border hover:text-fg hover:border-border-strong'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="agent-review-delivery"
+                          value={opt.id}
+                          checked={isActive}
+                          onChange={() => { void backend.setAgentReviewDelivery(opt.id) }}
+                          className="sr-only"
+                        />
+                        <div className="text-sm">{opt.label}</div>
+                        <div className="text-xs text-dim mt-0.5">{opt.hint}</div>
+                      </label>
+                    )
+                  })}
+                </fieldset>
               </div>
 
               {/* Auto-approve safe tool calls sub-card */}

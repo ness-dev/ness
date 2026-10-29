@@ -870,6 +870,13 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'review') {
+    return {
+      label: from ? `Code Review · from ${from}` : 'Code Review',
+      note: 'submitted in the Review tab',
+      brand: true
+    }
+  }
   if (source === 'worktree-kickoff') {
     return {
       label: from ? `Task Brief · from ${from}` : 'Task Brief',

@@ -909,6 +909,18 @@ describe('settingsReducer', () => {
     expect(off.preventSleepMode).toBe('off')
   })
 
+  it('agentReviewDeliveryChanged switches modes and keeps identity on a no-op', () => {
+    expect(initialSettings.agentReviewDelivery).toBe('draft')
+    const auto = apply(initialSettings, {
+      type: 'settings/agentReviewDeliveryChanged',
+      payload: 'auto'
+    })
+    expect(auto.agentReviewDelivery).toBe('auto')
+    expect(
+      apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
+    ).toBe(auto)
+  })
+
   it('preventSleepUntilChanged arms and clears the timer deadline', () => {
     expect(initialSettings.preventSleepUntil).toBeNull()
     const armed = apply(initialSettings, {
