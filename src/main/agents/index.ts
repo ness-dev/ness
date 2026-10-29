@@ -16,6 +16,9 @@ export interface AgentSpawnOpts {
   model?: string | null
   systemPrompt?: string
   tuiFullscreen?: boolean
+  /** Codex only: launch the TUI with `--no-daemon`. Set when the user's
+   *  codex supports it; see supportsNoDaemon in agents/codex.ts. */
+  noDaemon?: boolean
 }
 
 export interface AgentModule {

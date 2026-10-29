@@ -1,8 +1,10 @@
+import { execFile } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, appendFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { log } from '../debug'
 import { makeHookCommand } from '../hooks'
+import { loginShellCommandArgs, resolveUserShell } from '../user-shell'
 import type { AgentSpawnOpts } from './index'
 
 function shellQuote(s: string): string {
@@ -204,11 +206,43 @@ export function extractSessionId(payload: Record<string, unknown>): string | nul
   return typeof sid === 'string' && sid ? sid : null
 }
 
+// Recent Codex TUIs host their conversation on a shared background
+// app-server daemon rather than in-process. The daemon keeps a thread loaded
+// after the TUI exits, which locks it ("already has an active writer") — so
+// switching a Codex tab from Terminal back to Chat, whose app-server must
+// take the thread over, fails for as long as the daemon lives. `--no-daemon`
+// keeps the conversation in the TUI process, released when the tab closes.
+// Older codex builds predate the flag and would reject it, hence the probe.
+const noDaemonSupport = new Map<string, Promise<boolean>>()
+
+export function supportsNoDaemon(command: string): Promise<boolean> {
+  let probe = noDaemonSupport.get(command)
+  if (!probe) {
+    probe = new Promise((resolve) => {
+      execFile(
+        resolveUserShell(),
+        loginShellCommandArgs(`${command} --help`),
+        { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout) => {
+          const supported = !err && /--no-daemon\b/.test(stdout)
+          log('agents', `codex --no-daemon support command=${command} supported=${supported}`)
+          resolve(supported)
+        }
+      )
+    })
+    noDaemonSupport.set(command, probe)
+  }
+  return probe
+}
+
 export function buildSpawnArgs(opts: AgentSpawnOpts): string {
   // Codex MCP is configured globally via ~/.codex/config.toml, not per-terminal
   // flags. The mcpConfigPath is unused here but the MCP server was already
   // registered by the prepareMcpForTerminal IPC call.
   let cmd = opts.command
+  if (opts.noDaemon && !opts.command.includes('--no-daemon')) {
+    cmd += ' --no-daemon'
+  }
   if (opts.model && !opts.command.includes('--model') && !opts.command.includes('-m ')) {
     cmd += ` --model ${shellQuote(opts.model)}`
   }

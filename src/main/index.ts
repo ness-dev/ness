@@ -133,6 +133,7 @@ import {
 } from '../shared/state/settings'
 import { watchStatusDir } from './hooks'
 import { getAgent, type AgentKind } from './agents'
+import { supportsNoDaemon as supportsCodexNoDaemon } from './agents/codex'
 import { buildClaudeLaunchSettings } from './claude-launch'
 import { HARNESS_REPO_OWNER, HARNESS_REPO_NAME } from '../shared/constants'
 import { readRecentDebugLog } from './debug'
@@ -474,6 +475,8 @@ const codexChatProvider = new CodexChatProvider(store, {
     approvalBridge.cancelPendingForToolUse(sessionId, toolUseId)
 })
 const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager, codex: codexChatProvider })
+// Warm the probe so the first Codex terminal tab doesn't wait on a login shell.
+void supportsCodexNoDaemon(config.codexCommand || 'codex')
 const perfMonitor = new PerfMonitor()
 setGitHubApiRecorder(() => perfMonitor.recordGitHubApiCall())
 setGitHubApiLoggingEnabled(config.expandedDiagnosticLoggingEnabled === true)
@@ -3440,12 +3443,12 @@ function registerIpcHandlers(): void {
 
   transport.onRequest(
     'agent:buildSpawnArgs',
-    (_ctx, agentKind: string, opts: {
+    async (_ctx, agentKind: string, opts: {
       terminalId: string; cwd: string; sessionId?: string;
       initialPrompt?: string; teleportSessionId?: string;
       sessionName?: string;
       modelOverride?: string
-    }): string => {
+    }): Promise<string> => {
       const kind = toAgentKind(agentKind)
       const agent = getAgent(kind)
       const command =
@@ -3478,8 +3481,9 @@ function registerIpcHandlers(): void {
       } else {
         model = override || config.cursorModel || null
       }
+      const noDaemon = kind === 'codex' ? await supportsCodexNoDaemon(command) : undefined
 
-      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen })
+      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen, noDaemon })
     }
   )
 

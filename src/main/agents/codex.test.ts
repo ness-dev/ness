@@ -23,6 +23,28 @@ vi.mock('../debug', () => ({
   log: () => {}
 }))
 
+const execState: { calls: string[]; reply: { err: Error | null; stdout: string } } = {
+  calls: [],
+  reply: { err: null, stdout: '' }
+}
+
+vi.mock('child_process', () => ({
+  execFile: (
+    _shell: string,
+    args: string[],
+    _opts: unknown,
+    cb: (err: Error | null, stdout: string) => void
+  ) => {
+    execState.calls.push(args[args.length - 1])
+    cb(execState.reply.err, execState.reply.stdout)
+  }
+}))
+
+vi.mock('../user-shell', () => ({
+  resolveUserShell: () => '/bin/zsh',
+  loginShellCommandArgs: (cmd: string) => ['-ilc', cmd]
+}))
+
 vi.mock('../hooks', () => ({
   makeHookCommand: (event: string) =>
     `bash -c 'd=/tmp/harness-status; printf "${event}" >> "$d/$h.ndjson"'`
@@ -31,7 +53,9 @@ vi.mock('../hooks', () => ({
 import { homedir } from 'os'
 import { join } from 'path'
 import {
+  buildSpawnArgs,
   extractSessionId,
+  supportsNoDaemon,
   hooksInstalled,
   installHooks,
   hookEvents,
@@ -172,5 +196,28 @@ describe('codex extractSessionId', () => {
     expect(extractSessionId({})).toBeNull()
     expect(extractSessionId({ session_id: '' })).toBeNull()
     expect(extractSessionId({ session_id: 42 })).toBeNull()
+  })
+})
+
+describe('codex --no-daemon', () => {
+  it('detects support from --help and caches per command', async () => {
+    execState.calls = []
+    execState.reply = { err: null, stdout: '  --no-daemon\n      Run without the shared background server' }
+    await expect(supportsNoDaemon('codex-a')).resolves.toBe(true)
+    await expect(supportsNoDaemon('codex-a')).resolves.toBe(true)
+    expect(execState.calls).toEqual(['codex-a --help'])
+  })
+
+  it('reports no support when the flag is absent or the probe fails', async () => {
+    execState.reply = { err: null, stdout: 'Usage: codex [OPTIONS]' }
+    await expect(supportsNoDaemon('codex-old')).resolves.toBe(false)
+    execState.reply = { err: new Error('not found'), stdout: '' }
+    await expect(supportsNoDaemon('codex-missing')).resolves.toBe(false)
+  })
+
+  it('adds --no-daemon to fresh and resumed launches only when asked', () => {
+    expect(buildSpawnArgs({ command: 'codex', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
+    expect(buildSpawnArgs({ command: 'codex', cwd: '/x' })).toBe('codex')
+    expect(buildSpawnArgs({ command: 'codex --no-daemon', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
   })
 })
