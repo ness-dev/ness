@@ -9,6 +9,7 @@
 //   exited            → terminals/removed
 //   pending approval  → needs-approval (with PendingTool), unless the
 //                       auto-reviewer is still deciding
+//   pending edit_copy → needs-approval (the human owes the agent a draft)
 //   busy              → processing
 //   otherwise         → waiting
 //
@@ -17,6 +18,7 @@
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
 import type { JsonClaudeState } from '../shared/state/json-claude'
+import { firstDraftForTerminal } from '../shared/state/copy-drafts'
 import type { PtyStatus, PendingTool } from '../shared/state/terminals'
 import { log } from './debug'
 
@@ -46,6 +48,13 @@ export class JsonClaudeStatusDeriver {
   }
 
   private onEvent(event: StateEvent): void {
+    if (event.type === 'copyDrafts/requested' || event.type === 'copyDrafts/resolved') {
+      const jc = this.store.getSnapshot().state.jsonClaude
+      if (event.payload.terminalId in jc.sessions) {
+        this.deriveSession(event.payload.terminalId, jc)
+      }
+      return
+    }
     if (!event.type.startsWith('jsonClaude/')) return
     const jc = this.store.getSnapshot().state.jsonClaude
     // Re-derive only the session(s) the event touched, then dedup against
@@ -107,10 +116,20 @@ export class JsonClaudeStatusDeriver {
     const approval = Object.values(jc.pendingApprovals).find(
       (a) => a.sessionId === sessionId && a.autoReview?.state !== 'pending'
     )
+    const copyDraft = approval
+      ? null
+      : firstDraftForTerminal(this.store.getSnapshot().state.copyDrafts, sessionId)
     if (approval) {
       status = 'needs-approval'
       pendingTool = { name: approval.toolName, input: approval.input }
       fingerprint = `needs-approval:${approval.requestId}`
+    } else if (copyDraft) {
+      status = 'needs-approval'
+      pendingTool = {
+        name: 'edit_copy',
+        input: { title: copyDraft.title, draft: copyDraft.draft }
+      }
+      fingerprint = `needs-approval:${copyDraft.id}`
     } else if (session.busy) {
       status = 'processing'
       fingerprint = 'processing'

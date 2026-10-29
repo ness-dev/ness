@@ -378,6 +378,116 @@ describe('mcp-bridge get_tab_dom', () => {
   }, 10_000)
 })
 
+describe('mcp-bridge edit_copy', () => {
+  let stub
+  let bridge
+
+  afterEach(async () => {
+    if (bridge) await bridge.kill()
+    if (stub) await stub.close()
+    bridge = null
+    stub = null
+  })
+
+  async function callEditCopy(reply, args = { draft: 'Get started now!', title: 'Headline' }) {
+    stub = await startStub((req, body, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(req.url === '/copy-drafts' ? reply : { scope: null }))
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'edit_copy', arguments: args }
+    })
+    return bridge.next()
+  }
+
+  async function listedNames(copyEditing) {
+    stub = await startStub((req, body, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ scope: null, ...(copyEditing ? { copyEditing } : {}) }))
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const response = await bridge.next()
+    return response.result.tools.map((t) => t.name)
+  }
+
+  it('is only advertised when copy editing is enabled', async () => {
+    expect(await listedNames(null)).not.toContain('edit_copy')
+    await bridge.kill()
+    await stub.close()
+    expect(await listedNames({ enabled: true })).toContain('edit_copy')
+  })
+
+  it('returns the edited text and forwards title + context', async () => {
+    const response = await callEditCopy(
+      { kind: 'submitted', text: 'Start here', note: 'less shouty' },
+      { draft: 'Get started now!', title: 'Headline', context: 'max 20 chars' }
+    )
+    expect(response.result.isError).toBeFalsy()
+    const text = response.result.content[0].text
+    expect(text).toContain('<<<COPY\nStart here\nCOPY>>>')
+    expect(text).toContain('less shouty')
+    const post = stub.captured.find((c) => c.url === '/copy-drafts')
+    expect(post.body).toEqual({
+      draft: 'Get started now!',
+      title: 'Headline',
+      context: 'max 20 chars'
+    })
+  })
+
+  it('says so when the user approved the draft unchanged', async () => {
+    const response = await callEditCopy({ kind: 'submitted', text: 'Get started now!' })
+    expect(response.result.content[0].text).toMatch(/approved the draft unchanged/)
+  })
+
+  it('reports a dismissal as an error so the agent does not ship the draft', async () => {
+    const response = await callEditCopy({ kind: 'dismissed', note: 'wrong tone' })
+    expect(response.result.isError).toBe(true)
+    expect(response.result.content[0].text).toMatch(/dismissed/)
+    expect(response.result.content[0].text).toContain('wrong tone')
+  })
+
+  it('hangs up on Ness when the client cancels the call', async () => {
+    let closed = false
+    stub = await startStub((req, body, res) => {
+      if (req.url !== '/copy-drafts') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ scope: null }))
+      }
+      res.on('close', () => {
+        closed = true
+      })
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'edit_copy', arguments: { draft: 'x' } }
+    })
+    for (let i = 0; i < 200 && !stub.captured.some((c) => c.url === '/copy-drafts'); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    bridge.send({
+      jsonrpc: '2.0',
+      method: 'notifications/cancelled',
+      params: { requestId: 2 }
+    })
+    await bridge.next()
+    expect(closed).toBe(true)
+  })
+})
+
 describe('mcp-bridge log-size cap on startup', () => {
   let tmpDir
 

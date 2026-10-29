@@ -20,6 +20,7 @@ import {
   writeAttachmentImage
 } from './json-claude-attachments'
 import { JsonClaudeStatusDeriver } from './json-claude-status-deriver'
+import { CopyDraftBroker, type CopyDraftOutcome } from './copy-draft-broker'
 import { Store } from './store'
 import { WebSocketServerTransport } from './transport-websocket'
 import { CompoundServerTransport } from './transport-compound'
@@ -424,6 +425,10 @@ const approvalBridge = new ApprovalBridge(store, {
   getAutoApproveSteerInstructions: () =>
     store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
 })
+const copyDraftBroker = new CopyDraftBroker(
+  store,
+  (terminalId) => terminalId in store.getSnapshot().state.jsonClaude.sessions
+)
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
     store.getSnapshot().state.settings.claudeCommand || DEFAULT_CLAUDE_COMMAND,
@@ -2876,6 +2881,20 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setCopyEditingEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      config.copyEditingEnabled = true
+    } else {
+      delete config.copyEditingEnabled
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/copyEditingEnabledChanged',
+      payload: config.copyEditingEnabled === true
+    })
+    return true
+  })
+
   transport.onRequest('config:setNameClaudeSessions', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.nameClaudeSessions = true
@@ -3776,6 +3795,26 @@ function registerIpcHandlers(): void {
   // The request surfaces in the store as jsonClaude/approvalRequested; the
   // renderer UI calls this handler once the user clicks Allow/Deny, which
   // writes the PermissionResult back out over the same socket.
+  transport.onRequest(
+    'copyDrafts:resolve',
+    (_ctx, id: string, outcome: Exclude<CopyDraftOutcome, { kind: 'cancelled' }>) => {
+      if (outcome?.kind === 'submitted' && typeof outcome.text === 'string') {
+        return copyDraftBroker.resolve(id, {
+          kind: 'submitted',
+          text: outcome.text,
+          note: outcome.note?.trim() || undefined
+        })
+      }
+      if (outcome?.kind === 'dismissed') {
+        return copyDraftBroker.resolve(id, {
+          kind: 'dismissed',
+          note: outcome.note?.trim() || undefined
+        })
+      }
+      return false
+    }
+  )
+
   transport.onRequest(
     'jsonClaude:resolveApproval',
     (
@@ -5100,6 +5139,11 @@ async function runBoot(): Promise<void> {
       // response should not be able to arrive before the sidebar agrees.
       if (result.ok && result.renamed) await worktreesFSM.refreshList()
       return result
+    },
+    copyDrafts: {
+      isEnabled: () => config.copyEditingEnabled === true,
+      request: (input) => copyDraftBroker.request(input),
+      cancel: (id) => copyDraftBroker.cancel(id)
     },
     messaging: {
       isEnabled: () => config.worktreeMessagingEnabled === true,

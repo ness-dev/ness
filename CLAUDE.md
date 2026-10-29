@@ -43,7 +43,7 @@ slice has:
 
 Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
 `terminals` (which also owns `panes` and `lastActive`), `updater`,
-`repoConfigs`, `permissions`. Adding a new piece of shared state means picking the
+`repoConfigs`, `permissions`, `copyDrafts`. Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end
@@ -99,6 +99,7 @@ src/
 │   ├── updater.ts                 # status (checking/available/downloading/…)
 │   ├── repo-configs.ts            # byRepo: per-repo .ness.json contents
 │   ├── permissions.ts             # global "Always allow" tool grants
+│   ├── copy-drafts.ts             # pending `edit_copy` drafts awaiting a human edit
 │   └── *.test.ts                  # vitest reducer tests, one per slice
 │
 ├── main/

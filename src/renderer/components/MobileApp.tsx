@@ -12,6 +12,7 @@ import { useWorktreeListModel } from '../hooks/useWorktreeListModel'
 import { MobileTerminal } from './MobileTerminal'
 import { MobileRightPanel } from './MobileRightPanel'
 import { JsonModeChat } from './JsonModeChat'
+import { CopyDraftOverlay } from './CopyDraftOverlay'
 import { AgentIcon } from './AgentIcon'
 import { randomUUID } from '../uuid'
 import { HotkeysProvider } from './Tooltip'
@@ -306,6 +307,9 @@ export function MobileApp(): JSX.Element {
               tab={selectedTab as TerminalTab & { type: 'agent' | 'shell' }}
             />
           )
+        )}
+        {activeWorktree && selectedTab && selectedTab.type === 'agent' && (
+          <CopyDraftOverlay terminalId={selectedTab.id} />
         )}
         {activeWorktree && selectedTab && !isRunnable(selectedTab) && (
           <NonRunnableTabPlaceholder tab={selectedTab} />

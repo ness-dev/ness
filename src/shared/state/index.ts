@@ -132,6 +132,12 @@ import {
   type PermissionsEvent,
   type PermissionsState
 } from './permissions'
+import {
+  initialCopyDrafts,
+  copyDraftsReducer,
+  type CopyDraftsEvent,
+  type CopyDraftsState
+} from './copy-drafts'
 import { initialConfigHealth, type ConfigHealthState } from './config-health'
 import {
   initialAliases,
@@ -243,6 +249,11 @@ export type {
   PermissionRule,
   StoredPermissionRule
 } from './permissions'
+export type {
+  CopyDraftsState,
+  CopyDraftsEvent,
+  CopyDraftRequest
+} from './copy-drafts'
 
 export interface AppState {
   settings: SettingsState
@@ -267,6 +278,7 @@ export interface AppState {
   configHealth: ConfigHealthState
   aliases: AliasesState
   permissions: PermissionsState
+  copyDrafts: CopyDraftsState
 }
 
 export type StateEvent =
@@ -291,6 +303,7 @@ export type StateEvent =
   | AssignedPRsEvent
   | AliasesEvent
   | PermissionsEvent
+  | CopyDraftsEvent
 
 export const initialState: AppState = {
   settings: initialSettings,
@@ -314,7 +327,8 @@ export const initialState: AppState = {
   assignedPRs: initialAssignedPRs,
   configHealth: initialConfigHealth,
   aliases: initialAliases,
-  permissions: initialPermissions
+  permissions: initialPermissions,
+  copyDrafts: initialCopyDrafts
 }
 
 export function rootReducer(state: AppState, event: StateEvent): AppState {
@@ -432,6 +446,12 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       permissions: permissionsReducer(state.permissions, event as PermissionsEvent)
     }
   }
+  if (event.type.startsWith('copyDrafts/')) {
+    return {
+      ...state,
+      copyDrafts: copyDraftsReducer(state.copyDrafts, event as CopyDraftsEvent)
+    }
+  }
   // configHealth has no events — it's seeded at construction only (see
   // config-health.ts), so there's no reducer branch. The field flows through
   // unchanged via the `...state` spreads above.
@@ -487,7 +507,8 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     assignedPRs: { ...initialState.assignedPRs, ...state.assignedPRs },
     configHealth: { ...initialState.configHealth, ...state.configHealth },
     aliases: { ...initialState.aliases, ...state.aliases },
-    permissions: { ...initialState.permissions, ...state.permissions }
+    permissions: { ...initialState.permissions, ...state.permissions },
+    copyDrafts: { ...initialState.copyDrafts, ...state.copyDrafts }
   }
 }
 

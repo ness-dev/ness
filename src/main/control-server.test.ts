@@ -7,6 +7,7 @@ import {
 } from './control-server'
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
+import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 
 // Integration test for the local HTTP control server. Exercises the
@@ -67,6 +68,16 @@ let captureResult: CaptureResult | null = null
  * evaluated (load failed, or the eval timed out). */
 let domResult: () => Promise<string | null> = async () => null
 
+/** Drafts the fake broker is holding, keyed by id, so a test can answer
+ * one the way the renderer would. */
+const heldDrafts = new Map<
+  string,
+  { input: CopyDraftInput; answer: (o: CopyDraftOutcome) => void }
+>()
+const cancelDraft = vi.fn<(id: string) => void>()
+let nextDraftId = 0
+let copyEditingEnabled = true
+
 const deps: ControlServerDeps = {
   getRepoRoots: () => ['/repo'],
   getWorktreeBase: () => 'remote',
@@ -121,6 +132,21 @@ const deps: ControlServerDeps = {
     },
     describe: (path) => (path === CALLER_WORKTREE ? 'Callers Tree' : 'Other Tree'),
     send: (path, message) => sendMessage(path, message)
+  },
+  copyDrafts: {
+    isEnabled: () => copyEditingEnabled,
+    request: (input) => {
+      const id = `draft-${++nextDraftId}`
+      const result = new Promise<CopyDraftOutcome>((answer) => {
+        heldDrafts.set(id, { input, answer })
+      })
+      return { id, result }
+    },
+    cancel: (id) => {
+      cancelDraft(id)
+      heldDrafts.get(id)?.answer({ kind: 'cancelled' })
+      heldDrafts.delete(id)
+    }
   },
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
 }
@@ -639,5 +665,92 @@ describe('control-server /browser/dom endpoint', () => {
     const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
     expect(r.status).toBe(500)
     expect(r.json.error).toMatch(/tab has no document loaded/)
+  })
+})
+
+describe('control-server /copy-drafts endpoint', () => {
+  async function waitForDraft(): Promise<string> {
+    for (let i = 0; i < 100 && heldDrafts.size === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const [id] = heldDrafts.keys()
+    if (!id) throw new Error('draft never reached the broker')
+    return id
+  }
+
+  it('holds the response until the human submits, then returns their text', async () => {
+    heldDrafts.clear()
+    const pending = call('POST', '/copy-drafts', {
+      draft: 'Get started now!',
+      title: 'Empty state',
+      context: '  '
+    })
+    const id = await waitForDraft()
+    expect(heldDrafts.get(id)?.input).toEqual({
+      terminalId: CALLER_TERMINAL,
+      worktreePath: CALLER_WORKTREE,
+      draft: 'Get started now!',
+      title: 'Empty state',
+      context: undefined
+    })
+    heldDrafts.get(id)?.answer({ kind: 'submitted', text: 'Start here', note: 'calmer' })
+    heldDrafts.delete(id)
+    const r = await pending
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ kind: 'submitted', text: 'Start here', note: 'calmer' })
+  })
+
+  it('returns 409 when the draft is withdrawn', async () => {
+    heldDrafts.clear()
+    const pending = call('POST', '/copy-drafts', { draft: 'x' })
+    const id = await waitForDraft()
+    heldDrafts.get(id)?.answer({ kind: 'cancelled' })
+    heldDrafts.delete(id)
+    const r = await pending
+    expect(r.status).toBe(409)
+  })
+
+  it('withdraws the draft when the caller hangs up', async () => {
+    heldDrafts.clear()
+    cancelDraft.mockClear()
+    const controller = new AbortController()
+    const pending = fetch(`${baseUrl}/copy-drafts`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Harness-Terminal-Id': CALLER_TERMINAL
+      },
+      body: JSON.stringify({ draft: 'x' }),
+      signal: controller.signal
+    }).catch(() => null)
+    const id = await waitForDraft()
+    controller.abort()
+    await pending
+    for (let i = 0; i < 100 && cancelDraft.mock.calls.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    expect(cancelDraft).toHaveBeenCalledWith(id)
+  })
+
+  it('refuses when copy editing is disabled', async () => {
+    copyEditingEnabled = false
+    try {
+      const r = await call('POST', '/copy-drafts', { draft: 'x' })
+      expect(r.status).toBe(403)
+      expect(heldDrafts.size).toBe(0)
+    } finally {
+      copyEditingEnabled = true
+    }
+  })
+
+  it('rejects an empty draft', async () => {
+    const r = await call('POST', '/copy-drafts', { draft: '   ' })
+    expect(r.status).toBe(400)
+  })
+
+  it('rejects a caller with no worktree', async () => {
+    const r = await call('POST', '/copy-drafts', { draft: 'x' }, { terminalId: 'unknown' })
+    expect(r.status).toBe(404)
   })
 })

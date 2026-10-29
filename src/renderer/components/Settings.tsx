@@ -65,6 +65,7 @@ type SubSectionId =
   | 'experimental-browser-control'
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
+  | 'experimental-copy-editing'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
 
@@ -115,6 +116,7 @@ const SECTIONS: Section[] = [
     { id: 'experimental-browser-control', label: 'Browser control' },
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'experimental-copy-editing', label: 'Copy editing' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
   ]}
@@ -247,6 +249,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-browser-control': null,
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
+    'experimental-copy-editing': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
   })
@@ -437,6 +440,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    copyEditingEnabled,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -3952,6 +3956,39 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-sm text-fg-bright">Enable worktree messaging</div>
                     <div className="text-xs text-dim mt-0.5">
                       Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div
+                ref={(el) => { subSectionRefs.current['experimental-copy-editing'] = el }}
+                id="experimental-copy-editing"
+                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Copy editing</h3>
+                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
+                    Experimental
+                  </span>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Lets an agent hand you a draft of copy it&apos;s writing (UI text,
+                  release notes, a post) so you can rewrite it before it goes
+                  anywhere. The agent waits while you edit, then uses your version
+                  word for word. Only takes effect on the next agent session.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={copyEditingEnabled}
+                    onChange={(e) => { void backend.setCopyEditingEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable copy editing</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">edit_copy</code> MCP tool. In Chat tabs the draft shows up in the conversation; in Terminal tabs it opens over the bottom of the tab.
                     </div>
                   </div>
                 </label>
