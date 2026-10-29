@@ -55,6 +55,12 @@ import {
 const APPROVAL_POLICY = 'on-request'
 const SANDBOX = 'workspace-write'
 const DELTA_FLUSH_MS = 30
+const RESUME_RETRY_INTERVAL_MS = 250
+const RESUME_RETRY_WINDOW_MS = 5000
+
+function isActiveWriterError(reason: string): boolean {
+  return /active writer/i.test(reason)
+}
 
 export interface CodexChatProviderOptions {
   getBinPath: () => string
@@ -75,6 +81,7 @@ export interface CodexChatProviderOptions {
   cancelApprovalsForSession: (sessionId: string, reason: string) => void
   cancelApprovalForToolUse: (sessionId: string, toolUseId: string) => void
   spawnProcess?: (bin: string, args: string[], cwd: string) => ChildProcessWithoutNullStreams
+  resumeRetry?: { intervalMs: number; windowMs: number }
 }
 
 interface CodexInstance {
@@ -366,14 +373,27 @@ export class CodexChatProvider implements ChatProvider {
       const existing = fork ? undefined : this.opts.getThreadId(sessionId)
       if (existing) {
         try {
-          resp = await inst.client.request<CodexThreadResponse>('thread/resume', {
-            threadId: existing,
-            excludeTurns: true,
-            ...threadParams
-          })
+          resp = await this.resumeThread(inst, existing, threadParams)
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
           log('codex-chat', `resume failed sessionId=${sessionId} thread=${existing}`, reason)
+          if (isActiveWriterError(reason)) {
+            // Still held by another Codex process after the retry window.
+            // Starting a fresh thread here would silently orphan the
+            // conversation, so stop and keep the tab pointed at it.
+            if (this.instances.get(sessionId) !== inst) return
+            this.teardown(inst)
+            try {
+              inst.proc.kill('SIGTERM')
+            } catch {
+              /* ignore */
+            }
+            this.failToStart(
+              sessionId,
+              'This Codex conversation is still open in another Codex process (often a Codex terminal tab). Close it, then reconnect.'
+            )
+            return
+          }
           // A missing rollout means there was never a conversation to lose —
           // typically a Codex terminal tab that didn't get past its trust
           // prompt before being switched to Chat. Nothing worth telling.
@@ -407,6 +427,35 @@ export class CodexChatProvider implements ChatProvider {
         /* ignore */
       }
       this.failToStart(sessionId, reason)
+    }
+  }
+
+  /** thread/resume, retried while another app-server or TUI still holds
+   *  the thread. Switching a tab from Terminal back to Chat kills the
+   *  `codex resume` TUI, but its exit lands after we're already asking. */
+  private async resumeThread(
+    inst: CodexInstance,
+    threadId: string,
+    threadParams: Record<string, unknown>
+  ): Promise<CodexThreadResponse> {
+    const { intervalMs, windowMs } = this.opts.resumeRetry ?? {
+      intervalMs: RESUME_RETRY_INTERVAL_MS,
+      windowMs: RESUME_RETRY_WINDOW_MS
+    }
+    const deadline = Date.now() + windowMs
+    for (;;) {
+      try {
+        return await inst.client.request<CodexThreadResponse>('thread/resume', {
+          threadId,
+          excludeTurns: true,
+          ...threadParams
+        })
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        if (!isActiveWriterError(reason) || Date.now() >= deadline) throw err
+        if (this.instances.get(inst.sessionId) !== inst) throw err
+        await new Promise((r) => setTimeout(r, intervalMs))
+      }
     }
   }
 

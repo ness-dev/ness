@@ -355,6 +355,41 @@ describe('CodexChatProvider', () => {
     expect(session().entries.filter((e) => e.kind === 'error')).toEqual([])
   })
 
+  it('retries a resume while another process still holds the thread', async () => {
+    let attempts = 0
+    const { provider, opts, session } = setup(
+      {
+        'thread/resume': (p) =>
+          ++attempts < 3
+            ? new Error(`thread ${p.threadId} already has an active writer`)
+            : { thread: { id: p.threadId }, model: 'gpt-test' }
+      },
+      'thread-old'
+    )
+    opts.resumeRetry = { intervalMs: 1, windowMs: 1000 }
+    provider.create('s1', process.cwd(), 'default')
+    for (let i = 0; i < 100 && session().state !== 'running'; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(attempts).toBe(3)
+    expect(session().state).toBe('running')
+    expect(opts.setThreadId).not.toHaveBeenCalled()
+    expect(session().entries.filter((e) => e.kind === 'error')).toEqual([])
+  })
+
+  it('stops instead of starting a new thread when the holder never lets go', async () => {
+    const { provider, opts, session, server } = setup(
+      { 'thread/resume': (p) => new Error(`thread ${p.threadId} already has an active writer`) },
+      'thread-old'
+    )
+    opts.resumeRetry = { intervalMs: 1, windowMs: 20 }
+    provider.create('s1', process.cwd(), 'default')
+    for (let i = 0; i < 100 && session().state !== 'exited'; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(session().state).toBe('exited')
+    expect(server.received.some((m) => m.method === 'thread/start')).toBe(false)
+    expect(opts.setThreadId).not.toHaveBeenCalled()
+    expect(session().entries.at(-1)).toMatchObject({ errorKind: 'spawn-failed' })
+    expect(session().entries.at(-1)?.errorMessage).toMatch(/still open in another Codex process/)
+  })
+
   it('tells the user when an existing conversation fails to resume', async () => {
     const { provider, session } = setup(
       { 'thread/resume': () => new Error('rollout is corrupt') },
