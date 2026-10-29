@@ -41,6 +41,14 @@ export interface ChatCapabilities {
   approvalEditInput: boolean
 }
 
+/** The agents with a ChatProvider in main. ChatRouter requires one per
+ *  kind listed here, and agent-registry.test.ts requires this list to match
+ *  the registry entries that declare `chat` — so giving an agent chat
+ *  capabilities fails a test until it's listed here, and listing it fails
+ *  typecheck until main registers its provider. */
+export const CHAT_AGENT_KINDS = ['claude', 'codex'] as const satisfies readonly AgentKind[]
+export type ChatAgentKind = (typeof CHAT_AGENT_KINDS)[number]
+
 export const AGENT_REGISTRY: AgentInfo[] = [
   {
     kind: 'claude',

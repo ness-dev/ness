@@ -12,6 +12,7 @@
 
 import type { Store } from './store'
 import type { AgentKind } from '../shared/state/terminals'
+import type { ChatAgentKind } from '../shared/agent-registry'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 import { log } from './debug'
 
@@ -79,7 +80,7 @@ export class ChatRouter {
    *  chat tab that hasn't been started this run still knows its agent. */
   constructor(
     private store: Store,
-    private providers: Partial<Record<AgentKind, ChatProvider>>,
+    private providers: Record<ChatAgentKind, ChatProvider>,
     private fallbackKindOf: (sessionId: string) => AgentKind | undefined = () => undefined
   ) {}
 
@@ -93,7 +94,7 @@ export class ChatRouter {
 
   private providerFor(sessionId: string): ChatProvider | null {
     const kind = this.agentKindOf(sessionId)
-    const provider = this.providers[kind]
+    const provider = (this.providers as Partial<Record<AgentKind, ChatProvider>>)[kind]
     if (!provider) log('chat-router', `no chat provider for kind=${kind} sessionId=${sessionId}`)
     return provider ?? null
   }
@@ -101,7 +102,7 @@ export class ChatRouter {
   /** Asks every provider rather than routing, because callers check this
    *  before `sessionStarted` has recorded the session's agentKind. */
   hasSession(sessionId: string): boolean {
-    return Object.values(this.providers).some((p) => p?.hasSession(sessionId))
+    return Object.values(this.providers).some((p) => p.hasSession(sessionId))
   }
 
   seedFromTranscript(sessionId: string, worktreePath: string): void {
@@ -146,7 +147,7 @@ export class ChatRouter {
   }
 
   killAll(): void {
-    for (const provider of Object.values(this.providers)) provider?.killAll()
+    for (const provider of Object.values(this.providers)) provider.killAll()
   }
 
   async rewindTo(sessionId: string, fromEntryId: string): Promise<RewindOutcome> {

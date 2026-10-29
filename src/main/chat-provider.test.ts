@@ -76,7 +76,7 @@ describe('ChatRouter', () => {
   it('create marks the session exited when no provider backs its agent', () => {
     const store = new Store(initialState)
     const claude = fakeProvider()
-    const router = new ChatRouter(store, { claude })
+    const router = new ChatRouter(store, { claude, codex: fakeProvider() })
     startSession(store, 's1', 'cursor')
 
     router.create('s1', '/tmp/wt', 'default')
@@ -89,7 +89,7 @@ describe('ChatRouter', () => {
 
   it('rewind and fork fail cleanly when no provider backs the agent', async () => {
     const store = new Store(initialState)
-    const router = new ChatRouter(store, { claude: fakeProvider() })
+    const router = new ChatRouter(store, { claude: fakeProvider(), codex: fakeProvider() })
     startSession(store, 's1', 'cursor')
     expect((await router.rewindTo('s1', 'e1')).ok).toBe(false)
     expect((await router.forkAt('s1', 'e1')).ok).toBe(false)
@@ -112,7 +112,7 @@ describe('ChatRouter', () => {
 
   it('reports nothing forkable when the provider has no conversation', () => {
     const store = new Store(initialState)
-    const router = new ChatRouter(store, { claude: fakeProvider() })
+    const router = new ChatRouter(store, { claude: fakeProvider(), codex: fakeProvider() })
     startSession(store, 's1')
     expect(router.forkableConversationKind('s1', '/wt')).toBeNull()
   })

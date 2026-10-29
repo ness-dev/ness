@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AGENT_REGISTRY,
+  CHAT_AGENT_KINDS,
   CLAUDE_MODELS,
   CLAUDE_MODEL_ALIASES,
   CODEX_MODELS,
@@ -155,5 +157,28 @@ describe('chat capabilities', () => {
   it('reports no capabilities for agents without a chat provider', () => {
     expect(supportsChat('cursor')).toBe(false)
     expect(Object.values(getChatCapabilities('cursor')).every((v) => v === false)).toBe(true)
+  })
+})
+
+describe('registry invariants a new agent has to satisfy', () => {
+  it('lists each agent once', () => {
+    const kinds = AGENT_REGISTRY.map((a) => a.kind)
+    expect(new Set(kinds).size).toBe(kinds.length)
+  })
+
+  it('keeps CHAT_AGENT_KINDS — the kinds main must register a ChatProvider for — in step with the entries that declare chat', () => {
+    const declared = AGENT_REGISTRY.filter((a) => a.chat).map((a) => a.kind)
+    expect([...CHAT_AGENT_KINDS].sort()).toEqual(declared.sort())
+  })
+
+  it('backs a worktree fork with chat whenever the agent assigns its own session ids', () => {
+    // PanesFSM can only open such a fork in a Chat tab (the forked id can't
+    // be put on a terminal command line), so without chat it would silently
+    // open a fresh terminal conversation instead.
+    for (const agent of AGENT_REGISTRY) {
+      if (agent.supportsConversationFork && !agent.assignsSessionId) {
+        expect(agent.chat, agent.kind).toBeDefined()
+      }
+    }
   })
 })
