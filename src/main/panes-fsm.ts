@@ -16,7 +16,7 @@ import {
   removeLeaf
 } from '../shared/state/terminals'
 import type { PersistedPaneNode } from './persistence'
-import { agentDisplayName, getAgentInfo, supportsConversationFork } from '../shared/agent-registry'
+import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
 import { log } from './debug'
 
 interface PanesFSMOptions {
@@ -263,13 +263,13 @@ export class PanesFSM {
     const model = opts?.model && opts.model.trim() ? opts.model.trim() : undefined
     const shellTabId = `shell-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
     // Branch to a json-claude default tab when the user has opted in
-    // and the kind is Claude. teleport sessions stay on xterm (json-
+    // and the agent has a chat provider. teleport sessions stay on xterm (json-
     // claude has no `--resume <id>` analog for an arbitrary external
     // session today). initialPrompt is honored for both — for the
     // json-claude side we pre-spawn the subprocess and send it as the
     // first message via startJsonClaudeWithPrompt below.
     const wantsJson =
-      agentKind === 'claude' &&
+      supportsChat(agentKind) &&
       this.opts.getDefaultClaudeTabType?.() === 'json' &&
       !opts?.teleportSessionId
     let agentTab: TerminalTab
@@ -282,6 +282,7 @@ export class PanesFSM {
         label: 'Chat',
         sessionId,
         mode: 'awake',
+        ...(agentKind !== 'claude' ? { agentKind } : {}),
         model
       }
       jsonClaudeKickoff = { sessionId, initialPrompt: opts?.initialPrompt, model }
@@ -492,10 +493,9 @@ export class PanesFSM {
     if (!tab) return
     if (tab.type === newType) return
     if (tab.type !== 'agent' && tab.type !== 'json-claude') return
-    if (tab.type === 'agent' && tab.agentKind && tab.agentKind !== 'claude') {
-      // Only Claude agent tabs have a json-claude counterpart; refuse
-      // to swap a Codex tab.
-      log('panes-fsm', `convertTabType refused for non-claude agent kind=${tab.agentKind}`)
+    if (!supportsChat(tab.agentKind)) {
+      // Only agents with a chat provider have a json-claude counterpart.
+      log('panes-fsm', `convertTabType refused for agent without chat kind=${tab.agentKind}`)
       return
     }
     const sessionId = tab.sessionId ?? crypto.randomUUID()
@@ -512,7 +512,7 @@ export class PanesFSM {
       newType === 'json-claude'
         ? sessionId
         : `agent-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
-    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName('claude')
+    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName(tab.agentKind)
     this.store.dispatch({
       type: 'terminals/tabTypeChanged',
       payload: { worktreePath: wtPath, tabId, newId, newType, newLabel }
@@ -744,7 +744,7 @@ export class PanesFSM {
       // a brand-new session with no existing jsonl on disk — that drives
       // startJsonClaudeSession to use --session-id (new) rather than
       // --resume. Carry over only fields that make sense for a fresh
-      // chat (label, model) — never copy initialPrompt/teleportSessionId.
+      // chat (label, agent, model) — never copy initialPrompt/teleportSessionId.
       const sessionId = crypto.randomUUID()
       tab = {
         id: sessionId,
@@ -752,6 +752,7 @@ export class PanesFSM {
         label: sourceActive!.label,
         sessionId,
         mode: 'awake',
+        ...(sourceActive!.agentKind ? { agentKind: sourceActive!.agentKind } : {}),
         model: sourceActive!.model
       }
     } else {

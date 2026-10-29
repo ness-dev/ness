@@ -254,7 +254,7 @@ function buildTerminalTheme(
 }
 
 import type { AgentKind } from '../../shared/state/terminals'
-import { agentDisplayName } from '../../shared/agent-registry'
+import { agentDisplayName, supportsChat } from '../../shared/agent-registry'
 
 interface XTerminalProps {
   terminalId: string
@@ -1033,7 +1033,7 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
           </button>
         </div>
       )}
-      {!loading && !exited && onSwitchToChat && type === 'agent' && agentKind === 'claude' && !chatPromotionDismissed && (
+      {!loading && !exited && onSwitchToChat && type === 'agent' && supportsChat(agentKind) && !chatPromotionDismissed && (
         <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-auto">
           <Tooltip label="You can always switch modes by right-clicking the tab.">
             <button

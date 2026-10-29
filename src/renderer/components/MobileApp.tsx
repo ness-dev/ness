@@ -3,6 +3,7 @@ import { ChevronDown, RefreshCw, Loader2, SquareTerminal, FileText, FileDiff, Gl
 import { useWorktrees, usePanes, useTerminals, usePrs, useSettings, useAliases } from '../store'
 import { useBackend } from '../backend'
 import { getLeaves } from '../../shared/state/terminals'
+import { supportsChat } from '../../shared/agent-registry'
 import type { AgentKind, PtyStatus, TerminalTab, Worktree } from '../types'
 import type { ForkSource } from '../../shared/state/worktrees'
 import { WorktreeList } from './WorktreeList'
@@ -415,7 +416,7 @@ function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, picker
         {tabs.map((tab) => {
           const convertible =
             !!onConvertTabType &&
-            ((tab.type === 'agent' && tab.agentKind === 'claude') || tab.type === 'json-claude')
+            ((tab.type === 'agent' && supportsChat(tab.agentKind)) || tab.type === 'json-claude')
           return (
             <TabChip
               key={tab.id}

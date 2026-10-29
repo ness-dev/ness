@@ -417,3 +417,78 @@ describe('PanesFSM.openFileTab', () => {
     expect(leaf.activeTabId).toBe('file-src/a.ts')
   })
 })
+
+describe('PanesFSM chat-provider gating', () => {
+  it('refuses to convert an agent tab whose agent has no chat provider', () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/codex'
+    seedLeaf(store, wtPath, {
+      type: 'leaf',
+      id: 'pane-1',
+      tabs: [{ id: 'agent-1', type: 'agent', label: 'Codex', agentKind: 'codex' }],
+      activeTabId: 'agent-1'
+    })
+
+    fsm.convertTabType(wtPath, 'agent-1', 'json-claude')
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs[0].type).toBe('agent')
+    expect(leaf.tabs[0].id).toBe('agent-1')
+  })
+
+  it('opens an agent without a chat provider as a terminal tab even when chat is the default', () => {
+    const store = new Store()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      getDefaultClaudeTabType: () => 'json'
+    })
+    const wtPath = '/tmp/codex-default'
+    store.dispatch({
+      type: 'worktrees/listChanged',
+      payload: [
+        {
+          path: wtPath,
+          branch: 'feature',
+          head: '',
+          isBare: false,
+          isMain: false,
+          createdAt: 0,
+          repoRoot: '/tmp/repo'
+        }
+      ]
+    })
+
+    fsm.ensureInitialized(wtPath, { agentKind: 'codex' })
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs.some((t) => t.type === 'json-claude')).toBe(false)
+    expect(leaf.tabs.find((t) => t.type === 'agent')?.agentKind).toBe('codex')
+  })
+
+  it('carries agentKind onto a split chat clone', () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/split-kind'
+    const sourceTabId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc'
+    seedLeaf(store, wtPath, {
+      type: 'leaf',
+      id: 'pane-source',
+      tabs: [
+        {
+          id: sourceTabId,
+          type: 'json-claude',
+          label: 'Chat',
+          sessionId: sourceTabId,
+          mode: 'awake',
+          agentKind: 'codex'
+        }
+      ],
+      activeTabId: sourceTabId
+    })
+
+    const newPane = fsm.splitPane(wtPath, 'pane-source', 'horizontal')
+
+    expect(newPane!.tabs[0].agentKind).toBe('codex')
+  })
+})

@@ -57,7 +57,11 @@ import {
 } from './composer-height'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
-import { CLAUDE_MODELS } from '../../shared/agent-registry'
+import {
+  CLAUDE_MODELS,
+  getChatCapabilities,
+  supportsConversationFork
+} from '../../shared/agent-registry'
 import {
   parseImageAlt,
   parseImageTitle,
@@ -1343,6 +1347,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const worktrees = useWorktrees()
   const aliases = useAliases()
   const cameFromTerminalDefault = defaultClaudeTabType === 'xterm'
+  const chatCaps = getChatCapabilities(session?.agentKind)
+  const canForkIntoWorktree =
+    conversationForkEnabled && supportsConversationFork(session?.agentKind ?? 'claude')
+  const hasMessageMenu = chatCaps.rewind || chatCaps.fork || canForkIntoWorktree
   const isMac =
     typeof window !== 'undefined' &&
     (window.__HARNESS_PLATFORM__
@@ -2169,6 +2177,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   }
 
   const slashTrigger = useMemo(() => {
+    if (!chatCaps.slashCommands) return null
     if (session?.state === 'exited') return null
     const trig = findTrigger(draft, cursorPos, '/')
     if (!trig) return null
@@ -2178,7 +2187,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // literal slashes followed by punctuation without it lingering.
     if (!/^[a-zA-Z0-9:-]*$/.test(trig.query)) return null
     return trig
-  }, [draft, cursorPos, session?.state])
+  }, [draft, cursorPos, session?.state, chatCaps.slashCommands])
 
   const mentionTrigger = useMemo<{ start: number; query: string } | null>(() => {
     if (session?.state === 'exited') return null
@@ -2190,11 +2199,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // inserted `/model ` this dedicated detector takes over and drives
   // the model picker off whatever the user types next.
   const modelPickerTrigger = useMemo<{ query: string } | null>(() => {
+    if (!chatCaps.slashCommands) return null
     if (session?.state === 'exited') return null
     const m = draft.match(/^\/model(?:\s+([\s\S]*))?$/)
     if (!m) return null
     return { query: m[1] ?? '' }
-  }, [draft, session?.state])
+  }, [draft, session?.state, chatCaps.slashCommands])
 
   const modelIdToDisplay = useMemo(() => {
     const map = new Map<string, string>()
@@ -2679,51 +2689,55 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           style={{ left: rewindMenu.x, top: rewindMenu.y }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            disabled={rewindMenu.disabledReason !== null}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (rewindMenu.disabledReason !== null) return
-              void performRewind(rewindMenu.entryId)
-            }}
-            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-              rewindMenu.disabledReason
-                ? 'text-muted cursor-not-allowed opacity-60'
-                : 'text-danger hover:bg-panel cursor-pointer'
-            }`}
-          >
-            <RotateCcw className="icon-xs shrink-0" />
-            <div className="flex flex-col">
-              <span>Rewind to here</span>
-              <span className="text-xs text-muted">
-                {rewindMenu.disabledReason ?? 'drops everything after this'}
-              </span>
-            </div>
-          </button>
-          <button
-            type="button"
-            disabled={rewindMenu.forkDisabledReason !== null}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (rewindMenu.forkDisabledReason !== null) return
-              void performFork(rewindMenu.entryId)
-            }}
-            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-              rewindMenu.forkDisabledReason
-                ? 'text-muted cursor-not-allowed opacity-60'
-                : 'text-fg-bright hover:bg-panel cursor-pointer'
-            }`}
-          >
-            <GitBranch className="icon-xs shrink-0" />
-            <div className="flex flex-col">
-              <span>Fork chat here</span>
-              <span className="text-xs text-muted">
-                {rewindMenu.forkDisabledReason ?? 'opens a new tab with history up to here'}
-              </span>
-            </div>
-          </button>
-          {conversationForkEnabled && (
+          {chatCaps.rewind && (
+            <button
+              type="button"
+              disabled={rewindMenu.disabledReason !== null}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (rewindMenu.disabledReason !== null) return
+                void performRewind(rewindMenu.entryId)
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                rewindMenu.disabledReason
+                  ? 'text-muted cursor-not-allowed opacity-60'
+                  : 'text-danger hover:bg-panel cursor-pointer'
+              }`}
+            >
+              <RotateCcw className="icon-xs shrink-0" />
+              <div className="flex flex-col">
+                <span>Rewind to here</span>
+                <span className="text-xs text-muted">
+                  {rewindMenu.disabledReason ?? 'drops everything after this'}
+                </span>
+              </div>
+            </button>
+          )}
+          {chatCaps.fork && (
+            <button
+              type="button"
+              disabled={rewindMenu.forkDisabledReason !== null}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (rewindMenu.forkDisabledReason !== null) return
+                void performFork(rewindMenu.entryId)
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                rewindMenu.forkDisabledReason
+                  ? 'text-muted cursor-not-allowed opacity-60'
+                  : 'text-fg-bright hover:bg-panel cursor-pointer'
+              }`}
+            >
+              <GitBranch className="icon-xs shrink-0" />
+              <div className="flex flex-col">
+                <span>Fork chat here</span>
+                <span className="text-xs text-muted">
+                  {rewindMenu.forkDisabledReason ?? 'opens a new tab with history up to here'}
+                </span>
+              </div>
+            </button>
+          )}
+          {canForkIntoWorktree && (
             <button
               type="button"
               onClick={(e) => {
@@ -2866,7 +2880,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 ? entries[entryIndexById.get(targetEntryId) ?? -1]
                 : undefined
               const onContextMenu =
-                targetEntryId && targetEntry?.kind === 'assistant'
+                hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
                   ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
                   : undefined
               const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
@@ -3145,13 +3159,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
               <span className={`w-1.5 h-1.5 rounded-full ${stateDot}`} />
               <span>{state}</span>
             </div>
-            <button
-              onClick={cyclePermissionMode}
-              className={`px-1.5 py-0.5 rounded border text-xs cursor-pointer hover:opacity-80 transition-opacity ${modeBadgeStyle}`}
-              title="Click to cycle permission mode. Applies mid-turn — no restart."
-            >
-              {modeBadgeLabel}
-            </button>
+            {chatCaps.permissionModes && (
+              <button
+                onClick={cyclePermissionMode}
+                className={`px-1.5 py-0.5 rounded border text-xs cursor-pointer hover:opacity-80 transition-opacity ${modeBadgeStyle}`}
+                title="Click to cycle permission mode. Applies mid-turn — no restart."
+              >
+                {modeBadgeLabel}
+              </button>
+            )}
             <div className="flex-1" />
             {busy && (
               <button
