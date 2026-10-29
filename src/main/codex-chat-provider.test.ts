@@ -19,6 +19,7 @@ import {
 } from './codex-chat-provider'
 import type { CodexTurn } from './codex-app-server'
 import { getLatestTodos } from '../shared/state/json-claude-todos'
+import { describeChatProviderContract } from './test-support/chat-provider-contract'
 
 type Msg = { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown }
 
@@ -670,4 +671,36 @@ describe('codex mapping helpers', () => {
     expect(entries[3].blocks?.[0]).toMatchObject({ toolUseId: 'c', content: 'boom', isError: true })
     expect(entries.filter((e) => e.kind === 'assistant').every((e) => e.turnId === 't1')).toBe(true)
   })
+})
+
+describeChatProviderContract('codex', () => {
+  const { store, server, provider } = setup()
+  const notify = (method: string, params: Record<string, unknown>): void => {
+    server.emit({ method, params: { threadId: 'thread-new', ...params } })
+  }
+  return {
+    agentKind: 'codex',
+    store,
+    provider,
+    worktreePath: process.cwd(),
+    settle,
+    receivedUserText: () =>
+      server.received
+        .filter((m) => m.method === 'turn/start' || m.method === 'turn/steer')
+        .flatMap((m) => (m.params?.input as Array<{ type: string; text?: string }>) ?? [])
+        .filter((i) => i.type === 'text')
+        .map((i) => i.text ?? ''),
+    replyAndFinish: async (_sid, text) => {
+      notify('turn/started', { turn: { id: 'turn-1' } })
+      notify('item/started', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'm-contract', text: '' } })
+      notify('item/agentMessage/delta', { itemId: 'm-contract', delta: text })
+      notify('item/completed', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'm-contract', text } })
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', error: null, items: [] } })
+      await settle()
+    },
+    crash: async () => {
+      server.proc.emit('exit', 1, null)
+      await settle()
+    }
+  }
 })
