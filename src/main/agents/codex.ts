@@ -6,6 +6,7 @@ import { log } from '../debug'
 import { makeHookCommand } from '../hooks'
 import { loginShellCommandArgs, resolveUserShell } from '../user-shell'
 import type { AgentSpawnOpts } from './index'
+import type { StdioMcpServer } from '../ness-control-mcp'
 
 function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
@@ -235,13 +236,34 @@ export function supportsNoDaemon(command: string): Promise<boolean> {
   return probe
 }
 
+/** `-c` values that register an MCP server for one Codex invocation. The
+ *  server's env rides inside the override (a TOML inline table) rather than
+ *  the terminal's environment, so the control token reaches only the MCP
+ *  subprocess — not every shell command the agent runs. JSON string and
+ *  array literals are valid TOML, which keeps the quoting simple. */
+export function mcpServerOverrides(name: string, server: StdioMcpServer): string[] {
+  const env = Object.entries(server.env)
+    .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+    .join(', ')
+  return [
+    `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
+    `mcp_servers.${name}.args=${JSON.stringify(server.args)}`,
+    `mcp_servers.${name}.env={${env}}`
+  ]
+}
+
 export function buildSpawnArgs(opts: AgentSpawnOpts): string {
-  // Codex MCP is configured globally via ~/.codex/config.toml, not per-terminal
-  // flags. The mcpConfigPath is unused here but the MCP server was already
-  // registered by the prepareMcpForTerminal IPC call.
+  // Codex has no per-invocation MCP config file, so Ness's server goes in as
+  // `-c` overrides (opts.nessMcp); mcpConfigPath is the Claude-shaped file
+  // and is unused here.
   let cmd = opts.command
   if (opts.noDaemon && !opts.command.includes('--no-daemon')) {
     cmd += ' --no-daemon'
+  }
+  if (opts.nessMcp) {
+    for (const override of mcpServerOverrides('ness-control', opts.nessMcp)) {
+      cmd += ` -c ${shellQuote(override)}`
+    }
   }
   if (opts.model && !opts.command.includes('--model') && !opts.command.includes('-m ')) {
     cmd += ` --model ${shellQuote(opts.model)}`

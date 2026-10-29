@@ -1069,6 +1069,21 @@ const panesFSM = new PanesFSM(store, {
   }
 })
 
+/** Ness's MCP server for a Codex terminal tab, keyed by its terminal id —
+ *  the same entry Claude terminals get through their MCP config file. */
+function codexTerminalNessMcp(terminalId: string): StdioMcpServer | null {
+  if (store.getSnapshot().state.settings.harnessMcpEnabled === false) return null
+  const controlServer = getControlServerInfo()
+  if (!controlServer) return null
+  const scope = resolveCallerScope(terminalId)
+  return nessControlMcpServer({
+    sessionId: terminalId,
+    controlServer,
+    bridgeScriptPath: getBridgeScriptPath(),
+    scope: scope ? { worktreePath: scope.worktreePath, repoRoot: scope.repoRoot, isMain: scope.isMain } : null
+  })
+}
+
 /** Look up a json-claude tab by sessionId (which is also the tab id for
  *  json-claude tabs). startJsonClaudeSession reads its `model` override,
  *  so resume/kickoff/wake all respect a per-tab pin set when the worktree
@@ -3505,8 +3520,9 @@ function registerIpcHandlers(): void {
         model = override || config.cursorModel || null
       }
       const noDaemon = kind === 'codex' ? await supportsCodexNoDaemon(command) : undefined
+      const nessMcp = kind === 'codex' ? codexTerminalNessMcp(opts.terminalId) : undefined
 
-      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen, noDaemon })
+      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen, noDaemon, nessMcp })
     }
   )
 

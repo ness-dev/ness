@@ -5,6 +5,8 @@ import * as cursor from './cursor'
 
 export type { AgentKind }
 
+import type { StdioMcpServer } from '../ness-control-mcp'
+
 export interface AgentSpawnOpts {
   command: string
   cwd: string
@@ -19,6 +21,9 @@ export interface AgentSpawnOpts {
   /** Codex only: launch the TUI with `--no-daemon`. Set when the user's
    *  codex supports it; see supportsNoDaemon in agents/codex.ts. */
   noDaemon?: boolean
+  /** Codex only: Ness's ness-control MCP server, passed as `-c` overrides
+   *  because Codex has no per-invocation MCP config file flag. */
+  nessMcp?: StdioMcpServer | null
 }
 
 export interface AgentModule {

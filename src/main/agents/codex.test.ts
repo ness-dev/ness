@@ -56,6 +56,7 @@ import {
   buildSpawnArgs,
   extractSessionId,
   supportsNoDaemon,
+  mcpServerOverrides,
   hooksInstalled,
   installHooks,
   hookEvents,
@@ -219,5 +220,27 @@ describe('codex --no-daemon', () => {
     expect(buildSpawnArgs({ command: 'codex', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
     expect(buildSpawnArgs({ command: 'codex', cwd: '/x' })).toBe('codex')
     expect(buildSpawnArgs({ command: 'codex --no-daemon', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
+  })
+})
+
+describe('codex Ness MCP overrides', () => {
+  const server = {
+    command: '/Applications/Ness Dev.app/Contents/MacOS/Ness',
+    args: ['/res/mcp-bridge.js'],
+    env: { ELECTRON_RUN_AS_NODE: '1', HARNESS_TOKEN: 'a"b' }
+  }
+
+  it('encodes the server as TOML -c values with env inline', () => {
+    expect(mcpServerOverrides('ness-control', server)).toEqual([
+      'mcp_servers.ness-control.command="/Applications/Ness Dev.app/Contents/MacOS/Ness"',
+      'mcp_servers.ness-control.args=["/res/mcp-bridge.js"]',
+      'mcp_servers.ness-control.env={ELECTRON_RUN_AS_NODE = "1", HARNESS_TOKEN = "a\\"b"}'
+    ])
+  })
+
+  it('adds shell-quoted -c flags to the launch command', () => {
+    const cmd = buildSpawnArgs({ command: 'codex', cwd: '/x', nessMcp: server })
+    expect(cmd.startsWith("codex -c 'mcp_servers.ness-control.command=")).toBe(true)
+    expect(cmd.match(/ -c '/g)).toHaveLength(3)
   })
 })
