@@ -46,7 +46,11 @@ function fakeAppServer(handlers: Record<string, (params: Record<string, unknown>
       if (msg.method && msg.id !== undefined) {
         const h = handlers[msg.method]
         const result = h ? h(msg.params ?? {}) : {}
-        stdout.write(JSON.stringify({ id: msg.id, result }) + '\n')
+        const reply =
+          result instanceof Error
+            ? { id: msg.id, error: { code: -32600, message: result.message } }
+            : { id: msg.id, result }
+        stdout.write(JSON.stringify(reply) + '\n')
       }
     }
   })
@@ -237,10 +241,8 @@ describe('CodexChatProvider', () => {
     expect(session().entries.map((e) => e.blocks?.[0]?.text)).toEqual(['one'])
   })
 
-  it('forks through the clicked turn with the model passed explicitly', async () => {
-    const { provider, store, server } = setup({
-      'thread/fork': () => ({ thread: { id: 'thread-fork' }, model: 'gpt-test' })
-    })
+  it('forks in the new tab’s own process, through the clicked turn, with the model passed', async () => {
+    const { provider, store, opts } = setup()
     provider.create('s1', process.cwd(), 'default')
     await settle()
     store.dispatch({
@@ -255,14 +257,77 @@ describe('CodexChatProvider', () => {
     const entryId = store.getSnapshot().state.jsonClaude.sessions['s1'].entries[0].entryId
 
     const outcome = await provider.forkAt('s1', entryId)
+    expect(outcome.ok).toBe(true)
+    const forkId = outcome.newSessionId!
 
-    expect(outcome).toMatchObject({ ok: true, providerSessionId: 'thread-fork' })
-    expect(outcome.newSessionId).toBeTruthy()
-    expect(server.received.find((m) => m.method === 'thread/fork')?.params).toMatchObject({
+    // The fork tab spawns its own app-server; thread/fork must run there,
+    // not in the source's process (which would keep the fork loaded and
+    // block the new process from using it).
+    const forkTurns: CodexTurn[] = [
+      { id: 't1', status: 'completed', error: null, items: [{ type: 'agentMessage', id: 'a1', text: 'one' }] }
+    ]
+    const forkServer = fakeAppServer({
+      initialize: () => ({}),
+      'thread/fork': () => ({ thread: { id: 'thread-fork' }, model: 'gpt-test' }),
+      'thread/turns/list': () => ({ data: forkTurns, nextCursor: null })
+    })
+    opts.spawnProcess = () => forkServer.proc
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: forkId, worktreePath: process.cwd(), agentKind: 'codex' }
+    })
+    provider.create(forkId, process.cwd(), 'default')
+    await settle()
+
+    expect(forkServer.received.find((m) => m.method === 'thread/fork')?.params).toMatchObject({
       threadId: 'thread-new',
       lastTurnId: 't1',
       model: 'gpt-test'
     })
+    expect(forkServer.received.some((m) => m.method === 'thread/start')).toBe(false)
+    expect(opts.setThreadId).toHaveBeenCalledWith(forkId, 'thread-fork')
+    const forkSession = store.getSnapshot().state.jsonClaude.sessions[forkId]
+    expect(forkSession.state).toBe('running')
+    expect(forkSession.entries.map((e) => e.blocks?.[0]?.text)).toEqual(['one'])
+  })
+
+  it('refuses to fork a turn that is still running', async () => {
+    const { provider, store, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    provider.send('s1', 'go')
+    server.emit({ method: 'turn/started', params: { threadId: 'thread-new', turn: { id: 'turn-1' } } })
+    server.emit({
+      method: 'item/started',
+      params: { threadId: 'thread-new', turnId: 'turn-1', item: { type: 'agentMessage', id: 'm1', text: '' } }
+    })
+    await settle()
+    const entry = store.getSnapshot().state.jsonClaude.sessions['s1'].entries.find((e) => e.turnId === 'turn-1')!
+    expect((await provider.forkAt('s1', entry.entryId)).ok).toBe(false)
+  })
+
+  it('starts a new thread quietly when the recorded one never got a rollout', async () => {
+    const { provider, opts, session } = setup(
+      { 'thread/resume': (p) => new Error(`no rollout found for thread id ${p.threadId}`) },
+      'never-saved'
+    )
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-new')
+    expect(session().state).toBe('running')
+    expect(session().entries.filter((e) => e.kind === 'error')).toEqual([])
+  })
+
+  it('tells the user when an existing conversation fails to resume', async () => {
+    const { provider, session } = setup(
+      { 'thread/resume': () => new Error('rollout is corrupt') },
+      'thread-old'
+    )
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    const errors = session().entries.filter((e) => e.errorKind === 'agent-error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0].errorMessage).toMatch(/rollout is corrupt/)
   })
 
   it('surfaces a non-retrying error once, not again on turn/completed', async () => {

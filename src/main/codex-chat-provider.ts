@@ -98,9 +98,20 @@ interface CodexInstance {
   erroredTurnId: string | null
 }
 
+interface PendingFork {
+  sourceThreadId: string
+  lastTurnId: string
+  model: string | null
+}
+
 export class CodexChatProvider implements ChatProvider {
   private instances = new Map<string, CodexInstance>()
   private entrySeqBySession = new Map<string, number>()
+  /** Forks waiting for their tab's subprocess. thread/fork leaves the new
+   *  thread loaded in whichever process ran it, and a thread loaded in one
+   *  app-server can't be resumed by another ("already has an active
+   *  writer"). So the fork runs in the new tab's own process at boot. */
+  private pendingForks = new Map<string, PendingFork>()
 
   constructor(
     private store: Store,
@@ -279,33 +290,19 @@ export class CodexChatProvider implements ChatProvider {
     }
   }
 
-  async forkAt(sourceSessionId: string, fromEntryId: string): Promise<ForkOutcome> {
+  forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome {
     const inst = this.instances.get(sourceSessionId)
     if (!inst?.ready || !inst.threadId) return { ok: false, reason: 'session is not running' }
     const target = this.findEntry(sourceSessionId, fromEntryId)
     if (!target?.turnId) return { ok: false, reason: 'message has no Codex turn' }
-    try {
-      // Fork doesn't inherit the parent's model — it falls back to
-      // config.toml — so pass everything explicitly.
-      const resp = await inst.client.request<CodexThreadResponse>('thread/fork', {
-        threadId: inst.threadId,
-        lastTurnId: target.turnId,
-        excludeTurns: true,
-        cwd: inst.worktreePath,
-        approvalPolicy: APPROVAL_POLICY,
-        sandbox: SANDBOX,
-        ...(inst.model ? { model: inst.model } : {})
-      })
-      // The fork gets its own subprocess; this one shouldn't stream it.
-      inst.client
-        .request('thread/unsubscribe', { threadId: resp.thread.id })
-        .catch(() => {})
-      return { ok: true, newSessionId: randomUUID(), providerSessionId: resp.thread.id }
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err)
-      log('codex-chat', `fork failed sessionId=${sourceSessionId}`, reason)
-      return { ok: false, reason }
-    }
+    if (target.turnId === inst.activeTurnId) return { ok: false, reason: 'that turn is still running' }
+    const newSessionId = randomUUID()
+    this.pendingForks.set(newSessionId, {
+      sourceThreadId: inst.threadId,
+      lastTurnId: target.turnId,
+      model: inst.model
+    })
+    return { ok: true, newSessionId }
   }
 
   // ---------------------------------------------------------------------
@@ -340,7 +337,29 @@ export class CodexChatProvider implements ChatProvider {
         ...(model ? { model } : {})
       }
       let resp: CodexThreadResponse | null = null
-      const existing = this.opts.getThreadId(sessionId)
+      let forked = false
+      const fork = this.pendingForks.get(sessionId)
+      this.pendingForks.delete(sessionId)
+      if (fork) {
+        try {
+          // Fork doesn't inherit the parent's model — it falls back to
+          // config.toml — so pass it explicitly.
+          resp = await inst.client.request<CodexThreadResponse>('thread/fork', {
+            threadId: fork.sourceThreadId,
+            lastTurnId: fork.lastTurnId,
+            excludeTurns: true,
+            ...threadParams,
+            ...(fork.model ? { model: fork.model } : {})
+          })
+          this.opts.setThreadId(sessionId, resp.thread.id)
+          forked = true
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err)
+          log('codex-chat', `fork failed sessionId=${sessionId}`, reason)
+          this.appendAgentError(sessionId, `Couldn't fork the Codex conversation (${reason}). Started a new one.`)
+        }
+      }
+      const existing = fork ? undefined : this.opts.getThreadId(sessionId)
       if (existing) {
         try {
           resp = await inst.client.request<CodexThreadResponse>('thread/resume', {
@@ -351,7 +370,12 @@ export class CodexChatProvider implements ChatProvider {
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
           log('codex-chat', `resume failed sessionId=${sessionId} thread=${existing}`, reason)
-          this.appendAgentError(sessionId, `Couldn't resume the previous Codex conversation (${reason}). Started a new one.`)
+          // A missing rollout means there was never a conversation to lose —
+          // typically a Codex terminal tab that didn't get past its trust
+          // prompt before being switched to Chat. Nothing worth telling.
+          if (!/no rollout found/i.test(reason)) {
+            this.appendAgentError(sessionId, `Couldn't resume the previous Codex conversation (${reason}). Started a new one.`)
+          }
         }
       }
       if (!resp) {
@@ -362,7 +386,8 @@ export class CodexChatProvider implements ChatProvider {
       inst.threadId = resp.thread.id
       inst.model = resp.model
       log('codex-chat', `ready sessionId=${sessionId} thread=${inst.threadId} model=${inst.model}`)
-      if (existing && existing === inst.threadId) await this.seedHistory(inst, false)
+      if (forked) await this.seedHistory(inst, true)
+      else if (existing && existing === inst.threadId) await this.seedHistory(inst, false)
       this.store.dispatch({ type: 'jsonClaude/currentModelChanged', payload: { sessionId, model: resp.model } })
       inst.ready = true
       this.dispatchState(sessionId, 'running')
