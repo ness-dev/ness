@@ -49,9 +49,17 @@ export function AgentTabPicker({
   onPick: (tabId: string) => void
 }): JSX.Element {
   const backend = useBackend()
-  const [open, setOpen] = useState(false)
+  // Fixed-positioned from the button's rect: the submissions panel
+  // scrolls, and an absolute dropdown would be clipped by it.
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+  const open = anchor !== null
   const [tabs, setTabs] = useState<AgentTabInfo[] | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const toggle = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    if (anchor) return setAnchor(null)
+    const r = e.currentTarget.getBoundingClientRect()
+    setAnchor({ top: r.bottom + 4, right: window.innerWidth - r.right })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -67,7 +75,7 @@ export function AgentTabPicker({
       })
     const close = (e: MouseEvent): void => {
       if (e.target instanceof Node && wrapperRef.current?.contains(e.target)) return
-      setOpen(false)
+      setAnchor(null)
     }
     window.addEventListener('mousedown', close)
     return () => {
@@ -78,13 +86,14 @@ export function AgentTabPicker({
 
   return (
     <div ref={wrapperRef} className="relative">
-      <button onClick={() => setOpen((v) => !v)} disabled={disabled} className={className}>
+      <button onClick={toggle} disabled={disabled} className={className}>
         {children}
         <ChevronDown className="icon-2xs" />
       </button>
-      {open && (
+      {anchor && (
         <div
-          className="absolute z-50 top-full right-0 mt-1 w-64 bg-panel-raised border border-border-strong rounded shadow-lg py-1"
+          style={{ top: anchor.top, right: anchor.right }}
+          className="fixed z-50 w-64 bg-panel-raised border border-border-strong rounded shadow-lg py-1"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1 text-xs text-faint">Send to</div>
@@ -96,7 +105,7 @@ export function AgentTabPicker({
             <button
               key={t.id}
               onClick={() => {
-                setOpen(false)
+                setAnchor(null)
                 onPick(t.id)
               }}
               className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left cursor-pointer hover:bg-panel ${
