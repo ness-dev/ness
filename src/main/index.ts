@@ -14,6 +14,8 @@ import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
 import { ChatRouter } from './chat-provider'
+import { CodexChatProvider } from './codex-chat-provider'
+import { bundledCodexBinPath } from './codex-binary'
 import { getChatCapabilities } from '../shared/agent-registry'
 import { buildRelocationPreamble } from './fork-relocation'
 import { shellQuote } from './shell-quote'
@@ -458,7 +460,20 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
       modelOverride
     })
 })
-const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager })
+const codexChatProvider = new CodexChatProvider(store, {
+  getBinPath: () => bundledCodexBinPath(),
+  clientVersion: getHarnessVersion(),
+  getThreadId: (sessionId) => findJsonClaudeTab(sessionId)?.providerSessionId,
+  setThreadId: (sessionId, threadId) => panesFSM.setTabProviderSessionId(sessionId, threadId),
+  getModel: (modelOverride) =>
+    modelOverride || store.getSnapshot().state.settings.codexModel || undefined,
+  requestApproval: (request) => approvalBridge.requestApproval(request),
+  cancelApprovalsForSession: (sessionId, reason) =>
+    approvalBridge.cancelPendingForSession(sessionId, reason),
+  cancelApprovalForToolUse: (sessionId, toolUseId) =>
+    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId)
+})
+const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager, codex: codexChatProvider })
 const perfMonitor = new PerfMonitor()
 setGitHubApiRecorder(() => perfMonitor.recordGitHubApiCall())
 setGitHubApiLoggingEnabled(config.expandedDiagnosticLoggingEnabled === true)
@@ -3904,7 +3919,7 @@ function registerIpcHandlers(): void {
 
       approvalBridge.cancelPendingForSession(sessionId)
 
-      const outcome = chatRouter.rewindTo(sessionId, entryId)
+      const outcome = await chatRouter.rewindTo(sessionId, entryId)
       if (!outcome.ok) return { ok: false, reason: outcome.reason }
 
       // Respawn so --resume re-seeds the slice from the truncated jsonl
@@ -3923,11 +3938,11 @@ function registerIpcHandlers(): void {
   // the source's active tab.
   transport.onRequest(
     'jsonClaude:forkAt',
-    (
+    async (
       _ctx,
       sessionId: string,
       entryId: string
-    ): { ok: boolean; newSessionId?: string; reason?: string } => {
+    ): Promise<{ ok: boolean; newSessionId?: string; reason?: string }> => {
       if (!sessionId || !entryId) return { ok: false, reason: 'missing args' }
       const source = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!source) return { ok: false, reason: 'unknown session' }
@@ -3935,7 +3950,7 @@ function registerIpcHandlers(): void {
         return { ok: false, reason: 'fork is not supported for this agent' }
       }
 
-      const outcome = chatRouter.forkAt(sessionId, entryId)
+      const outcome = await chatRouter.forkAt(sessionId, entryId)
       if (!outcome.ok || !outcome.newSessionId) {
         return { ok: false, reason: outcome.reason }
       }
@@ -3956,6 +3971,7 @@ function registerIpcHandlers(): void {
         sessionId: newSessionId,
         mode: 'awake',
         ...(source.agentKind ? { agentKind: source.agentKind } : {}),
+        ...(outcome.providerSessionId ? { providerSessionId: outcome.providerSessionId } : {}),
         ...(sourceModel ? { model: sourceModel } : {})
       })
 

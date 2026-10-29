@@ -642,6 +642,52 @@ describe('terminalsReducer', () => {
     expect(getLeaves(back.panes['/wt/a'])[0].tabs[0].agentKind).toBe('codex')
   })
 
+  it('tabTypeChanged maps a codex session id to the chat providerSessionId and back', () => {
+    const tree: PaneNode = {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [{ id: 'agent-1', type: 'agent', label: 'Codex', agentKind: 'codex', sessionId: 'thread-1' }],
+      activeTabId: 'agent-1'
+    }
+    const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
+    const toChat = apply(start, {
+      type: 'terminals/tabTypeChanged',
+      payload: { worktreePath: '/wt/a', tabId: 'agent-1', newId: 'thread-1', newType: 'json-claude', newLabel: 'Chat' }
+    })
+    const chat = getLeaves(toChat.panes['/wt/a'])[0].tabs[0]
+    expect(chat.providerSessionId).toBe('thread-1')
+
+    const withNewThread = apply(toChat, {
+      type: 'terminals/tabProviderSessionIdChanged',
+      payload: { worktreePath: '/wt/a', tabId: 'thread-1', providerSessionId: 'thread-2' }
+    })
+    const back = apply(withNewThread, {
+      type: 'terminals/tabTypeChanged',
+      payload: { worktreePath: '/wt/a', tabId: 'thread-1', newId: 'agent-2', newType: 'agent', newLabel: 'Codex' }
+    })
+    expect(getLeaves(back.panes['/wt/a'])[0].tabs[0].sessionId).toBe('thread-2')
+  })
+
+  it('tabProviderSessionIdChanged sets the id and is a no-op when unchanged', () => {
+    const tree: PaneNode = {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [{ id: 'chat-1', type: 'json-claude', label: 'Chat', sessionId: 'chat-1', agentKind: 'codex' }],
+      activeTabId: 'chat-1'
+    }
+    const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
+    const event = {
+      type: 'terminals/tabProviderSessionIdChanged' as const,
+      payload: { worktreePath: '/wt/a', tabId: 'chat-1', providerSessionId: 'thread-9' }
+    }
+    const next = apply(start, event)
+    expect(getLeaves(next.panes['/wt/a'])[0].tabs[0].providerSessionId).toBe('thread-9')
+    expect(apply(next, event)).toBe(next)
+    expect(
+      apply(start, { ...event, payload: { ...event.payload, tabId: 'missing' } })
+    ).toBe(start)
+  })
+
   it('tabTypeChanged leaves agentKind off a claude chat tab', () => {
     const tree: PaneNode = {
       type: 'leaf',

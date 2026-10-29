@@ -51,7 +51,13 @@ export const AGENT_REGISTRY: AgentInfo[] = [
     displayName: 'Codex',
     vendor: 'OpenAI',
     assignsSessionId: false,
-    supportsConversationFork: false
+    supportsConversationFork: false,
+    chat: {
+      rewind: true,
+      fork: true,
+      permissionModes: false,
+      slashCommands: false
+    }
   },
   {
     kind: 'cursor',

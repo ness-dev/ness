@@ -23,6 +23,9 @@ export interface RewindOutcome {
 export interface ForkOutcome {
   ok: boolean
   newSessionId?: string
+  /** The agent's own id for the forked conversation, for agents that
+   *  assign their own (Codex). Stored on the new tab. */
+  providerSessionId?: string
   reason?: string
 }
 
@@ -50,9 +53,9 @@ export interface ChatProvider {
   kill(sessionId: string): void
   killAll(): void
   /** Only reached when the agent's ChatCapabilities.rewind is true. */
-  rewindTo(sessionId: string, fromEntryId: string): RewindOutcome
+  rewindTo(sessionId: string, fromEntryId: string): RewindOutcome | Promise<RewindOutcome>
   /** Only reached when the agent's ChatCapabilities.fork is true. */
-  forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome
+  forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome | Promise<ForkOutcome>
   /** Only reached when the agent's ChatCapabilities.permissionModes is true. */
   setPermissionMode(sessionId: string, mode: JsonClaudePermissionMode): void
 }
@@ -125,13 +128,13 @@ export class ChatRouter {
     for (const provider of Object.values(this.providers)) provider?.killAll()
   }
 
-  rewindTo(sessionId: string, fromEntryId: string): RewindOutcome {
+  async rewindTo(sessionId: string, fromEntryId: string): Promise<RewindOutcome> {
     const provider = this.providerFor(sessionId)
     if (!provider) return { ok: false, reason: 'no chat provider' }
     return provider.rewindTo(sessionId, fromEntryId)
   }
 
-  forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome {
+  async forkAt(sourceSessionId: string, fromEntryId: string): Promise<ForkOutcome> {
     const provider = this.providerFor(sourceSessionId)
     if (!provider) return { ok: false, reason: 'no chat provider' }
     return provider.forkAt(sourceSessionId, fromEntryId)

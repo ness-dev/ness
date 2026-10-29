@@ -520,6 +520,19 @@ export class PanesFSM {
     this.opts.persist(this.buildPersistPayload())
   }
 
+  /** Record the agent's own id for a chat tab's conversation (a Codex
+   *  thread id) so a restart resumes it. No-op if the tab is gone. */
+  setTabProviderSessionId(tabId: string, providerSessionId: string): void {
+    const panes = this.store.getSnapshot().state.terminals.panes
+    const wtPath = Object.keys(panes).find((p) => findLeafByTabId(panes[p], tabId))
+    if (!wtPath) return
+    this.store.dispatch({
+      type: 'terminals/tabProviderSessionIdChanged',
+      payload: { worktreePath: wtPath, tabId, providerSessionId }
+    })
+    this.opts.persist(this.buildPersistPayload())
+  }
+
   restartAgentTab(wtPath: string, tabId: string, newId: string): void {
     const tree = this.getTree(wtPath)
     if (!tree) return

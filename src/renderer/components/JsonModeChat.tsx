@@ -59,6 +59,7 @@ import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import {
   CLAUDE_MODELS,
+  agentDisplayName,
   getChatCapabilities,
   supportsConversationFork
 } from '../../shared/agent-registry'
@@ -774,6 +775,35 @@ function RateLimitWarningCard({
   )
 }
 
+function AgentErrorCard({ message }: { message: string }): JSX.Element {
+  return (
+    <div
+      className="my-2 border border-danger/40 bg-danger/5 overflow-hidden"
+      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+    >
+      <div
+        className="flex items-center gap-2 bg-danger/10 border-b border-danger/20"
+        style={{
+          paddingInline: 'var(--chat-chrome-px)',
+          paddingBlock: 'var(--chat-chrome-py)',
+          fontSize: 'var(--chat-chrome-text)'
+        }}
+      >
+        <AlertOctagon className="icon-xs text-danger shrink-0" />
+        <span
+          className="font-semibold shrink-0 text-danger"
+          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+        >
+          Turn failed
+        </span>
+      </div>
+      <div className="px-3 py-2 text-xs text-fg/80">
+        <HighlightedText text={message} />
+      </div>
+    </div>
+  )
+}
+
 function RateLimitErrorCard({
   message,
   detail
@@ -1129,6 +1159,15 @@ function renderEntries(
       })
       continue
     }
+    if (entry.kind === 'error' && entry.errorKind === 'agent-error') {
+      rows.push({
+        key: entry.entryId,
+        entryId: entry.entryId,
+        type: 'tool',
+        node: <AgentErrorCard message={entry.errorMessage ?? 'The agent reported an error'} />
+      })
+      continue
+    }
     if (entry.kind === 'error' && entry.errorKind === 'rate-limit-error') {
       rows.push({
         key: entry.entryId,
@@ -1372,9 +1411,11 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     ? `${modKeySymbol}⇧↵`
     : `${modKeySymbol}Shift+Enter`
   const interruptSendHotkeyAria = `${modKeyWord}+Shift+Enter`
+  const agentName =
+    session?.agentKind && session.agentKind !== 'claude' ? agentDisplayName(session.agentKind) : 'Claude'
   const composerPlaceholder = sendOnEnter
-    ? 'Message Claude — Enter to send, Shift+Enter for newline'
-    : `Message Claude — ${modKeyWord}+Enter to send`
+    ? `Message ${agentName} — Enter to send, Shift+Enter for newline`
+    : `Message ${agentName} — ${modKeyWord}+Enter to send`
   const [draft, setDraft] = useState('')
   // Mention/popover state. `dismissed` carries the draft text at which
   // the user pressed Escape — comparing against the live draft is how we

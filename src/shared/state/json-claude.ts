@@ -279,6 +279,7 @@ export interface JsonClaudeChatEntry {
     | 'rate-limit-warning'
     | 'rate-limit-error'
     | 'auth-failure'
+    | 'agent-error'
   /** For kind === 'error'. Human-readable detail (exitReason, rate-limit
    *  retry-at timestamp, original auth error string, etc.). */
   errorMessage?: string
@@ -304,6 +305,10 @@ export interface JsonClaudeChatEntry {
    *  jsonl line carrying this id, which is the natural end of the
    *  assistant's turn. */
   apiMessageId?: string
+  /** Codex turn this entry belongs to. Codex rewinds and forks at turn
+   *  boundaries (thread/revert, thread/fork), so assistant entries carry
+   *  the id of the turn that produced them. */
+  turnId?: string
   /** For errorKind === 'rate-limit-warning' | 'rate-limit-error'.
    *  Structured detail sourced from the SDK's `rate_limit_info`
    *  payload. All fields optional because the wire shape is sparse —

@@ -48,7 +48,7 @@ describe('ChatRouter', () => {
     expect(codex.send).not.toHaveBeenCalled()
   })
 
-  it('routes by the agentKind recorded on the session', () => {
+  it('routes by the agentKind recorded on the session', async () => {
     const store = new Store(initialState)
     const claude = fakeProvider()
     const codex = fakeProvider()
@@ -56,7 +56,7 @@ describe('ChatRouter', () => {
     startSession(store, 's1', 'codex')
 
     router.create('s1', '/tmp/wt', 'default', 'gpt-x')
-    expect(router.forkAt('s1', 'e1')).toEqual({ ok: true, newSessionId: 'forked' })
+    await expect(router.forkAt('s1', 'e1')).resolves.toEqual({ ok: true, newSessionId: 'forked' })
 
     expect(codex.create).toHaveBeenCalledWith('s1', '/tmp/wt', 'default', 'gpt-x')
     expect(codex.forkAt).toHaveBeenCalledWith('s1', 'e1')
@@ -84,12 +84,12 @@ describe('ChatRouter', () => {
     expect(claude.create).not.toHaveBeenCalled()
   })
 
-  it('rewind and fork fail cleanly when no provider backs the agent', () => {
+  it('rewind and fork fail cleanly when no provider backs the agent', async () => {
     const store = new Store(initialState)
     const router = new ChatRouter(store, { claude: fakeProvider() })
     startSession(store, 's1', 'cursor')
-    expect(router.rewindTo('s1', 'e1').ok).toBe(false)
-    expect(router.forkAt('s1', 'e1').ok).toBe(false)
+    expect((await router.rewindTo('s1', 'e1')).ok).toBe(false)
+    expect((await router.forkAt('s1', 'e1')).ok).toBe(false)
   })
 
   it('killAll reaches every provider', () => {

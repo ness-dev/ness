@@ -136,10 +136,18 @@ describe('chat capabilities', () => {
     expect(getChatCapabilities(undefined)).toEqual(getChatCapabilities('claude'))
   })
 
+  it('codex backs chat tabs with rewind and fork but no Claude-only affordances', () => {
+    expect(supportsChat('codex')).toBe(true)
+    expect(getChatCapabilities('codex')).toEqual({
+      rewind: true,
+      fork: true,
+      permissionModes: false,
+      slashCommands: false
+    })
+  })
+
   it('reports no capabilities for agents without a chat provider', () => {
-    for (const kind of ['codex', 'cursor'] as const) {
-      expect(supportsChat(kind)).toBe(false)
-      expect(Object.values(getChatCapabilities(kind)).every((v) => v === false)).toBe(true)
-    }
+    expect(supportsChat('cursor')).toBe(false)
+    expect(Object.values(getChatCapabilities('cursor')).every((v) => v === false)).toBe(true)
   })
 })
