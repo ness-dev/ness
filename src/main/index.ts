@@ -13,6 +13,8 @@ import { join } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
+import { ChatRouter } from './chat-provider'
+import { getChatCapabilities } from '../shared/agent-registry'
 import { buildRelocationPreamble } from './fork-relocation'
 import { shellQuote } from './shell-quote'
 import {
@@ -456,6 +458,7 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
       modelOverride
     })
 })
+const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager })
 const perfMonitor = new PerfMonitor()
 setGitHubApiRecorder(() => perfMonitor.recordGitHubApiCall())
 setGitHubApiLoggingEnabled(config.expandedDiagnosticLoggingEnabled === true)
@@ -1012,30 +1015,28 @@ const panesFSM = new PanesFSM(store, {
   // could disconnect without intending to kill agents). Tab-close /
   // restart / clear events are the actual lifecycle boundary.
   killTabPty: (tabId) => ptyManager.kill(tabId),
-  killJsonClaude: (sessionId) => jsonClaudeManager.kill(sessionId),
+  killJsonClaude: (sessionId) => chatRouter.kill(sessionId),
   clearJsonClaudeSession: (sessionId) =>
     store.dispatch({ type: 'jsonClaude/sessionCleared', payload: { sessionId } }),
   startJsonClaudeWithPrompt: (sessionId, worktreePath, initialPrompt) => {
     startJsonClaudeSession(sessionId, worktreePath)
-    if (initialPrompt) jsonClaudeManager.send(sessionId, initialPrompt)
+    if (initialPrompt) chatRouter.send(sessionId, initialPrompt)
   },
   startJsonClaude: (sessionId, worktreePath) => {
     startJsonClaudeSession(sessionId, worktreePath)
   }
 })
 
-/** Look up a json-claude tab's persisted `model` override by sessionId
- *  (which is also the tab id for json-claude tabs). Returned to the
- *  json-claude manager so resume/kickoff/wake all respect a per-tab pin
- *  that was set when the worktree was created. */
-function findJsonClaudeTabModel(sessionId: string): string | undefined {
+/** Look up a json-claude tab by sessionId (which is also the tab id for
+ *  json-claude tabs). startJsonClaudeSession reads its `model` override,
+ *  so resume/kickoff/wake all respect a per-tab pin set when the worktree
+ *  was created, and its `agentKind`, which picks the chat provider. */
+function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
   const panes = store.getSnapshot().state.terminals.panes
   for (const tree of Object.values(panes)) {
     for (const leaf of getLeaves(tree)) {
       for (const tab of leaf.tabs) {
-        if (tab.id === sessionId && tab.type === 'json-claude') {
-          return tab.model && tab.model.trim() ? tab.model.trim() : undefined
-        }
+        if (tab.id === sessionId && tab.type === 'json-claude') return tab
       }
     }
   }
@@ -1046,24 +1047,27 @@ function findJsonClaudeTabModel(sessionId: string): string | undefined {
  *  this sessionId". Used by the jsonClaude:start IPC handler, the
  *  panesFSM's startJsonClaudeWithPrompt + startJsonClaude options
  *  (kickoff + wake), so all paths produce the same dispatch + seed +
- *  create order. Idempotent — JsonClaudeManager.create() short-circuits
+ *  create order. Idempotent — every provider's create() short-circuits
  *  if the instance is already running. */
 function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
-  if (jsonClaudeManager.hasSession(sessionId)) return
+  if (chatRouter.hasSession(sessionId)) return
+  const tab = findJsonClaudeTab(sessionId)
   store.dispatch({
     type: 'jsonClaude/sessionStarted',
     payload: {
       sessionId,
       worktreePath,
+      ...(tab?.agentKind ? { agentKind: tab.agentKind } : {}),
       defaultPermissionMode:
         store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
     }
   })
-  jsonClaudeManager.seedFromTranscript(sessionId, worktreePath)
+  chatRouter.seedFromTranscript(sessionId, worktreePath)
   const permMode =
     store.getSnapshot().state.jsonClaude.sessions[sessionId]?.permissionMode ||
     'default'
-  jsonClaudeManager.create(sessionId, worktreePath, permMode, findJsonClaudeTabModel(sessionId))
+  const model = tab?.model && tab.model.trim() ? tab.model.trim() : undefined
+  chatRouter.create(sessionId, worktreePath, permMode, model)
 }
 
 /** Resolve what the new worktree's first agent tab should start from,
@@ -1153,7 +1157,7 @@ async function interruptAndQuiesce(sessionId: string): Promise<void> {
       }
     })
     const timer = setTimeout(() => finish('timeout'), QUIESCE_TIMEOUT_MS)
-    jsonClaudeManager.interrupt(sessionId)
+    chatRouter.interrupt(sessionId)
     armed = true
   })
 }
@@ -1206,8 +1210,8 @@ const activityDeriver = new ActivityDeriver(store)
 // How anything in main reaches a worktree's agent chat. Shared by the CI
 // notifier and the send_message MCP tool so both route (and wake) alike.
 const chatDeliveryDeps = {
-  send: (sessionId: string, text: string) => jsonClaudeManager.send(sessionId, text),
-  hasSession: (sessionId: string) => jsonClaudeManager.hasSession(sessionId),
+  send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
+  hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
   wake: (worktreePath: string, tabId: string) =>
     panesFSM.wakeJsonClaudeTab(worktreePath, tabId)
 }
@@ -3824,21 +3828,21 @@ function registerIpcHandlers(): void {
       text: string,
       images?: Array<{ mediaType: string; data: string; path: string }>
     ) => {
-      jsonClaudeManager.send(sessionId, text, images)
+      chatRouter.send(sessionId, text, images)
     }
   )
   transport.onSignal(
     'jsonClaude:cancelQueued',
     (_ctx, sessionId: string, messageId: string) => {
-      jsonClaudeManager.cancelQueued(sessionId, messageId)
+      chatRouter.cancelQueued(sessionId, messageId)
     }
   )
   transport.onRequest('jsonClaude:kill', (_ctx, sessionId: string) => {
-    jsonClaudeManager.kill(sessionId)
+    chatRouter.kill(sessionId)
     return true
   })
   transport.onRequest('jsonClaude:interrupt', (_ctx, sessionId: string) => {
-    jsonClaudeManager.interrupt(sessionId)
+    chatRouter.interrupt(sessionId)
     return true
   })
 
@@ -3871,7 +3875,7 @@ function registerIpcHandlers(): void {
 
       // busy is false by now (interrupt flips it, or it already was), so
       // this takes the fresh-turn path rather than the queue path.
-      jsonClaudeManager.send(sessionId, text, images)
+      chatRouter.send(sessionId, text, images)
       return { ok: true }
     }
   )
@@ -3892,12 +3896,15 @@ function registerIpcHandlers(): void {
       if (!sessionId || !entryId) return { ok: false, reason: 'missing args' }
       const startSession = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!startSession) return { ok: false, reason: 'unknown session' }
+      if (!getChatCapabilities(startSession.agentKind).rewind) {
+        return { ok: false, reason: 'rewind is not supported for this agent' }
+      }
 
       if (startSession.busy) await interruptAndQuiesce(sessionId)
 
       approvalBridge.cancelPendingForSession(sessionId)
 
-      const outcome = jsonClaudeManager.rewindTo(sessionId, entryId)
+      const outcome = chatRouter.rewindTo(sessionId, entryId)
       if (!outcome.ok) return { ok: false, reason: outcome.reason }
 
       // Respawn so --resume re-seeds the slice from the truncated jsonl
@@ -3924,30 +3931,22 @@ function registerIpcHandlers(): void {
       if (!sessionId || !entryId) return { ok: false, reason: 'missing args' }
       const source = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!source) return { ok: false, reason: 'unknown session' }
+      if (!getChatCapabilities(source.agentKind).fork) {
+        return { ok: false, reason: 'fork is not supported for this agent' }
+      }
 
-      const outcome = jsonClaudeManager.forkAt(sessionId, entryId)
+      const outcome = chatRouter.forkAt(sessionId, entryId)
       if (!outcome.ok || !outcome.newSessionId) {
         return { ok: false, reason: outcome.reason }
       }
       const newSessionId = outcome.newSessionId
 
-      // Carry the source tab's label + per-tab model pin so the fork
-      // reads as a sibling. Walk panes for the source worktree; the
-      // source tab id equals its sessionId.
-      let sourceLabel: string | undefined
-      let sourceModel: string | undefined
-      const tree = store.getSnapshot().state.terminals.panes[source.worktreePath]
-      if (tree) {
-        outer: for (const leaf of getLeaves(tree)) {
-          for (const tab of leaf.tabs) {
-            if (tab.id === sessionId && tab.type === 'json-claude') {
-              sourceLabel = tab.customLabel?.trim() || tab.label
-              sourceModel = tab.model && tab.model.trim() ? tab.model.trim() : undefined
-              break outer
-            }
-          }
-        }
-      }
+      // Carry the source tab's label, agent and per-tab model pin so the
+      // fork reads as a sibling. The source tab id equals its sessionId.
+      const sourceTab = findJsonClaudeTab(sessionId)
+      const sourceLabel = sourceTab ? sourceTab.customLabel?.trim() || sourceTab.label : undefined
+      const sourceModel =
+        sourceTab?.model && sourceTab.model.trim() ? sourceTab.model.trim() : undefined
       const label = sourceLabel ? `${sourceLabel} (fork)` : 'Chat (fork)'
 
       panesFSM.addTab(source.worktreePath, {
@@ -3956,6 +3955,7 @@ function registerIpcHandlers(): void {
         label,
         sessionId: newSessionId,
         mode: 'awake',
+        ...(source.agentKind ? { agentKind: source.agentKind } : {}),
         ...(sourceModel ? { model: sourceModel } : {})
       })
 
@@ -4066,7 +4066,7 @@ function registerIpcHandlers(): void {
       if (!worktreePath) return { ok: false, reason: 'no owning worktree' }
 
       // Persist the per-tab override first so the respawn picks it up
-      // via findJsonClaudeTabModel(). Empty string clears the override.
+      // via findJsonClaudeTab(). Empty string clears the override.
       store.dispatch({
         type: 'terminals/tabModelChanged',
         payload: { worktreePath, tabId: sessionId, model: trimmed }
@@ -4081,9 +4081,9 @@ function registerIpcHandlers(): void {
 
       // Kill the subprocess, then respawn via the shared start helper.
       // startJsonClaudeSession is idempotent + reads the new tab.model
-      // through findJsonClaudeTabModel, so the fresh spawn gets
+      // through findJsonClaudeTab, so the fresh spawn gets
       // --model <newValue> --resume <sessionId>.
-      jsonClaudeManager.kill(sessionId)
+      chatRouter.kill(sessionId)
       startJsonClaudeSession(sessionId, worktreePath)
       return { ok: true }
     }
@@ -4093,6 +4093,7 @@ function registerIpcHandlers(): void {
     'jsonClaude:setPermissionMode',
     (_ctx, sessionId: string, mode: JsonClaudePermissionMode) => {
       if (!sessionId) return false
+      if (!getChatCapabilities(chatRouter.agentKindOf(sessionId)).permissionModes) return false
       // Optimistically reflect in the slice so the badge updates
       // immediately. The manager writes a stdin control_request that
       // the subprocess applies mid-turn (same protocol the TUI's
@@ -4103,7 +4104,7 @@ function registerIpcHandlers(): void {
         type: 'jsonClaude/permissionModeChanged',
         payload: { sessionId, mode }
       })
-      jsonClaudeManager.setPermissionMode(sessionId, mode)
+      chatRouter.setPermissionMode(sessionId, mode)
       return true
     }
   )
@@ -5391,7 +5392,7 @@ if (desktopShellMod && desktopEarly) {
       void worktreesFSM.refreshList()
     },
     onBeforeQuit: () => {
-      jsonClaudeManager.killAll()
+      chatRouter.killAll()
       approvalBridge.stopAll()
       // Close local tunnel ends — the remote `harness-server` is left
       // running (intentional; see plans/remote-main.md §4).
@@ -5420,7 +5421,7 @@ if (desktopShellMod && desktopEarly) {
     stopWatchingStatus?.()
     stopWatchingStatus = null
     ptyManager.killAll('SIGKILL')
-    jsonClaudeManager.killAll()
+    chatRouter.killAll()
     approvalBridge.stopAll()
     worktreeWatcher.shutdown()
     browserManager.destroyAll()

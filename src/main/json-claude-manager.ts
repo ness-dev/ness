@@ -1,3 +1,5 @@
+// The Claude ChatProvider (see chat-provider.ts).
+//
 // Runs `claude -p --input-format stream-json --output-format stream-json`
 // as a long-lived subprocess per json-claude tab. Mirrors PtyManager's
 // lifecycle shape (create / send / kill / killAll) and dispatches state
@@ -35,6 +37,7 @@ import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
+import type { ChatImageInput, ChatProvider, ForkOutcome, RewindOutcome } from './chat-provider'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
 
@@ -206,17 +209,6 @@ export function hasForkableTranscript(sessionId: string, worktreePath: string): 
   return existsSync(transcriptPathFor(sessionId, worktreePath))
 }
 
-export interface RewindOutcome {
-  ok: boolean
-  reason?: string
-}
-
-export interface ForkOutcome {
-  ok: boolean
-  newSessionId?: string
-  reason?: string
-}
-
 export interface ForkTranscriptParams {
   sourceSessionId: string
   sourceWorktreePath: string
@@ -335,7 +327,7 @@ export function forkTranscript(params: ForkTranscriptParams): ForkOutcome {
   return { ok: true, newSessionId }
 }
 
-export class JsonClaudeManager {
+export class JsonClaudeManager implements ChatProvider {
   private instances = new Map<string, JsonClaudeInstance>()
   private store: Store
   private opts: JsonClaudeManagerOptions
@@ -870,7 +862,7 @@ export class JsonClaudeManager {
   send(
     sessionId: string,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const inst = this.instances.get(sessionId)
     if (!inst) return
@@ -908,7 +900,7 @@ export class JsonClaudeManager {
   private writeUserTurn(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     this.appendUserEntry(inst, text, images, {
       entryId: this.nextEntryId(inst.sessionId, 'u')
@@ -923,9 +915,7 @@ export class JsonClaudeManager {
   private appendUserEntry(
     inst: JsonClaudeInstance,
     text: string,
-    images:
-      | Array<{ mediaType: string; data: string; path: string }>
-      | undefined,
+    images: ChatImageInput[] | undefined,
     extra: { entryId: string; isQueued?: boolean }
   ): void {
     const hasImages = !!images && images.length > 0
@@ -965,7 +955,7 @@ export class JsonClaudeManager {
   private writeUserStdin(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const hasImages = !!images && images.length > 0
     const annotatedText = hasImages
