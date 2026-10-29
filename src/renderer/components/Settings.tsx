@@ -4292,6 +4292,7 @@ function SidebarRowPreview({ density, prefs }: SidebarRowPreviewProps): JSX.Elem
               aliased
               prStatus={PREVIEW_PR}
               prefs={prefs}
+              active
             />
           )}
         </div>
@@ -4302,6 +4303,7 @@ function SidebarRowPreview({ density, prefs }: SidebarRowPreviewProps): JSX.Elem
             aliased
             prStatus={PREVIEW_PR}
             prefs={prefs}
+            active
             inline
           />
         )}
