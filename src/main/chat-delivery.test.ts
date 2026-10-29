@@ -82,6 +82,7 @@ function makeState(opts: {
 function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   send: ReturnType<typeof vi.fn>
   wake: ReturnType<typeof vi.fn>
+  respawn: ReturnType<typeof vi.fn>
 } {
   const live = new Set(liveSessionIds)
   const send = vi.fn()
@@ -90,7 +91,10 @@ function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   const wake = vi.fn((_wt: string, tabId: string) => {
     live.add(tabId)
   })
-  return { send, wake, hasSession: (id) => live.has(id) }
+  const respawn = vi.fn((_wt: string, tabId: string) => {
+    live.add(tabId)
+  })
+  return { send, wake, respawn, hasSession: (id) => live.has(id) }
 }
 
 describe('resolveWorktreeQuery', () => {
@@ -235,7 +239,7 @@ describe('deliverToWorktreeChat', () => {
     const send = vi.fn()
     const result = deliverToWorktreeChat(
       state,
-      { send, hasSession: () => false, wake: () => {} },
+      { send, hasSession: () => false, wake: () => {}, respawn: () => {} },
       A,
       'hi'
     )
@@ -271,11 +275,13 @@ describe('deliverToTab', () => {
     expect(d.send).toHaveBeenCalledWith('slept', 'hi')
   })
 
-  it('refuses an awake tab whose subprocess is gone rather than racing the renderer respawn', () => {
+  it('respawns an awake tab whose subprocess is gone instead of waking it', () => {
     const state = makeState({ panes: { [A]: panes([{ id: 's1' }]) } })
     const d = deps()
-    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'unavailable' })
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: true, tabId: 's1', woke: true })
+    expect(d.respawn).toHaveBeenCalledWith(A, 's1')
     expect(d.wake).not.toHaveBeenCalled()
+    expect(d.send).toHaveBeenCalledWith('s1', 'hi')
   })
 
   it('reports terminal agent tabs as unsupported and other tabs as not agents', () => {
@@ -299,7 +305,7 @@ describe('deliverToTab', () => {
 
   it('reports a failed wake', () => {
     const state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
-    const d = { ...deps(), wake: vi.fn(), hasSession: () => false }
+    const d = { ...deps(), wake: vi.fn(), respawn: vi.fn(), hasSession: () => false }
     expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'wake-failed' })
     expect(d.send).not.toHaveBeenCalled()
   })

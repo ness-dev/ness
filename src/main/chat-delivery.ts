@@ -10,6 +10,11 @@ export interface ChatDeliveryDeps {
   /** Re-spawns a slept json-claude tab's subprocess. Synchronous — the
    *  session is live by the time this returns (or the spawn failed). */
   wake: (worktreePath: string, tabId: string) => void
+  /** Starts the subprocess of an awake json-claude tab whose process is
+   *  gone (crashed, or not yet respawned by a client). Idempotent with the
+   *  renderer's own respawn: JsonClaudeManager.create no-ops when the
+   *  session is already running, so whichever side goes second is a no-op. */
+  respawn: (worktreePath: string, tabId: string) => void
 }
 
 export type ChatDeliveryResult =
@@ -39,9 +44,7 @@ function pickLiveSession(
 }
 
 /** A slept json-claude tab to wake, preferring whichever tab its pane
- *  had focused. Only genuinely-asleep tabs qualify: a tab marked awake
- *  with a dead subprocess is the renderer's to respawn on focus, and
- *  racing it here would double-spawn. */
+ *  had focused. */
 function pickSleptTab(state: AppState, worktreePath: string): string | null {
   const tree = state.terminals.panes[worktreePath]
   if (!tree) return null
@@ -113,7 +116,6 @@ export type TabDeliveryFailure =
   | 'no-tab'
   | 'not-agent-tab'
   | 'terminal-unsupported'
-  | 'unavailable'
   | 'wake-failed'
 
 export type TabDeliveryResult =
@@ -152,10 +154,8 @@ export function deliverToTab(
   if (!tab) return { ok: false, reason: 'no-tab' }
   if (tab.type === 'agent') return { ok: false, reason: 'terminal-unsupported' }
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
-  // Awake with no subprocess means the renderer is (re)spawning it on
-  // focus; waking here too would double-spawn. See pickSleptTab.
-  if ((tab.mode ?? 'awake') !== 'asleep') return { ok: false, reason: 'unavailable' }
-  deps.wake(worktreePath, tabId)
+  if ((tab.mode ?? 'awake') === 'asleep') deps.wake(worktreePath, tabId)
+  else deps.respawn(worktreePath, tabId)
   if (!deps.hasSession(tabId)) return { ok: false, reason: 'wake-failed' }
   deps.send(tabId, message)
   return { ok: true, tabId, woke: true }
@@ -170,10 +170,8 @@ export function describeTabDeliveryFailure(reason: TabDeliveryFailure): string {
       return 'that tab is not an agent tab'
     case 'terminal-unsupported':
       return 'delivery to terminal agent tabs is not supported yet — only Chat tabs can receive it'
-    case 'unavailable':
-      return "that Chat tab's agent isn't running — open the tab in Ness and retry"
     case 'wake-failed':
-      return 'failed to wake that Chat tab'
+      return "failed to start that Chat tab's agent"
   }
 }
 

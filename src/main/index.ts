@@ -1281,7 +1281,8 @@ const chatDeliveryDeps = {
   send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
   wake: (worktreePath: string, tabId: string) =>
-    panesFSM.wakeJsonClaudeTab(worktreePath, tabId)
+    panesFSM.wakeJsonClaudeTab(worktreePath, tabId),
+  respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)
 }
 
 // Injects a "CI is failing" message into a worktree's agent chat when its
