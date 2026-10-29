@@ -1,3 +1,4 @@
+import { getAgentInfo } from '../agent-registry'
 export type PtyStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval'
 
 export interface PendingTool {
@@ -623,6 +624,7 @@ export function terminalsReducer(
             // An agent that assigns its own ids (Codex) put its own id in
             // the terminal tab's sessionId; the chat side keeps it as the
             // provider id so it resumes the same conversation.
+            const ownIds = !getAgentInfo(agentKind).assignsSessionId
             return {
               id: newId,
               type: 'json-claude' as const,
@@ -630,7 +632,7 @@ export function terminalsReducer(
               sessionId,
               mode: 'awake' as const,
               ...(agentKind !== 'claude' ? { agentKind } : {}),
-              ...(agentKind !== 'claude' && t.sessionId ? { providerSessionId: t.sessionId } : {})
+              ...(ownIds && t.sessionId ? { providerSessionId: t.sessionId } : {})
             }
           }
           return {

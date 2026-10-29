@@ -269,10 +269,11 @@ export class PanesFSM {
     // session today). initialPrompt is honored for both — for the
     // json-claude side we pre-spawn the subprocess and send it as the
     // first message via startJsonClaudeWithPrompt below.
-    // A forked Codex conversation can only open in Chat: the fork itself
-    // runs in the chat tab's app-server, so a terminal tab would have no
-    // thread to resume.
-    const forkNeedsChat = !!opts?.forkedSessionId && agentKind !== 'claude'
+    // An agent that assigns its own session ids can't be handed the forked
+    // conversation's id on a terminal command line — the fork only becomes
+    // a real conversation inside its chat provider (Codex forks the thread
+    // when the chat tab boots). So such a fork can only open in Chat.
+    const forkNeedsChat = !!opts?.forkedSessionId && !agentInfo.assignsSessionId
     const wantsJson =
       supportsChat(agentKind) &&
       (this.opts.getDefaultClaudeTabType?.() === 'json' || forkNeedsChat) &&
