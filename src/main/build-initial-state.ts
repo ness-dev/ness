@@ -45,6 +45,7 @@ import {
   DEFAULT_WORKTREE_BASE,
   DEFAULT_MERGE_STRATEGY,
   DEFAULT_SIDEBAR_DENSITY,
+  DEFAULT_SIDEBAR_TABS_EXPANSION,
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
   type Config
@@ -165,6 +166,7 @@ export function buildInitialAppState(
       worktreeBase: config.worktreeBase || DEFAULT_WORKTREE_BASE,
       mergeStrategy: config.mergeStrategy || DEFAULT_MERGE_STRATEGY,
       sidebarDensity: config.sidebarDensity || DEFAULT_SIDEBAR_DENSITY,
+      sidebarTabsExpansion: config.sidebarTabsExpansion || DEFAULT_SIDEBAR_TABS_EXPANSION,
       sidebarDetails: {
         compact: { ...DEFAULT_SIDEBAR_DETAILS.compact, ...(config.sidebarDetails?.compact || {}) },
         comfy: { ...DEFAULT_SIDEBAR_DETAILS.comfy, ...(config.sidebarDetails?.comfy || {}) }

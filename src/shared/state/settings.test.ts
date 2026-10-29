@@ -312,6 +312,20 @@ describe('settingsReducer', () => {
     expect(comfy.sidebarDensity).toBe('comfy')
   })
 
+  it('sidebarTabsExpansionChanged sets which rows list their tabs', () => {
+    expect(initialSettings.sidebarTabsExpansion).toBe('selected')
+    const all = apply(initialSettings, {
+      type: 'settings/sidebarTabsExpansionChanged',
+      payload: 'all'
+    })
+    expect(all.sidebarTabsExpansion).toBe('all')
+    const never = apply(all, {
+      type: 'settings/sidebarTabsExpansionChanged',
+      payload: 'never'
+    })
+    expect(never.sidebarTabsExpansion).toBe('never')
+  })
+
   it('sidebarDetailsChanged replaces the whole per-mode prefs object', () => {
     // Comfy defaults: everything on.
     expect(initialSettings.sidebarDetails.comfy.diff).toBe(true)

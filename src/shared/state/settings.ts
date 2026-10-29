@@ -23,6 +23,9 @@ export type WorktreeBase = 'remote' | 'local'
  *  signal is too important to hide. */
 export type SidebarDensity = 'compact' | 'comfy'
 
+/** Which sidebar worktree rows list their tabs as nested child rows. */
+export type SidebarTabsExpansion = 'never' | 'selected' | 'all'
+
 /** Per-item toggles for the sidebar row's detail cluster. Each `true`
  *  means the item shows when it has data to show (e.g. `assignee` only
  *  renders when a PR actually has an assignee). Set to `false` to hide
@@ -319,6 +322,7 @@ export interface SettingsState {
   mergeStrategy: MergeStrategy
   sidebarDensity: SidebarDensity
   sidebarDetails: SidebarDetailPrefsByMode
+  sidebarTabsExpansion: SidebarTabsExpansion
   /** Set once the user dismisses the starter-task cards on the New
    *  worktree screen. One-way — there is no UI to bring them back, which
    *  is the point of a "don't show me this again" affordance. */
@@ -512,6 +516,7 @@ export type SettingsEvent =
   | { type: 'settings/worktreeBaseChanged'; payload: WorktreeBase }
   | { type: 'settings/mergeStrategyChanged'; payload: MergeStrategy }
   | { type: 'settings/sidebarDensityChanged'; payload: SidebarDensity }
+  | { type: 'settings/sidebarTabsExpansionChanged'; payload: SidebarTabsExpansion }
   | { type: 'settings/sidebarDetailsChanged'; payload: SidebarDetailPrefsByMode }
   | { type: 'settings/newWorktreeAdvancedOpenChanged'; payload: boolean }
   | { type: 'settings/starterTasksDismissedChanged'; payload: boolean }
@@ -592,6 +597,7 @@ export const initialSettings: SettingsState = {
   mergeStrategy: 'squash',
   sidebarDensity: 'comfy',
   sidebarDetails: DEFAULT_SIDEBAR_DETAILS,
+  sidebarTabsExpansion: 'selected',
   newWorktreeAdvancedOpen: false,
   starterTasksDismissed: false,
   claudeModel: null,
@@ -731,6 +737,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, mergeStrategy: event.payload }
     case 'settings/sidebarDensityChanged':
       return { ...state, sidebarDensity: event.payload }
+    case 'settings/sidebarTabsExpansionChanged':
+      return { ...state, sidebarTabsExpansion: event.payload }
     case 'settings/sidebarDetailsChanged':
       return { ...state, sidebarDetails: event.payload }
     case 'settings/newWorktreeAdvancedOpenChanged':

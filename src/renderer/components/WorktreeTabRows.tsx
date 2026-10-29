@@ -7,13 +7,14 @@ import { AgentIcon } from './AgentIcon'
 
 interface WorktreeTabRowsProps {
   worktreePath: string
+  /** Focused tab when this is the active worktree, else null — only the
+   *  active worktree highlights a child row. */
   activeTabId: string | null
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
 }
 
-/** The active worktree's tabs as indented child rows inside its selection
- *  pill. Reads its own pane tree so other worktrees' tab churn doesn't
- *  re-render it. */
+/** A worktree's tabs as indented child rows under its sidebar row. Reads its
+ *  own pane tree so other worktrees' tab churn doesn't re-render it. */
 export const WorktreeTabRows = memo(function WorktreeTabRows({
   worktreePath,
   activeTabId,

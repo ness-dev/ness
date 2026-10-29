@@ -42,7 +42,8 @@ interface WorktreeListProps {
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
   onSelectWorktree: (path: string) => void
-  /** When provided, the active worktree lists its tabs as child rows. */
+  /** When provided, worktrees list their tabs as child rows, per the
+   *  sidebarTabsExpansion setting. */
   onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
   onToggleRepo: (repoRoot: string) => void
@@ -84,6 +85,7 @@ export function WorktreeList({
   const settings = useSettings()
   const density = settings.sidebarDensity
   const detailPrefs = settings.sidebarDetails[density]
+  const tabsExpansion = settings.sidebarTabsExpansion
   const metaHeld = useMetaHeld() && !touch
 
   const [continueTarget, setContinueTarget] = useState<{ path: string; oldBranch: string } | null>(
@@ -220,10 +222,12 @@ export function WorktreeList({
               onStartAliasEdit={onStartAliasEdit}
               onEndAliasEdit={onEndAliasEdit}
             />
-            {onSelectTab && !row.deleting && row.path === activeWorktreeId && (
+            {onSelectTab &&
+              !row.deleting &&
+              (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId)) && (
               <WorktreeTabRows
                 worktreePath={row.path}
-                activeTabId={activeTabId ?? null}
+                activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
                 onSelectTab={onSelectTab}
               />
             )}
