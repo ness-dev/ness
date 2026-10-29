@@ -164,11 +164,11 @@ export interface ControlServerDeps {
   /** Returns the caller's current scope, or null if the terminal is not
    * associated with any known worktree (e.g. the worktree was deleted). */
   resolveCallerScope: (terminalId: string) => CallerScope | null
-  /** Whether the caller has a conversation transcript that can be forked
-   * into a new worktree. For Chat tabs the terminal id IS the session id;
-   * for terminal tabs it isn't, so this is how `forkConversation` gets
+  /** Which agent the caller's conversation can be forked as, or null when
+   * it has nothing to fork. For Chat tabs the terminal id IS the session
+   * id; for terminal tabs it isn't, so this is how `forkConversation` gets
    * rejected before the worktree is created. */
-  hasForkableTranscript: (sessionId: string, worktreePath: string) => boolean
+  forkableConversationKind: (sessionId: string, worktreePath: string) => AgentKind | null
   /** Whether conversation forking is enabled in settings. Re-read per request
    * so a toggle takes effect without restarting the bridge. */
   getConversationForkEnabled: () => boolean
@@ -373,7 +373,7 @@ async function handleRequest(
       }
       if (agentKind !== undefined && !supportsConversationFork(agentKind)) {
         return sendJson(res, 400, {
-          error: `forkConversation is not supported for ${agentDisplayName(agentKind)} worktrees — only Claude Code can resume a forked transcript. Retry without forkConversation and describe the task in initialPrompt instead.`
+          error: `forkConversation is not supported for ${agentDisplayName(agentKind)} worktrees. Retry without forkConversation and describe the task in initialPrompt instead.`
         })
       }
       if (prNumber !== undefined) {
@@ -383,17 +383,23 @@ async function handleRequest(
         })
       }
       const { scope, terminalId } = resolveScope(req, deps)
-      if (!scope || !deps.hasForkableTranscript(terminalId, scope.worktreePath)) {
+      const sourceKind = scope ? deps.forkableConversationKind(terminalId, scope.worktreePath) : null
+      if (!scope || !sourceKind) {
         return sendJson(res, 400, {
           error:
             'forkConversation is only available from a Ness Chat tab that already has conversation history. Retry without forkConversation and describe the task in initialPrompt instead.'
         })
       }
+      if (agentKind !== undefined && agentKind !== sourceKind) {
+        return sendJson(res, 400, {
+          error: `forkConversation continues your own ${agentDisplayName(sourceKind)} conversation, so the new worktree must run ${agentDisplayName(sourceKind)} too. Omit agentKind, or retry without forkConversation.`
+        })
+      }
       forkSource = { sessionId: terminalId, worktreePath: scope.worktreePath }
       // Pin rather than leave undefined: an omitted agentKind falls back to
-      // the user's default agent, and a non-Claude default would drop the
-      // forked session id on the floor at spawn time.
-      agentKind = 'claude'
+      // the user's default agent, which might not be the one that owns
+      // the conversation.
+      agentKind = sourceKind
     }
 
     if (prNumber !== undefined) {

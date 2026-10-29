@@ -2130,8 +2130,8 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // there's no fork point to resolve and no assistant-message guard.
   const performForkIntoWorktree = useCallback(() => {
     setRewindMenu(null)
-    openForkIntoWorktree({ sessionId, worktreePath })
-  }, [sessionId, worktreePath])
+    openForkIntoWorktree({ sessionId, worktreePath, agentKind: session?.agentKind ?? 'claude' })
+  }, [sessionId, worktreePath, session?.agentKind])
   useEffect(() => {
     if (!rewindMenu) return
     const onAway = (): void => setRewindMenu(null)

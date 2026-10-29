@@ -445,6 +445,20 @@ describe('CodexChatProvider', () => {
     expect(forkSession.entries.map((e) => e.blocks?.[0]?.text)).toEqual(['one'])
   })
 
+  it('runs a prepared whole-thread fork in the new worktree at boot', async () => {
+    const { provider, opts, store, server } = setup({
+      'thread/fork': () => ({ thread: { id: 'thread-into-wt' }, model: 'gpt-test' })
+    })
+    provider.prepareFork('s1', { sourceThreadId: 'thread-source', model: 'gpt-test' })
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    const params = server.received.find((m) => m.method === 'thread/fork')?.params
+    expect(params).toMatchObject({ threadId: 'thread-source', cwd: process.cwd(), model: 'gpt-test' })
+    expect(params).not.toHaveProperty('lastTurnId')
+    expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-into-wt')
+    expect(store.getSnapshot().state.jsonClaude.sessions['s1'].state).toBe('running')
+  })
+
   it('refuses to fork a turn that is still running', async () => {
     const { provider, store, server } = setup()
     provider.create('s1', process.cwd(), 'default')

@@ -9,9 +9,9 @@ export interface AgentInfo {
    * discovers it from the first hook event. */
   assignsSessionId: boolean
   /** Whether a conversation can be forked INTO a new worktree running this
-   * agent. Requires a transcript format Ness can rewrite and a CLI flag
-   * to resume it by id — only Claude Code qualifies today. Agents that
-   * assign their own session ids can't be handed a pre-seeded one at all. */
+   * agent. Claude copies its transcript into the new worktree's project
+   * dir; Codex's new chat tab runs thread/fork on the source thread at
+   * boot. Either way the new worktree runs the same agent as the source. */
   supportsConversationFork: boolean
   /** Present when this agent can back a Chat tab. Absent means the agent
    *  only runs in Terminal tabs. */
@@ -63,7 +63,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
     displayName: 'Codex',
     vendor: 'OpenAI',
     assignsSessionId: false,
-    supportsConversationFork: false,
+    supportsConversationFork: true,
     chat: {
       rewind: true,
       fork: true,

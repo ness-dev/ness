@@ -52,6 +52,7 @@ const scope: CallerScope = {
 /** Mutable so a test can flip the setting off without restarting the server —
  * mirrors how the real dep re-reads config per request. */
 let conversationForkEnabled = true
+let callerForkKind: 'claude' | 'codex' = 'claude'
 let prReviewPrompt = ''
 
 const runPendingPR = vi.fn<
@@ -76,7 +77,7 @@ const deps: ControlServerDeps = {
   runPendingPRWorktree: (params) => runPendingPR(params),
   resolveCallerScope: (terminalId) =>
     terminalId === CALLER_TERMINAL || terminalId === NO_TRANSCRIPT_TERMINAL ? scope : null,
-  hasForkableTranscript: (sessionId) => sessionId === CALLER_TERMINAL,
+  forkableConversationKind: (sessionId) => (sessionId === CALLER_TERMINAL ? callerForkKind : null),
   getConversationForkEnabled: () => conversationForkEnabled,
   getBrowserPerms: () => ({ enabled: browserEnabled, mode: 'full' }),
   getWorktreeStatus: () => ({ status: 'no-pr', statusLabel: 'Active' }),
@@ -357,15 +358,36 @@ describe('control-server POST /worktrees forkConversation', () => {
     expect(r.json.error).toMatch(/cannot be combined with prNumber/)
   })
 
-  it('rejects forkConversation into an agent that cannot resume a transcript', async () => {
-    for (const agentKind of ['codex', 'cursor']) {
-      const r = await call('POST', '/worktrees', {
+  it('rejects forkConversation into an agent that cannot be forked into', async () => {
+    const r = await call('POST', '/worktrees', {
+      branchName: 'spinoff',
+      agentKind: 'cursor',
+      forkConversation: true
+    })
+    expect(r.status).toBe(400)
+    expect(r.json.error).toMatch(/not supported for Cursor Agent worktrees/)
+  })
+
+  it('rejects forking a conversation into a different agent than owns it', async () => {
+    const r = await call('POST', '/worktrees', {
+      branchName: 'spinoff',
+      agentKind: 'codex',
+      forkConversation: true
+    })
+    expect(r.status).toBe(400)
+    expect(r.json.error).toMatch(/must run Claude Code too/)
+
+    callerForkKind = 'codex'
+    try {
+      const r2 = await call('POST', '/worktrees', {
         branchName: 'spinoff',
-        agentKind,
+        agentKind: 'claude',
         forkConversation: true
       })
-      expect(r.status).toBe(400)
-      expect(r.json.error).toMatch(/only Claude Code can resume a forked transcript/)
+      expect(r2.status).toBe(400)
+      expect(r2.json.error).toMatch(/must run Codex too/)
+    } finally {
+      callerForkKind = 'claude'
     }
   })
 

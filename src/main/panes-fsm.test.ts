@@ -589,3 +589,31 @@ describe('PanesFSM.setTabProviderSessionId', () => {
     expect(persist).not.toHaveBeenCalled()
   })
 })
+
+describe('PanesFSM forked Codex conversations', () => {
+  it('opens a Codex fork in Chat even when Terminal is the default tab type', () => {
+    const store = new Store()
+    const startJsonClaudeWithPrompt = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      getDefaultClaudeTabType: () => 'xterm',
+      startJsonClaudeWithPrompt
+    })
+    const wtPath = '/tmp/codex-fork'
+    store.dispatch({
+      type: 'worktrees/listChanged',
+      payload: [
+        { path: wtPath, branch: 'spinoff', head: '', isBare: false, isMain: false, createdAt: 0, repoRoot: '/tmp/repo' }
+      ]
+    })
+
+    fsm.ensureInitialized(wtPath, { agentKind: 'codex', forkedSessionId: 'fork-1', initialPrompt: 'carry on' })
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    const chat = leaf.tabs.find((t) => t.type === 'json-claude')
+    expect(chat).toMatchObject({ id: 'fork-1', agentKind: 'codex' })
+    expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith('fork-1', wtPath, 'carry on')
+  })
+})

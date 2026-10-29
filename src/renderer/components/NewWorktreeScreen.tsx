@@ -406,9 +406,14 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
     setError(null)
     try {
       // Teleport mode always Claude — codex has no resume-by-session-id
-      // analog today. Same for a forked transcript: only Claude can resume one.
+      // analog today. A forked conversation can only continue as the agent
+      // that owns it (main pins this too).
       const effectiveAgent: AgentKind =
-        mode === 'teleport' || forkSource ? 'claude' : agentKindOverride
+        mode === 'teleport'
+          ? 'claude'
+          : forkSource
+            ? (forkSource.agentKind ?? 'claude')
+            : agentKindOverride
       // Existing tab: `git worktree add <dir> <branch>` (no `-b`) so git
       // checks out the already-existing local branch as-is. Ref tab: create
       // a new branch named `effectiveBranch` forked from `baseRef`.
@@ -957,7 +962,7 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
                     defaultCodexModel={settings.codexModel}
                     defaultCursorModel={settings.cursorModel}
                     disabled={footerBusy}
-                    forkLocked={forkSource !== undefined}
+                    forkLockedAgent={forkSource ? (forkSource.agentKind ?? 'claude') : undefined}
                     collapsible={false}
                   />
                 </div>
@@ -1323,9 +1328,9 @@ interface AgentModelRowProps {
   defaultCodexModel: string | null
   defaultCursorModel: string | null
   disabled: boolean
-  /** Pins the agent to Claude because the new worktree resumes a forked
-   *  transcript, which no other agent can pick up. */
-  forkLocked?: boolean
+  /** Pins the agent to the one that owns the forked conversation — no
+   *  other agent can pick it up. Undefined when not forking. */
+  forkLockedAgent?: AgentKind
   /** Whether to render its own "Advanced" disclosure. False when an outer
    *  disclosure already owns the collapse (the fresh-start flow), so the
    *  user doesn't have to open two nested Advanced sections. */
@@ -1342,11 +1347,11 @@ function AgentModelRow({
   defaultCodexModel,
   defaultCursorModel,
   disabled,
-  forkLocked,
+  forkLockedAgent,
   collapsible = true
 }: AgentModelRowProps): JSX.Element {
-  const locked = mode === 'teleport' || forkLocked === true
-  const effectiveAgent = locked ? 'claude' : agentKind
+  const locked = mode === 'teleport' || forkLockedAgent !== undefined
+  const effectiveAgent = forkLockedAgent ?? (locked ? 'claude' : agentKind)
   const modelOptions =
     effectiveAgent === 'codex'
       ? CODEX_MODELS
@@ -1416,8 +1421,8 @@ function AgentModelRow({
               onChange={(e) => handleAgentChange(e.target.value as AgentKind)}
               disabled={disabled || locked}
               title={
-                forkLocked
-                  ? 'Forked conversations can only be resumed by Claude'
+                forkLockedAgent
+                  ? `A forked conversation continues with ${agentLabel}, the agent that owns it`
                   : locked
                     ? 'Teleport sessions require Claude'
                     : undefined

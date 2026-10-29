@@ -1,3 +1,5 @@
+import type { AgentKind } from './terminals'
+
 export interface Worktree {
   path: string
   branch: string
@@ -128,12 +130,16 @@ export interface PendingWorktree {
   forkSource?: ForkSource
 }
 
-/** An existing Claude conversation the new worktree's first agent tab
- *  should resume, instead of starting empty. The transcript is copied
- *  into the new worktree's project dir at creation time. */
+/** An existing conversation the new worktree's first agent tab should
+ *  continue, instead of starting empty. For Claude the transcript is copied
+ *  into the new worktree's project dir at creation time; for Codex the new
+ *  tab forks the source thread when it boots. Main resolves the source's
+ *  agent from the session itself — `agentKind` here only tells the New
+ *  Worktree screen which agent to lock to. */
 export interface ForkSource {
   sessionId: string
   worktreePath: string
+  agentKind?: AgentKind
 }
 
 export type PendingDeletionPhase =

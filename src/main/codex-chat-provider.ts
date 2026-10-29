@@ -139,7 +139,8 @@ interface CodexInstance {
 
 interface PendingFork {
   sourceThreadId: string
-  lastTurnId: string
+  /** Fork through this turn; omitted copies the whole conversation. */
+  lastTurnId?: string
   model: string | null
 }
 
@@ -343,6 +344,14 @@ export class CodexChatProvider implements ChatProvider {
     }
   }
 
+  /** Queue a fork of `sourceThreadId` for the chat session `newSessionId`,
+   *  which runs it in its own app-server when it boots — wherever that
+   *  session's worktree is. Used for forking a conversation into a new
+   *  worktree, where the source tab may not even be running. */
+  prepareFork(newSessionId: string, fork: PendingFork): void {
+    this.pendingForks.set(newSessionId, fork)
+  }
+
   forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome {
     const inst = this.instances.get(sourceSessionId)
     if (!inst?.ready || !inst.threadId) return { ok: false, reason: 'session is not running' }
@@ -404,7 +413,7 @@ export class CodexChatProvider implements ChatProvider {
           // config.toml — so pass it explicitly.
           resp = await inst.client.request<CodexThreadResponse>('thread/fork', {
             threadId: fork.sourceThreadId,
-            lastTurnId: fork.lastTurnId,
+            ...(fork.lastTurnId ? { lastTurnId: fork.lastTurnId } : {}),
             excludeTurns: true,
             ...threadParams,
             ...(fork.model ? { model: fork.model } : {})
