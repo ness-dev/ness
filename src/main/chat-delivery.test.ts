@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 import {
+  deliverToTab,
   deliverToWorktreeChat,
   describeWorktree,
   resolveWorktreeQuery,
@@ -240,5 +241,66 @@ describe('deliverToWorktreeChat', () => {
     )
     expect(result).toEqual({ ok: false, reason: 'wake-failed' })
     expect(send).not.toHaveBeenCalled()
+  })
+})
+
+describe('deliverToTab', () => {
+  it('sends to a live chat session without waking it', () => {
+    const state = makeState({ sessions: { s1: session(A, 1) }, panes: { [A]: panes([{ id: 's1' }]) } })
+    const d = deps(['s1'])
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: true, tabId: 's1', woke: false })
+    expect(d.send).toHaveBeenCalledWith('s1', 'hi')
+    expect(d.wake).not.toHaveBeenCalled()
+  })
+
+  it('does not send to a live session that belongs to another worktree', () => {
+    const state = makeState({ sessions: { s1: session(B, 1) }, panes: { [B]: panes([{ id: 's1' }]) } })
+    const d = deps(['s1'])
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'no-tab' })
+    expect(d.send).not.toHaveBeenCalled()
+  })
+
+  it('wakes the named tab even when another chat tab is live', () => {
+    const state = makeState({
+      sessions: { live: session(A, 5) },
+      panes: { [A]: panes([{ id: 'live' }, { id: 'slept', mode: 'asleep' }]) }
+    })
+    const d = deps(['live'])
+    expect(deliverToTab(state, d, A, 'slept', 'hi')).toEqual({ ok: true, tabId: 'slept', woke: true })
+    expect(d.wake).toHaveBeenCalledWith(A, 'slept')
+    expect(d.send).toHaveBeenCalledWith('slept', 'hi')
+  })
+
+  it('refuses an awake tab whose subprocess is gone rather than racing the renderer respawn', () => {
+    const state = makeState({ panes: { [A]: panes([{ id: 's1' }]) } })
+    const d = deps()
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'unavailable' })
+    expect(d.wake).not.toHaveBeenCalled()
+  })
+
+  it('reports terminal agent tabs as unsupported and other tabs as not agents', () => {
+    const tree: PaneNode = {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [
+        { id: 't1', type: 'agent', label: 'Claude' },
+        { id: 'sh', type: 'shell', label: 'zsh' }
+      ],
+      activeTabId: 't1'
+    }
+    const state = makeState({ panes: { [A]: tree } })
+    expect(deliverToTab(state, deps(), A, 't1', 'hi')).toEqual({
+      ok: false,
+      reason: 'terminal-unsupported'
+    })
+    expect(deliverToTab(state, deps(), A, 'sh', 'hi')).toEqual({ ok: false, reason: 'not-agent-tab' })
+    expect(deliverToTab(state, deps(), A, 'nope', 'hi')).toEqual({ ok: false, reason: 'no-tab' })
+  })
+
+  it('reports a failed wake', () => {
+    const state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    const d = { ...deps(), wake: vi.fn(), hasSession: () => false }
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'wake-failed' })
+    expect(d.send).not.toHaveBeenCalled()
   })
 })

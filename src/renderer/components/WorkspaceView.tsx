@@ -50,7 +50,7 @@ interface WorkspaceViewProps {
   onRestartAgentTab: (worktreePath: string, tabId: string) => void
   onReorderTabs: (worktreePath: string, paneId: string, fromId: string, toId: string) => void
   onMoveTabToPane: (worktreePath: string, tabId: string, toPaneId: string, toIndex?: number) => void
-  onSendToAgent?: (worktreePath: string, text: string) => void
+  onSendToAgent?: (worktreePath: string, text: string, targetTabId?: string) => void
   /** Leading padding for the leftmost leaf's tab bar so it clears the macOS
    *  traffic lights when no sidebar sits to the left of the workspace. */
   topBarLeadingPx?: number
@@ -603,7 +603,7 @@ function WorkspaceViewInner({
                     toCommit={tab.reviewToCommit}
                     onSendToAgent={
                       onSendToAgent
-                        ? (text) => onSendToAgent(worktreePath, text)
+                        ? (text, targetTabId) => onSendToAgent(worktreePath, text, targetTabId)
                         : undefined
                     }
                   />

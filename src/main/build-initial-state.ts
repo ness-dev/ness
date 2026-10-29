@@ -107,7 +107,20 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
   const out: ReviewsState['byPath'] = {}
   for (const [path, entry] of Object.entries(raw as Record<string, unknown>)) {
     const comments = (entry as { comments?: unknown } | null)?.comments
+    const rawSubmissions = (entry as { submissions?: unknown } | null)?.submissions
     if (!Array.isArray(comments)) continue
+    const submissions = Array.isArray(rawSubmissions)
+      ? rawSubmissions.filter(
+          (s) =>
+            s &&
+            typeof s === 'object' &&
+            typeof s.id === 'string' &&
+            typeof s.summary === 'string' &&
+            Array.isArray(s.commentIds) &&
+            (s.state === 'draft' || s.state === 'sent' || s.state === 'failed') &&
+            (s.verdict === 'approve' || s.verdict === 'changes-requested' || s.verdict === 'comment')
+        )
+      : []
     const valid = comments.filter(
       (c) =>
         c &&
@@ -118,7 +131,8 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
         c.anchor &&
         typeof c.anchor.snippet === 'string'
     )
-    if (valid.length > 0) out[path] = { comments: valid }
+    if (submissions.length > 0) out[path] = { comments: valid, submissions }
+    else if (valid.length > 0) out[path] = { comments: valid }
   }
   return out
 }
@@ -265,6 +279,7 @@ export function buildInitialAppState(
       preventSleepMode: PREVENT_SLEEP_MODES.includes(config.preventSleepMode as PreventSleepMode)
         ? (config.preventSleepMode as PreventSleepMode)
         : 'off',
+      agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
       // The temporary "+1h" timer never survives a relaunch — always seed null.
       preventSleepUntil: null,
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),

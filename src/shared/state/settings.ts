@@ -251,6 +251,11 @@ export const DEFAULT_PR_REVIEW_PROMPT =
  *  timer overlay covers the "also keep awake right now" case. */
 export type PreventSleepMode = 'off' | 'while-agents-running' | 'always'
 
+/** What happens when an agent submits a review: hold it as a draft in the
+ *  Review tab until a human sends it, or deliver it to the author tab
+ *  straight away. Human-sent reviews always go immediately. */
+export type AgentReviewDelivery = 'draft' | 'auto'
+
 /** Stable keys for each icon in the sidebar's bottom launcher strip. New
  *  entries can be added at the end; renaming an existing key would strand
  *  existing users' pinned/unpinned choices, so avoid it. The `settings` and
@@ -474,6 +479,8 @@ export interface SettingsState {
    *  lives in the main-process WakeLockController — never in the store.
    *  Default 'off'. */
   preventSleepMode: PreventSleepMode
+  /** Default 'draft'. See AgentReviewDelivery. */
+  agentReviewDelivery: AgentReviewDelivery
   /** Epoch-ms deadline for the temporary "keep awake for the next hour"
    *  overlay, or null when no timer is running. Shared world state (a
    *  second client sees the countdown) but deliberately NOT persisted to
@@ -566,6 +573,7 @@ export type SettingsEvent =
   | { type: 'settings/announcementsMutedChanged'; payload: boolean }
   | { type: 'settings/showAssignedPRsChanged'; payload: boolean }
   | { type: 'settings/preventSleepModeChanged'; payload: PreventSleepMode }
+  | { type: 'settings/agentReviewDeliveryChanged'; payload: AgentReviewDelivery }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
@@ -643,6 +651,7 @@ export const initialSettings: SettingsState = {
   announcementsMuted: false,
   showAssignedPRs: false,
   preventSleepMode: 'off',
+  agentReviewDelivery: 'draft',
   preventSleepUntil: null,
   hiddenBottomIcons: {},
   bottomIconOrder: [...BOTTOM_ICON_KEYS]
@@ -836,6 +845,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/agentReviewDeliveryChanged':
+      return state.agentReviewDelivery === event.payload
+        ? state
+        : { ...state, agentReviewDelivery: event.payload }
     case 'settings/preventSleepUntilChanged':
       return { ...state, preventSleepUntil: event.payload }
     case 'settings/hiddenBottomIconsChanged':

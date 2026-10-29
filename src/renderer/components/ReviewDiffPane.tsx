@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as monaco from 'monaco-editor'
-import { ArrowRightFromLine, Check, ChevronRight, RotateCcw, WrapText, X } from 'lucide-react'
+import { ArrowRightFromLine, Bot, Check, ChevronRight, Pencil, RotateCcw, WrapText, X } from 'lucide-react'
 import type { FileDiffSides, ChangedFile, ReviewComment, ReviewCommentStatus } from '../types'
 import { placeComment, splitLines } from '../../shared/review-anchor'
-import { reviewAuthorLabel } from '../review-format'
+import { reviewAuthorLabel } from '../../shared/review-format'
 import { MonacoDiffEditor } from './MonacoDiffEditor'
 import { Tooltip } from './Tooltip'
 import { useSettings } from '../store'
@@ -27,6 +27,7 @@ interface ReviewDiffPaneProps {
   onAddComment: (lineNumber: number, body: string) => Promise<string | null>
   onDeleteComment: (id: string) => void
   onSetCommentStatus: (id: string, status: ReviewCommentStatus) => void
+  onEditComment: (id: string, body: string) => void
   wordWrap: boolean
   onWordWrapChange: (next: boolean) => void
 }
@@ -78,20 +79,39 @@ function zoneHeightInLines(comment: ReviewComment): number {
   return Math.max(2, Math.min(20, lines + 1))
 }
 
+function AuthorLabel({ author }: { author: ReviewComment['author'] }): JSX.Element {
+  if (author.kind === 'human') return <>{reviewAuthorLabel(author)}</>
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-accent)' }}
+    >
+      <Bot className="icon-xs" />
+      {reviewAuthorLabel(author)}
+    </span>
+  )
+}
+
 function InlineComment({
   comment,
   location,
   onDelete,
-  onSetStatus
+  onSetStatus,
+  onEdit
 }: {
   comment: ReviewComment
   /** Shown when the comment isn't drawn on its line, e.g. "L42". */
   location?: string
   onDelete: () => void
   onSetStatus: (status: ReviewCommentStatus) => void
+  onEdit: (body: string) => void
 }): JSX.Element {
   const accent = STATUS_ACCENT[comment.status]
   const muted = comment.status !== 'open'
+  const [draft, setDraft] = useState<string | null>(null)
+  const saveEdit = (): void => {
+    if (draft !== null && draft.trim() && draft.trim() !== comment.body) onEdit(draft.trim())
+    setDraft(null)
+  }
   return (
     <div
       style={{
@@ -108,21 +128,65 @@ function InlineComment({
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
         <span style={{ flexShrink: 0, color: 'var(--color-faint)' }}>
-          {reviewAuthorLabel(comment.author)}
+          <AuthorLabel author={comment.author} />
           {location && <span style={{ fontFamily: 'monospace' }}> · {location}</span>}
           {comment.status === 'resolved' && ' · Resolved'}
           {comment.status === 'outdated' && ' · Outdated'}
         </span>
-        <span
-          style={{
-            flex: 1,
-            color: 'var(--color-fg)',
-            whiteSpace: 'pre-wrap',
-            textDecoration: comment.status === 'outdated' ? 'line-through' : undefined
-          }}
-        >
-          {comment.body}
-        </span>
+        {draft !== null ? (
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={saveEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                saveEdit()
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setDraft(null)
+              }
+              e.stopPropagation()
+            }}
+            rows={Math.max(1, countLines(draft))}
+            style={{
+              flex: 1,
+              background: 'var(--color-surface)',
+              color: 'var(--color-fg)',
+              fontSize: '0.75rem',
+              borderRadius: '0.25rem',
+              border: '1px solid var(--color-border)',
+              padding: '0 0.25rem',
+              resize: 'none',
+              outline: 'none',
+              fontFamily: 'inherit'
+            }}
+          />
+        ) : (
+          <span
+            style={{
+              flex: 1,
+              color: 'var(--color-fg)',
+              whiteSpace: 'pre-wrap',
+              textDecoration: comment.status === 'outdated' ? 'line-through' : undefined
+            }}
+          >
+            {comment.body}
+          </span>
+        )}
+        {draft === null && (
+          <button
+            onClick={() => setDraft(comment.body)}
+            aria-label="Edit comment"
+            style={actionButtonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-fg)')}
+            onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
+          >
+            <Pencil className="icon-xs" />
+          </button>
+        )}
         {comment.status === 'resolved' ? (
           <button
             onClick={() => onSetStatus('open')}
@@ -159,7 +223,7 @@ function InlineComment({
       {comment.replies?.map((r) => (
         <div key={r.id} style={{ display: 'flex', gap: '0.5rem', paddingLeft: '1rem' }}>
           <span style={{ flexShrink: 0, color: 'var(--color-faint)' }}>
-            ↳ {reviewAuthorLabel(r.author)}
+            ↳ <AuthorLabel author={r.author} />
           </span>
           <span style={{ flex: 1, color: 'var(--color-fg)', whiteSpace: 'pre-wrap' }}>{r.body}</span>
         </div>
@@ -308,6 +372,7 @@ export function ReviewDiffPane({
   onAddComment,
   onDeleteComment,
   onSetCommentStatus,
+  onEditComment,
   wordWrap,
   onWordWrapChange
 }: ReviewDiffPaneProps): JSX.Element {
@@ -440,6 +505,7 @@ export function ReviewDiffPane({
               comment={c}
               onDelete={() => onDeleteComment(c.id)}
               onSetStatus={(status) => onSetCommentStatus(c.id, status)}
+              onEdit={(body) => onEditComment(c.id, body)}
             />
           )
         } else {
@@ -474,7 +540,7 @@ export function ReviewDiffPane({
       for (const z of entries) z.root.unmount()
       viewZonesRef.current = []
     }
-  }, [editor, placed, commentLine, onAddComment, onDeleteComment, onSetCommentStatus])
+  }, [editor, placed, commentLine, onAddComment, onDeleteComment, onSetCommentStatus, onEditComment])
 
   const handleReferenceLine = useCallback((lineNumber: number) => {
     setCommentLine(lineNumber)
@@ -567,6 +633,7 @@ export function ReviewDiffPane({
                   location={c.side === 'old' ? `L${c.line} (old)` : `L${c.line}`}
                   onDelete={() => onDeleteComment(c.id)}
                   onSetStatus={(status) => onSetCommentStatus(c.id, status)}
+                  onEdit={(body) => onEditComment(c.id, body)}
                 />
               ))}
             </div>

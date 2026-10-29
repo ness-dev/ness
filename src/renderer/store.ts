@@ -35,7 +35,12 @@ import {
 } from '../shared/state'
 import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
-import { EMPTY_REVIEW_COMMENTS, type ReviewComment } from '../shared/state/reviews'
+import {
+  EMPTY_REVIEW_COMMENTS,
+  EMPTY_REVIEW_SUBMISSIONS,
+  type ReviewComment,
+  type ReviewSubmission
+} from '../shared/state/reviews'
 import type { LocalTransportHandle, BackendConnection } from './types'
 import type { BootstrapProgress, SshBootstrapState } from '../shared/state/ssh-bootstrap'
 import {
@@ -838,6 +843,15 @@ export function useReviewComments(worktreePath: string | null): ReviewComment[] 
     worktreePath
       ? s.reviews.byPath[worktreePath]?.comments ?? EMPTY_REVIEW_COMMENTS
       : EMPTY_REVIEW_COMMENTS
+  )
+}
+
+/** Submitted reviews for one worktree, oldest first. */
+export function useReviewSubmissions(worktreePath: string | null): ReviewSubmission[] {
+  return useAppState((s) =>
+    worktreePath
+      ? s.reviews.byPath[worktreePath]?.submissions ?? EMPTY_REVIEW_SUBMISSIONS
+      : EMPTY_REVIEW_SUBMISSIONS
   )
 }
 

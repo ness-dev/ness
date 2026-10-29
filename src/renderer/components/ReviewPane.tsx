@@ -6,8 +6,9 @@ import { ReviewDiffPane } from './ReviewDiffPane'
 import { ResizeHandle } from './ResizeHandle'
 import { Tooltip } from './Tooltip'
 import { useBackend } from '../backend'
-import { useReviewComments } from '../store'
-import { formatReviewComments } from '../review-format'
+import { useReviewComments, useReviewSubmissions } from '../store'
+import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
+import { formatReviewComments } from '../../shared/review-format'
 import { setReviewProgress, clearReviewProgress } from '../review-progress'
 
 interface ReviewPaneProps {
@@ -17,7 +18,7 @@ interface ReviewPaneProps {
   fromCommit?: string
   /** Tip commit of the selection (newest selected). Undefined ⇒ "All commits". */
   toCommit?: string
-  onSendToAgent?: (text: string) => void
+  onSendToAgent?: (text: string, targetTabId?: string) => void
 }
 
 export function ReviewPane({
@@ -33,6 +34,7 @@ export function ReviewPane({
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set())
   const comments = useReviewComments(worktreePath)
+  const submissions = useReviewSubmissions(worktreePath)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   const [fileTreeWidth, setFileTreeWidth] = useState<number>(240)
   // Hoisted above ReviewDiffPane so the choice persists as the reviewer
@@ -168,6 +170,13 @@ export function ReviewPane({
     [backend, worktreePath]
   )
 
+  const handleEditComment = useCallback(
+    (id: string, body: string) => {
+      void backend.editReviewComment(worktreePath, id, body)
+    },
+    [backend, worktreePath]
+  )
+
   const handleSetCommentStatus = useCallback(
     (id: string, status: ReviewCommentStatus) => {
       void backend.setReviewCommentStatus(worktreePath, id, status)
@@ -203,11 +212,14 @@ export function ReviewPane({
     })
   }, [])
 
-  const handleSendToAgent = useCallback(() => {
-    const text = formatComments()
-    if (!text || !onSendToAgent) return
-    onSendToAgent(text + '\n')
-  }, [formatComments, onSendToAgent])
+  const handleSendToAgent = useCallback(
+    (targetTabId: string) => {
+      const text = formatComments()
+      if (!text || !onSendToAgent) return
+      onSendToAgent(text + '\n', targetTabId)
+    },
+    [formatComments, onSendToAgent]
+  )
 
   const handleCopyComments = useCallback(() => {
     const text = formatComments()
@@ -326,16 +338,15 @@ export function ReviewPane({
               </button>
             </Tooltip>
 
-            <Tooltip label="Send open comments to the active agent terminal">
-              <button
-                onClick={handleSendToAgent}
-                disabled={openCount === 0 || !onSendToAgent}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
-              >
-                <Send className="icon-xs" />
-                Send to Agent
-              </button>
-            </Tooltip>
+            <AgentTabPicker
+              worktreePath={worktreePath}
+              disabled={openCount === 0 || !onSendToAgent}
+              onPick={handleSendToAgent}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+            >
+              <Send className="icon-xs" />
+              Send to Agent
+            </AgentTabPicker>
           </div>
         </div>
 
@@ -348,6 +359,8 @@ export function ReviewPane({
           />
         </div>
       </div>
+
+      <ReviewSubmissionsPanel worktreePath={worktreePath} submissions={submissions} />
 
       <div className="flex flex-1 min-h-0">
         {/* File tree */}
@@ -389,6 +402,7 @@ export function ReviewPane({
             onAddComment={handleAddComment}
             onDeleteComment={handleDeleteComment}
             onSetCommentStatus={handleSetCommentStatus}
+            onEditComment={handleEditComment}
             wordWrap={wordWrap}
             onWordWrapChange={setWordWrap}
           />

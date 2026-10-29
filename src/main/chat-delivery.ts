@@ -1,5 +1,5 @@
 import type { AppState } from '../shared/state'
-import { getLeaves } from '../shared/state/terminals'
+import { getLeaves, type TerminalTab } from '../shared/state/terminals'
 import { worktreeHandle } from '../shared/state/worktrees'
 
 export interface ChatDeliveryDeps {
@@ -109,6 +109,74 @@ export function describeWorktree(state: AppState, worktreePath: string): string 
   return wt?.branch || worktreePath
 }
 
+export type TabDeliveryFailure =
+  | 'no-tab'
+  | 'not-agent-tab'
+  | 'terminal-unsupported'
+  | 'unavailable'
+  | 'wake-failed'
+
+export type TabDeliveryResult =
+  | { ok: true; tabId: string; woke: boolean }
+  | { ok: false; reason: TabDeliveryFailure }
+
+function findTab(state: AppState, worktreePath: string, tabId: string): TerminalTab | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    const tab = leaf.tabs.find((t) => t.id === tabId)
+    if (tab) return tab
+  }
+  return null
+}
+
+/** Deliver a message into one specific agent tab, waking it if it's
+ *  asleep. A json-claude tab's id is its session id. Terminal agent tabs
+ *  can't receive yet — that needs either a channel into the running CLI
+ *  or a typed paste gated on its hook status.
+ *
+ *  Same cost caveat as deliverToWorktreeChat: waking spawns a subprocess,
+ *  so never call this from inside a store listener. */
+export function deliverToTab(
+  state: AppState,
+  deps: ChatDeliveryDeps,
+  worktreePath: string,
+  tabId: string,
+  message: string
+): TabDeliveryResult {
+  if (deps.hasSession(tabId) && state.jsonClaude.sessions[tabId]?.worktreePath === worktreePath) {
+    deps.send(tabId, message)
+    return { ok: true, tabId, woke: false }
+  }
+  const tab = findTab(state, worktreePath, tabId)
+  if (!tab) return { ok: false, reason: 'no-tab' }
+  if (tab.type === 'agent') return { ok: false, reason: 'terminal-unsupported' }
+  if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
+  // Awake with no subprocess means the renderer is (re)spawning it on
+  // focus; waking here too would double-spawn. See pickSleptTab.
+  if ((tab.mode ?? 'awake') !== 'asleep') return { ok: false, reason: 'unavailable' }
+  deps.wake(worktreePath, tabId)
+  if (!deps.hasSession(tabId)) return { ok: false, reason: 'wake-failed' }
+  deps.send(tabId, message)
+  return { ok: true, tabId, woke: true }
+}
+
+/** Human-readable reason, phrased for an agent or a toast. */
+export function describeTabDeliveryFailure(reason: TabDeliveryFailure): string {
+  switch (reason) {
+    case 'no-tab':
+      return 'that tab no longer exists in this worktree'
+    case 'not-agent-tab':
+      return 'that tab is not an agent tab'
+    case 'terminal-unsupported':
+      return 'delivery to terminal agent tabs is not supported yet — only Chat tabs can receive it'
+    case 'unavailable':
+      return "that Chat tab's agent isn't running — open the tab in Ness and retry"
+    case 'wake-failed':
+      return 'failed to wake that Chat tab'
+  }
+}
+
 /** Route a message to a worktree's agent chat, waking a slept tab if that's
  *  what it takes. Every persisted json-claude tab hydrates as 'asleep' at
  *  app launch and the auto-sleep monitor puts idle ones back to sleep, so
@@ -124,16 +192,10 @@ export function deliverToWorktreeChat(
   worktreePath: string,
   message: string
 ): ChatDeliveryResult {
-  const live = pickLiveSession(state, deps, worktreePath)
-  if (live) {
-    deps.send(live, message)
-    return { ok: true, sessionId: live, woke: false }
-  }
-  const slept = pickSleptTab(state, worktreePath)
+  const tabId = pickLiveSession(state, deps, worktreePath) ?? pickSleptTab(state, worktreePath)
   // No chat tab at all — a terminal-only worktree.
-  if (!slept) return { ok: false, reason: 'no-chat-tab' }
-  deps.wake(worktreePath, slept)
-  if (!deps.hasSession(slept)) return { ok: false, reason: 'wake-failed' }
-  deps.send(slept, message)
-  return { ok: true, sessionId: slept, woke: true }
+  if (!tabId) return { ok: false, reason: 'no-chat-tab' }
+  const result = deliverToTab(state, deps, worktreePath, tabId, message)
+  if (!result.ok) return { ok: false, reason: 'wake-failed' }
+  return { ok: true, sessionId: tabId, woke: result.woke }
 }

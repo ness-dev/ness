@@ -38,7 +38,7 @@ import type {
   LocalTransportHandle,
   StateEventListener
 } from '../shared/transport/transport'
-import type { ElectronAPI, AgentKind, ReviewCommentStatus } from './types'
+import type { ElectronAPI, AgentKind, ReviewCommentStatus, ReviewVerdict } from './types'
 import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
@@ -46,6 +46,7 @@ import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 import type {
   SidebarDetailPrefsByMode,
   PreventSleepMode,
+  AgentReviewDelivery,
   HiddenBottomIcons,
   BottomIconKey
 } from '../shared/state/settings'
@@ -311,6 +312,8 @@ export function buildBackend(
     setAutoSleepMinutes: (value: number) => req('config:setAutoSleepMinutes', value),
     setPreventSleepMode: (value: PreventSleepMode) =>
       req('config:setPreventSleepMode', value),
+    setAgentReviewDelivery: (value: AgentReviewDelivery) =>
+      req('config:setAgentReviewDelivery', value),
     setPreventSleepUntil: (value: number | null) =>
       req('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => req('config:setAutoUpdateEnabled', enabled),
@@ -473,6 +476,19 @@ export function buildBackend(
       req('reviews:addReply', worktreePath, commentId, body),
     refreshReviewAnchors: (worktreePath: string, filePath?: string) =>
       req('reviews:refreshAnchors', worktreePath, filePath),
+    editReviewComment: (worktreePath: string, id: string, body: string) =>
+      req('reviews:editComment', worktreePath, id, body),
+    listReviewTargets: (worktreePath: string) => req('reviews:listAgentTabs', worktreePath),
+    editReviewSubmission: (
+      worktreePath: string,
+      id: string,
+      summary: string,
+      verdict: ReviewVerdict
+    ) => req('reviews:editSubmission', worktreePath, id, summary, verdict),
+    deleteReviewSubmission: (worktreePath: string, id: string) =>
+      req('reviews:deleteSubmission', worktreePath, id),
+    sendReviewSubmission: (worktreePath: string, id: string, targetTabId?: string) =>
+      req('reviews:sendSubmission', worktreePath, id, targetTabId),
 
     openInEditor: (worktreePath: string, filePath?: string) =>
       req('editor:open', worktreePath, filePath),

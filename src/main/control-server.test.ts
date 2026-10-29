@@ -5,7 +5,9 @@ import {
   type ControlServerDeps,
   type CallerScope
 } from './control-server'
-import type { ChatDeliveryResult } from './chat-delivery'
+import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
+import type { AgentTabInfo } from '../shared/agent-tabs'
+import type { ReviewComment } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 
@@ -33,6 +35,72 @@ const sendMessage = vi.fn<(worktreePath: string, message: string) => ChatDeliver
   () => ({ ok: true, sessionId: 'tab-1', woke: false })
 )
 let messagingEnabled = true
+const sendToTab = vi.fn<
+  (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
+>((_wt, tabId) => ({ ok: true, tabId, woke: false }))
+
+function agentTab(id: string, label: string, kind: 'chat' | 'terminal'): AgentTabInfo {
+  return { id, label, kind, agentKind: 'claude', lastActiveAt: 0, asleep: false }
+}
+const AUTHOR_TAB = 'author-tab'
+const tabsByWorktree: Record<string, AgentTabInfo[]> = {}
+
+function reviewComment(over: Partial<ReviewComment> = {}): ReviewComment {
+  return {
+    id: 'c1',
+    filePath: 'src/a.ts',
+    side: 'new',
+    line: 4,
+    anchoredSha: 'sha',
+    anchor: { commitSha: 'sha', line: 4, snippet: 'x' },
+    author: { kind: 'agent', tabId: 'terminal-abc', label: 'Reviewer' },
+    status: 'open',
+    body: 'nit',
+    createdAt: 0,
+    ...over
+  }
+}
+const reviews = {
+  list: vi.fn<ControlServerDeps['reviews']['list']>(async () => [
+    reviewComment({
+      replies: [{ id: 'r1', author: { kind: 'human' }, body: 'agreed', createdAt: 1 }]
+    })
+  ]),
+  addComment: vi.fn<ControlServerDeps['reviews']['addComment']>(async (_wt, tabId, input) =>
+    input.line > 100
+      ? { error: 'line 101 is out of range' }
+      : reviewComment({
+          filePath: input.filePath,
+          line: input.line,
+          author: { kind: 'agent', tabId, label: 'Reviewer' }
+        })
+  ),
+  reply: vi.fn<ControlServerDeps['reviews']['reply']>((_wt, tabId, commentId, body) =>
+    commentId === 'c1'
+      ? {
+          comment: reviewComment({
+            replies: [{ id: 'r', author: { kind: 'agent', tabId }, body, createdAt: 1 }]
+          })
+        }
+      : { error: 'no review comment' }
+  ),
+  setResolved: vi.fn<ControlServerDeps['reviews']['setResolved']>((_wt, _id, resolved) => ({
+    comment: reviewComment({ status: resolved ? 'resolved' : 'open' })
+  })),
+  submit: vi.fn<ControlServerDeps['reviews']['submit']>((_wt, tabId, input) => ({
+    submission: {
+      id: 'sub-1',
+      author: { kind: 'agent', tabId },
+      verdict: input.verdict,
+      summary: input.summary,
+      commentIds: ['c1'],
+      createdAt: 0,
+      state: 'draft',
+      targetTabId: input.targetTabId ?? AUTHOR_TAB
+    },
+    delivery: null
+  }))
+}
 
 const CALLER_TERMINAL = 'terminal-abc'
 const CALLER_WORKTREE = '/repo/wt/callers-tree'
@@ -121,10 +189,20 @@ const deps: ControlServerDeps = {
       return { error: `no worktree matching "${query}"` }
     },
     describe: (path) => (path === CALLER_WORKTREE ? 'Callers Tree' : 'Other Tree'),
-    send: (path, message) => sendMessage(path, message)
+    send: (path, message) => sendMessage(path, message),
+    sendToTab: (path, tabId, message) => sendToTab(path, tabId, message)
   },
+  reviews,
+  listAgentTabs: (path) => tabsByWorktree[path] ?? [],
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
 }
+
+
+tabsByWorktree[CALLER_WORKTREE] = [
+  agentTab(CALLER_TERMINAL, 'Reviewer', 'terminal'),
+  agentTab(AUTHOR_TAB, 'Chat', 'chat')
+]
+tabsByWorktree[EXPLICIT_WORKTREE] = [agentTab('other-chat', 'Chat', 'chat')]
 
 let baseUrl: string
 let token: string
@@ -553,6 +631,157 @@ describe('control-server /messages endpoint', () => {
       'POST',
       '/messages',
       { worktree: EXPLICIT_WORKTREE, message: 'hi' },
+      { terminalId: 'unknown-terminal' }
+    )
+    expect(r.status).toBe(404)
+  })
+})
+
+describe('control-server /messages with a tab', () => {
+  it('delivers to another tab in your own worktree and names the sending tab', async () => {
+    sendToTab.mockClear()
+    const r = await call('POST', '/messages', { tab: AUTHOR_TAB, message: 'over to you' })
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({
+      delivered: true,
+      worktreePath: CALLER_WORKTREE,
+      tab: AUTHOR_TAB,
+      from: 'Callers Tree · Reviewer'
+    })
+    const [path, tab, wire] = sendToTab.mock.calls[0]
+    expect([path, tab]).toEqual([CALLER_WORKTREE, AUTHOR_TAB])
+    expect(parseAutomatedMessage(wire)?.from).toBe('Callers Tree · Reviewer')
+  })
+
+  it('rejects your own tab and tabs outside the target worktree', async () => {
+    sendToTab.mockClear()
+    const own = await call('POST', '/messages', { tab: CALLER_TERMINAL, message: 'hi' })
+    expect(own.status).toBe(400)
+    expect(own.json.error).toMatch(/your own tab/)
+    const wrong = await call('POST', '/messages', {
+      worktree: EXPLICIT_WORKTREE,
+      tab: AUTHOR_TAB,
+      message: 'hi'
+    })
+    expect(wrong.status).toBe(404)
+    expect(sendToTab).not.toHaveBeenCalled()
+  })
+
+  it('reports why a tab could not receive the message', async () => {
+    sendToTab.mockReturnValueOnce({ ok: false, reason: 'terminal-unsupported' })
+    const r = await call('POST', '/messages', { tab: AUTHOR_TAB, message: 'hi' })
+    expect(r.status).toBe(409)
+    expect(r.json.error).toMatch(/terminal agent tabs is not supported yet/)
+  })
+})
+
+describe('control-server /tabs endpoint', () => {
+  it("lists the caller's worktree tabs and flags the caller", async () => {
+    const r = await get('/tabs')
+    expect(r.status).toBe(200)
+    expect(r.json.worktreePath).toBe(CALLER_WORKTREE)
+    expect(r.json.tabs).toEqual([
+      expect.objectContaining({ id: CALLER_TERMINAL, self: true }),
+      expect.not.objectContaining({ self: true })
+    ])
+  })
+
+  it('lists another worktree by handle', async () => {
+    const r = await get('/tabs?worktree=' + encodeURIComponent('Other Tree'))
+    expect(r.json).toMatchObject({ worktreePath: EXPLICIT_WORKTREE, tabs: [{ id: 'other-chat' }] })
+  })
+})
+
+describe('control-server /reviews endpoints', () => {
+  it('lists comments flat, marking the caller’s own and naming the human', async () => {
+    const r = await get('/reviews/comments?status=open&file=src%2Fa.ts')
+    expect(r.status).toBe(200)
+    expect(reviews.list).toHaveBeenLastCalledWith(CALLER_WORKTREE, {
+      status: 'open',
+      file: 'src/a.ts'
+    })
+    expect(r.json.comments).toEqual([
+      {
+        id: 'c1',
+        file: 'src/a.ts',
+        line: 4,
+        side: 'new',
+        status: 'open',
+        author: 'Reviewer',
+        authorTab: CALLER_TERMINAL,
+        mine: true,
+        body: 'nit',
+        replies: [{ id: 'r1', author: 'User', body: 'agreed' }]
+      }
+    ])
+    expect((await get('/reviews/comments?status=bogus')).status).toBe(400)
+  })
+
+  it('adds a comment authored by the calling tab, ignoring any author in the body', async () => {
+    const r = await call('POST', '/reviews/comments', {
+      file: './src/a.ts',
+      line: 7,
+      body: 'why?',
+      author: { kind: 'human' }
+    })
+    expect(r.status).toBe(200)
+    expect(reviews.addComment).toHaveBeenLastCalledWith(CALLER_WORKTREE, CALLER_TERMINAL, {
+      filePath: 'src/a.ts',
+      line: 7,
+      side: 'new',
+      body: 'why?'
+    })
+    expect(r.json.comment).toMatchObject({ mine: true, line: 7 })
+  })
+
+  it('validates add_review_comment input and passes range errors through', async () => {
+    expect((await call('POST', '/reviews/comments', { file: 'a', line: 0, body: 'x' })).status).toBe(400)
+    expect(
+      (await call('POST', '/reviews/comments', { file: 'a', line: 1, side: 'left', body: 'x' })).status
+    ).toBe(400)
+    expect((await call('POST', '/reviews/comments', { file: 'a', line: 1, body: ' ' })).status).toBe(400)
+    const r = await call('POST', '/reviews/comments', { file: 'a', line: 101, body: 'x' })
+    expect(r.status).toBe(422)
+    expect(r.json.error).toMatch(/out of range/)
+  })
+
+  it('replies and resolves as the calling tab', async () => {
+    const reply = await call('POST', '/reviews/replies', { commentId: 'c1', body: 'fixed' })
+    expect(reply.status).toBe(200)
+    expect(reviews.reply).toHaveBeenLastCalledWith(CALLER_WORKTREE, CALLER_TERMINAL, 'c1', 'fixed')
+    expect((await call('POST', '/reviews/replies', { commentId: 'zz', body: 'x' })).status).toBe(404)
+    const resolved = await call('POST', '/reviews/resolve', { commentId: 'c1', resolved: true })
+    expect(resolved.json.comment).toMatchObject({ status: 'resolved' })
+    const reopened = await call('POST', '/reviews/resolve', { commentId: 'c1', resolved: false })
+    expect(reopened.json.comment).toMatchObject({ status: 'open' })
+  })
+
+  it('submits a review and reports where it is going', async () => {
+    const r = await call('POST', '/reviews/submit', {
+      verdict: 'changes-requested',
+      summary: 'two issues'
+    })
+    expect(r.status).toBe(200)
+    expect(reviews.submit).toHaveBeenLastCalledWith(CALLER_WORKTREE, CALLER_TERMINAL, {
+      verdict: 'changes-requested',
+      summary: 'two issues',
+      targetTabId: undefined
+    })
+    expect(r.json).toMatchObject({
+      id: 'sub-1',
+      state: 'draft',
+      commentCount: 1,
+      targetTabId: AUTHOR_TAB,
+      delivery: null
+    })
+    expect((await call('POST', '/reviews/submit', { verdict: 'lgtm' })).status).toBe(400)
+  })
+
+  it('requires a scoped caller', async () => {
+    const r = await call(
+      'POST',
+      '/reviews/submit',
+      { verdict: 'approve' },
       { terminalId: 'unknown-terminal' }
     )
     expect(r.status).toBe(404)
