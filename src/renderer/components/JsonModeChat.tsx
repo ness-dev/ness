@@ -60,6 +60,7 @@ import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
 import {
   CLAUDE_MODELS,
+  type ModelOption,
   agentDisplayName,
   getChatCapabilities,
   supportsConversationFork
@@ -345,9 +346,9 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 // its behavior without stepping on any harvested entry.
 const MODEL_COMMAND_NAME = 'model'
 
-function claudeModelDisplayName(id: string | undefined): string {
+function modelDisplayName(options: readonly ModelOption[], id: string | undefined): string {
   if (!id) return ''
-  return CLAUDE_MODELS.find((m) => m.id === id)?.displayName ?? id
+  return options.find((m) => m.id === id)?.displayName ?? id
 }
 
 function formatTokenCount(n: number): string {
@@ -2220,7 +2221,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   }
 
   const slashTrigger = useMemo(() => {
-    if (!chatCaps.slashCommands) return null
+    if (!chatCaps.slashCommands && !chatCaps.modelPicker) return null
     if (session?.state === 'exited') return null
     const trig = findTrigger(draft, cursorPos, '/')
     if (!trig) return null
@@ -2230,7 +2231,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // literal slashes followed by punctuation without it lingering.
     if (!/^[a-zA-Z0-9:-]*$/.test(trig.query)) return null
     return trig
-  }, [draft, cursorPos, session?.state, chatCaps.slashCommands])
+  }, [draft, cursorPos, session?.state, chatCaps.slashCommands, chatCaps.modelPicker])
 
   const mentionTrigger = useMemo<{ start: number; query: string } | null>(() => {
     if (session?.state === 'exited') return null
@@ -2242,20 +2243,30 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // inserted `/model ` this dedicated detector takes over and drives
   // the model picker off whatever the user types next.
   const modelPickerTrigger = useMemo<{ query: string } | null>(() => {
-    if (!chatCaps.slashCommands) return null
+    if (!chatCaps.modelPicker) return null
     if (session?.state === 'exited') return null
     const m = draft.match(/^\/model(?:\s+([\s\S]*))?$/)
     if (!m) return null
     return { query: m[1] ?? '' }
-  }, [draft, session?.state, chatCaps.slashCommands])
+  }, [draft, session?.state, chatCaps.modelPicker])
 
+  // A provider that can list its models (Codex, per signed-in account)
+  // puts them on the session; Claude's picker keeps the static catalog.
+  const sessionModels = session?.availableModels
+  const modelOptions = useMemo<readonly ModelOption[]>(
+    () =>
+      sessionModels
+        ? sessionModels.map((m) => ({ id: m.id, displayName: m.displayName, tier: 'current' as const }))
+        : CLAUDE_MODELS,
+    [sessionModels]
+  )
   const modelIdToDisplay = useMemo(() => {
     const map = new Map<string, string>()
-    for (const m of CLAUDE_MODELS) map.set(m.id, m.displayName)
+    for (const m of modelOptions) map.set(m.id, m.displayName)
     return map
-  }, [])
+  }, [modelOptions])
 
-  const currentModelDisplay = claudeModelDisplayName(session?.currentModel)
+  const currentModelDisplay = modelDisplayName(modelOptions, session?.currentModel)
 
   // Gated on the setting that grants the agent send_message in the first
   // place — tagging a worktree it has no tool to reach is a dead end.
@@ -2285,7 +2296,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
         icon: <Sparkles className="icon-xs" />
       }
       const q = modelPickerTrigger.query.trim().toLowerCase()
-      const searchTargets = CLAUDE_MODELS.map((m) => ({
+      const searchTargets = modelOptions.map((m) => ({
         id: m.id,
         // Fuzzy against "Display Name (id)" so both a friendly typo
         // like "opus47" and an id like "claude-opus-4-7" both hit.
@@ -2326,10 +2337,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
       // list as the CLI-harvested commands. It's client-side only —
       // stream-json mode never advertises /model itself. Dedupe in case
       // the CLI ever starts advertising it.
-      const harvested = (session?.slashCommands ?? []).filter(
-        (n) => n !== MODEL_COMMAND_NAME
-      )
-      const all = [MODEL_COMMAND_NAME, ...harvested]
+      const harvested = chatCaps.slashCommands
+        ? (session?.slashCommands ?? []).filter((n) => n !== MODEL_COMMAND_NAME)
+        : []
+      const all = chatCaps.modelPicker ? [MODEL_COMMAND_NAME, ...harvested] : harvested
       const ranked =
         q.length === 0
           ? all.map((name) => ({ name, indices: undefined as number[] | undefined }))
@@ -2384,7 +2395,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     session?.slashCommands,
     session?.currentModel,
     currentModelDisplay,
-    modelIdToDisplay
+    modelIdToDisplay,
+    modelOptions,
+    chatCaps.slashCommands,
+    chatCaps.modelPicker
   ])
 
   // Clamp the selection index when the item list shrinks (e.g. the user
@@ -2571,7 +2585,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // to the requested model (empty = clear override). This catches
     // Cmd+Enter bypass of the popover, or any dismissed-popover path
     // that lands here with a literal `/model …` draft.
-    const modelMatch = text.match(/^\/model(?:\s+([\s\S]+))?$/)
+    const modelMatch = chatCaps.modelPicker ? text.match(/^\/model(?:\s+([\s\S]+))?$/) : null
     if (modelMatch) {
       const arg = (modelMatch[1] ?? '').trim()
       void backend.setJsonClaudeTabModel(sessionId, arg).catch(() => {

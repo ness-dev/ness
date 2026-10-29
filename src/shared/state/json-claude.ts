@@ -391,6 +391,10 @@ export interface JsonClaudeSession {
    *  show the effective model even when no `--model` was passed and the
    *  CLI fell back to its own default. Empty until init lands. */
   currentModel?: string
+  /** Models this session's agent offers, when its provider can list them
+   *  (Codex's model/list depends on the signed-in account). Absent for
+   *  Claude, whose picker uses the static CLAUDE_MODELS list. */
+  availableModels?: Array<{ id: string; displayName: string }>
   /** Audit map of tool calls that were auto-approved by the LLM-based
    *  reviewer (instead of going through the user UI). Keyed by toolUseId
    *  so the per-tool card can render a small "auto-approved" badge.
@@ -575,6 +579,10 @@ export type JsonClaudeEvent =
   | {
       type: 'jsonClaude/currentModelChanged'
       payload: { sessionId: string; model: string }
+    }
+  | {
+      type: 'jsonClaude/availableModelsChanged'
+      payload: { sessionId: string; models: Array<{ id: string; displayName: string }> }
     }
   | {
       type: 'jsonClaude/historyPendingChanged'
@@ -810,6 +818,7 @@ export function jsonClaudeReducer(
             ...(existing?.currentModel !== undefined
               ? { currentModel: existing.currentModel }
               : {}),
+            ...(existing?.availableModels ? { availableModels: existing.availableModels } : {}),
             autoApprovedDecisions: existing?.autoApprovedDecisions ?? {},
             sessionToolApprovals: existing?.sessionToolApprovals ?? [],
             sessionAllowedDecisions: existing?.sessionAllowedDecisions ?? {},
@@ -1120,6 +1129,17 @@ export function jsonClaudeReducer(
             ...session,
             slashCommands: event.payload.slashCommands
           }
+        }
+      }
+    }
+    case 'jsonClaude/availableModelsChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: { ...session, availableModels: event.payload.models }
         }
       }
     }

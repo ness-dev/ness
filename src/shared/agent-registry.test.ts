@@ -128,6 +128,7 @@ describe('chat capabilities', () => {
       fork: true,
       permissionModes: true,
       slashCommands: true,
+      modelPicker: true,
       approvalDenyReason: true,
       approvalEditInput: true
     })
@@ -145,6 +146,7 @@ describe('chat capabilities', () => {
       fork: true,
       permissionModes: false,
       slashCommands: false,
+      modelPicker: true,
       approvalDenyReason: false,
       approvalEditInput: false
     })

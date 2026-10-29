@@ -355,6 +355,7 @@ export class CodexChatProvider implements ChatProvider {
         capabilities: { experimentalApi: true }
       })
       inst.client.notify('initialized')
+      void this.publishModels(inst)
 
       const model = this.opts.getModel(modelOverride)
       const mcpServers = this.opts.getMcpServers?.(sessionId) ?? {}
@@ -448,6 +449,26 @@ export class CodexChatProvider implements ChatProvider {
         /* ignore */
       }
       this.failToStart(sessionId, reason)
+    }
+  }
+
+  /** The models this account can use, for the chat's /model picker. Best
+   *  effort — a failure just leaves the picker without a Codex list. */
+  private async publishModels(inst: CodexInstance): Promise<void> {
+    try {
+      const resp = await inst.client.request<{
+        data: Array<{ id: string; displayName?: string; hidden?: boolean }>
+      }>('model/list', {})
+      if (this.instances.get(inst.sessionId) !== inst) return
+      const models = resp.data
+        .filter((m) => !m.hidden)
+        .map((m) => ({ id: m.id, displayName: m.displayName || m.id }))
+      this.store.dispatch({
+        type: 'jsonClaude/availableModelsChanged',
+        payload: { sessionId: inst.sessionId, models }
+      })
+    } catch (err) {
+      log('codex-chat', `model/list failed sessionId=${inst.sessionId}`, err instanceof Error ? err.message : String(err))
     }
   }
 

@@ -72,6 +72,12 @@ function setup(handlers: Record<string, (params: Record<string, unknown>) => unk
     'thread/resume': (p) => ({ thread: { id: p.threadId }, model: 'gpt-test' }),
     'turn/start': () => ({ turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } }),
     'thread/turns/list': () => ({ data: [], nextCursor: null }),
+    'model/list': () => ({
+      data: [
+        { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', hidden: false },
+        { id: 'secret-model', displayName: 'Secret', hidden: true }
+      ]
+    }),
     ...handlers
   })
   const opts: CodexChatProviderOptions = {
@@ -103,11 +109,13 @@ describe('CodexChatProvider', () => {
     expect(server.received.map((m) => m.method).filter(Boolean)).toEqual([
       'initialize',
       'initialized',
+      'model/list',
       'thread/start'
     ])
     expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-new')
     expect(session().state).toBe('running')
     expect(session().currentModel).toBe('gpt-test')
+    expect(session().availableModels).toEqual([{ id: 'gpt-6-luna', displayName: 'GPT-6 Luna' }])
     expect(session().historyPending).toBeUndefined()
   })
 

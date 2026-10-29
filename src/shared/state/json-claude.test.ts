@@ -52,6 +52,18 @@ describe('jsonClaudeReducer', () => {
     expect(state.sessions[SID].agentKind).toBe('codex')
   })
 
+  it('availableModelsChanged stores the list and survives a re-attach', () => {
+    let state = seedSession(initialJsonClaude)
+    const models = [{ id: 'gpt-6-luna', displayName: 'GPT-6 Luna' }]
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/availableModelsChanged',
+      payload: { sessionId: SID, models }
+    })
+    expect(state.sessions[SID].availableModels).toEqual(models)
+    state = seedSession(state)
+    expect(state.sessions[SID].availableModels).toEqual(models)
+  })
+
   it('historyPendingChanged sets and clears the flag, and no-ops when unchanged', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {

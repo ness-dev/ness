@@ -28,8 +28,11 @@ export interface ChatCapabilities {
   fork: boolean
   /** Claude's permission-mode cycle (default / acceptEdits / plan / auto). */
   permissionModes: boolean
-  /** Agent-advertised slash commands, including the synthetic `/model`. */
+  /** Agent-advertised slash commands. */
   slashCommands: boolean
+  /** The synthetic `/model` picker. Its list comes from the session's
+   *  `availableModels` when the provider reports one, else CLAUDE_MODELS. */
+  modelPicker: boolean
   /** A deny can carry a note the agent reads. Codex's approval reply is a
    *  bare decision, so the approval card hides the note there. */
   approvalDenyReason: boolean
@@ -50,6 +53,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
       fork: true,
       permissionModes: true,
       slashCommands: true,
+      modelPicker: true,
       approvalDenyReason: true,
       approvalEditInput: true
     }
@@ -65,6 +69,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
       fork: true,
       permissionModes: false,
       slashCommands: false,
+      modelPicker: true,
       approvalDenyReason: false,
       approvalEditInput: false
     }
@@ -197,6 +202,7 @@ const NO_CHAT_CAPABILITIES: ChatCapabilities = {
   fork: false,
   permissionModes: false,
   slashCommands: false,
+  modelPicker: false,
   approvalDenyReason: false,
   approvalEditInput: false
 }
