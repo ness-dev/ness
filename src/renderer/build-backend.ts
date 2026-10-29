@@ -428,6 +428,8 @@ export function buildBackend(
       req('config:setMergeStrategy', strategy),
     setSidebarDensity: (density: 'compact' | 'comfy') =>
       req('config:setSidebarDensity', density),
+    setSidebarTabsExpansion: (mode: 'never' | 'selected' | 'all') =>
+      req('config:setSidebarTabsExpansion', mode),
     setSidebarDetails: (prefs: SidebarDetailPrefsByMode) =>
       req('config:setSidebarDetails', prefs),
     setHiddenBottomIcons: (hidden: HiddenBottomIcons) =>

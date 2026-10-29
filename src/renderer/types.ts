@@ -19,7 +19,7 @@ export type { SessionCostSummary, ClaudeAuthInfo, SubscriptionTier }
 import type { AddRepoResult } from '../shared/repo-pick'
 export type { AddRepoResult }
 
-import type { PreventSleepMode } from '../shared/state/settings'
+import type { PreventSleepMode, SidebarTabsExpansion } from '../shared/state/settings'
 export type { PreventSleepMode }
 
 /** Per-kind dirtiness flags for a worktree. `git` reflects
@@ -451,6 +451,7 @@ export interface ElectronAPI {
   setWorktreeBase(mode: 'remote' | 'local'): Promise<boolean>
   setMergeStrategy(strategy: MergeStrategy): Promise<boolean>
   setSidebarDensity(density: SidebarDensity): Promise<boolean>
+  setSidebarTabsExpansion(mode: SidebarTabsExpansion): Promise<boolean>
   setSidebarDetails(prefs: SidebarDetailPrefsByMode): Promise<boolean>
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>

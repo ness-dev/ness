@@ -13,12 +13,14 @@ import { BottomIconStrip } from './BottomIconStrip'
 interface SidebarProps {
   model: WorktreeListModel
   activeWorktreeId: string | null
+  activeTabId: string | null
   snoozeDefaultDays?: number
   prLoading: boolean
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
   /** Non-main worktrees. Used to decide whether to show the "spawn your first agent" nudge. */
   agentCount: number
   onSelectWorktree: (path: string) => void
+  onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
   onContinueWorktree: (worktreePath: string, newBranchName: string) => Promise<void>
@@ -50,11 +52,13 @@ interface SidebarProps {
 export function Sidebar({
   model,
   activeWorktreeId,
+  activeTabId,
   snoozeDefaultDays,
   prLoading,
   onOpenAssignedPR,
   agentCount,
   onSelectWorktree,
+  onSelectTab,
   onDismissPendingWorktree,
   onNewWorktree,
   onContinueWorktree,
@@ -139,12 +143,14 @@ export function Sidebar({
           model={model}
           variant="desktop"
           activeWorktreeId={activeWorktreeId}
+          activeTabId={activeTabId}
           snoozeDefaultDays={snoozeDefaultDays}
           agentCount={agentCount}
           editingAliasPath={editingAliasPath}
           onStartAliasEdit={onStartAliasEdit}
           onEndAliasEdit={onEndAliasEdit}
           onSelectWorktree={onSelectWorktree}
+          onSelectTab={onSelectTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}
           onNewWorktree={onNewWorktree}

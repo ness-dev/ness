@@ -723,6 +723,13 @@ export function usePanes() {
   return useAppState((s) => s.terminals.panes)
 }
 
+/** One worktree's pane tree. Per-id so a tab change in one worktree doesn't
+ *  re-render every sidebar row (CLAUDE.md anti-pattern #4) — the reducer
+ *  keeps untouched worktrees' trees reference-stable. */
+export function useWorktreePanes(worktreePath: string) {
+  return useAppState((s) => s.terminals.panes[worktreePath] ?? null)
+}
+
 export function useLastActive() {
   return useAppState((s) => s.terminals.lastActive)
 }

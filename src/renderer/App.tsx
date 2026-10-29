@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
 import { useAppState, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
 import { useBackend } from './backend'
@@ -118,6 +118,21 @@ function DesktopApp(): JSX.Element {
   // Initial focus = first worktree in the already-hydrated store.
   const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(
     () => worktrees[0]?.path ?? null
+  )
+  // Switching worktrees re-renders the newly shown workspace and right
+  // column, which can take a few frames. The sidebar reads this optimistic
+  // copy so its highlight moves on the first frame, while the real switch
+  // renders in a transition behind it.
+  const [sidebarActiveId, setSidebarActiveId] = useOptimistic(activeWorktreeId)
+  const switchWorktree = useCallback(
+    (path: string, alsoInTransition?: () => void) => {
+      startTransition(() => {
+        setSidebarActiveId(path)
+        setActiveWorktreeId(path)
+        alsoInTransition?.()
+      })
+    },
+    [setSidebarActiveId]
   )
   const activeAlias = useAliasForPath(activeWorktreeId)
   useEffect(() => {
@@ -746,6 +761,49 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // defeats WorkspaceView's memo before it can compare anything else.
   const handleFocusPane = useCallback((wtPath: string, paneId: string) => {
     setActivePaneId((prev) => (prev[wtPath] === paneId ? prev : { ...prev, [wtPath]: paneId }))
+  }, [])
+
+  const handleSidebarSelectWorktree = useCallback(
+    (path: string) => {
+      switchWorktree(path, () => {
+        setShowNewWorktree(false)
+        setShowActivity(false)
+        setShowCleanup(false)
+        setShowCommandCenter(false)
+      })
+    },
+    [switchWorktree]
+  )
+
+  const handleSidebarSelectTab = useCallback(
+    (wtPath: string, paneId: string, tabId: string) => {
+      handleSidebarSelectWorktree(wtPath)
+      startTransition(() => handleSelectTab(wtPath, paneId, tabId))
+    },
+    [handleSidebarSelectWorktree, handleSelectTab]
+  )
+
+  const handleEndAliasEdit = useCallback(() => setEditingAliasPath(null), [])
+
+  // Hoisted for RightColumn's memo, so the sidebar's optimistic highlight
+  // render doesn't re-render the whole right column with unchanged data.
+  const handleOpenGithubSettings = useCallback(() => {
+    setSettingsInitialSection('github')
+    setShowSettings(true)
+  }, [])
+  const handleOpenActivePR = useCallback(
+    (url: string) => {
+      if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
+    },
+    [activeWorktreeId, handleOpenPR]
+  )
+  const handleOpenActiveReview = useCallback(() => {
+    if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
+  }, [activeWorktreeId])
+  const handleCollapseRightColumn = useCallback(() => setRightColumnHidden(true), [])
+  const handleBuildCustomTool = useCallback((branch: string, prompt: string) => {
+    setNewWorktreePrefill({ branch, prompt })
+    setShowNewWorktree(true)
   }, [])
 
   const effectiveDefaultAgent = defaultAgent ?? 'claude'
@@ -1521,18 +1579,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
         {!singleScreenMode && sidebarVisible && (
           <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: effectiveSidebarWidth }}><div className="drag-region h-10 shrink-0 flex items-stretch border-b border-border-strong bg-panel titlebar-lead"><AppTitleSegment fillParent /></div><div className="flex-1 min-h-0 flex"><Sidebar
             model={worktreeListModel}
-            activeWorktreeId={activeWorktreeId}
+            activeWorktreeId={sidebarActiveId}
+            activeTabId={sidebarActiveId ? (activeTabId[sidebarActiveId] ?? null) : null}
             snoozeDefaultDays={settings.snoozeDefaultDays}
             prLoading={prLoading}
             onOpenAssignedPR={handleOpenAssignedPR}
             agentCount={agentWorktreeCount}
-            onSelectWorktree={(path) => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(false)
-              setActiveWorktreeId(path)
-            }}
+            onSelectWorktree={handleSidebarSelectWorktree}
+            onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {
               setNewWorktreeRepo(repoRoot)
@@ -1566,7 +1620,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onCollapseSidebar={() => setSidebarVisible(false)}
             editingAliasPath={editingAliasPath}
             onStartAliasEdit={setEditingAliasPath}
-            onEndAliasEdit={() => setEditingAliasPath(null)}
+            onEndAliasEdit={handleEndAliasEdit}
           /></div></div>
         )}
         {!singleScreenMode && !sidebarVisible && (
@@ -1791,27 +1845,17 @@ const setQuestStep = useCallback((next: QuestStep) => {
             hasGithubToken={hasGithubToken}
             activeRepoConfig={activeRepoConfig}
             onRefreshPRs={fetchAllPRStatuses}
-            onOpenGithubSettings={() => {
-              setSettingsInitialSection('github')
-              setShowSettings(true)
-            }}
+            onOpenGithubSettings={handleOpenGithubSettings}
             onMerged={refreshMergedStatus}
             onRemoveWorktree={handleDeleteWorktree}
             onOpenDiff={handleOpenDiff}
             onOpenCommitFileDiff={handleOpenCommitFileDiff}
             onOpenFile={handleOpenFile}
             onSendToAgent={handleSendToAgent}
-            onOpenPR={(url) => {
-              if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
-            }}
-            onOpenReview={() => {
-              if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
-            }}
-            onCollapse={() => setRightColumnHidden(true)}
-            onBuildCustomTool={(branch, prompt) => {
-              setNewWorktreePrefill({ branch, prompt })
-              setShowNewWorktree(true)
-            }}
+            onOpenPR={handleOpenActivePR}
+            onOpenReview={handleOpenActiveReview}
+            onCollapse={handleCollapseRightColumn}
+            onBuildCustomTool={handleBuildCustomTool}
           /></div></div>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (

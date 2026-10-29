@@ -422,6 +422,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     mergeStrategy,
     sidebarDensity,
     sidebarDetails,
+    sidebarTabsExpansion,
     hasGithubToken: settingsHasToken,
     githubAuthSource: authSource,
     harnessStarred,
@@ -2026,6 +2027,56 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     </div>
                   </label>
                 ))}
+              </div>
+
+              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Worktree tabs in the sidebar</h3>
+              <p className="text-xs text-dim mb-3">
+                List each worktree's tabs underneath it, with their status.
+                Click one to jump straight to that tab.
+              </p>
+              <div className="space-y-2">
+                {(
+                  [
+                    {
+                      id: 'never' as const,
+                      label: 'Never expanded',
+                      description: 'Rows show only the worktree'
+                    },
+                    {
+                      id: 'selected' as const,
+                      label: 'Only the selected is expanded',
+                      description: 'The selected worktree lists its tabs'
+                    },
+                    {
+                      id: 'all' as const,
+                      label: 'Expand all',
+                      description: 'Every worktree lists its tabs'
+                    }
+                  ]
+                ).map((opt) => {
+                  const isActive = sidebarTabsExpansion === opt.id
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => void backend.setSidebarTabsExpansion(opt.id)}
+                      className={`w-full text-left rounded border px-3 py-2 transition-colors cursor-pointer ${
+                        isActive
+                          ? 'border-accent bg-panel-raised'
+                          : 'border-border hover:border-border-strong'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-3 h-3 rounded-full border ${
+                            isActive ? 'border-accent bg-accent' : 'border-border-strong'
+                          }`}
+                        />
+                        <span className="text-sm text-fg-bright">{opt.label}</span>
+                      </div>
+                      <p className="text-xs text-dim mt-1 ml-5">{opt.description}</p>
+                    </button>
+                  )
+                })}
               </div>
 
             </section>

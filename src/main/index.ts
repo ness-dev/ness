@@ -79,6 +79,7 @@ import {
   DEFAULT_WORKTREE_BASE,
   DEFAULT_MERGE_STRATEGY,
   DEFAULT_SIDEBAR_DENSITY,
+  DEFAULT_SIDEBAR_TABS_EXPANSION,
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
   pruneTerminalHistory,
@@ -3109,6 +3110,21 @@ function registerIpcHandlers(): void {
       }
       saveConfig(config)
       store.dispatch({ type: 'settings/sidebarDensityChanged', payload: density })
+      return true
+    }
+  )
+
+  transport.onRequest(
+    'config:setSidebarTabsExpansion',
+    (_ctx, mode: 'never' | 'selected' | 'all') => {
+      if (mode !== 'never' && mode !== 'selected' && mode !== 'all') return false
+      if (mode === DEFAULT_SIDEBAR_TABS_EXPANSION) {
+        delete config.sidebarTabsExpansion
+      } else {
+        config.sidebarTabsExpansion = mode
+      }
+      saveConfig(config)
+      store.dispatch({ type: 'settings/sidebarTabsExpansionChanged', payload: mode })
       return true
     }
   )

@@ -150,6 +150,9 @@ export interface Config {
   // detail cluster on a second line; 'compact' folds it onto the right of
   // a single line.
   sidebarDensity?: 'compact' | 'comfy'
+  // Which sidebar worktree rows list their tabs underneath. Missing =
+  // DEFAULT_SIDEBAR_TABS_EXPANSION.
+  sidebarTabsExpansion?: 'never' | 'selected' | 'all'
   // Per-density detail-item toggles for the sidebar row. Compact and
   // comfy have independent toggle sets. Missing keys/modes fall back to
   // DEFAULT_SIDEBAR_DETAILS.
@@ -384,6 +387,7 @@ export interface Config {
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'
 export const DEFAULT_MERGE_STRATEGY: 'squash' | 'merge-commit' | 'fast-forward' = 'squash'
 export const DEFAULT_SIDEBAR_DENSITY: 'compact' | 'comfy' = 'comfy'
+export const DEFAULT_SIDEBAR_TABS_EXPANSION: 'never' | 'selected' | 'all' = 'selected'
 
 export const AVAILABLE_THEMES = [
   'dark',
