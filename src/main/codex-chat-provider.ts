@@ -401,7 +401,12 @@ export class CodexChatProvider implements ChatProvider {
         sandbox: SANDBOX,
         ...(model ? { model } : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
-        ...(Object.keys(mcpServers).length > 0 ? { config: { mcp_servers: mcpServers } } : {})
+        config: {
+          // Codex's plan tool is off in app-server unless asked for; its
+          // turn/plan/updated events feed the todos panel.
+          tools: { update_plan: { enabled: true } },
+          ...(Object.keys(mcpServers).length > 0 ? { mcp_servers: mcpServers } : {})
+        }
       }
       let resp: CodexThreadResponse | null = null
       let forked = false

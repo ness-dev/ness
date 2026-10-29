@@ -162,6 +162,12 @@ const BUILTIN_ICONS: Record<string, ToolIcon> = {
   ReadMcpResourceTool: McpResourceIcon
 }
 
+/** Built-ins whose wire name isn't what the user should read. */
+const BUILTIN_LABELS: Record<string, string> = {
+  // Codex's file edits (see the Codex chat provider's fileChange mapping).
+  ApplyPatch: 'Edit'
+}
+
 interface McpBrand {
   label: string
   icon: ToolIcon
@@ -319,7 +325,8 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
 
   const parsed = parseMcpToolName(name)
   if (!parsed) {
-    return { label: name, compactLabel: name, icon: BUILTIN_ICONS[name] ?? null }
+    const label = BUILTIN_LABELS[name] ?? name
+    return { label, compactLabel: label, icon: BUILTIN_ICONS[name] ?? null }
   }
 
   const normalized = normalizeServerName(parsed.server)

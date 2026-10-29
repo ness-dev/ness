@@ -251,12 +251,14 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
               </div>
             )}
 
-            <div
-              className="text-xs text-faint italic"
-              title="The total is exact — it comes off the last turn's usage record. The category split is anchored to the measured token delta between turns and divided within each turn by char proportion."
-            >
-              total is exact, split is estimated
-            </div>
+            {breakdown.length > 0 && (
+              <div
+                className="text-xs text-faint italic"
+                title="The total is exact — it comes off the last turn's usage record. The category split is anchored to the measured token delta between turns and divided within each turn by char proportion."
+              >
+                total is exact, split is estimated
+              </div>
+            )}
           </div>
         </>
       )}

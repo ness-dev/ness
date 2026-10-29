@@ -252,7 +252,10 @@ describe('CodexChatProvider', () => {
     await settle()
     expect(server.received.find((m) => m.method === 'thread/start')?.params).toMatchObject({
       developerInstructions: 'You are running inside Ness.',
-      config: { mcp_servers: { 'ness-control': { command: '/bin/node', args: ['bridge.js'] } } }
+      config: {
+        tools: { update_plan: { enabled: true } },
+        mcp_servers: { 'ness-control': { command: '/bin/node', args: ['bridge.js'] } }
+      }
     })
   })
 
