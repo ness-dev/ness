@@ -647,6 +647,10 @@ export function buildBackend(
         interrupt?: boolean
       }
     ) => req('jsonClaude:resolveApproval', requestId, result),
+    resolveCopyDraft: (
+      id: string,
+      outcome: { kind: 'submitted'; text: string; note?: string } | { kind: 'dismissed'; note?: string }
+    ) => req('copyDrafts:resolve', id, outcome),
     rerunJsonClaudeAutoApprovalReview: (requestId: string) =>
       req('jsonClaude:rerunAutoApprovalReview', requestId),
     startJsonClaude: (id: string, cwd: string) => req('jsonClaude:start', id, cwd),

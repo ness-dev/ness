@@ -658,6 +658,15 @@ export interface ElectronAPI {
     }
   ): Promise<boolean>
   rerunJsonClaudeAutoApprovalReview(requestId: string): Promise<boolean>
+
+  /** Answer an agent's `edit_copy` call. False when the draft is already
+   *  gone (answered elsewhere, or the agent stopped waiting). */
+  resolveCopyDraft(
+    id: string,
+    outcome:
+      | { kind: 'submitted'; text: string; note?: string }
+      | { kind: 'dismissed'; note?: string }
+  ): Promise<boolean>
   startJsonClaude(id: string, cwd: string): Promise<boolean>
   sendJsonClaudeMessage(
     id: string,

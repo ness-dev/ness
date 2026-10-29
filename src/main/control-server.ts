@@ -10,6 +10,7 @@ import { normalizeViewport, type BrowserViewport } from '../shared/browser-viewp
 import type { PRStatus } from '../shared/state/prs'
 import type { ChatDeliveryResult } from './chat-delivery'
 import type { CaptureResult } from './browser-manager-types'
+import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
@@ -120,6 +121,11 @@ export interface MessagingQueries {
   send: (worktreePath: string, message: string) => ChatDeliveryResult
 }
 
+export interface CopyDraftQueries {
+  request: (input: CopyDraftInput) => { id: string; result: Promise<CopyDraftOutcome> }
+  cancel: (id: string) => void
+}
+
 /** Scope derived from the caller's terminal id on every request. The
  * source of truth — env vars injected into the MCP bridge can go stale
  * (teleport sessions, deleted worktrees), so each tool call re-resolves. */
@@ -180,6 +186,7 @@ export interface ControlServerDeps {
   browser: BrowserQueries
   shell: ShellQueries
   messaging: MessagingQueries
+  copyDrafts: CopyDraftQueries
   /** Trim + 80-char clamp + dispatch. Matches the aliases:set IPC handler.
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
@@ -880,6 +887,45 @@ async function handleRequest(
       from,
       woke: result.woke
     })
+  }
+
+  // edit_copy — hand a draft to the human and hold this response open until
+  // they submit or dismiss it. Closing the connection (bridge timeout, agent
+  // interrupt, process exit) withdraws the draft from the UI.
+  if (req.method === 'POST' && path === '/copy-drafts') {
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, {
+        error: 'caller terminal is not associated with a worktree'
+      })
+    }
+    const body = await readJson(req)
+    const draft = typeof body.draft === 'string' ? body.draft : ''
+    if (!draft.trim()) return sendJson(res, 400, { error: 'draft required' })
+    const optional = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.trim() ? v.trim() : undefined
+
+    const { id, result } = deps.copyDrafts.request({
+      terminalId,
+      worktreePath: scope.worktreePath,
+      draft,
+      title: optional(body.title),
+      context: optional(body.context)
+    })
+    const onClose = (): void => {
+      if (!res.writableEnded) deps.copyDrafts.cancel(id)
+    }
+    res.on('close', onClose)
+    const outcome = await result
+    res.off('close', onClose)
+    if (res.destroyed) return
+    if (outcome.kind === 'cancelled') {
+      return sendJson(res, 409, { error: 'the draft was withdrawn before the user answered' })
+    }
+    return sendJson(res, 200, outcome)
   }
 
   // /scope — returns the caller's current scope. The MCP bridge calls this

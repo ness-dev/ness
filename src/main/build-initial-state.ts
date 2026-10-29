@@ -23,6 +23,7 @@ import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
 import { initialPermissions } from '../shared/state/permissions'
+import { initialCopyDrafts } from '../shared/state/copy-drafts'
 import { ruleKey, type StoredPermissionRule } from '../shared/permission-match'
 import {
   initialSettings,
@@ -135,6 +136,7 @@ export function buildInitialAppState(
     permissions: config.permissionRules
       ? { rules: sanitizePermissionRules(config.permissionRules) }
       : initialPermissions,
+    copyDrafts: initialCopyDrafts,
     settings: {
       ...initialSettings,
       themeMode:
