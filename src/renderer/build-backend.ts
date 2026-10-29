@@ -38,7 +38,7 @@ import type {
   LocalTransportHandle,
   StateEventListener
 } from '../shared/transport/transport'
-import type { ElectronAPI, AgentKind } from './types'
+import type { ElectronAPI, AgentKind, ReviewCommentStatus } from './types'
 import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
@@ -458,6 +458,19 @@ export function buildBackend(
 
     setScratchpadText: (worktreePath: string, text: string) =>
       req('scratchpad:setText', worktreePath, text),
+
+    addReviewComment: (
+      worktreePath: string,
+      input: Parameters<ElectronAPI['addReviewComment']>[1]
+    ) => req('reviews:addComment', worktreePath, input),
+    deleteReviewComment: (worktreePath: string, id: string) =>
+      req('reviews:deleteComment', worktreePath, id),
+    setReviewCommentStatus: (worktreePath: string, id: string, status: ReviewCommentStatus) =>
+      req('reviews:setCommentStatus', worktreePath, id, status),
+    addReviewReply: (worktreePath: string, commentId: string, body: string) =>
+      req('reviews:addReply', worktreePath, commentId, body),
+    refreshReviewAnchors: (worktreePath: string, filePath?: string) =>
+      req('reviews:refreshAnchors', worktreePath, filePath),
 
     openInEditor: (worktreePath: string, filePath?: string) =>
       req('editor:open', worktreePath, filePath),

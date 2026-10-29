@@ -1173,6 +1173,32 @@ async function getMergeBase(worktreePath: string, ref: string): Promise<string |
   }
 }
 
+export async function resolveCommitSha(worktreePath: string, ref: string): Promise<string | null> {
+  try {
+    const { stdout } = await execGitRead(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+      cwd: worktreePath
+    })
+    return stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+/** The commit the Review viewer's whole-branch diff uses as its old side. */
+export async function getBranchDiffBase(worktreePath: string): Promise<string | null> {
+  const baseRef = await getDefaultBaseRef(worktreePath)
+  if (baseRef === 'HEAD') return null
+  return getMergeBase(worktreePath, baseRef)
+}
+
+export function readFileAtCommit(
+  worktreePath: string,
+  sha: string,
+  filePath: string
+): Promise<string | null> {
+  return getFileAtRef(worktreePath, sha, filePath)
+}
+
 /** Resolve the two sides of a single-file diff as plain text, suitable for
  * feeding Monaco's DiffEditor. Semantics match getFileDiff: working vs
  * index (unstaged), HEAD vs index (staged), merge-base vs HEAD (branch). */
