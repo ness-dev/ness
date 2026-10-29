@@ -4,6 +4,8 @@
 // JsonClaudeManager, and its per-tool approval flow rides an MCP bridge
 // instead of the terminal-hook status dir.
 
+import type { AgentKind } from './terminals'
+
 export type JsonClaudeSessionState =
   | 'idle'
   | 'connecting'
@@ -343,6 +345,9 @@ export interface JsonClaudeBackgroundAgent {
 export interface JsonClaudeSession {
   sessionId: string
   worktreePath: string
+  /** Which agent backs this chat. Missing means Claude — every session
+   *  predating the field was. Fixed for the session's lifetime. */
+  agentKind?: AgentKind
   state: JsonClaudeSessionState
   exitCode: number | null
   exitReason: string | null
@@ -441,6 +446,9 @@ export type JsonClaudeEvent =
       payload: {
         sessionId: string
         worktreePath: string
+        /** Omitted for Claude. Ignored when the session already exists —
+         *  a respawn can't change which agent backs it. */
+        agentKind?: AgentKind
         /** Permission mode applied only when this session id has no
          *  prior slice entry (fresh tab). When the session already
          *  exists (resume / re-attach / mode-change respawn), the
@@ -762,6 +770,7 @@ export function jsonClaudeReducer(
       // kill+respawn the same way permissionMode does. Reset exit
       // bookkeeping.
       const existing = state.sessions[sessionId]
+      const agentKind = existing ? existing.agentKind : event.payload.agentKind
       return {
         ...state,
         sessions: {
@@ -769,6 +778,7 @@ export function jsonClaudeReducer(
           [sessionId]: {
             sessionId,
             worktreePath,
+            ...(agentKind && agentKind !== 'claude' ? { agentKind } : {}),
             state: 'connecting',
             exitCode: null,
             exitReason: null,

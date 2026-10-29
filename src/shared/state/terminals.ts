@@ -35,7 +35,8 @@ export interface TerminalTab {
    *  hydrate as 'asleep' so app launch doesn't construct an xterm or
    *  spawn a subprocess per tab; they wake on first focus. */
   mode?: 'awake' | 'asleep'
-  /** For agent tabs: which CLI agent this tab runs. */
+  /** For agent and json-claude tabs: which CLI agent this tab runs.
+   *  Missing means Claude. */
   agentKind?: AgentKind
   /** For agent + json-claude tabs: override the model resolved from
    *  settings (claudeModel/codexModel). Set when a worktree was spawned
@@ -142,8 +143,8 @@ export function findTabById(
  *  existed, and the default in PanesFSM.addTab. */
 export function isClaudeBackedTab(tab: TerminalTab | null | undefined): boolean {
   if (!tab) return false
-  if (tab.type === 'json-claude') return true
-  return tab.type === 'agent' && (tab.agentKind ?? 'claude') === 'claude'
+  if (tab.type !== 'agent' && tab.type !== 'json-claude') return false
+  return (tab.agentKind ?? 'claude') === 'claude'
 }
 
 export function hasAnyTabs(node: PaneNode): boolean {
@@ -609,6 +610,7 @@ export function terminalsReducer(
           // --resume picks it up after the swap. Carry it across either
           // way, generating one if the source tab somehow lacked it.
           const sessionId = t.sessionId ?? newId
+          const agentKind = t.agentKind ?? 'claude'
           changed = true
           if (newType === 'json-claude') {
             return {
@@ -616,13 +618,14 @@ export function terminalsReducer(
               type: 'json-claude' as const,
               label: newLabel,
               sessionId,
-              mode: 'awake' as const
+              mode: 'awake' as const,
+              ...(agentKind !== 'claude' ? { agentKind } : {})
             }
           }
           return {
             id: newId,
             type: 'agent' as const,
-            agentKind: 'claude' as const,
+            agentKind,
             label: newLabel,
             sessionId
           }

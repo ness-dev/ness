@@ -31,6 +31,27 @@ describe('jsonClaudeReducer', () => {
     expect(next.sessions[SID].busy).toBe(false)
   })
 
+  it('sessionStarted leaves agentKind off a claude session', () => {
+    const next = jsonClaudeReducer(initialJsonClaude, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'claude' }
+    })
+    expect('agentKind' in next.sessions[SID]).toBe(false)
+  })
+
+  it('sessionStarted records a non-claude agentKind and keeps it across re-attach', () => {
+    let state = jsonClaudeReducer(initialJsonClaude, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'codex' }
+    })
+    expect(state.sessions[SID].agentKind).toBe('codex')
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'claude' }
+    })
+    expect(state.sessions[SID].agentKind).toBe('codex')
+  })
+
   it('sessionStateChanged updates state + exit info', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {

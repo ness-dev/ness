@@ -3,7 +3,9 @@ import {
   CLAUDE_MODELS,
   CLAUDE_MODEL_ALIASES,
   CODEX_MODELS,
-  CURSOR_MODELS
+  CURSOR_MODELS,
+  getChatCapabilities,
+  supportsChat
 } from './agent-registry'
 import { isKnownModel } from './pricing'
 
@@ -114,6 +116,30 @@ describe('CLAUDE_MODELS', () => {
     // because Settings renders a picker for each.
     for (const m of [...CLAUDE_MODELS, ...CODEX_MODELS, ...CURSOR_MODELS]) {
       expect(['alias', 'current', 'legacy']).toContain(m.tier)
+    }
+  })
+})
+
+describe('chat capabilities', () => {
+  it('claude backs chat tabs with every capability', () => {
+    expect(supportsChat('claude')).toBe(true)
+    expect(getChatCapabilities('claude')).toEqual({
+      rewind: true,
+      fork: true,
+      permissionModes: true,
+      slashCommands: true
+    })
+  })
+
+  it('treats a missing kind as claude', () => {
+    expect(supportsChat(undefined)).toBe(true)
+    expect(getChatCapabilities(undefined)).toEqual(getChatCapabilities('claude'))
+  })
+
+  it('reports no capabilities for agents without a chat provider', () => {
+    for (const kind of ['codex', 'cursor'] as const) {
+      expect(supportsChat(kind)).toBe(false)
+      expect(Object.values(getChatCapabilities(kind)).every((v) => v === false)).toBe(true)
     }
   })
 })

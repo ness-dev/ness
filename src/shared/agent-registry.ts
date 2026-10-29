@@ -13,6 +13,23 @@ export interface AgentInfo {
    * to resume it by id — only Claude Code qualifies today. Agents that
    * assign their own session ids can't be handed a pre-seeded one at all. */
   supportsConversationFork: boolean
+  /** Present when this agent can back a Chat tab. Absent means the agent
+   *  only runs in Terminal tabs. */
+  chat?: ChatCapabilities
+}
+
+/** What a Chat tab can offer for a given agent. The renderer gates
+ *  affordances on these rather than on the agent kind, so a new chat
+ *  provider only has to declare what it supports. */
+export interface ChatCapabilities {
+  /** Drop everything after a message and continue from there. */
+  rewind: boolean
+  /** Copy the conversation up to a message into a new tab. */
+  fork: boolean
+  /** Claude's permission-mode cycle (default / acceptEdits / plan / auto). */
+  permissionModes: boolean
+  /** Agent-advertised slash commands, including the synthetic `/model`. */
+  slashCommands: boolean
 }
 
 export const AGENT_REGISTRY: AgentInfo[] = [
@@ -21,7 +38,13 @@ export const AGENT_REGISTRY: AgentInfo[] = [
     displayName: 'Claude Code',
     vendor: 'Anthropic',
     assignsSessionId: true,
-    supportsConversationFork: true
+    supportsConversationFork: true,
+    chat: {
+      rewind: true,
+      fork: true,
+      permissionModes: true,
+      slashCommands: true
+    }
   },
   {
     kind: 'codex',
@@ -147,4 +170,21 @@ export function agentDisplayName(kind: AgentKind | undefined): string {
 
 export function supportsConversationFork(kind: AgentKind): boolean {
   return getAgentInfo(kind).supportsConversationFork
+}
+
+export function supportsChat(kind: AgentKind | undefined): boolean {
+  return !!getAgentInfo(kind ?? 'claude').chat
+}
+
+const NO_CHAT_CAPABILITIES: ChatCapabilities = {
+  rewind: false,
+  fork: false,
+  permissionModes: false,
+  slashCommands: false
+}
+
+/** A missing kind means Claude — chat sessions and tabs created before
+ *  `agentKind` existed were all Claude. */
+export function getChatCapabilities(kind: AgentKind | undefined): ChatCapabilities {
+  return getAgentInfo(kind ?? 'claude').chat ?? NO_CHAT_CAPABILITIES
 }
