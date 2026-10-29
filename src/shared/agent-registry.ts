@@ -30,6 +30,12 @@ export interface ChatCapabilities {
   permissionModes: boolean
   /** Agent-advertised slash commands, including the synthetic `/model`. */
   slashCommands: boolean
+  /** A deny can carry a note the agent reads. Codex's approval reply is a
+   *  bare decision, so the approval card hides the note there. */
+  approvalDenyReason: boolean
+  /** An approval can be answered with edited tool input ("Allow with
+   *  edits"). Codex runs the command it asked about or nothing. */
+  approvalEditInput: boolean
 }
 
 export const AGENT_REGISTRY: AgentInfo[] = [
@@ -43,7 +49,9 @@ export const AGENT_REGISTRY: AgentInfo[] = [
       rewind: true,
       fork: true,
       permissionModes: true,
-      slashCommands: true
+      slashCommands: true,
+      approvalDenyReason: true,
+      approvalEditInput: true
     }
   },
   {
@@ -56,7 +64,9 @@ export const AGENT_REGISTRY: AgentInfo[] = [
       rewind: true,
       fork: true,
       permissionModes: false,
-      slashCommands: false
+      slashCommands: false,
+      approvalDenyReason: false,
+      approvalEditInput: false
     }
   },
   {
@@ -186,7 +196,9 @@ const NO_CHAT_CAPABILITIES: ChatCapabilities = {
   rewind: false,
   fork: false,
   permissionModes: false,
-  slashCommands: false
+  slashCommands: false,
+  approvalDenyReason: false,
+  approvalEditInput: false
 }
 
 /** A missing kind means Claude — chat sessions and tabs created before

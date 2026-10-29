@@ -127,7 +127,9 @@ describe('chat capabilities', () => {
       rewind: true,
       fork: true,
       permissionModes: true,
-      slashCommands: true
+      slashCommands: true,
+      approvalDenyReason: true,
+      approvalEditInput: true
     })
   })
 
@@ -136,13 +138,15 @@ describe('chat capabilities', () => {
     expect(getChatCapabilities(undefined)).toEqual(getChatCapabilities('claude'))
   })
 
-  it('codex backs chat tabs with rewind and fork but no Claude-only affordances', () => {
+  it('codex backs chat tabs with rewind and fork but none of the Claude-only approval or mode affordances', () => {
     expect(supportsChat('codex')).toBe(true)
     expect(getChatCapabilities('codex')).toEqual({
       rewind: true,
       fork: true,
       permissionModes: false,
-      slashCommands: false
+      slashCommands: false,
+      approvalDenyReason: false,
+      approvalEditInput: false
     })
   })
 
