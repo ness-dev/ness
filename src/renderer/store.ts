@@ -762,8 +762,8 @@ export function useSnooze() {
   return useAppState((s) => s.snooze)
 }
 
-export function useCiNotify() {
-  return useAppState((s) => s.ciNotify)
+export function usePrNotify() {
+  return useAppState((s) => s.prNotify)
 }
 
 export function useAssignedPRs() {

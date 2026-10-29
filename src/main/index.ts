@@ -50,6 +50,8 @@ import { sweepWorktreeTrashOnBoot } from './worktree-trash'
 import { PanesFSM, stripTransientTabFields } from './panes-fsm'
 import { ActivityDeriver } from './activity-deriver'
 import { CiNotifier } from './ci-notifier'
+import { PrCommentNotifier, MergeConflictNotifier } from './pr-activity-notifier'
+import { isPrNotifyKind, type PrNotifyKind } from '../shared/state/pr-notify'
 import { AutoSleepMonitor } from './auto-sleep-monitor'
 import { WakeLockController } from './wake-lock-controller'
 import { WorktreeWatcher } from './worktree-watcher'
@@ -716,14 +718,15 @@ store.subscribe((event) => {
   }
 })
 
-// Persist per-worktree CI-notify overrides so they survive restart.
+// Persist per-worktree PR-notify overrides so they survive restart.
 store.subscribe((event) => {
-  if (event.type.startsWith('ciNotify/')) {
-    const byPath = store.getSnapshot().state.ciNotify.byPath
+  if (event.type.startsWith('prNotify/')) {
+    const byPath = store.getSnapshot().state.prNotify.byPath
+    delete config.ciNotify
     if (Object.keys(byPath).length === 0) {
-      delete config.ciNotify
+      delete config.prNotify
     } else {
-      config.ciNotify = byPath
+      config.prNotify = byPath
     }
     saveConfig(config)
   }
@@ -1212,10 +1215,13 @@ const chatDeliveryDeps = {
     panesFSM.wakeJsonClaudeTab(worktreePath, tabId)
 }
 
-// Injects a "CI is failing" message into a worktree's agent chat when its
-// PR checks go red. Kept out of PRPoller so the poller stays ignorant of
-// chat sessions.
+// Inject PR activity into a worktree's agent chat: CI going red, new
+// comments/reviews from other people, and the PR starting to conflict with
+// its base. Each is opt-in. Kept out of PRPoller so the poller stays
+// ignorant of chat sessions.
 const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
+const prCommentNotifier = new PrCommentNotifier(store, chatDeliveryDeps)
+const mergeConflictNotifier = new MergeConflictNotifier(store, chatDeliveryDeps)
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
 // settings.autoSleepMinutes). Constructed after panesFSM since it
@@ -1440,15 +1446,15 @@ store.subscribe((event) => {
   }
 })
 
-// Same for CI-notify overrides — a removed worktree's override would
+// Same for PR-notify overrides — a removed worktree's override would
 // otherwise linger and silently apply to a future worktree at the same path.
 store.subscribe((event) => {
   if (event.type !== 'worktrees/listChanged') return
   const live = new Set(store.getSnapshot().state.worktrees.list.map((w) => w.path))
-  const byPath = store.getSnapshot().state.ciNotify.byPath
+  const byPath = store.getSnapshot().state.prNotify.byPath
   for (const path of Object.keys(byPath)) {
     if (!live.has(path)) {
-      store.dispatch({ type: 'ciNotify/clear', payload: path })
+      store.dispatch({ type: 'prNotify/pathRemoved', payload: path })
     }
   }
 })
@@ -4831,13 +4837,14 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest(
-    'ciNotify:setOverride',
-    (_ctx, path: string, enabled: boolean | null) => {
+    'prNotify:setOverride',
+    (_ctx, path: string, kind: PrNotifyKind, enabled: boolean | null) => {
       if (typeof path !== 'string' || !path) return false
+      if (!isPrNotifyKind(kind)) return false
       if (enabled === null) {
-        store.dispatch({ type: 'ciNotify/clear', payload: path })
+        store.dispatch({ type: 'prNotify/clear', payload: { path, kind } })
       } else if (typeof enabled === 'boolean') {
-        store.dispatch({ type: 'ciNotify/set', payload: { path, enabled } })
+        store.dispatch({ type: 'prNotify/set', payload: { path, kind, enabled } })
       } else {
         return false
       }
@@ -4854,6 +4861,30 @@ function registerIpcHandlers(): void {
     }
     saveConfig(config)
     store.dispatch({ type: 'settings/notifyChatOnCiFailureChanged', payload: enabled })
+    return true
+  })
+
+  transport.onRequest('config:setNotifyChatOnPrComments', (_ctx, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') return false
+    if (enabled) {
+      config.notifyChatOnPrComments = true
+    } else {
+      delete config.notifyChatOnPrComments
+    }
+    saveConfig(config)
+    store.dispatch({ type: 'settings/notifyChatOnPrCommentsChanged', payload: enabled })
+    return true
+  })
+
+  transport.onRequest('config:setNotifyChatOnMergeConflict', (_ctx, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') return false
+    if (enabled) {
+      config.notifyChatOnMergeConflict = true
+    } else {
+      delete config.notifyChatOnMergeConflict
+    }
+    saveConfig(config)
+    store.dispatch({ type: 'settings/notifyChatOnMergeConflictChanged', payload: enabled })
     return true
   })
 
@@ -4952,6 +4983,8 @@ async function runBoot(): Promise<void> {
   activityDeriver.start()
 
   ciNotifier.start()
+  prCommentNotifier.start()
+  mergeConflictNotifier.start()
 
   autoSleepMonitor.start()
 

@@ -98,7 +98,11 @@ function makeState(
       ...initialState.settings,
       notifyChatOnCiFailure: opts.globalDefault ?? true
     },
-    ciNotify: { byPath: { ...(opts.overrides ?? {}) } },
+    prNotify: {
+      byPath: Object.fromEntries(
+        Object.entries(opts.overrides ?? {}).map(([path, ci]) => [path, { ci }])
+      )
+    },
     jsonClaude: { ...initialState.jsonClaude, sessions },
     terminals: { ...initialState.terminals, panes: { ...(opts.panes ?? {}) } }
   }

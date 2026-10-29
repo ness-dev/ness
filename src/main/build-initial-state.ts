@@ -14,7 +14,7 @@ import {
   isJsonClaudePermissionMode
 } from '../shared/state/json-claude'
 import { initialSnooze } from '../shared/state/snooze'
-import { initialCiNotify } from '../shared/state/ci-notify'
+import { prNotifyFromConfig } from '../shared/state/pr-notify'
 import { initialPinned } from '../shared/state/pinned'
 import { initialAnnouncements } from '../shared/state/announcements'
 import { initialScratchpad } from '../shared/state/scratchpad'
@@ -123,7 +123,7 @@ export function buildInitialAppState(
     browser: initialBrowser,
     jsonClaude: initialJsonClaude,
     snooze: config.snooze ? { byPath: { ...config.snooze } } : initialSnooze,
-    ciNotify: config.ciNotify ? { byPath: { ...config.ciNotify } } : initialCiNotify,
+    prNotify: prNotifyFromConfig(config.prNotify, config.ciNotify),
     pinned: config.pinned ? { byPath: { ...config.pinned } } : initialPinned,
     announcements: initialAnnouncements,
     scratchpad: { byWorktreePath: flattenScratchpadNotes(config.scratchpadNotes) },
@@ -228,6 +228,8 @@ export function buildInitialAppState(
           : 30,
       snoozeDefaultDays: Math.max(1, Math.floor(config.snoozeDefaultDays ?? 7)),
       notifyChatOnCiFailure: config.notifyChatOnCiFailure === true,
+      notifyChatOnPrComments: config.notifyChatOnPrComments === true,
+      notifyChatOnMergeConflict: config.notifyChatOnMergeConflict === true,
       expandedDiagnosticLoggingEnabled: config.expandedDiagnosticLoggingEnabled === true,
       prReviewPrompt: config.prReviewPrompt || DEFAULT_PR_REVIEW_PROMPT,
       dismissedAnnouncementIds: Array.isArray(config.dismissedAnnouncementIds)

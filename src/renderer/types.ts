@@ -20,6 +20,7 @@ import type { AddRepoResult } from '../shared/repo-pick'
 export type { AddRepoResult }
 
 import type { PreventSleepMode } from '../shared/state/settings'
+import type { PrNotifyKind } from '../shared/state/pr-notify'
 export type { PreventSleepMode }
 
 /** Per-kind dirtiness flags for a worktree. `git` reflects
@@ -466,9 +467,11 @@ export interface ElectronAPI {
   unpinWorktree(path: string): Promise<boolean>
   setSnoozeDefaultDays(days: number): Promise<boolean>
   /** `enabled: null` clears the override so the worktree inherits the
-   *  global `notifyChatOnCiFailure` setting again. */
-  setCiNotifyOverride(path: string, enabled: boolean | null): Promise<boolean>
+   *  matching global `notifyChatOn*` setting again. */
+  setPrNotifyOverride(path: string, kind: PrNotifyKind, enabled: boolean | null): Promise<boolean>
   setNotifyChatOnCiFailure(enabled: boolean): Promise<boolean>
+  setNotifyChatOnPrComments(enabled: boolean): Promise<boolean>
+  setNotifyChatOnMergeConflict(enabled: boolean): Promise<boolean>
   /** Injects a "resolve this PR's conflicts" turn into the worktree's agent
    *  chat, waking a slept tab if needed. */
   requestMergeConflictFix(worktreePath: string): Promise<MergeConflictFixResult>

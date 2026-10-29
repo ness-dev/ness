@@ -18,6 +18,18 @@ export interface PRReview {
   body: string
   submittedAt: string
   htmlUrl: string
+  /** Line comments attached to this review. Undefined on statuses cached
+   *  by an older build. */
+  inlineCommentCount?: number
+}
+
+/** A top-level comment on the PR's conversation tab (not a review). */
+export interface PRComment {
+  user: string
+  avatarUrl: string
+  body: string
+  createdAt: string
+  htmlUrl: string
 }
 
 export interface PRStatus {
@@ -37,6 +49,9 @@ export interface PRStatus {
   /** true = has conflicts with base, false = mergeable, null = still computing */
   hasConflict: boolean | null
   reviews: PRReview[]
+  /** Most recent conversation comments, oldest first. Undefined on
+   *  statuses cached by an older build. */
+  comments?: PRComment[]
   reviewDecision: 'approved' | 'changes_requested' | 'review_required' | 'none'
   additions?: number
   deletions?: number

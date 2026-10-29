@@ -437,8 +437,16 @@ export interface SettingsState {
   snoozeDefaultDays: number
   /** Global default for "when a worktree's PR checks transition into
    *  failure, inject a message into its agent chat". Per-worktree
-   *  overrides live in the `ciNotify` slice and win over this. */
+   *  overrides live in the `prNotify` slice and win over this. */
   notifyChatOnCiFailure: boolean
+  /** Global default for "when someone else comments on or reviews a
+   *  worktree's PR, inject the new feedback into its agent chat".
+   *  Per-worktree overrides live in the `prNotify` slice. */
+  notifyChatOnPrComments: boolean
+  /** Global default for "when a worktree's PR starts conflicting with its
+   *  base, ask its agent to resolve the conflicts". Per-worktree overrides
+   *  live in the `prNotify` slice. */
+  notifyChatOnMergeConflict: boolean
   /** When true, high-volume diagnostic categories are written to
    *  debug.log — currently per-GitHub-API-call `[github-api]` lines (URL,
    *  method, status, duration). Off by default because the per-call
@@ -555,6 +563,8 @@ export type SettingsEvent =
   | { type: 'settings/autoSleepMinutesChanged'; payload: number }
   | { type: 'settings/snoozeDefaultDaysChanged'; payload: number }
   | { type: 'settings/notifyChatOnCiFailureChanged'; payload: boolean }
+  | { type: 'settings/notifyChatOnPrCommentsChanged'; payload: boolean }
+  | { type: 'settings/notifyChatOnMergeConflictChanged'; payload: boolean }
   | { type: 'settings/expandedDiagnosticLoggingEnabledChanged'; payload: boolean }
   | { type: 'settings/prReviewPromptChanged'; payload: string }
   | { type: 'settings/announcementDismissed'; payload: string }
@@ -631,6 +641,8 @@ export const initialSettings: SettingsState = {
   autoSleepMinutes: 30,
   snoozeDefaultDays: 7,
   notifyChatOnCiFailure: false,
+  notifyChatOnPrComments: false,
+  notifyChatOnMergeConflict: false,
   expandedDiagnosticLoggingEnabled: false,
   prReviewPrompt: DEFAULT_PR_REVIEW_PROMPT,
   dismissedAnnouncementIds: [],
@@ -811,6 +823,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, snoozeDefaultDays: event.payload }
     case 'settings/notifyChatOnCiFailureChanged':
       return { ...state, notifyChatOnCiFailure: event.payload }
+    case 'settings/notifyChatOnPrCommentsChanged':
+      return { ...state, notifyChatOnPrComments: event.payload }
+    case 'settings/notifyChatOnMergeConflictChanged':
+      return { ...state, notifyChatOnMergeConflict: event.payload }
     case 'settings/expandedDiagnosticLoggingEnabledChanged':
       return { ...state, expandedDiagnosticLoggingEnabled: event.payload }
     case 'settings/prReviewPromptChanged':

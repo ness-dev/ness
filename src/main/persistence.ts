@@ -21,6 +21,7 @@ import {
 } from './persistence-migrations'
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
+import type { PrNotifyOverrides } from '../shared/state/pr-notify'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 
@@ -348,13 +349,22 @@ export interface Config {
   pinned?: Record<string, true>
   // Default duration (days) for plain-click snooze. Min 1, default 7.
   snoozeDefaultDays?: number
-  // Per-worktree overrides for the "notify agent chat on CI failure"
-  // behaviour, keyed by absolute path. Absent path = inherit
-  // notifyChatOnCiFailure.
+  // Legacy per-worktree CI-notify overrides (path → boolean). Read once and
+  // folded into prNotify; never written.
   ciNotify?: Record<string, boolean>
+  // Per-worktree overrides for the "notify agent chat on PR activity"
+  // behaviours, keyed by absolute path then kind. An absent kind inherits
+  // the matching notifyChatOn* global.
+  prNotify?: Record<string, PrNotifyOverrides>
   // Global default for injecting a "CI failed" message into a worktree's
   // agent chat when its PR checks start failing. Default off.
   notifyChatOnCiFailure?: boolean
+  // Global default for forwarding new PR comments / reviews from other
+  // people into the agent chat. Default off.
+  notifyChatOnPrComments?: boolean
+  // Global default for asking the agent to resolve conflicts when its PR
+  // starts conflicting with the base. Default off.
+  notifyChatOnMergeConflict?: boolean
   // When true, high-volume diagnostic log categories (currently
   // [github-api] per-call lines) are written to debug.log. Default off.
   expandedDiagnosticLoggingEnabled?: boolean

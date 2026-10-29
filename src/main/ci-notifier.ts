@@ -1,9 +1,7 @@
-import type { Store } from './store'
-import type { StateEvent } from '../shared/state'
 import type { PRStatus } from '../shared/state/prs'
-import { isCiNotifyEnabled } from '../shared/state/ci-notify'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
-import { deliverToWorktreeChat, type ChatDeliveryDeps } from './chat-delivery'
+import type { ChatDeliveryDeps } from './chat-delivery'
+import { PrStatusWatcher } from './pr-status-watcher'
 import { log } from './debug'
 
 /** Identity of a failure. Statuses cached by an older build carry no
@@ -58,76 +56,24 @@ export function buildCiFailureMessage(pr: PRStatus): string {
  *  ever observes a non-failure state is still a new failure, and with
  *  multi-minute poll intervals that's the common case, not the edge.
  *
- *  `seen` exists only to suppress a burst on the first poll after boot,
- *  where every already-red PR would otherwise read as fresh.
- *
  *  Delivery wakes a slept chat tab when it has to — see `deliver`. */
-export class CiNotifier {
-  private store: Store
-  private opts: CiNotifierOptions
-  private seen = new Set<string>()
+export class CiNotifier extends PrStatusWatcher {
   private handledSha = new Map<string, string>()
-  private unsubscribe: (() => void) | null = null
 
-  constructor(store: Store, opts: CiNotifierOptions) {
-    this.store = store
-    this.opts = opts
-  }
-
-  start(): void {
-    if (this.unsubscribe) return
-    // Seed from whatever the store already knows so a poll that landed
-    // before we subscribed doesn't read as a fresh transition.
-    const byPath = this.store.getSnapshot().state.prs.byPath
-    for (const [path, status] of Object.entries(byPath)) {
-      if (!status) continue
-      this.seen.add(path)
-      // Claim an already-red commit so boot stays quiet until a NEW one
-      // fails. Marking the path seen isn't enough on its own — the next
-      // poll would read as a fresh failure.
-      if (status.checksOverall === 'failure') {
-        this.handledSha.set(path, shaKeyFor(status))
-      }
-    }
-    this.unsubscribe = this.store.subscribe((event) => this.onEvent(event))
-  }
-
-  stop(): void {
-    this.unsubscribe?.()
-    this.unsubscribe = null
-  }
-
-  private onEvent(event: StateEvent): void {
-    if (event.type === 'prs/statusChanged') {
-      this.consider(event.payload.path, event.payload.status)
-      return
-    }
-    if (event.type === 'prs/bulkStatusChanged') {
-      // Sweeping the whole payload is inherent to this event — it replaces
-      // prs.byPath wholesale — and PR polls are minutes apart, so the cost
-      // is negligible. The per-path caches below keep the sweep from
-      // turning into repeated work.
-      for (const path of Object.keys(event.payload)) {
-        this.consider(path, event.payload[path])
-      }
-      for (const path of this.seen) {
-        if (!(path in event.payload)) {
-          this.seen.delete(path)
-          this.handledSha.delete(path)
-        }
-      }
-      return
+  protected seed(path: string, status: PRStatus): void {
+    // Claim an already-red commit so boot stays quiet until a NEW one
+    // fails. Marking the path seen isn't enough on its own — the next
+    // poll would read as a fresh failure.
+    if (status.checksOverall === 'failure') {
+      this.handledSha.set(path, shaKeyFor(status))
     }
   }
 
-  private consider(path: string, status: PRStatus | null): void {
-    if (!status) {
-      this.seen.delete(path)
-      this.handledSha.delete(path)
-      return
-    }
-    const firstObservation = !this.seen.has(path)
-    this.seen.add(path)
+  protected forget(path: string): void {
+    this.handledSha.delete(path)
+  }
+
+  protected consider(path: string, status: PRStatus, firstObservation: boolean): void {
     if (status.checksOverall !== 'failure') return
 
     const shaKey = shaKeyFor(status)
@@ -145,17 +91,12 @@ export class CiNotifier {
       return
     }
 
-    const state = this.store.getSnapshot().state
-    if (!isCiNotifyEnabled(state.ciNotify, path, state.settings.notifyChatOnCiFailure)) {
+    if (!this.isEnabled(path, 'ci')) {
       log('ci-notifier', `skip ${path} @ ${shaKey}: notifications off for this worktree`)
       return
     }
 
-    const message = buildCiFailureMessage(status)
-    // Waking a tab spawns a subprocess and replays its transcript from
-    // disk. That's far too much work to run inside a store listener, so
-    // hop off the fan-out first.
-    setImmediate(() => this.deliver(path, message, shaKey))
+    this.deliver(path, buildCiFailureMessage(status), shaKey)
   }
 
   /** Hand the message to the shared chat router. A failure to deliver
@@ -163,18 +104,18 @@ export class CiNotifier {
    *  have been asleep mid-spawn, or the worktree may not have had a chat
    *  tab yet. */
   private deliver(worktreePath: string, message: string, shaKey: string): void {
-    const state = this.store.getSnapshot().state
-    const result = deliverToWorktreeChat(state, this.opts, worktreePath, message)
-    if (!result.ok) {
-      // No chat tab (terminal-only worktree) is not a problem to solve
-      // here — the PR pane already shows the red checks.
-      log('ci-notifier', `skip ${worktreePath} @ ${shaKey}: ${result.reason}`)
-      this.handledSha.delete(worktreePath)
-      return
-    }
-    if (result.woke) {
-      log('ci-notifier', `woke tab=${result.sessionId} wt=${worktreePath} to report CI failure`)
-    }
-    log('ci-notifier', `notified ${result.sessionId} of CI failure on ${worktreePath} @ ${shaKey}`)
+    this.deliverLater(worktreePath, message, (result) => {
+      if (!result.ok) {
+        // No chat tab (terminal-only worktree) is not a problem to solve
+        // here — the PR pane already shows the red checks.
+        log('ci-notifier', `skip ${worktreePath} @ ${shaKey}: ${result.reason}`)
+        this.handledSha.delete(worktreePath)
+        return
+      }
+      if (result.woke) {
+        log('ci-notifier', `woke tab=${result.sessionId} wt=${worktreePath} to report CI failure`)
+      }
+      log('ci-notifier', `notified ${result.sessionId} of CI failure on ${worktreePath} @ ${shaKey}`)
+    })
   }
 }

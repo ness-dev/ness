@@ -858,6 +858,12 @@ function automationLabel(
       brand: false
     }
   }
+  if (source === 'merge-conflict-detected') {
+    return { label: 'Ness · Merge conflicts', note: 'sent automatically', brand: false }
+  }
+  if (source === 'pr-feedback') {
+    return { label: 'Ness · PR feedback', note: 'sent automatically', brand: false }
+  }
   return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
 }
 

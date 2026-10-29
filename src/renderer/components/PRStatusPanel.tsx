@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck } from 'lucide-react'
-import { useCiNotify, useRepoConfigs, useSettings } from '../store'
-import { isCiNotifyEnabled } from '../../shared/state/ci-notify'
+import { usePrNotify, useRepoConfigs, useSettings } from '../store'
+import {
+  isPrNotifyEnabled,
+  prNotifyGlobalDefault,
+  type PrNotifyKind
+} from '../../shared/state/pr-notify'
 import { useBackend } from '../backend'
 import type {
   PRStatus,
@@ -882,7 +886,6 @@ export function PRStatusPanel({
   const needsGithubToken = hasGithubToken === false
 
   const settings = useSettings()
-  const ciNotify = useCiNotify()
   const mergeAction = usePRMergeAction(pr, worktree, needsGithubToken)
   const approveAction = usePRApproveAction(pr, worktree, settings.viewerLogin, needsGithubToken)
 
@@ -1198,28 +1201,18 @@ export function PRStatusPanel({
             pr.state !== 'merged' &&
             pr.state !== 'closed' && <FixConflictsButton worktreePath={worktree.path} />}
 
-          {worktree && (
-            <CiNotifyToggle
-              worktreePath={worktree.path}
-              enabled={isCiNotifyEnabled(
-                ciNotify,
-                worktree.path,
-                settings.notifyChatOnCiFailure
-              )}
-              globalDefault={settings.notifyChatOnCiFailure}
-            />
-          )}
+          {worktree && <PrNotifyToggles worktreePath={worktree.path} />}
         </div>
       )}
     </RightPanel>
   )
 }
 
-/** Hands the conflict off to the worktree's agent. A button rather than the
- *  standing opt-in CI failures get: a branch that conflicts with its base
- *  usually conflicts with every other in-flight branch too, so firing this
- *  automatically would put the whole workspace to work over one bad merge
- *  base. */
+/** Hands the conflict off to the worktree's agent on demand. Automatic
+ *  conflict notifications exist too but default off: a branch that
+ *  conflicts with its base usually conflicts with every other in-flight
+ *  branch too, so firing automatically can put the whole workspace to work
+ *  over one bad merge base. */
 function FixConflictsButton({ worktreePath }: { worktreePath: string }): JSX.Element {
   const backend = useBackend()
   const [phase, setPhase] = useState<'idle' | 'sending' | 'sent'>('idle')
@@ -1266,38 +1259,60 @@ function FixConflictsButton({ worktreePath }: { worktreePath: string }): JSX.Ele
   )
 }
 
-/** Per-worktree opt in/out of the "tell the agent when CI fails" injection.
- *  Toggling back to the global default drops the override entirely so the
+const PR_NOTIFY_OPTIONS: { kind: PrNotifyKind; label: string; title: string }[] = [
+  {
+    kind: 'ci',
+    label: 'CI fails',
+    title: "Post a message naming the failing checks into this worktree's agent chat when CI goes red."
+  },
+  {
+    kind: 'comments',
+    label: 'Someone comments or reviews',
+    title: "Forward new PR comments and reviews from other people into this worktree's agent chat."
+  },
+  {
+    kind: 'conflicts',
+    label: 'The PR conflicts with its base',
+    title: "Ask this worktree's agent to resolve conflicts when the PR stops merging cleanly."
+  }
+]
+
+/** Per-worktree opt in/out of each "tell the agent" injection. Toggling
+ *  back to the global default drops that kind's override entirely so the
  *  worktree tracks future changes to the setting. */
-function CiNotifyToggle({
-  worktreePath,
-  enabled,
-  globalDefault
-}: {
-  worktreePath: string
-  enabled: boolean
-  globalDefault: boolean
-}): JSX.Element {
+function PrNotifyToggles({ worktreePath }: { worktreePath: string }): JSX.Element {
   const backend = useBackend()
+  const settings = useSettings()
+  const prNotify = usePrNotify()
   return (
-    <label
-      className="flex items-center gap-1.5 cursor-pointer text-xs text-dim hover:text-fg mt-1.5"
-      title={`Post a message naming the failing checks into this worktree's agent chat when CI goes red. Default for all worktrees: ${globalDefault ? 'on' : 'off'}.`}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <input
-        type="checkbox"
-        checked={enabled}
-        onChange={(e) => {
-          const next = e.target.checked
-          void backend.setCiNotifyOverride(
-            worktreePath,
-            next === globalDefault ? null : next
-          )
-        }}
-        className="accent-current icon-base cursor-pointer"
-      />
-      <span>Tell the agent when CI fails</span>
-    </label>
+    <div className="mt-1.5 space-y-0.5" onClick={(e) => e.stopPropagation()}>
+      <div className="text-xs text-dim">Tell the agent when</div>
+      {PR_NOTIFY_OPTIONS.map(({ kind, label, title }) => {
+        const globalDefault = prNotifyGlobalDefault(settings, kind)
+        const enabled = isPrNotifyEnabled(prNotify, worktreePath, kind, globalDefault)
+        return (
+          <label
+            key={kind}
+            className="flex items-center gap-1.5 cursor-pointer text-xs text-dim hover:text-fg"
+            title={`${title} Default for all worktrees: ${globalDefault ? 'on' : 'off'}.`}
+          >
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => {
+                const next = e.target.checked
+                void backend.setPrNotifyOverride(
+                  worktreePath,
+                  kind,
+                  next === globalDefault ? null : next
+                )
+              }}
+              className="accent-current icon-base cursor-pointer"
+            />
+            <span>{label}</span>
+          </label>
+        )
+      })}
+    </div>
   )
 }

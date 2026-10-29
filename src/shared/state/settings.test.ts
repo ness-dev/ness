@@ -806,6 +806,24 @@ describe('settingsReducer', () => {
     expect(next.snoozeDefaultDays).toBe(3)
   })
 
+  it('notifyChatOnPrCommentsChanged toggles the global default', () => {
+    expect(initialSettings.notifyChatOnPrComments).toBe(false)
+    const on = settingsReducer(initialSettings, {
+      type: 'settings/notifyChatOnPrCommentsChanged',
+      payload: true
+    })
+    expect(on.notifyChatOnPrComments).toBe(true)
+  })
+
+  it('notifyChatOnMergeConflictChanged toggles the global default', () => {
+    expect(initialSettings.notifyChatOnMergeConflict).toBe(false)
+    const on = settingsReducer(initialSettings, {
+      type: 'settings/notifyChatOnMergeConflictChanged',
+      payload: true
+    })
+    expect(on.notifyChatOnMergeConflict).toBe(true)
+  })
+
   it('notifyChatOnCiFailureChanged toggles the global default', () => {
     expect(initialSettings.notifyChatOnCiFailure).toBe(false)
     const on = apply(initialSettings, {

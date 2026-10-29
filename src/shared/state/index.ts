@@ -91,11 +91,11 @@ import {
   type SnoozeState
 } from './snooze'
 import {
-  initialCiNotify,
-  ciNotifyReducer,
-  type CiNotifyEvent,
-  type CiNotifyState
-} from './ci-notify'
+  initialPrNotify,
+  prNotifyReducer,
+  type PrNotifyEvent,
+  type PrNotifyState
+} from './pr-notify'
 import {
   initialPinned,
   pinnedReducer,
@@ -218,8 +218,8 @@ export type {
 } from './json-claude'
 export type { SnoozeState, SnoozeEvent, SnoozeEntry } from './snooze'
 export { MAX_WAKE } from './snooze'
-export type { CiNotifyState, CiNotifyEvent } from './ci-notify'
-export { isCiNotifyEnabled } from './ci-notify'
+export type { PrNotifyState, PrNotifyEvent, PrNotifyKind } from './pr-notify'
+export { isPrNotifyEnabled, prNotifyGlobalDefault } from './pr-notify'
 export type { PinnedState, PinnedEvent } from './pinned'
 export type {
   AnnouncementsState,
@@ -258,7 +258,7 @@ export interface AppState {
   browser: BrowserState
   jsonClaude: JsonClaudeState
   snooze: SnoozeState
-  ciNotify: CiNotifyState
+  prNotify: PrNotifyState
   pinned: PinnedState
   announcements: AnnouncementsState
   scratchpad: ScratchpadState
@@ -283,7 +283,7 @@ export type StateEvent =
   | BrowserEvent
   | JsonClaudeEvent
   | SnoozeEvent
-  | CiNotifyEvent
+  | PrNotifyEvent
   | PinnedEvent
   | AnnouncementsEvent
   | ScratchpadEvent
@@ -306,7 +306,7 @@ export const initialState: AppState = {
   browser: initialBrowser,
   jsonClaude: initialJsonClaude,
   snooze: initialSnooze,
-  ciNotify: initialCiNotify,
+  prNotify: initialPrNotify,
   pinned: initialPinned,
   announcements: initialAnnouncements,
   scratchpad: initialScratchpad,
@@ -384,10 +384,10 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       snooze: snoozeReducer(state.snooze, event as SnoozeEvent)
     }
   }
-  if (event.type.startsWith('ciNotify/')) {
+  if (event.type.startsWith('prNotify/')) {
     return {
       ...state,
-      ciNotify: ciNotifyReducer(state.ciNotify, event as CiNotifyEvent)
+      prNotify: prNotifyReducer(state.prNotify, event as PrNotifyEvent)
     }
   }
   if (event.type.startsWith('pinned/')) {
@@ -479,7 +479,7 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     browser: { ...initialState.browser, ...state.browser },
     jsonClaude: { ...initialState.jsonClaude, ...state.jsonClaude },
     snooze: { ...initialState.snooze, ...state.snooze },
-    ciNotify: { ...initialState.ciNotify, ...state.ciNotify },
+    prNotify: { ...initialState.prNotify, ...state.prNotify },
     pinned: { ...initialState.pinned, ...state.pinned },
     announcements: { ...initialState.announcements, ...state.announcements },
     scratchpad: { ...initialState.scratchpad, ...state.scratchpad },

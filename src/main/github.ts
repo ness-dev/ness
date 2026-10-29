@@ -3,7 +3,7 @@ import { promisify } from 'util'
 import { log, formatErr } from './debug'
 import { getCachedToken, invalidateTokenCache, resolveGitHubToken } from './github-auth'
 import { trackedFetch } from './github-recorder'
-import type { CheckStatus, PRReview, PRStatus } from '../shared/state/prs'
+import type { CheckStatus, PRComment, PRReview, PRStatus } from '../shared/state/prs'
 import type { PRSummary, PRMetadata, PRLookupResult } from '../shared/github-types'
 
 export type { CheckStatus, PRReview, PRStatus, PRSummary, PRMetadata, PRLookupResult }
@@ -220,6 +220,15 @@ interface GraphQLPR {
       body: string
       submittedAt: string
       url: string
+      comments: { totalCount: number } | null
+    } | null> | null
+  } | null
+  comments: {
+    nodes: Array<{
+      author: GraphQLActor | null
+      body: string
+      createdAt: string
+      url: string
     } | null> | null
   } | null
   commits: {
@@ -335,7 +344,10 @@ const PR_FRAGMENT = `fragment PR on PullRequest {
   mergeQueueEntry { position estimatedTimeToMerge }
   closingIssuesReferences(first: 10) { nodes { number title state url } }
   reviews(last: 100) {
-    nodes { author { login avatarUrl } state body submittedAt url }
+    nodes { author { login avatarUrl } state body submittedAt url comments { totalCount } }
+  }
+  comments(last: 30) {
+    nodes { author { login avatarUrl } body createdAt url }
   }
   commits(last: 1) {
     nodes {
@@ -652,7 +664,19 @@ function buildPRStatus(
       state: r.state,
       body: r.body || '',
       submittedAt: r.submittedAt,
-      htmlUrl: r.url
+      htmlUrl: r.url,
+      inlineCommentCount: r.comments?.totalCount ?? 0
+    })
+  }
+  const comments: PRComment[] = []
+  for (const c of pr.comments?.nodes ?? []) {
+    if (!c || !c.author?.login) continue
+    comments.push({
+      user: c.author.login,
+      avatarUrl: c.author.avatarUrl || '',
+      body: c.body || '',
+      createdAt: c.createdAt,
+      htmlUrl: c.url
     })
   }
   const latestByUser = new Map<string, PRReview['state']>()
@@ -710,6 +734,7 @@ function buildPRStatus(
     checksOverall: computeOverall(checks),
     hasConflict,
     reviews,
+    comments,
     reviewDecision,
     additions: pr.additions,
     deletions: pr.deletions,

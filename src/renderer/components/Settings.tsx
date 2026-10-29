@@ -453,6 +453,8 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     autoApproveSteerInstructions,
     snoozeDefaultDays,
     notifyChatOnCiFailure,
+    notifyChatOnPrComments,
+    notifyChatOnMergeConflict,
     expandedDiagnosticLoggingEnabled,
     showAssignedPRs,
     openPrInBrowserTab,
@@ -3167,24 +3169,59 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <span className="text-xs text-dim">days</span>
                   </div>
 
-                  <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Notify chat on CI failure</h3>
+                  <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Notify chat about PR activity</h3>
                   <p className="text-xs text-dim mb-3">
-                    When a worktree's PR checks start failing, post a message
-                    naming the failing checks into its agent chat so the agent
-                    can start investigating. Fires once per failing commit, and
-                    only for worktrees with a live chat tab. Individual
-                    worktrees can opt in or out from the PR panel.
+                    Post a message into a worktree's agent chat when something
+                    happens on its PR, so the agent can pick it up without you
+                    relaying it. Only reaches worktrees with a chat tab, and
+                    stays quiet about anything that was already true when Ness
+                    started. Individual worktrees can opt in or out from the PR
+                    panel.
                   </p>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifyChatOnCiFailure}
-                      onChange={(e) => { void backend.setNotifyChatOnCiFailure(e.target.checked) }}
-                      className="accent-current icon-base cursor-pointer" />
-                    <span className="text-sm text-fg">
-                      Tell the agent when CI fails
-                    </span>
-                  </label>
+                  <div className="space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={notifyChatOnCiFailure}
+                        onChange={(e) => { void backend.setNotifyChatOnCiFailure(e.target.checked) }}
+                        className="accent-current icon-base cursor-pointer mt-0.5" />
+                      <span>
+                        <span className="block text-sm text-fg">Tell the agent when CI fails</span>
+                        <span className="block text-xs text-dim">Names the failing checks. Fires once per failing commit.</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={notifyChatOnPrComments}
+                        onChange={(e) => { void backend.setNotifyChatOnPrComments(e.target.checked) }}
+                        className="accent-current icon-base cursor-pointer mt-0.5" />
+                      <span>
+                        <span className="block text-sm text-fg">Tell the agent about new comments and reviews</span>
+                        <span className="block text-xs text-dim">
+                          Quotes new conversation comments and reviews from other
+                          people; your own are skipped. Anyone who can comment on
+                          the PR can put text in front of the agent, so think
+                          twice before enabling this for public repos.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={notifyChatOnMergeConflict}
+                        onChange={(e) => { void backend.setNotifyChatOnMergeConflict(e.target.checked) }}
+                        className="accent-current icon-base cursor-pointer mt-0.5" />
+                      <span>
+                        <span className="block text-sm text-fg">Ask the agent to fix merge conflicts</span>
+                        <span className="block text-xs text-dim">
+                          Fires when a PR starts conflicting with its base. One
+                          change to the base can conflict with many branches at
+                          once, waking every one of their agents.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
 
 
                   <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">PR review prompt</h3>

@@ -43,6 +43,7 @@ import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
+import type { PrNotifyKind } from '../shared/state/pr-notify'
 import type {
   SidebarDetailPrefsByMode,
   PreventSleepMode,
@@ -447,10 +448,14 @@ export function buildBackend(
     unpinWorktree: (path: string) => req('pinned:unpin', path),
     unsnooze: (path: string) => req('snooze:unsnooze', path),
     setSnoozeDefaultDays: (days: number) => req('config:setSnoozeDefaultDays', days),
-    setCiNotifyOverride: (path: string, enabled: boolean | null) =>
-      req('ciNotify:setOverride', path, enabled),
+    setPrNotifyOverride: (path: string, kind: PrNotifyKind, enabled: boolean | null) =>
+      req('prNotify:setOverride', path, kind, enabled),
     setNotifyChatOnCiFailure: (enabled: boolean) =>
       req('config:setNotifyChatOnCiFailure', enabled),
+    setNotifyChatOnPrComments: (enabled: boolean) =>
+      req('config:setNotifyChatOnPrComments', enabled),
+    setNotifyChatOnMergeConflict: (enabled: boolean) =>
+      req('config:setNotifyChatOnMergeConflict', enabled),
     requestMergeConflictFix: (worktreePath: string) =>
       req('prs:requestConflictFix', worktreePath),
     setAlias: (path: string, alias: string) => req('aliases:set', path, alias),
