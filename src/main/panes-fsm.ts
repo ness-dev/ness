@@ -175,6 +175,7 @@ export class PanesFSM {
         label: t.label,
         agentKind: t.agentKind,
         sessionId: t.sessionId,
+        ...(t.providerSessionId ? { providerSessionId: t.providerSessionId } : {}),
         url: t.url,
         command: t.command,
         cwd: t.cwd,

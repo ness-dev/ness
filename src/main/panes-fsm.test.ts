@@ -209,6 +209,33 @@ describe('PanesFSM.restoreFromConfig', () => {
     expect(agentTab?.mode).toBeUndefined()
     expect(chatTab?.mode).toBe('asleep')
   })
+
+  it('restores a codex chat tab’s providerSessionId', async () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/restore-codex'
+    await fsm.restoreFromConfig({
+      _ignored: {
+        [wtPath]: {
+          type: 'leaf',
+          id: 'pane-1',
+          tabs: [
+            {
+              id: 'chat-1',
+              type: 'json-claude',
+              label: 'Chat',
+              agentKind: 'codex',
+              sessionId: 'chat-1',
+              providerSessionId: 'thread-1'
+            }
+          ],
+          activeTabId: 'chat-1'
+        }
+      }
+    })
+    fsm.ensureInitialized(wtPath)
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs[0].providerSessionId).toBe('thread-1')
+  })
 })
 
 describe('PanesFSM.ensureInitialized', () => {

@@ -965,6 +965,7 @@ function treeToPersistedNode(node: PaneNode): PersistedPaneNode | null {
           label: stripped.label,
           agentKind: stripped.agentKind,
           sessionId: stripped.sessionId,
+          ...(stripped.providerSessionId ? { providerSessionId: stripped.providerSessionId } : {}),
           url: liveUrl || stripped.url,
           command: stripped.command,
           cwd: stripped.cwd,
