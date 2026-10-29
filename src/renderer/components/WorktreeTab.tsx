@@ -145,7 +145,7 @@ export const WorktreeTab = memo(function WorktreeTab({
               setMenu({ x: e.clientX, y: e.clientY })
             }
       }
-      className={`group px-2 rounded-md text-left flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group w-full px-3 text-left flex items-center gap-2 transition-colors cursor-pointer ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${deleting ? 'opacity-60 italic' : ''} ${
         isActive ? 'text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'

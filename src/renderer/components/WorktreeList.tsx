@@ -206,7 +206,7 @@ export function WorktreeList({
       {!group.collapsed &&
         group.rows.map((row) => (
           <div key={row.path}>
-            <div className={`mx-1.5 rounded-md ${row.path === activeWorktreeId ? 'bg-surface' : ''}`}>
+            <div className={row.path === activeWorktreeId ? 'bg-surface' : ''}>
             <WorktreeTab
               row={row}
               variant={variant}
@@ -229,7 +229,7 @@ export function WorktreeList({
             )}
             </div>
             {continueTarget?.path === row.path && (
-              <div className="mx-1.5 my-1 rounded-md border-2 border-accent bg-panel-raised p-2.5 shadow-inner">
+              <div className="border-y-2 border-accent bg-panel-raised p-2.5 shadow-inner">
                 <div className="text-xs font-semibold uppercase tracking-wider text-accent mb-1.5 px-0.5">
                   Continue on new branch
                 </div>
@@ -333,11 +333,11 @@ export function WorktreeList({
           {!section.collapsed && agentCount > 0 && onNewWorktree && (
             <button
               onClick={() => onNewWorktree(section.unified ? undefined : section.repoRoot)}
-              className={`group relative mx-1.5 w-[calc(100%-0.75rem)] rounded-md flex items-center gap-2 px-2 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
+              className={`group relative w-full flex items-center gap-2 px-3 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
                 touch ? 'min-h-11 py-3' : 'py-1.5'
               }`}
             >
-              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full brand-gradient-flow-bar opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="absolute left-0 top-0 bottom-0 w-0.5 brand-gradient-flow-bar opacity-0 group-hover:opacity-100 transition-opacity" />
               <Plus className="icon-sm shrink-0 text-dim group-hover:text-brand transition-colors" />
               <span className="text-sm font-medium brand-gradient-flow-text-hover">Add worktree</span>
               {!touch && (section.unified || !model.showRepoHeaders) && (
@@ -458,7 +458,7 @@ function PendingWorktreeRow({
   return (
     <div
       onClick={onClick}
-      className={`group mx-1.5 px-2 rounded-md text-left flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group w-full text-left px-3 flex items-center gap-2 transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-3' : 'py-2'
       } ${isActive ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'}`}
     >
@@ -520,9 +520,9 @@ function AssignedPRRow({
           ? `Open PR #${pr.number} from ${pr.repoNameWithOwner} as a new worktree`
           : `PR #${pr.number} from ${pr.repoNameWithOwner} — awaiting your review`
       }
-      className={`group mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-2 flex items-center gap-2 text-muted transition-colors ${
+      className={`group w-full text-left px-3 flex items-center gap-2 text-muted transition-colors border-l-2 border-transparent ${
         touch ? 'min-h-11 py-3' : 'py-2'
-      } ${onClick ? 'hover:bg-panel-raised hover:text-fg cursor-pointer' : 'cursor-default'}`}
+      } ${onClick ? 'hover:bg-panel-raised hover:text-fg hover:border-accent cursor-pointer' : 'cursor-default'}`}
     >
       <GitPullRequest className={`icon-sm shrink-0 ${pr.isDraft ? 'text-dim' : 'text-accent'}`} />
       <div className="min-w-0 flex-1">
