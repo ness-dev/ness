@@ -15,13 +15,16 @@ interface SubtitleDetailProps {
    *  action buttons. When false (default), renders as a stacked line-2
    *  cluster that grows into `flex-1 min-w-0` next to the label. */
   inline?: boolean
+  /** The row is selected. `text-faint` sits too close to `bg-surface` in
+   *  most themes to read, so the cluster lifts to `text-muted`. */
+  active?: boolean
 }
 
 /** The right-hand / line-2 detail cluster shown next to each sidebar
  *  worktree row. Shared between `WorktreeTab` (production use) and the
  *  Settings > Appearance > Sidebar preview so both stay in sync when the
  *  layout or item set changes. */
-export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, inline }: SubtitleDetailProps): JSX.Element | null {
+export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, inline, active }: SubtitleDetailProps): JSX.Element | null {
   const items: { key: string; node: ReactNode }[] = []
   if (repoLabel && prefs.repoLabel) {
     items.push({
@@ -116,6 +119,7 @@ export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, 
     })
   }
   if (items.length === 0) return null
+  const tone = active ? 'text-muted' : 'text-faint'
   return (
     <div
       className={
@@ -126,8 +130,8 @@ export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, 
           // flexible items inside (repoLabel / branch / milestone) truncate
           // first via their own `truncate min-w-0`; rigid items (age, diff,
           // #N, avatar) stay legible.
-          ? 'text-xs text-faint flex items-center gap-1.5 min-w-0 max-w-[50%] overflow-hidden'
-          : 'text-xs text-faint flex items-center gap-1.5 min-w-0'
+          ? `text-xs ${tone} flex items-center gap-1.5 min-w-0 max-w-[50%] overflow-hidden`
+          : `text-xs ${tone} flex items-center gap-1.5 min-w-0`
       }
     >
       {items.map((item) => (

@@ -211,7 +211,7 @@ export function WorktreeTab({
             {formatPendingTool(pendingTool!)}
           </div>
         ) : worktree.prunable ? (
-          <div className="text-xs text-faint truncate">
+          <div className={`text-xs truncate ${isActive ? 'text-muted' : 'text-faint'}`}>
             {row.repoLabel ? (
               <span className="inline-flex items-center gap-1">
                 <span className={repoNameColor(row.repoLabel)}>{row.repoLabel}</span>
@@ -229,6 +229,7 @@ export function WorktreeTab({
             aliased={alias !== undefined}
             prStatus={prStatus}
             prefs={detailPrefs}
+            active={isActive}
           />
         ) : null}
       </div>
@@ -239,6 +240,7 @@ export function WorktreeTab({
           aliased={alias !== undefined}
           prStatus={prStatus}
           prefs={detailPrefs}
+          active={isActive}
           inline
         />
       )}
