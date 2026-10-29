@@ -56,6 +56,7 @@ import {
   buildSpawnArgs,
   extractSessionId,
   supportsNoDaemon,
+  launchExtras,
   mcpServerOverrides,
   hooksInstalled,
   installHooks,
@@ -214,6 +215,11 @@ describe('codex --no-daemon', () => {
     await expect(supportsNoDaemon('codex-old')).resolves.toBe(false)
     execState.reply = { err: new Error('not found'), stdout: '' }
     await expect(supportsNoDaemon('codex-missing')).resolves.toBe(false)
+  })
+
+  it('reports --no-daemon support through launchExtras', async () => {
+    execState.reply = { err: null, stdout: '--no-daemon' }
+    await expect(launchExtras('codex-extras')).resolves.toEqual({ noDaemon: true })
   })
 
   it('adds --no-daemon to fresh and resumed launches only when asked', () => {

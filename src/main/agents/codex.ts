@@ -252,6 +252,10 @@ export function mcpServerOverrides(name: string, server: StdioMcpServer): string
   ]
 }
 
+export async function launchExtras(command: string): Promise<Partial<AgentSpawnOpts>> {
+  return { noDaemon: await supportsNoDaemon(command) }
+}
+
 export function buildSpawnArgs(opts: AgentSpawnOpts): string {
   // Codex has no per-invocation MCP config file, so Ness's server goes in as
   // `-c` overrides (opts.nessMcp); mcpConfigPath is the Claude-shaped file

@@ -17,7 +17,7 @@ import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
 import { bundledCodexBinPath } from './codex-binary'
-import { getChatCapabilities } from '../shared/agent-registry'
+import { AGENT_REGISTRY, getChatCapabilities } from '../shared/agent-registry'
 import { buildRelocationPreamble } from './fork-relocation'
 import { shellQuote } from './shell-quote'
 import {
@@ -134,7 +134,6 @@ import {
 } from '../shared/state/settings'
 import { watchStatusDir } from './hooks'
 import { getAgent, type AgentKind } from './agents'
-import { supportsNoDaemon as supportsCodexNoDaemon } from './agents/codex'
 import { buildClaudeLaunchSettings } from './claude-launch'
 import { HARNESS_REPO_OWNER, HARNESS_REPO_NAME } from '../shared/constants'
 import { readRecentDebugLog } from './debug'
@@ -502,8 +501,9 @@ const chatRouter = new ChatRouter(
   { claude: jsonClaudeManager, codex: codexChatProvider },
   (sessionId) => findJsonClaudeTab(sessionId)?.agentKind
 )
-// Warm the probe so the first Codex terminal tab doesn't wait on a login shell.
-void supportsCodexNoDaemon(config.codexCommand || 'codex')
+// Warm each agent's launch probes so its first terminal tab doesn't wait on
+// a login shell.
+for (const { kind } of AGENT_REGISTRY) void getAgent(kind).launchExtras?.(agentLaunchCommand(kind))
 const perfMonitor = new PerfMonitor()
 setGitHubApiRecorder(() => perfMonitor.recordGitHubApiCall())
 setGitHubApiLoggingEnabled(config.expandedDiagnosticLoggingEnabled === true)
@@ -1075,9 +1075,16 @@ const panesFSM = new PanesFSM(store, {
   }
 })
 
-/** Ness's MCP server for a Codex terminal tab, keyed by its terminal id —
- *  the same entry Claude terminals get through their MCP config file. */
-function codexTerminalNessMcp(terminalId: string): StdioMcpServer | null {
+/** The CLI command a terminal tab of this agent runs, from settings. */
+function agentLaunchCommand(kind: AgentKind): string {
+  const custom =
+    kind === 'claude' ? config.claudeCommand : kind === 'codex' ? config.codexCommand : config.cursorCommand
+  return custom || getAgent(kind).defaultCommand
+}
+
+/** Ness's MCP server for a terminal tab, keyed by its terminal id — the
+ *  same entry Claude terminals also get through their MCP config file. */
+function terminalNessMcp(terminalId: string): StdioMcpServer | null {
   if (store.getSnapshot().state.settings.harnessMcpEnabled === false) return null
   const controlServer = getControlServerInfo()
   if (!controlServer) return null
@@ -3500,12 +3507,7 @@ function registerIpcHandlers(): void {
     }): Promise<string> => {
       const kind = toAgentKind(agentKind)
       const agent = getAgent(kind)
-      const command =
-        kind === 'claude'
-          ? (config.claudeCommand || agent.defaultCommand)
-          : kind === 'codex'
-            ? (config.codexCommand || agent.defaultCommand)
-            : (config.cursorCommand || agent.defaultCommand)
+      const command = agentLaunchCommand(kind)
       const mcpConfigPath = writeMcpConfigForTerminal(
         opts.terminalId,
         resolveCallerScope(opts.terminalId)
@@ -3530,10 +3532,18 @@ function registerIpcHandlers(): void {
       } else {
         model = override || config.cursorModel || null
       }
-      const noDaemon = kind === 'codex' ? await supportsCodexNoDaemon(command) : undefined
-      const nessMcp = kind === 'codex' ? codexTerminalNessMcp(opts.terminalId) : undefined
+      const extras = (await agent.launchExtras?.(command)) ?? {}
 
-      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen, noDaemon, nessMcp })
+      return agent.buildSpawnArgs({
+        ...opts,
+        ...extras,
+        command,
+        mcpConfigPath,
+        model,
+        systemPrompt,
+        tuiFullscreen,
+        nessMcp: terminalNessMcp(opts.terminalId)
+      })
     }
   )
 
