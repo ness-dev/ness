@@ -41,6 +41,7 @@ import {
 } from '../shared/state/context-window'
 import { AUTOCOMPACT_FRACTION } from '../shared/context-limits'
 import { log } from './debug'
+import { writeResultImage } from './json-claude-attachments'
 import type { ApprovalResult } from './approval-bridge'
 import type {
   ChatImageInput,
@@ -724,7 +725,13 @@ export class CodexChatProvider implements ChatProvider {
     this.opts.cancelApprovalForToolUse(sessionId, item.id)
     this.store.dispatch({
       type: 'jsonClaude/toolResultAttached',
-      payload: { sessionId, toolUseId: item.id, content: result.content, isError: result.isError }
+      payload: {
+        sessionId,
+        toolUseId: item.id,
+        content: result.content,
+        isError: result.isError,
+        ...(result.images ? { images: result.images } : {})
+      }
     })
   }
 
@@ -1087,7 +1094,32 @@ export function toolUseBlockFor(item: CodexThreadItem): JsonClaudeMessageBlock |
   }
 }
 
-export function toolResultFor(item: CodexThreadItem): { content: string; isError: boolean } | null {
+/** MCP image blocks (`{type: 'image', data, mimeType}` — e.g. ness-control's
+ *  screenshot_tab) are spilled to disk like Claude's tool-result images, so
+ *  the tool timeline can show them inline. */
+function mcpResultImages(
+  content: unknown[],
+  writeImage: (base64: string, mediaType: string) => string
+): JsonClaudeImageRef[] {
+  const images: JsonClaudeImageRef[] = []
+  for (const c of content) {
+    if (!c || typeof c !== 'object') continue
+    const { type, data, mimeType } = c as Record<string, unknown>
+    if (type !== 'image' || typeof data !== 'string' || !data) continue
+    if (typeof mimeType !== 'string' || !mimeType.startsWith('image/')) continue
+    try {
+      images.push({ path: writeImage(data, mimeType), mediaType: mimeType })
+    } catch {
+      /* an image that can't be written just doesn't show */
+    }
+  }
+  return images
+}
+
+export function toolResultFor(
+  item: CodexThreadItem,
+  writeImage: (base64: string, mediaType: string) => string = writeResultImage
+): { content: string; isError: boolean; images?: JsonClaudeImageRef[] } | null {
   switch (item.type) {
     case 'commandExecution': {
       const it = item as Extract<CodexThreadItem, { type: 'commandExecution' }>
@@ -1104,12 +1136,16 @@ export function toolResultFor(item: CodexThreadItem): { content: string; isError
     case 'mcpToolCall': {
       const it = item as Extract<CodexThreadItem, { type: 'mcpToolCall' }>
       if (it.error) return { content: it.error.message, isError: true }
-      const parts = (it.result?.content ?? []).map((c) =>
-        c && typeof c === 'object' && typeof (c as { text?: unknown }).text === 'string'
-          ? (c as { text: string }).text
-          : JSON.stringify(c)
-      )
-      return { content: parts.join('\n'), isError: false }
+      const content = it.result?.content ?? []
+      const parts = content.flatMap((c) => {
+        if (!c || typeof c !== 'object') return [JSON.stringify(c)]
+        const block = c as { type?: unknown; text?: unknown }
+        if (typeof block.text === 'string') return [block.text]
+        if (block.type === 'image') return []
+        return [JSON.stringify(c)]
+      })
+      const images = mcpResultImages(content, writeImage)
+      return { content: parts.join('\n'), isError: false, ...(images.length > 0 ? { images } : {}) }
     }
     case 'webSearch':
       return { content: '', isError: false }
@@ -1180,7 +1216,15 @@ export function turnsToEntries(sessionId: string, turns: CodexTurn[]): JsonClaud
         entryId: `${entryId}-r`,
         kind: 'tool_result',
         timestamp: now,
-        blocks: [{ type: 'tool_result', toolUseId: item.id, content: result.content, isError: result.isError }]
+        blocks: [
+          {
+            type: 'tool_result',
+            toolUseId: item.id,
+            content: result.content,
+            isError: result.isError,
+            ...(result.images ? { images: result.images } : {})
+          }
+        ]
       })
     })
   })

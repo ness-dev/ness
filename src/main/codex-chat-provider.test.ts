@@ -12,6 +12,7 @@ import { initialState } from '../shared/state'
 import {
   CodexChatProvider,
   turnsToEntries,
+  toolResultFor,
   unwrapShellCommand,
   displayCommand,
   type CodexChatProviderOptions
@@ -581,6 +582,36 @@ describe('codex mapping helpers', () => {
     expect(displayCommand("/bin/zsh -lc 'sleep 4 && echo slept'", [{ command: 'sleep 4 && echo slept' }])).toBe(
       'sleep 4 && echo slept'
     )
+  })
+
+  it('spills MCP image results to disk and keeps base64 out of the text', () => {
+    const written: Array<[string, string]> = []
+    const result = toolResultFor(
+      {
+        type: 'mcpToolCall',
+        id: 'm',
+        server: 'ness-control',
+        tool: 'screenshot_tab',
+        status: 'completed',
+        arguments: {},
+        result: {
+          content: [
+            { type: 'image', data: 'QUJD', mimeType: 'image/jpeg' },
+            { type: 'text', text: 'Saved to /tmp/shot.jpg' }
+          ]
+        }
+      },
+      (data, mediaType) => {
+        written.push([data, mediaType])
+        return '/tmp/result-abc.jpg'
+      }
+    )
+    expect(written).toEqual([['QUJD', 'image/jpeg']])
+    expect(result).toEqual({
+      content: 'Saved to /tmp/shot.jpg',
+      isError: false,
+      images: [{ path: '/tmp/result-abc.jpg', mediaType: 'image/jpeg' }]
+    })
   })
 
   it('maps turns to user, assistant, tool_use and tool_result entries', () => {
