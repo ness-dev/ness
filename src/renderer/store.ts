@@ -35,6 +35,7 @@ import {
 } from '../shared/state'
 import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
+import { EMPTY_REVIEW_COMMENTS, type ReviewComment } from '../shared/state/reviews'
 import type { LocalTransportHandle, BackendConnection } from './types'
 import type { BootstrapProgress, SshBootstrapState } from '../shared/state/ssh-bootstrap'
 import {
@@ -827,6 +828,16 @@ export function useEditorOverrideScope(
 export function useScratchpad(worktreePath: string | null): string {
   return useAppState((s) =>
     worktreePath ? s.scratchpad.byWorktreePath[worktreePath] ?? '' : ''
+  )
+}
+
+/** Review comments for one worktree. Per-id selector; the reducer keeps
+ *  each worktree's array reference stable across other worktrees' edits. */
+export function useReviewComments(worktreePath: string | null): ReviewComment[] {
+  return useAppState((s) =>
+    worktreePath
+      ? s.reviews.byPath[worktreePath]?.comments ?? EMPTY_REVIEW_COMMENTS
+      : EMPTY_REVIEW_COMMENTS
   )
 }
 

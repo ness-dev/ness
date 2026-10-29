@@ -21,6 +21,7 @@ import {
 } from './persistence-migrations'
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
+import type { WorktreeReview } from '../shared/state/reviews'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 
@@ -376,6 +377,9 @@ export interface Config {
   // Same nesting scheme as `panes` so two repos with identical worktree
   // paths stay distinct. Absent / empty entries are pruned on write.
   scratchpadNotes?: Record<string, Record<string, string>>
+  // Review viewer comments keyed by worktree path (the `reviews` slice's
+  // byPath). Pruned when a worktree is removed.
+  reviews?: Record<string, WorktreeReview>
   // Persisted alias map: worktree path → user-defined display alias.
   aliases?: Record<string, string>
   // Wake-lock mode: hold a power-save blocker 'off' | while any agent

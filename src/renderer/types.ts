@@ -7,6 +7,14 @@ export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 import type { RepoConfig } from '../shared/state/repo-configs'
 export type { RepoConfig }
 
+import type {
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewSide,
+  ReviewAuthor
+} from '../shared/state/reviews'
+export type { ReviewComment, ReviewCommentStatus, ReviewSide, ReviewAuthor }
+
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
 export type { ToolSpec, ToolRunResult }
 
@@ -474,6 +482,24 @@ export interface ElectronAPI {
    *  chat, waking a slept tab if needed. */
   requestMergeConflictFix(worktreePath: string): Promise<MergeConflictFixResult>
   setScratchpadText(worktreePath: string, text: string): Promise<boolean>
+  addReviewComment(
+    worktreePath: string,
+    input: {
+      filePath: string
+      line: number
+      side: ReviewSide
+      body: string
+      view?: { fromCommit?: string; toCommit?: string }
+    }
+  ): Promise<ReviewComment | { error: string }>
+  deleteReviewComment(worktreePath: string, id: string): Promise<boolean>
+  setReviewCommentStatus(
+    worktreePath: string,
+    id: string,
+    status: ReviewCommentStatus
+  ): Promise<boolean>
+  addReviewReply(worktreePath: string, commentId: string, body: string): Promise<boolean>
+  refreshReviewAnchors(worktreePath: string, filePath?: string): Promise<boolean>
   setAlias(path: string, alias: string): Promise<boolean>
   clearAlias(path: string): Promise<boolean>
   openInEditor(worktreePath: string, filePath?: string): Promise<{ ok: true } | { ok: false; error: string }>

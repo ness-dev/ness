@@ -103,6 +103,14 @@ import { isWorktreeMerged } from '../shared/state/prs'
 import type { ForkSource } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
+import type { ReviewCommentStatus, ReviewSide } from '../shared/state/reviews'
+import {
+  addReviewComment,
+  addReviewReply,
+  refreshReviewAnchors,
+  setReviewCommentStatus,
+  type ReviewView
+} from './review-comments'
 import { normalizeAlias } from '../shared/state/aliases'
 import { parseRuleKey, ruleKey, type PermissionRule } from '../shared/permission-match'
 import {
@@ -751,6 +759,19 @@ store.subscribe((event) => {
       delete config.pinned
     } else {
       config.pinned = byPath
+    }
+    saveConfig(config)
+  }
+})
+
+// Persist review comments so they survive restart.
+store.subscribe((event) => {
+  if (event.type.startsWith('reviews/')) {
+    const byPath = store.getSnapshot().state.reviews.byPath
+    if (Object.keys(byPath).length === 0) {
+      delete config.reviews
+    } else {
+      config.reviews = byPath
     }
     saveConfig(config)
   }
@@ -1463,6 +1484,19 @@ store.subscribe((event) => {
   for (const path of Object.keys(byPath)) {
     if (!live.has(path)) {
       store.dispatch({ type: 'pinned/clear', payload: path })
+    }
+  }
+})
+
+// Same for review comments — they're anchored to a worktree's commits and
+// mean nothing once it's gone.
+store.subscribe((event) => {
+  if (event.type !== 'worktrees/listChanged') return
+  const live = new Set(store.getSnapshot().state.worktrees.list.map((w) => w.path))
+  const byPath = store.getSnapshot().state.reviews.byPath
+  for (const path of Object.keys(byPath)) {
+    if (!live.has(path)) {
+      store.dispatch({ type: 'reviews/worktreeRemoved', payload: { worktreePath: path } })
     }
   }
 })
@@ -4789,6 +4823,69 @@ function registerIpcHandlers(): void {
     store.dispatch({ type: 'pinned/clear', payload: path })
     return true
   })
+
+  transport.onRequest(
+    'reviews:addComment',
+    async (
+      _ctx,
+      worktreePath: string,
+      input: { filePath: string; line: number; side: ReviewSide; body: string; view?: ReviewView }
+    ) => {
+      if (typeof worktreePath !== 'string' || !worktreePath || !input) {
+        return { error: 'Invalid request' }
+      }
+      if (typeof input.filePath !== 'string' || !input.filePath) return { error: 'Missing file' }
+      if (!Number.isInteger(input.line) || input.line < 1) return { error: 'Invalid line' }
+      if (input.side !== 'old' && input.side !== 'new') return { error: 'Invalid side' }
+      if (typeof input.body !== 'string') return { error: 'Missing body' }
+      return addReviewComment(store, worktreePath, {
+        filePath: input.filePath,
+        line: input.line,
+        side: input.side,
+        body: input.body,
+        author: { kind: 'human' },
+        view: input.view
+      })
+    }
+  )
+
+  transport.onRequest('reviews:deleteComment', (_ctx, worktreePath: string, id: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    store.dispatch({ type: 'reviews/commentDeleted', payload: { worktreePath, id } })
+    return true
+  })
+
+  transport.onRequest(
+    'reviews:setCommentStatus',
+    (_ctx, worktreePath: string, id: string, status: ReviewCommentStatus) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+      if (status !== 'open' && status !== 'resolved' && status !== 'outdated') return false
+      setReviewCommentStatus(store, worktreePath, id, status)
+      return true
+    }
+  )
+
+  transport.onRequest(
+    'reviews:addReply',
+    (_ctx, worktreePath: string, commentId: string, body: string) => {
+      if (typeof worktreePath !== 'string' || typeof commentId !== 'string') return false
+      if (typeof body !== 'string') return false
+      return addReviewReply(store, worktreePath, commentId, { kind: 'human' }, body)
+    }
+  )
+
+  transport.onRequest(
+    'reviews:refreshAnchors',
+    async (_ctx, worktreePath: string, filePath?: string) => {
+      if (typeof worktreePath !== 'string' || !worktreePath) return false
+      await refreshReviewAnchors(
+        store,
+        worktreePath,
+        typeof filePath === 'string' && filePath ? filePath : undefined
+      )
+      return true
+    }
+  )
 
   transport.onRequest(
     'scratchpad:setText',

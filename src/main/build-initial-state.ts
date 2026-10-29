@@ -23,6 +23,7 @@ import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
 import { initialPermissions } from '../shared/state/permissions'
+import { initialReviews, type ReviewsState } from '../shared/state/reviews'
 import { ruleKey, type StoredPermissionRule } from '../shared/permission-match'
 import {
   initialSettings,
@@ -99,6 +100,29 @@ function flattenScratchpadNotes(
   return out
 }
 
+/** `config.json` is user-editable; drop entries that would crash the
+ *  Review viewer rather than fail the whole boot. */
+function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: ReviewsState['byPath'] = {}
+  for (const [path, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const comments = (entry as { comments?: unknown } | null)?.comments
+    if (!Array.isArray(comments)) continue
+    const valid = comments.filter(
+      (c) =>
+        c &&
+        typeof c === 'object' &&
+        typeof c.id === 'string' &&
+        typeof c.filePath === 'string' &&
+        typeof c.line === 'number' &&
+        c.anchor &&
+        typeof c.anchor.snippet === 'string'
+    )
+    if (valid.length > 0) out[path] = { comments: valid }
+  }
+  return out
+}
+
 const PREVENT_SLEEP_MODES: PreventSleepMode[] = ['off', 'while-agents-running', 'always']
 
 export function buildInitialAppState(
@@ -136,6 +160,7 @@ export function buildInitialAppState(
     permissions: config.permissionRules
       ? { rules: sanitizePermissionRules(config.permissionRules) }
       : initialPermissions,
+    reviews: config.reviews ? { byPath: sanitizeReviews(config.reviews) } : initialReviews,
     settings: {
       ...initialSettings,
       themeMode:
