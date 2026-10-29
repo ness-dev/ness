@@ -6,7 +6,7 @@ import {
   type CallerScope
 } from './control-server'
 import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
-import type { AgentTabInfo } from '../shared/agent-tabs'
+import type { ChatTabInfo } from '../shared/agent-tabs'
 import type { ReviewComment } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
@@ -48,11 +48,11 @@ const sendToTab = vi.fn<
   (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
 >((_wt, tabId) => ({ ok: true, tabId, woke: false }))
 
-function agentTab(id: string, label: string, kind: 'chat' | 'terminal'): AgentTabInfo {
-  return { id, label, kind, agentKind: 'claude', lastActiveAt: 0, asleep: false }
+function chatTab(id: string, label: string): ChatTabInfo {
+  return { id, label, agentKind: 'claude', lastActiveAt: 0, asleep: false }
 }
 const AUTHOR_TAB = 'author-tab'
-const tabsByWorktree: Record<string, AgentTabInfo[]> = {}
+const tabsByWorktree: Record<string, ChatTabInfo[]> = {}
 
 function reviewComment(over: Partial<ReviewComment> = {}): ReviewComment {
   return {
@@ -204,16 +204,16 @@ const deps: ControlServerDeps = {
     sendToTab: (path, tabId, message) => sendToTab(path, tabId, message)
   },
   reviews,
-  listAgentTabs: (path) => tabsByWorktree[path] ?? [],
+  listChatTabs: (path) => tabsByWorktree[path] ?? [],
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
 }
 
 
 tabsByWorktree[CALLER_WORKTREE] = [
-  agentTab(CALLER_TERMINAL, 'Reviewer', 'terminal'),
-  agentTab(AUTHOR_TAB, 'Chat', 'chat')
+  chatTab(CALLER_TERMINAL, 'Reviewer'),
+  chatTab(AUTHOR_TAB, 'Chat')
 ]
-tabsByWorktree[EXPLICIT_WORKTREE] = [agentTab('other-chat', 'Chat', 'chat')]
+tabsByWorktree[EXPLICIT_WORKTREE] = [chatTab('other-chat', 'Chat')]
 
 let baseUrl: string
 let token: string
@@ -760,7 +760,7 @@ describe('control-server /messages with a tab', () => {
     sendToTab.mockReturnValueOnce({ ok: false, reason: 'terminal-unsupported' })
     const r = await call('POST', '/messages', { tab: AUTHOR_TAB, message: 'hi' })
     expect(r.status).toBe(409)
-    expect(r.json.error).toMatch(/terminal agent tabs is not supported yet/)
+    expect(r.json.error).toMatch(/terminal tabs cannot receive/)
   })
 })
 

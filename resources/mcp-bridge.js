@@ -338,7 +338,7 @@ const TOOLS = [
   {
     name: 'send_message',
     description:
-      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific agent tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Only Chat tabs can receive messages for now; a terminal tab is refused.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
+      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -350,7 +350,7 @@ const TOOLS = [
         tab: {
           type: 'string',
           description:
-            'Id of one agent tab to deliver to, from list_tabs. Must be in `worktree` (or your own worktree when that is omitted), and must not be your own tab.'
+            'Id of one Chat tab to deliver to, from list_tabs. Must be in `worktree` (or your own worktree when that is omitted), and must not be your own tab.'
         },
         message: {
           type: 'string',
@@ -364,7 +364,7 @@ const TOOLS = [
   {
     name: 'list_tabs',
     description:
-      "List the agent tabs (terminal and Chat) in a worktree, most recently active first. Each entry has id, label (the name in the tab strip), kind ('chat' or 'terminal'), agentKind, lastActiveAt (epoch ms, 0 if unknown) and asleep. Your own tab is marked `self: true`. Defaults to your own worktree. The ids are what send_message's `tab` and submit_review's `tab` take.",
+      "List the Chat tabs in a worktree — the only tabs that can receive messages and reviews — most recently active first. Each entry has id, label (the name in the tab strip), agentKind, lastActiveAt (epoch ms, 0 if unknown) and asleep. Your own tab is marked `self: true` when it is a Chat tab. Terminal agent tabs are not listed. Defaults to your own worktree. The ids are what send_message's `tab` and submit_review's `tab` take.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -446,7 +446,7 @@ const TOOLS = [
   {
     name: 'submit_review',
     description:
-      "Finish a review of this worktree's branch: a verdict plus a summary, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nThe review goes to the author's agent tab — by default the most recently active agent tab in this worktree other than yours; pass `tab` (from list_tabs) to choose. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
+      "Finish a review of this worktree's branch: a verdict plus a summary, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nThe review goes to the author's Chat tab — by default the most recently active Chat tab in this worktree other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -462,7 +462,7 @@ const TOOLS = [
         },
         tab: {
           type: 'string',
-          description: "Id of the author's agent tab, from list_tabs. Optional."
+          description: "Id of the author's Chat tab, from list_tabs. Optional."
         }
       },
       required: ['verdict', 'summary']
@@ -1092,7 +1092,7 @@ async function handleToolCall(name, args) {
     return (
       what +
       '. It is held as a draft in the Review tab for the user to check and send' +
-      (r.targetTabId ? ' (to tab ' + r.targetTabId + ')' : ' — there is no other agent tab to send it to yet') +
+      (r.targetTabId ? ' (to tab ' + r.targetTabId + ')' : ' — there is no other Chat tab to send it to yet') +
       '. Nothing more to do on your side.'
     )
   }

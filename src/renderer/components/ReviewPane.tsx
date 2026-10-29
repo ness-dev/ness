@@ -340,6 +340,7 @@ export function ReviewPane({
 
             <AgentTabPicker
               worktreePath={worktreePath}
+              includeTerminals
               disabled={openCount === 0 || !onSendToAgent}
               onPick={handleSendToAgent}
               className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"

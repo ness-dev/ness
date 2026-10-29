@@ -496,7 +496,7 @@ export function buildBackend(
       req('reviews:refreshAnchors', worktreePath, filePath),
     editReviewComment: (worktreePath: string, id: string, body: string) =>
       req('reviews:editComment', worktreePath, id, body),
-    listReviewTargets: (worktreePath: string) => req('reviews:listAgentTabs', worktreePath),
+    listReviewTargets: (worktreePath: string) => req('reviews:listChatTabs', worktreePath),
     editReviewSubmission: (
       worktreePath: string,
       id: string,

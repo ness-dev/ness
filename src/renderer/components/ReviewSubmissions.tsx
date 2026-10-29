@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, ChevronDown, ChevronRight, MessageSquare, Pencil, Send, SquareTerminal, X } from 'lucide-react'
-import type { AgentTabInfo, ReviewSubmission, ReviewVerdict } from '../types'
+import type { ReviewSubmission, ReviewVerdict } from '../types'
 import { useBackend } from '../backend'
 import { useWorktreePanes } from '../store'
 import { getLeaves } from '../../shared/state/terminals'
@@ -27,13 +27,21 @@ function useTabLabels(worktreePath: string): Map<string, string> {
   }, [tree])
 }
 
-/** Dropdown of the worktree's agent tabs, most recently active first —
- *  the first entry is the default. Fetched on open because terminal-tab
- *  recency lives in main, not the store. */
+interface PickerTab {
+  id: string
+  label: string
+  kind: 'chat' | 'terminal'
+  asleep: boolean
+}
+
+/** Dropdown of the worktree's Chat tabs, most recently active first — the
+ *  first entry is the default. `includeTerminals` appends terminal agent
+ *  tabs for the human "Send to Agent", which pastes into the terminal for
+ *  the user to submit; reviews Ness delivers itself only go to Chat tabs. */
 export function AgentTabPicker({
   worktreePath,
   excludeTabId,
-  terminalNote,
+  includeTerminals,
   disabled,
   className,
   children,
@@ -41,8 +49,7 @@ export function AgentTabPicker({
 }: {
   worktreePath: string
   excludeTabId?: string
-  /** Shown beside terminal tabs, e.g. when they can't receive yet. */
-  terminalNote?: string
+  includeTerminals?: boolean
   disabled?: boolean
   className: string
   children: React.ReactNode
@@ -53,7 +60,16 @@ export function AgentTabPicker({
   // scrolls, and an absolute dropdown would be clipped by it.
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
   const open = anchor !== null
-  const [tabs, setTabs] = useState<AgentTabInfo[] | null>(null)
+  const [tabs, setTabs] = useState<PickerTab[] | null>(null)
+  const tree = useWorktreePanes(worktreePath)
+  const terminalTabs = useMemo<PickerTab[]>(() => {
+    if (!includeTerminals || !tree) return []
+    return getLeaves(tree).flatMap((leaf) =>
+      leaf.tabs
+        .filter((t) => t.type === 'agent')
+        .map((t) => ({ id: t.id, label: tabLabel(t), kind: 'terminal' as const, asleep: false }))
+    )
+  }, [includeTerminals, tree])
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const toggle = (e: React.MouseEvent<HTMLButtonElement>): void => {
     if (anchor) return setAnchor(null)
@@ -68,7 +84,9 @@ export function AgentTabPicker({
     backend
       .listReviewTargets(worktreePath)
       .then((list) => {
-        if (!cancelled) setTabs(list.filter((t) => t.id !== excludeTabId))
+        if (cancelled) return
+        const chats = list.map((t) => ({ id: t.id, label: t.label, kind: 'chat' as const, asleep: t.asleep }))
+        setTabs([...chats, ...terminalTabs].filter((t) => t.id !== excludeTabId))
       })
       .catch(() => {
         if (!cancelled) setTabs([])
@@ -82,7 +100,7 @@ export function AgentTabPicker({
       cancelled = true
       window.removeEventListener('mousedown', close)
     }
-  }, [open, backend, worktreePath, excludeTabId])
+  }, [open, backend, worktreePath, excludeTabId, terminalTabs])
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -99,7 +117,9 @@ export function AgentTabPicker({
           <div className="px-3 py-1 text-xs text-faint">Send to</div>
           {tabs === null && <div className="px-3 py-1.5 text-xs text-faint">Loading…</div>}
           {tabs?.length === 0 && (
-            <div className="px-3 py-1.5 text-xs text-faint">No agent tabs in this worktree</div>
+            <div className="px-3 py-1.5 text-xs text-faint">
+              {includeTerminals ? 'No agent tabs in this worktree' : 'No Chat tabs in this worktree'}
+            </div>
           )}
           {tabs?.map((t, i) => (
             <button
@@ -119,8 +139,8 @@ export function AgentTabPicker({
               )}
               <span className="truncate flex-1">{t.label}</span>
               <span className="shrink-0 text-faint">
-                {t.kind === 'terminal' && terminalNote
-                  ? terminalNote
+                {t.kind === 'terminal'
+                  ? 'paste'
                   : i === 0
                     ? 'most recent'
                     : t.asleep
@@ -176,7 +196,7 @@ function SubmissionCard({
         ? `Not sent${target ? ` to ${target}` : ''}`
         : target
           ? `Draft · will go to ${target}`
-          : 'Draft · no agent tab to send to'
+          : 'Draft · no Chat tab to send to'
 
   const count = submission.commentIds.length
 
@@ -218,7 +238,6 @@ function SubmissionCard({
             <AgentTabPicker
               worktreePath={worktreePath}
               excludeTabId={reviewerTabId}
-              terminalNote="not supported yet"
               disabled={sending}
               onPick={(id) => send(id)}
               className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-faint hover:text-fg cursor-pointer disabled:opacity-30"

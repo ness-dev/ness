@@ -9,7 +9,7 @@ import type {
   ReviewVerdict
 } from '../shared/state/reviews'
 import { getLeaves } from '../shared/state/terminals'
-import { tabLabel, type AgentTabInfo } from '../shared/agent-tabs'
+import { tabLabel, type ChatTabInfo } from '../shared/agent-tabs'
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { describeTabDeliveryFailure, type TabDeliveryResult } from './chat-delivery'
@@ -17,7 +17,7 @@ import { addReviewReply, refreshReviewAnchors } from './review-comments'
 
 export interface ReviewServiceDeps {
   store: Store
-  listAgentTabs: (worktreePath: string) => AgentTabInfo[]
+  listChatTabs: (worktreePath: string) => ChatTabInfo[]
   deliver: (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
 }
 
@@ -60,12 +60,12 @@ export function findReviewComment(
   return { error: `no review comment with id "${q}" in this worktree` }
 }
 
-/** The tab a review goes to: the most recently active agent tab that
+/** The tab a review goes to: the most recently active Chat tab that
  *  isn't the reviewer's own. This is the fallback; once reviewer tabs are
  *  spawned by Ness they'll carry an explicit link to the tab they review,
  *  and that link should win here. */
 export function pickReviewTarget(
-  tabs: AgentTabInfo[],
+  tabs: ChatTabInfo[],
   reviewerTabId: string | null
 ): string | null {
   return tabs.find((t) => t.id !== reviewerTabId)?.id ?? null
@@ -154,7 +154,7 @@ export function sendReviewSubmission(
   const target =
     targetTabId ??
     submission.targetTabId ??
-    pickReviewTarget(deps.listAgentTabs(worktreePath), reviewerTabId)
+    pickReviewTarget(deps.listChatTabs(worktreePath), reviewerTabId)
 
   const record = (result: ReviewSendResult): ReviewSendResult => {
     deps.store.dispatch({
@@ -171,7 +171,7 @@ export function sendReviewSubmission(
     return result
   }
 
-  if (!target) return record({ ok: false, error: 'No other agent tab in this worktree to send it to' })
+  if (!target) return record({ ok: false, error: 'No other Chat tab in this worktree to send it to' })
   if (target === reviewerTabId) {
     return record({ ok: false, error: "A review can't be sent to the tab that wrote it", tabId: target })
   }
@@ -189,7 +189,7 @@ export function sendReviewSubmission(
 export interface SubmitReviewInput {
   verdict: ReviewVerdict
   summary: string
-  /** Explicit author tab. Must be an agent tab in the worktree other than
+  /** Explicit author tab. Must be a Chat tab in the worktree other than
    *  the reviewer's. */
   targetTabId?: string
   /** Deliver now instead of holding a draft. */
@@ -208,13 +208,15 @@ export function submitReview(
 ): SubmitReviewResult {
   const state = deps.store.getSnapshot().state
   const reviewerTabId = author.kind === 'agent' ? author.tabId : null
-  const tabs = deps.listAgentTabs(worktreePath)
+  const tabs = deps.listChatTabs(worktreePath)
   if (input.targetTabId) {
     if (input.targetTabId === reviewerTabId) {
       return { error: "you can't send a review to your own tab — pick the author's tab" }
     }
     if (!tabs.some((t) => t.id === input.targetTabId)) {
-      return { error: `no agent tab "${input.targetTabId}" in this worktree — call list_tabs` }
+      return {
+        error: `no Chat tab "${input.targetTabId}" in this worktree — reviews only go to Chat tabs, not terminal tabs; call list_tabs`
+      }
     }
   }
   const sameAuthor = (a: ReviewAuthor): boolean =>

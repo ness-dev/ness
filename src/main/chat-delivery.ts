@@ -132,10 +132,10 @@ function findTab(state: AppState, worktreePath: string, tabId: string): Terminal
   return null
 }
 
-/** Deliver a message into one specific agent tab, waking it if it's
- *  asleep. A json-claude tab's id is its session id. Terminal agent tabs
- *  can't receive yet — that needs either a channel into the running CLI
- *  or a typed paste gated on its hook status.
+/** Deliver a message into one specific Chat tab, waking or restarting
+ *  it as needed. A json-claude tab's id is its session id. Terminal agent
+ *  tabs are refused: typing into a running TUI unattended is too
+ *  unreliable (it can land in a permission prompt or a half-typed draft).
  *
  *  Same cost caveat as deliverToWorktreeChat: waking spawns a subprocess,
  *  so never call this from inside a store listener. */
@@ -169,7 +169,7 @@ export function describeTabDeliveryFailure(reason: TabDeliveryFailure): string {
     case 'not-agent-tab':
       return 'that tab is not an agent tab'
     case 'terminal-unsupported':
-      return 'delivery to terminal agent tabs is not supported yet — only Chat tabs can receive it'
+      return 'terminal tabs cannot receive reviews or messages — only Chat tabs can'
     case 'wake-failed':
       return "failed to start that Chat tab's agent"
   }

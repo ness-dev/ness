@@ -10,7 +10,7 @@ import { normalizeViewport, type BrowserViewport } from '../shared/browser-viewp
 import type { PRStatus } from '../shared/state/prs'
 import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
 import { describeTabDeliveryFailure } from './chat-delivery'
-import type { AgentTabInfo } from '../shared/agent-tabs'
+import type { ChatTabInfo } from '../shared/agent-tabs'
 import type {
   ReviewComment,
   ReviewCommentStatus,
@@ -222,8 +222,9 @@ export interface ControlServerDeps {
   shell: ShellQueries
   messaging: MessagingQueries
   reviews: ReviewQueries
-  /** Agent tabs (terminal + chat) of a worktree, most recently active first. */
-  listAgentTabs: (worktreePath: string) => AgentTabInfo[]
+  /** Chat tabs of a worktree, most recently active first — the only tabs
+   *  reviews and tab messages can be delivered to. */
+  listChatTabs: (worktreePath: string) => ChatTabInfo[]
   /** Trim + 80-char clamp + dispatch. Matches the aliases:set IPC handler.
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
@@ -921,7 +922,7 @@ async function handleRequest(
     return
   }
 
-  // Agent tabs in a worktree — the ids send_message's `tab` and
+  // Chat tabs in a worktree — the ids send_message's `tab` and
   // submit_review's `tab` take. Defaults to the caller's own worktree.
   if (req.method === 'GET' && path === '/tabs') {
     const { scope, terminalId } = resolveScope(req, deps)
@@ -938,7 +939,7 @@ async function handleRequest(
       if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
       worktreePath = resolved.path
     }
-    const tabs = deps.listAgentTabs(worktreePath).map((t) => ({
+    const tabs = deps.listChatTabs(worktreePath).map((t) => ({
       ...t,
       ...(t.id === terminalId ? { self: true } : {})
     }))
@@ -1090,14 +1091,14 @@ async function handleRequest(
     if (tab === terminalId) {
       return sendJson(res, 400, { error: 'cannot send a message to your own tab' })
     }
-    if (tab && !deps.listAgentTabs(targetPath).some((t) => t.id === tab)) {
+    if (tab && !deps.listChatTabs(targetPath).some((t) => t.id === tab)) {
       return sendJson(res, 404, {
-        error: `no agent tab "${tab}" in ${targetPath} — call list_tabs to see them`
+        error: `no Chat tab "${tab}" in ${targetPath} — only Chat tabs can receive messages; call list_tabs to see them`
       })
     }
 
     const worktreeName = deps.messaging.describe(scope.worktreePath)
-    const senderTab = deps.listAgentTabs(scope.worktreePath).find((t) => t.id === terminalId)
+    const senderTab = deps.listChatTabs(scope.worktreePath).find((t) => t.id === terminalId)
     const from = tab && senderTab ? `${worktreeName} · ${senderTab.label}` : worktreeName
     const wrapped = wrapAutomatedMessage('worktree-message', message, { from })
 

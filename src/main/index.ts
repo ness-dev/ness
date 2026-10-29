@@ -163,8 +163,7 @@ import {
   describeWorktree,
   resolveWorktreeQuery
 } from './chat-delivery'
-import { TabActivityTracker } from './tab-activity'
-import { listAgentTabs } from '../shared/agent-tabs'
+import { listChatTabs } from '../shared/agent-tabs'
 import {
   agentAuthor,
   listReviewComments,
@@ -1290,12 +1289,11 @@ const chatDeliveryDeps = {
 // chat sessions.
 const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
 
-const tabActivity = new TabActivityTracker(store)
-const listWorktreeAgentTabs = (worktreePath: string) =>
-  listAgentTabs(store.getSnapshot().state, worktreePath, (id) => tabActivity.get(id))
+const listWorktreeChatTabs = (worktreePath: string) =>
+  listChatTabs(store.getSnapshot().state, worktreePath)
 const reviewServiceDeps: ReviewServiceDeps = {
   store,
-  listAgentTabs: listWorktreeAgentTabs,
+  listChatTabs: listWorktreeChatTabs,
   deliver: (worktreePath, tabId, message) =>
     deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
 }
@@ -4971,9 +4969,9 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  transport.onRequest('reviews:listAgentTabs', (_ctx, worktreePath: string) => {
+  transport.onRequest('reviews:listChatTabs', (_ctx, worktreePath: string) => {
     if (typeof worktreePath !== 'string' || !worktreePath) return []
-    return listWorktreeAgentTabs(worktreePath)
+    return listWorktreeChatTabs(worktreePath)
   })
 
   transport.onRequest(
@@ -5207,8 +5205,6 @@ async function runBoot(): Promise<void> {
 
   ciNotifier.start()
 
-  tabActivity.start()
-
   autoSleepMonitor.start()
 
   wakeLockController.start()
@@ -5377,7 +5373,7 @@ async function runBoot(): Promise<void> {
       sendToTab: (worktreePath, tabId, message) =>
         deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
     },
-    listAgentTabs: listWorktreeAgentTabs,
+    listChatTabs: listWorktreeChatTabs,
     reviews: {
       list: (worktreePath, filter) => listReviewComments(store, worktreePath, filter),
       addComment: (worktreePath, callerTabId, input) =>

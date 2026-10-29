@@ -24,8 +24,8 @@ export type {
   ReviewVerdict
 }
 
-import type { AgentTabInfo } from '../shared/agent-tabs'
-export type { AgentTabInfo }
+import type { ChatTabInfo } from '../shared/agent-tabs'
+export type { ChatTabInfo }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
 export type { ToolSpec, ToolRunResult }
@@ -519,7 +519,7 @@ export interface ElectronAPI {
   addReviewReply(worktreePath: string, commentId: string, body: string): Promise<boolean>
   refreshReviewAnchors(worktreePath: string, filePath?: string): Promise<boolean>
   editReviewComment(worktreePath: string, id: string, body: string): Promise<boolean>
-  listReviewTargets(worktreePath: string): Promise<AgentTabInfo[]>
+  listReviewTargets(worktreePath: string): Promise<ChatTabInfo[]>
   editReviewSubmission(
     worktreePath: string,
     id: string,

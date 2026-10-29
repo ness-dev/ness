@@ -9,7 +9,7 @@ import { Store } from './store'
 import { initialState, type AppState } from '../shared/state'
 import type { PaneNode } from '../shared/state/terminals'
 import type { ReviewComment } from '../shared/state/reviews'
-import { listAgentTabs } from '../shared/agent-tabs'
+import { listChatTabs, type ChatTabInfo } from '../shared/agent-tabs'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 import {
   agentAuthor,
@@ -22,7 +22,6 @@ import {
   submitReview,
   type ReviewServiceDeps
 } from './review-service'
-import type { TabDeliveryResult } from './chat-delivery'
 
 const WT = '/wt'
 
@@ -33,6 +32,7 @@ const tree: PaneNode = {
     { id: 'author', type: 'json-claude', label: 'Chat' },
     { id: 'reviewer', type: 'agent', label: 'Claude', customLabel: 'Reviewer' },
     { id: 'term', type: 'agent', label: 'Codex', agentKind: 'codex' },
+    { id: 'chat2', type: 'json-claude', label: 'Codex Chat', agentKind: 'codex' },
     { id: 'sh', type: 'shell', label: 'zsh' }
   ],
   activeTabId: 'reviewer'
@@ -56,12 +56,11 @@ function comment(id: string, over: Partial<ReviewComment> = {}): ReviewComment {
 
 function setup(
   comments: ReviewComment[] = [],
-  deliver: (wt: string, tab: string, msg: string) => TabDeliveryResult = (_w, tabId) => ({
+  deliver: ReviewServiceDeps['deliver'] = (_w, tabId) => ({
     ok: true,
     tabId,
     woke: false
-  }),
-  activity: Record<string, number> = {}
+  })
 ): { store: Store; deps: ReviewServiceDeps; deliver: ReturnType<typeof vi.fn> } {
   const state: AppState = {
     ...initialState,
@@ -72,7 +71,7 @@ function setup(
   const deliverFn = vi.fn(deliver)
   const deps: ReviewServiceDeps = {
     store,
-    listAgentTabs: (wt) => listAgentTabs(store.getSnapshot().state, wt, (id) => activity[id]),
+    listChatTabs: (wt) => listChatTabs(store.getSnapshot().state, wt),
     deliver: deliverFn
   }
   return { store, deps, deliver: deliverFn }
@@ -109,14 +108,23 @@ describe('findReviewComment', () => {
 })
 
 describe('pickReviewTarget', () => {
-  it('takes the most recently active agent tab other than the reviewer', () => {
+  it('lists only Chat tabs, so terminal tabs are never picked', () => {
     const { store } = setup()
-    const tabs = listAgentTabs(store.getSnapshot().state, WT, (id) =>
-      ({ reviewer: 50, term: 40 })[id]
-    )
-    expect(tabs.map((t) => t.id)).toEqual(['reviewer', 'term', 'author'])
-    expect(pickReviewTarget(tabs, 'reviewer')).toBe('term')
-    expect(pickReviewTarget([], 'reviewer')).toBeNull()
+    const tabs = listChatTabs(store.getSnapshot().state, WT)
+    expect(tabs.map((t) => t.id)).toEqual(['author', 'chat2'])
+    expect(tabs[1]).toMatchObject({ label: 'Codex Chat', agentKind: 'codex' })
+  })
+
+  it('takes the most recently active Chat tab other than the reviewer', () => {
+    const tab = (id: string, lastActiveAt: number): ChatTabInfo => ({
+      id,
+      label: id,
+      agentKind: 'claude',
+      lastActiveAt,
+      asleep: false
+    })
+    expect(pickReviewTarget([tab('rev', 50), tab('b', 40), tab('a', 0)], 'rev')).toBe('b')
+    expect(pickReviewTarget([tab('rev', 50)], 'rev')).toBeNull()
   })
 })
 
@@ -210,19 +218,30 @@ describe('submitReview', () => {
   it('records a failed delivery with a readable reason', () => {
     const { store, deps } = setup([comment('mine')], () => ({
       ok: false,
-      reason: 'terminal-unsupported'
+      reason: 'wake-failed'
     }))
     const result = submitReview(deps, WT, author, {
       verdict: 'comment',
       summary: '',
-      targetTabId: 'term',
+      targetTabId: 'chat2',
       autoSend: true
     })
     if ('error' in result) throw new Error(result.error)
-    expect(result.delivery).toMatchObject({ ok: false, tabId: 'term' })
+    expect(result.delivery).toMatchObject({ ok: false, tabId: 'chat2' })
     const sub = store.getSnapshot().state.reviews.byPath[WT].submissions![0]
     expect(sub.state).toBe('failed')
-    expect(sub.error).toMatch(/terminal agent tabs is not supported yet/)
+    expect(sub.error).toMatch(/failed to start/)
+  })
+
+  it('rejects a terminal tab as the target', () => {
+    const { deps } = setup()
+    const r = submitReview(deps, WT, author, {
+      verdict: 'comment',
+      summary: '',
+      targetTabId: 'term',
+      autoSend: false
+    })
+    expect(r).toEqual({ error: expect.stringMatching(/only go to Chat tabs/) })
   })
 
   it('rejects targeting its own tab or a tab that is not an agent tab', () => {
@@ -260,9 +279,9 @@ describe('sendReviewSubmission', () => {
       type: 'reviews/commentDeleted',
       payload: { worktreePath: WT, id: 'b' }
     })
-    expect(sendReviewSubmission(deps, WT, result.submission.id, 'term')).toEqual({
+    expect(sendReviewSubmission(deps, WT, result.submission.id, 'chat2')).toEqual({
       ok: true,
-      tabId: 'term',
+      tabId: 'chat2',
       woke: false
     })
     const msg = deliver.mock.calls[0][2] as string
@@ -270,7 +289,7 @@ describe('sendReviewSubmission', () => {
     expect(msg).not.toContain('[b]')
     expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0]).toMatchObject({
       state: 'sent',
-      targetTabId: 'term'
+      targetTabId: 'chat2'
     })
   })
 
