@@ -21,6 +21,8 @@
 //         @anthropic-ai/claude-code-<platform>/    json-mode subprocess (npm layout
 //           package.json                            so require.resolve from main/index.js
 //           claude                                  matches the Electron resolution path)
+//         @openai/codex-<platform>/                Codex Chat subprocess, same layout
+//           package.json, vendor/<triple>/bin/codex
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
@@ -57,6 +59,12 @@ const CLAUDE_PLATFORM_PKG = {
   'darwin-arm64': '@anthropic-ai/claude-code-darwin-arm64',
   'linux-x64': '@anthropic-ai/claude-code-linux-x64',
   'linux-arm64': '@anthropic-ai/claude-code-linux-arm64'
+}
+
+const CODEX_PLATFORM_PKG = {
+  'darwin-arm64': { pkg: '@openai/codex-darwin-arm64', triple: 'aarch64-apple-darwin' },
+  'linux-x64': { pkg: '@openai/codex-linux-x64', triple: 'x86_64-unknown-linux-musl' },
+  'linux-arm64': { pkg: '@openai/codex-linux-arm64', triple: 'aarch64-unknown-linux-musl' }
 }
 
 async function downloadNodeBinary(platform, nodeDist) {
@@ -132,6 +140,21 @@ async function copyClaudeBinary(platform, libDir) {
   await chmod(join(destPkgDir, 'claude'), 0o755)
 }
 
+async function copyCodexBinary(platform, libDir) {
+  const info = CODEX_PLATFORM_PKG[platform]
+  if (!info) throw new Error(`No codex package mapping for ${platform}`)
+  const r = createRequire(join(repoRoot, 'package.json'))
+  const srcPkgDir = dirname(r.resolve(`${info.pkg}/package.json`))
+  const binRel = join('vendor', info.triple, 'bin', 'codex')
+  if (!existsSync(join(srcPkgDir, binRel))) {
+    throw new Error(`codex binary not found at ${join(srcPkgDir, binRel)}. Run npm install first.`)
+  }
+  const destPkgDir = join(libDir, 'node_modules', info.pkg)
+  await mkdir(dirname(destPkgDir), { recursive: true })
+  await cp(srcPkgDir, destPkgDir, { recursive: true })
+  await chmod(join(destPkgDir, binRel), 0o755)
+}
+
 // vite externalizes runtime npm deps (see vite.headless.config.ts), so
 // `require('node-pty')` and `require('ws')` in the bundled main.js
 // resolve through plain Node lookup at runtime. We ship them as a real
@@ -203,6 +226,7 @@ async function main() {
   })
   await copyRuntimePackages(libDir)
   await copyClaudeBinary(platform, libDir)
+  await copyCodexBinary(platform, libDir)
   await cp(
     join(repoRoot, 'resources', 'permission-prompt-mcp.js'),
     join(libDir, 'mcp', 'permission-prompt-mcp.js')
