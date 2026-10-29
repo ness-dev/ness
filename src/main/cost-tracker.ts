@@ -80,13 +80,13 @@ export class CostTracker {
   private interestedClients = new Set<string>()
   private lastStops = new Map<string, StopEvent>()
 
-  /** `resolveChatTranscriptPath` returns a chat session's history file
-   *  when its provider doesn't keep Claude's `~/.claude/projects` layout
-   *  (Codex keeps rollout files under `~/.codex/sessions`). Null falls back
-   *  to the Claude path. */
+  /** `resolveChatTranscriptPath` asks the session's chat provider where its
+   *  history lives (each agent keeps its own format and layout). Null means
+   *  there's nothing to read yet. Defaults to Claude's layout. */
   constructor(
     private store: Store,
-    private resolveChatTranscriptPath: (sessionId: string) => string | null = () => null
+    private resolveChatTranscriptPath: (sessionId: string, worktreePath: string) => string | null =
+      (sessionId, worktreePath) => jsonClaudeTranscriptPath(worktreePath, sessionId)
   ) {}
 
   start(): void {
@@ -171,9 +171,8 @@ export class CostTracker {
     const session =
       this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
     if (!session) return
-    const transcriptPath =
-      this.resolveChatTranscriptPath(sessionId) ??
-      jsonClaudeTranscriptPath(session.worktreePath, sessionId)
+    const transcriptPath = this.resolveChatTranscriptPath(sessionId, session.worktreePath)
+    if (!transcriptPath) return
     try {
       const entry = this.parseIncremental(sessionId, transcriptPath)
       if (!entry || Object.keys(entry.byModel).length === 0) return

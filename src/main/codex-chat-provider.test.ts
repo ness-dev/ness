@@ -453,14 +453,41 @@ describe('CodexChatProvider', () => {
     const { provider, opts, store, server } = setup({
       'thread/fork': () => ({ thread: { id: 'thread-into-wt' }, model: 'gpt-test' })
     })
-    provider.prepareFork('s1', { sourceThreadId: 'thread-source', model: 'gpt-test' })
-    provider.create('s1', process.cwd(), 'default')
+    ;(opts.getThreadId as ReturnType<typeof vi.fn>).mockImplementation((id: string) =>
+      id === 'source' ? 'thread-source' : undefined
+    )
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: 'source', worktreePath: '/src', agentKind: 'codex' }
+    })
+    store.dispatch({ type: 'jsonClaude/currentModelChanged', payload: { sessionId: 'source', model: 'gpt-test' } })
+    expect(provider.canForkIntoWorktree('source')).toBe(true)
+    const outcome = provider.forkIntoWorktree({
+      sourceSessionId: 'source',
+      sourceWorktreePath: '/src',
+      destWorktreePath: process.cwd()
+    })
+    expect(outcome.ok).toBe(true)
+    const forkId = outcome.newSessionId!
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: forkId, worktreePath: process.cwd(), agentKind: 'codex' }
+    })
+    provider.create(forkId, process.cwd(), 'default')
     await settle()
     const params = server.received.find((m) => m.method === 'thread/fork')?.params
     expect(params).toMatchObject({ threadId: 'thread-source', cwd: process.cwd(), model: 'gpt-test' })
     expect(params).not.toHaveProperty('lastTurnId')
-    expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-into-wt')
-    expect(store.getSnapshot().state.jsonClaude.sessions['s1'].state).toBe('running')
+    expect(opts.setThreadId).toHaveBeenCalledWith(forkId, 'thread-into-wt')
+    expect(store.getSnapshot().state.jsonClaude.sessions[forkId].state).toBe('running')
+  })
+
+  it('has nothing to fork into a worktree before a thread exists', () => {
+    const { provider } = setup()
+    expect(provider.canForkIntoWorktree('s1')).toBe(false)
+    expect(
+      provider.forkIntoWorktree({ sourceSessionId: 's1', sourceWorktreePath: '/a', destWorktreePath: '/b' }).ok
+    ).toBe(false)
   })
 
   it('refuses to fork a turn that is still running', async () => {

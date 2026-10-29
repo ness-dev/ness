@@ -21,7 +21,10 @@ function fakeProvider(running: string[] = []): ChatProvider {
     killAll: vi.fn(),
     rewindTo: vi.fn(() => ({ ok: true })),
     forkAt: vi.fn(() => ({ ok: true, newSessionId: 'forked' })),
-    setPermissionMode: vi.fn()
+    setPermissionMode: vi.fn(),
+    transcriptPath: vi.fn(() => '/tmp/history.jsonl'),
+    canForkIntoWorktree: vi.fn((id: string) => running.includes(id)),
+    forkIntoWorktree: vi.fn(() => ({ ok: true, newSessionId: 'wt-fork' }))
   }
 }
 
@@ -90,6 +93,28 @@ describe('ChatRouter', () => {
     startSession(store, 's1', 'cursor')
     expect((await router.rewindTo('s1', 'e1')).ok).toBe(false)
     expect((await router.forkAt('s1', 'e1')).ok).toBe(false)
+  })
+
+  it('resolves an unstarted session to its tab\'s agent through the fallback', () => {
+    const store = new Store(initialState)
+    const claude = fakeProvider()
+    const codex = fakeProvider(['s1'])
+    const router = new ChatRouter(store, { claude, codex }, (id) => (id === 's1' ? 'codex' : undefined))
+    expect(router.agentKindOf('s1')).toBe('codex')
+    expect(router.forkableConversationKind('s1', '/wt')).toBe('codex')
+    expect(router.forkIntoWorktree({ sourceSessionId: 's1', sourceWorktreePath: '/wt', destWorktreePath: '/new' })).toEqual({
+      ok: true,
+      newSessionId: 'wt-fork'
+    })
+    expect(codex.forkIntoWorktree).toHaveBeenCalled()
+    expect(claude.forkIntoWorktree).not.toHaveBeenCalled()
+  })
+
+  it('reports nothing forkable when the provider has no conversation', () => {
+    const store = new Store(initialState)
+    const router = new ChatRouter(store, { claude: fakeProvider() })
+    startSession(store, 's1')
+    expect(router.forkableConversationKind('s1', '/wt')).toBeNull()
   })
 
   it('killAll reaches every provider', () => {

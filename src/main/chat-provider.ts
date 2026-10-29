@@ -23,10 +23,13 @@ export interface RewindOutcome {
 export interface ForkOutcome {
   ok: boolean
   newSessionId?: string
-  /** The agent's own id for the forked conversation, for agents that
-   *  assign their own (Codex). Stored on the new tab. */
-  providerSessionId?: string
   reason?: string
+}
+
+export interface ForkIntoWorktreeParams {
+  sourceSessionId: string
+  sourceWorktreePath: string
+  destWorktreePath: string
 }
 
 export interface ChatImageInput {
@@ -58,16 +61,34 @@ export interface ChatProvider {
   forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome | Promise<ForkOutcome>
   /** Only reached when the agent's ChatCapabilities.permissionModes is true. */
   setPermissionMode(sessionId: string, mode: JsonClaudePermissionMode): void
+  /** The session's on-disk history, for cost accounting. Null when it has
+   *  none (yet). */
+  transcriptPath(sessionId: string, worktreePath: string): string | null
+  /** Whether the session has a conversation that could continue in another
+   *  worktree (AgentInfo.supportsConversationFork says whether the agent can
+   *  do it at all). */
+  canForkIntoWorktree(sessionId: string, worktreePath: string): boolean
+  /** Set the session's whole conversation up to continue in
+   *  `destWorktreePath` as a new chat session, whose id comes back as
+   *  `newSessionId`. The caller opens a chat tab with that id there. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome
 }
 
 export class ChatRouter {
+  /** `fallbackKindOf` answers for sessions the slice hasn't seen yet — a
+   *  chat tab that hasn't been started this run still knows its agent. */
   constructor(
     private store: Store,
-    private providers: Partial<Record<AgentKind, ChatProvider>>
+    private providers: Partial<Record<AgentKind, ChatProvider>>,
+    private fallbackKindOf: (sessionId: string) => AgentKind | undefined = () => undefined
   ) {}
 
   agentKindOf(sessionId: string): AgentKind {
-    return this.store.getSnapshot().state.jsonClaude.sessions[sessionId]?.agentKind ?? 'claude'
+    return (
+      this.store.getSnapshot().state.jsonClaude.sessions[sessionId]?.agentKind ??
+      this.fallbackKindOf(sessionId) ??
+      'claude'
+    )
   }
 
   private providerFor(sessionId: string): ChatProvider | null {
@@ -142,5 +163,23 @@ export class ChatRouter {
 
   setPermissionMode(sessionId: string, mode: JsonClaudePermissionMode): void {
     this.providerFor(sessionId)?.setPermissionMode(sessionId, mode)
+  }
+
+  transcriptPath(sessionId: string, worktreePath: string): string | null {
+    return this.providerFor(sessionId)?.transcriptPath(sessionId, worktreePath) ?? null
+  }
+
+  /** The agent a session's conversation would fork as, or null when there's
+   *  nothing to fork. The new worktree has to run that same agent. */
+  forkableConversationKind(sessionId: string, worktreePath: string): AgentKind | null {
+    const provider = this.providerFor(sessionId)
+    if (!provider?.canForkIntoWorktree(sessionId, worktreePath)) return null
+    return this.agentKindOf(sessionId)
+  }
+
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    const provider = this.providerFor(params.sourceSessionId)
+    if (!provider) return { ok: false, reason: 'no chat provider' }
+    return provider.forkIntoWorktree(params)
   }
 }

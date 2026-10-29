@@ -37,7 +37,13 @@ import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
-import type { ChatImageInput, ChatProvider, ForkOutcome, RewindOutcome } from './chat-provider'
+import type {
+  ChatImageInput,
+  ChatProvider,
+  ForkIntoWorktreeParams,
+  ForkOutcome,
+  RewindOutcome
+} from './chat-provider'
 import { nessControlMcpServer } from './ness-control-mcp'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
@@ -354,6 +360,20 @@ export class JsonClaudeManager implements ChatProvider {
 
   hasSession(sessionId: string): boolean {
     return this.instances.has(sessionId)
+  }
+
+  transcriptPath(sessionId: string, worktreePath: string): string {
+    return transcriptPathFor(sessionId, worktreePath)
+  }
+
+  canForkIntoWorktree(sessionId: string, worktreePath: string): boolean {
+    return hasForkableTranscript(sessionId, worktreePath)
+  }
+
+  /** Copies the transcript into the destination's project dir under a new
+   *  session id; the new tab's `--resume` picks it up from there. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    return forkTranscript(params)
   }
 
   /** Mint the next chat entry id for a session. `kind` distinguishes the

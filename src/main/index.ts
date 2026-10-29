@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
-import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
+import { JsonClaudeManager, bundledClaudeBinPath } from './json-claude-manager'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
@@ -497,7 +497,11 @@ const codexChatProvider = new CodexChatProvider(store, {
       config
     }).systemPrompt
 })
-const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager, codex: codexChatProvider })
+const chatRouter = new ChatRouter(
+  store,
+  { claude: jsonClaudeManager, codex: codexChatProvider },
+  (sessionId) => findJsonClaudeTab(sessionId)?.agentKind
+)
 // Warm the probe so the first Codex terminal tab doesn't wait on a login shell.
 void supportsCodexNoDaemon(config.codexCommand || 'codex')
 const perfMonitor = new PerfMonitor()
@@ -703,7 +707,9 @@ function getLanAddresses(): Array<{ iface: string; address: string }> {
 // Tails Claude Code session jsonl transcripts on Stop hook events,
 // sums per-model usage, and dispatches costs/usageUpdated. See
 // src/main/cost-tracker.ts and src/shared/state/costs.ts.
-const costTracker = new CostTracker(store, (sessionId) => codexChatProvider.transcriptPath(sessionId))
+const costTracker = new CostTracker(store, (sessionId, worktreePath) =>
+  chatRouter.transcriptPath(sessionId, worktreePath)
+)
 costTracker.start()
 
 // CostPanel is collapsed-by-default. Renderer signals its expand state
@@ -1141,18 +1147,6 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
  *  performing the transcript fork when one was requested. Shared by the FSM
  *  path (UI creation) and the MCP path (worktrees:externalCreate) so both
  *  produce an identically-seeded session. */
-/** Which agent a conversation can be forked as, or null when it has nothing
- *  to fork yet. Codex needs a recorded thread id; Claude needs a transcript
- *  on disk. */
-function forkableConversationKind(sessionId: string, worktreePath: string): AgentKind | null {
-  const tab = findJsonClaudeTab(sessionId)
-  const kind =
-    store.getSnapshot().state.jsonClaude.sessions[sessionId]?.agentKind ?? tab?.agentKind ?? 'claude'
-  if (kind === 'codex') return tab?.providerSessionId ? 'codex' : null
-  if (kind !== 'claude') return null
-  return hasForkableTranscript(sessionId, worktreePath) ? 'claude' : null
-}
-
 async function resolveForkedKickoff(args: {
   createdPath: string
   initialPrompt?: string
@@ -1162,28 +1156,14 @@ async function resolveForkedKickoff(args: {
   const { createdPath, initialPrompt, forkSource, baseRef } = args
   if (!forkSource) return { initialPrompt }
 
-  const kind = forkableConversationKind(forkSource.sessionId, forkSource.worktreePath)
-  let outcome: { ok: boolean; newSessionId?: string; reason?: string }
-  if (kind === 'codex') {
-    // Codex forks in the new tab's own app-server when it boots, with the
-    // new worktree as its cwd — nothing to copy here.
-    const sourceTab = findJsonClaudeTab(forkSource.sessionId)
-    const sourceSession = store.getSnapshot().state.jsonClaude.sessions[forkSource.sessionId]
-    const newSessionId = randomUUID()
-    codexChatProvider.prepareFork(newSessionId, {
-      sourceThreadId: sourceTab!.providerSessionId!,
-      model: sourceSession?.currentModel || sourceTab?.model?.trim() || null
-    })
-    outcome = { ok: true, newSessionId }
-  } else if (kind === 'claude') {
-    outcome = forkTranscript({
-      sourceSessionId: forkSource.sessionId,
-      sourceWorktreePath: forkSource.worktreePath,
-      destWorktreePath: createdPath
-    })
-  } else {
-    outcome = { ok: false, reason: 'source has no forkable conversation' }
-  }
+  const kind = chatRouter.forkableConversationKind(forkSource.sessionId, forkSource.worktreePath)
+  const outcome = kind
+    ? chatRouter.forkIntoWorktree({
+        sourceSessionId: forkSource.sessionId,
+        sourceWorktreePath: forkSource.worktreePath,
+        destWorktreePath: createdPath
+      })
+    : { ok: false, reason: 'source has no forkable conversation' }
   if (!outcome.ok || !outcome.newSessionId) {
     // Degrade to a normal empty session rather than failing creation —
     // the worktree already exists on disk at this point.
@@ -4056,7 +4036,6 @@ function registerIpcHandlers(): void {
         sessionId: newSessionId,
         mode: 'awake',
         ...(source.agentKind ? { agentKind: source.agentKind } : {}),
-        ...(outcome.providerSessionId ? { providerSessionId: outcome.providerSessionId } : {}),
         ...(sourceModel ? { model: sourceModel } : {})
       })
 
@@ -5175,7 +5154,8 @@ async function runBoot(): Promise<void> {
     getWorktreeBase: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
     getPrReviewPrompt: () => config.prReviewPrompt || DEFAULT_PR_REVIEW_PROMPT,
     resolveCallerScope,
-    forkableConversationKind,
+    forkableConversationKind: (sessionId: string, worktreePath: string) =>
+      chatRouter.forkableConversationKind(sessionId, worktreePath),
     getConversationForkEnabled: () => config.conversationForkEnabled === true,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,

@@ -46,6 +46,7 @@ import type { ApprovalResult } from './approval-bridge'
 import type {
   ChatImageInput,
   ChatProvider,
+  ForkIntoWorktreeParams,
   ForkOutcome,
   RewindOutcome
 } from './chat-provider'
@@ -164,7 +165,7 @@ export class CodexChatProvider implements ChatProvider {
   }
 
   /** The running thread's rollout jsonl, which the cost tracker can fold. */
-  transcriptPath(sessionId: string): string | null {
+  transcriptPath(sessionId: string, _worktreePath?: string): string | null {
     return this.instances.get(sessionId)?.transcriptPath ?? null
   }
 
@@ -345,12 +346,25 @@ export class CodexChatProvider implements ChatProvider {
     }
   }
 
-  /** Queue a fork of `sourceThreadId` for the chat session `newSessionId`,
-   *  which runs it in its own app-server when it boots — wherever that
-   *  session's worktree is. Used for forking a conversation into a new
-   *  worktree, where the source tab may not even be running. */
-  prepareFork(newSessionId: string, fork: PendingFork): void {
-    this.pendingForks.set(newSessionId, fork)
+  canForkIntoWorktree(sessionId: string): boolean {
+    return !!this.opts.getThreadId(sessionId)
+  }
+
+  /** Nothing is copied: the new session forks the whole source thread in
+   *  its own app-server when it boots, with the destination as its cwd —
+   *  so the source tab needn't be running. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    const sourceThreadId = this.opts.getThreadId(params.sourceSessionId)
+    if (!sourceThreadId) return { ok: false, reason: 'source has no Codex thread yet' }
+    const newSessionId = randomUUID()
+    this.pendingForks.set(newSessionId, {
+      sourceThreadId,
+      model:
+        this.store.getSnapshot().state.jsonClaude.sessions[params.sourceSessionId]?.currentModel ??
+        this.instances.get(params.sourceSessionId)?.model ??
+        null
+    })
+    return { ok: true, newSessionId }
   }
 
   forkAt(sourceSessionId: string, fromEntryId: string): ForkOutcome {
