@@ -1068,12 +1068,22 @@ function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
 function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
   if (chatRouter.hasSession(sessionId)) return
   const tab = findJsonClaudeTab(sessionId)
+  // Every real start has a chat tab by now — kickoff, wake, fork and the
+  // renderer's mount all run after the tab is committed. The one caller
+  // without a tab is a chat view still mounted for a beat after its tab
+  // was converted to Terminal. Starting then would pick a provider with no
+  // agentKind to go on (so Claude, even for a Codex tab) and leave an
+  // orphan session that the switch back to Chat attaches to.
+  if (!tab) {
+    log('json-claude', `start skipped — no chat tab sessionId=${sessionId}`)
+    return
+  }
   store.dispatch({
     type: 'jsonClaude/sessionStarted',
     payload: {
       sessionId,
       worktreePath,
-      ...(tab?.agentKind ? { agentKind: tab.agentKind } : {}),
+      ...(tab.agentKind ? { agentKind: tab.agentKind } : {}),
       defaultPermissionMode:
         store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
     }
@@ -1082,7 +1092,7 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
   const permMode =
     store.getSnapshot().state.jsonClaude.sessions[sessionId]?.permissionMode ||
     'default'
-  const model = tab?.model && tab.model.trim() ? tab.model.trim() : undefined
+  const model = tab.model && tab.model.trim() ? tab.model.trim() : undefined
   chatRouter.create(sessionId, worktreePath, permMode, model)
 }
 
