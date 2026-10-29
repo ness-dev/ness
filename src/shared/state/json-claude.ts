@@ -367,6 +367,11 @@ export interface JsonClaudeSession {
    *  flash during the fetch window. The reducer flips this true on
    *  `entriesSeeded`. Server-side it's always true. */
   entriesHydrated: boolean
+  /** True while the provider is still loading this session's history from
+   *  the agent (Codex reads it over app-server after its subprocess is up,
+   *  well after `entriesHydrated` flips). The renderer shows a loading
+   *  state rather than the empty-chat card while it's set. */
+  historyPending?: boolean
   /** Last text of the most recent user submission; used by the renderer to
    *  pair the echo against the user-card it just rendered optimistically. */
   busy: boolean
@@ -570,6 +575,10 @@ export type JsonClaudeEvent =
   | {
       type: 'jsonClaude/currentModelChanged'
       payload: { sessionId: string; model: string }
+    }
+  | {
+      type: 'jsonClaude/historyPendingChanged'
+      payload: { sessionId: string; pending: boolean }
     }
   | {
       type: 'jsonClaude/compactBoundaryReceived'
@@ -1111,6 +1120,20 @@ export function jsonClaudeReducer(
             ...session,
             slashCommands: event.payload.slashCommands
           }
+        }
+      }
+    }
+    case 'jsonClaude/historyPendingChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      if (!!session.historyPending === event.payload.pending) return state
+      const { historyPending: _drop, ...rest } = session
+      void _drop
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: event.payload.pending ? { ...rest, historyPending: true } : rest
         }
       }
     }

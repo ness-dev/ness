@@ -178,6 +178,11 @@ export class CodexChatProvider implements ChatProvider {
       onProtocolError: (line) => log('codex-chat', `non-json stdout sessionId=${sessionId}: ${line.slice(0, 200)}`)
     })
     this.instances.set(sessionId, instance)
+    // History arrives over app-server a second or two from now; until then
+    // the renderer would otherwise show an empty chat for a resumed one.
+    const willSeed = !!this.opts.getThreadId(sessionId) || this.pendingForks.has(sessionId)
+    const slice = this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
+    if (willSeed && !slice?.entries.length) this.setHistoryPending(sessionId, true)
 
     let stderrBuf = ''
     proc.stderr.on('data', (chunk: Buffer) => {
@@ -413,6 +418,7 @@ export class CodexChatProvider implements ChatProvider {
       if (forked) await this.seedHistory(inst, true)
       else if (existing && existing === inst.threadId) await this.seedHistory(inst, false)
       this.store.dispatch({ type: 'jsonClaude/currentModelChanged', payload: { sessionId, model: resp.model } })
+      this.setHistoryPending(sessionId, false)
       inst.ready = true
       this.dispatchState(sessionId, 'running')
       for (const input of inst.outbox.splice(0)) this.startTurn(inst, input)
@@ -469,10 +475,12 @@ export class CodexChatProvider implements ChatProvider {
     inst.client.close()
     this.opts.cancelApprovalsForSession(inst.sessionId, 'Codex session ended')
     this.dispatchBusy(inst.sessionId, false)
+    this.setHistoryPending(inst.sessionId, false)
   }
 
   private failToStart(sessionId: string, reason: string): void {
     log('codex-chat', `start failed sessionId=${sessionId}`, reason)
+    this.setHistoryPending(sessionId, false)
     this.dispatchState(sessionId, 'exited', { exitReason: reason })
     this.appendEntry(sessionId, {
       entryId: `${sessionId}-spawn-fail-${Date.now()}`,
@@ -804,6 +812,12 @@ export class CodexChatProvider implements ChatProvider {
     extra?: { exitCode?: number | null; exitReason?: string | null }
   ): void {
     this.store.dispatch({ type: 'jsonClaude/sessionStateChanged', payload: { sessionId, state, ...extra } })
+  }
+
+  private setHistoryPending(sessionId: string, pending: boolean): void {
+    const session = this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
+    if (!session || !!session.historyPending === pending) return
+    this.store.dispatch({ type: 'jsonClaude/historyPendingChanged', payload: { sessionId, pending } })
   }
 
   private dispatchBusy(sessionId: string, busy: boolean): void {

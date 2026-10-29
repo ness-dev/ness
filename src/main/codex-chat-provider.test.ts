@@ -108,6 +108,7 @@ describe('CodexChatProvider', () => {
     expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-new')
     expect(session().state).toBe('running')
     expect(session().currentModel).toBe('gpt-test')
+    expect(session().historyPending).toBeUndefined()
   })
 
   it('resumes the recorded thread and seeds its history', async () => {
@@ -127,8 +128,10 @@ describe('CodexChatProvider', () => {
       'thread-old'
     )
     provider.create('s1', process.cwd(), 'default')
+    expect(session().historyPending).toBe(true)
     await settle()
 
+    expect(session().historyPending).toBeUndefined()
     expect(server.received.find((m) => m.method === 'thread/resume')?.params?.threadId).toBe('thread-old')
     expect(opts.setThreadId).not.toHaveBeenCalled()
     expect(session().entries.map((e) => [e.kind, e.text ?? e.blocks?.[0]?.text])).toEqual([
@@ -385,6 +388,7 @@ describe('CodexChatProvider', () => {
     for (let i = 0; i < 100 && session().state !== 'exited'; i++) await new Promise((r) => setTimeout(r, 5))
     expect(session().state).toBe('exited')
     expect(server.received.some((m) => m.method === 'thread/start')).toBe(false)
+    expect(session().historyPending).toBeUndefined()
     expect(opts.setThreadId).not.toHaveBeenCalled()
     expect(session().entries.at(-1)).toMatchObject({ errorKind: 'spawn-failed' })
     expect(session().entries.at(-1)?.errorMessage).toMatch(/still open in another Codex process/)

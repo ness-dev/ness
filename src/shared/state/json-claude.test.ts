@@ -52,6 +52,25 @@ describe('jsonClaudeReducer', () => {
     expect(state.sessions[SID].agentKind).toBe('codex')
   })
 
+  it('historyPendingChanged sets and clears the flag, and no-ops when unchanged', () => {
+    let state = seedSession(initialJsonClaude)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: true }
+    })
+    expect(state.sessions[SID].historyPending).toBe(true)
+    const same = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: true }
+    })
+    expect(same).toBe(state)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: false }
+    })
+    expect('historyPending' in state.sessions[SID]).toBe(false)
+  })
+
   it('sessionStateChanged updates state + exit info', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {

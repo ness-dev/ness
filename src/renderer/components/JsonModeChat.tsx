@@ -31,7 +31,8 @@ import {
   ShieldAlert,
   Sparkles,
   GitBranch,
-  GitBranchPlus
+  GitBranchPlus,
+  Loader2
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
@@ -1857,6 +1858,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // by a frame or two, which is invisible to the user.
   const entries = session?.entries ?? []
   const entriesHydrated = session?.entriesHydrated ?? false
+  const historyPending = session?.historyPending ?? false
   const deferredEntries = useDeferredValue(entries)
   const find = useFindController(entries, scrollRef)
   // Find's corpus comes from entries[], not the DOM, so it counts matches in
@@ -2867,8 +2869,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             // shortly after mount — rendering the bright sparkle card in
             // that window flashes loudly on tabs that actually have history.
             // Render blank during the fetch; a spinner's appear-then-
-            // disappear would itself be a flash.
-            entriesHydrated ? (
+            // disappear would itself be a flash. A provider that loads
+            // history from the agent (Codex) takes seconds rather than a
+            // frame, so that case does get a quiet loading line.
+            historyPending ? (
+              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
+                <Loader2 className="icon-xs animate-spin" />
+                Loading conversation…
+              </div>
+            ) : entriesHydrated ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
                 <div className="relative mb-6">
                   <div
