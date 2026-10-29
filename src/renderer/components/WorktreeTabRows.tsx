@@ -27,7 +27,7 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
   )
   if (entries.length === 0) return null
   return (
-    <div className="pb-1">
+    <div className="pb-2">
       {entries.map(({ paneId, tab }) => (
         <TabRow
           key={tab.id}
@@ -53,7 +53,7 @@ function TabRow({
   return (
     <div
       onClick={onClick}
-      className={`ml-5 mr-1 px-1.5 py-0.5 rounded flex items-center gap-1.5 text-xs cursor-pointer transition-colors ${
+      className={`ml-[1.125rem] mr-2 px-1.5 py-0.5 rounded flex items-center gap-1.5 text-xs cursor-pointer transition-colors ${
         isActive ? 'bg-surface-hover/60 text-fg-bright' : 'text-muted hover:bg-surface-hover/40 hover:text-fg'
       }`}
     >

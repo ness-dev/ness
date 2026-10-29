@@ -316,7 +316,7 @@ export function WorktreeList({
           {!section.collapsed && agentCount > 0 && onNewWorktree && (
             <button
               onClick={() => onNewWorktree(section.unified ? undefined : section.repoRoot)}
-              className={`group relative mx-1.5 w-[calc(100%-0.75rem)] rounded-md flex items-center gap-2 px-1.5 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
+              className={`group relative mx-1.5 w-[calc(100%-0.75rem)] rounded-md flex items-center gap-2 px-2 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
                 touch ? 'min-h-11 py-3' : 'py-1.5'
               }`}
             >
@@ -441,7 +441,7 @@ function PendingWorktreeRow({
   return (
     <div
       onClick={onClick}
-      className={`group mx-1.5 px-1.5 rounded-md text-left flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group mx-1.5 px-2 rounded-md text-left flex items-center gap-2 transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-3' : 'py-2'
       } ${isActive ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'}`}
     >
@@ -503,7 +503,7 @@ function AssignedPRRow({
           ? `Open PR #${pr.number} from ${pr.repoNameWithOwner} as a new worktree`
           : `PR #${pr.number} from ${pr.repoNameWithOwner} — awaiting your review`
       }
-      className={`group mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-1.5 flex items-center gap-2 text-muted transition-colors ${
+      className={`group mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-2 flex items-center gap-2 text-muted transition-colors ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${onClick ? 'hover:bg-panel-raised hover:text-fg cursor-pointer' : 'cursor-default'}`}
     >
