@@ -308,7 +308,7 @@ export function MobileApp(): JSX.Element {
             />
           )
         )}
-        {activeWorktree && selectedTab && (selectedTab.type === 'agent' || selectedTab.type === 'json-claude') && (
+        {activeWorktree && selectedTab && selectedTab.type === 'agent' && (
           <CopyDraftOverlay terminalId={selectedTab.id} />
         )}
         {activeWorktree && selectedTab && !isRunnable(selectedTab) && (

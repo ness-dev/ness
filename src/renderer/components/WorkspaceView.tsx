@@ -632,9 +632,7 @@ function WorkspaceViewInner({
                     }
                   />
                 )}
-                {(tab.type === 'agent' || tab.type === 'json-claude') && (
-                  <CopyDraftOverlay terminalId={tab.id} />
-                )}
+                {tab.type === 'agent' && <CopyDraftOverlay terminalId={tab.id} />}
               </ErrorBoundary>
             </div>,
             slot,

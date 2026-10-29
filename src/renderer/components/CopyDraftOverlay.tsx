@@ -5,16 +5,25 @@ import { useCopyDraftForTerminal } from '../store'
 import { useBackend } from '../backend'
 
 /** Docked editor for an agent's `edit_copy` call, rendered over the bottom of
- *  the tab that made it. The agent is blocked until this is answered, so it
- *  covers the composer/TUI rather than sitting in the transcript where it
- *  could scroll out of view. */
+ *  a Terminal tab. Chat tabs render `CopyDraftCard` inline in the transcript
+ *  instead, under the tool call it answers. */
 export function CopyDraftOverlay({ terminalId }: { terminalId: string }): JSX.Element | null {
   const draft = useCopyDraftForTerminal(terminalId)
   if (!draft) return null
-  return <CopyDraftEditor key={draft.id} draft={draft} />
+  return <CopyDraftEditor key={draft.id} draft={draft} docked />
 }
 
-function CopyDraftEditor({ draft }: { draft: CopyDraftRequest }): JSX.Element {
+export function CopyDraftCard({ draft }: { draft: CopyDraftRequest }): JSX.Element {
+  return <CopyDraftEditor key={draft.id} draft={draft} docked={false} />
+}
+
+function CopyDraftEditor({
+  draft,
+  docked
+}: {
+  draft: CopyDraftRequest
+  docked: boolean
+}): JSX.Element {
   const backend = useBackend()
   const [text, setText] = useState(draft.draft)
   const [note, setNote] = useState('')
@@ -48,7 +57,7 @@ function CopyDraftEditor({ draft }: { draft: CopyDraftRequest }): JSX.Element {
     </>
   )
 
-  if (collapsed) {
+  if (docked && collapsed) {
     return (
       <div className="absolute inset-x-0 bottom-0 z-20 border-t border-accent/40 bg-panel-raised shadow-lg">
         <button
@@ -66,16 +75,25 @@ function CopyDraftEditor({ draft }: { draft: CopyDraftRequest }): JSX.Element {
   }
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-20 max-h-[85%] flex flex-col border-t border-accent/40 bg-panel-raised shadow-lg">
+    <div
+      id={draft.id}
+      className={
+        docked
+          ? 'absolute inset-x-0 bottom-0 z-20 max-h-[85%] flex flex-col border-t border-accent/40 bg-panel-raised shadow-lg'
+          : 'rounded-md border border-accent/40 bg-accent/5 my-2 overflow-hidden flex flex-col'
+      }
+    >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-accent/30 bg-accent/10 shrink-0">
         {heading}
-        <button
-          onClick={() => setCollapsed(true)}
-          title="Hide to read the conversation — the agent keeps waiting"
-          className="ml-auto p-0.5 rounded text-muted hover:text-fg hover:bg-surface/60 cursor-pointer"
-        >
-          <ChevronDown className="icon-sm" />
-        </button>
+        {docked && (
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Hide to read the conversation — the agent keeps waiting"
+            className="ml-auto p-0.5 rounded text-muted hover:text-fg hover:bg-surface/60 cursor-pointer"
+          >
+            <ChevronDown className="icon-sm" />
+          </button>
+        )}
       </div>
 
       <div className="px-3 py-2 space-y-2 overflow-y-auto min-h-0">
@@ -91,7 +109,7 @@ function CopyDraftEditor({ draft }: { draft: CopyDraftRequest }): JSX.Element {
               if (!sending && text.trim()) void submit()
             }
           }}
-          autoFocus
+          autoFocus={docked}
           spellCheck
           className="w-full field-sizing-content min-h-24 bg-app/60 border border-border rounded p-2 text-sm text-fg-bright leading-relaxed outline-none focus:border-accent resize-y"
         />
