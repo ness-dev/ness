@@ -719,7 +719,8 @@ async function getToolPerms() {
   const s = await getScopeInfo()
   return {
     browser: s.browser || { enabled: true, mode: 'full' },
-    messaging: s.messaging || { enabled: false }
+    messaging: s.messaging || { enabled: false },
+    copyEditing: s.copyEditing || { enabled: false }
   }
 }
 
@@ -740,6 +741,7 @@ async function getRendersMarkdown() {
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (t.name === 'send_message') return perms.messaging.enabled
+    if (t.name === 'edit_copy') return perms.copyEditing.enabled
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true

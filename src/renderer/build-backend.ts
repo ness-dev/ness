@@ -291,6 +291,8 @@ export function buildBackend(
       req('config:setConversationForkEnabled', enabled),
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       req('config:setWorktreeMessagingEnabled', enabled),
+    setCopyEditingEnabled: (enabled: boolean) =>
+      req('config:setCopyEditingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>
       req('config:setDefaultClaudeTabType', value),
     setChatPromotionDismissed: (value: boolean) =>

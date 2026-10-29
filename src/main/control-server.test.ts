@@ -76,6 +76,7 @@ const heldDrafts = new Map<
 >()
 const cancelDraft = vi.fn<(id: string) => void>()
 let nextDraftId = 0
+let copyEditingEnabled = true
 
 const deps: ControlServerDeps = {
   getRepoRoots: () => ['/repo'],
@@ -133,6 +134,7 @@ const deps: ControlServerDeps = {
     send: (path, message) => sendMessage(path, message)
   },
   copyDrafts: {
+    isEnabled: () => copyEditingEnabled,
     request: (input) => {
       const id = `draft-${++nextDraftId}`
       const result = new Promise<CopyDraftOutcome>((answer) => {
@@ -729,6 +731,17 @@ describe('control-server /copy-drafts endpoint', () => {
       await new Promise((r) => setTimeout(r, 5))
     }
     expect(cancelDraft).toHaveBeenCalledWith(id)
+  })
+
+  it('refuses when copy editing is disabled', async () => {
+    copyEditingEnabled = false
+    try {
+      const r = await call('POST', '/copy-drafts', { draft: 'x' })
+      expect(r.status).toBe(403)
+      expect(heldDrafts.size).toBe(0)
+    } finally {
+      copyEditingEnabled = true
+    }
   })
 
   it('rejects an empty draft', async () => {

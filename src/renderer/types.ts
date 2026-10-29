@@ -381,6 +381,7 @@ export interface ElectronAPI {
   setBrowserToolsMode(mode: 'view' | 'full'): Promise<boolean>
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
+  setCopyEditingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
   setJsonModeChatDensity(value: 'compact' | 'comfy'): Promise<boolean>

@@ -2881,6 +2881,20 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setCopyEditingEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      config.copyEditingEnabled = true
+    } else {
+      delete config.copyEditingEnabled
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/copyEditingEnabledChanged',
+      payload: config.copyEditingEnabled === true
+    })
+    return true
+  })
+
   transport.onRequest('config:setNameClaudeSessions', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.nameClaudeSessions = true
@@ -5127,6 +5141,7 @@ async function runBoot(): Promise<void> {
       return result
     },
     copyDrafts: {
+      isEnabled: () => config.copyEditingEnabled === true,
       request: (input) => copyDraftBroker.request(input),
       cancel: (id) => copyDraftBroker.cancel(id)
     },

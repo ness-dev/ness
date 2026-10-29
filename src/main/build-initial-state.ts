@@ -192,6 +192,7 @@ export function buildInitialAppState(
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
       conversationForkEnabled: config.conversationForkEnabled === true,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
+      copyEditingEnabled: config.copyEditingEnabled === true,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,
       autoApprovePermissions: config.autoApprovePermissions === true,

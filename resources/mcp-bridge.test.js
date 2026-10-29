@@ -406,6 +406,26 @@ describe('mcp-bridge edit_copy', () => {
     return bridge.next()
   }
 
+  async function listedNames(copyEditing) {
+    stub = await startStub((req, body, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ scope: null, ...(copyEditing ? { copyEditing } : {}) }))
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const response = await bridge.next()
+    return response.result.tools.map((t) => t.name)
+  }
+
+  it('is only advertised when copy editing is enabled', async () => {
+    expect(await listedNames(null)).not.toContain('edit_copy')
+    await bridge.kill()
+    await stub.close()
+    expect(await listedNames({ enabled: true })).toContain('edit_copy')
+  })
+
   it('returns the edited text and forwards title + context', async () => {
     const response = await callEditCopy(
       { kind: 'submitted', text: 'Start here', note: 'less shouty' },

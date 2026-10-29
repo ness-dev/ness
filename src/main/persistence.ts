@@ -280,6 +280,9 @@ export interface Config {
   // endpoint accepts calls, letting an agent write into another worktree's
   // chat. Default off (undefined treated as false).
   worktreeMessagingEnabled?: boolean
+  // When true, the edit_copy MCP tool is advertised and the /copy-drafts
+  // endpoint accepts calls. Default off (undefined treated as false).
+  copyEditingEnabled?: boolean
   // Controls whether new Claude tabs spawn as the terminal-hosted TUI
   // ('xterm') or the React chat interface ('json'). Default 'xterm'.
   defaultClaudeTabType?: 'xterm' | 'json'

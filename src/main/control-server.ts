@@ -122,6 +122,9 @@ export interface MessagingQueries {
 }
 
 export interface CopyDraftQueries {
+  /** Whether the edit_copy setting is on. Re-read per request so a toggle
+   * takes effect without restarting the bridge. */
+  isEnabled: () => boolean
   request: (input: CopyDraftInput) => { id: string; result: Promise<CopyDraftOutcome> }
   cancel: (id: string) => void
 }
@@ -893,6 +896,11 @@ async function handleRequest(
   // they submit or dismiss it. Closing the connection (bridge timeout, agent
   // interrupt, process exit) withdraws the draft from the UI.
   if (req.method === 'POST' && path === '/copy-drafts') {
+    if (!deps.copyDrafts.isEnabled()) {
+      return sendJson(res, 403, {
+        error: 'copy editing is disabled in Ness settings (Settings → Experimental → Copy editing)'
+      })
+    }
     const { scope, terminalId } = resolveScope(req, deps)
     if (!terminalId) {
       return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
@@ -941,7 +949,8 @@ async function handleRequest(
       scope,
       browser: deps.getBrowserPerms(),
       conversationFork: { enabled: deps.getConversationForkEnabled() },
-      messaging: { enabled: deps.messaging.isEnabled() }
+      messaging: { enabled: deps.messaging.isEnabled() },
+      copyEditing: { enabled: deps.copyDrafts.isEnabled() }
     })
   }
 
