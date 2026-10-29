@@ -241,6 +241,12 @@ describe('reviewsReducer', () => {
       targetTabId: 'other'
     })
     expect(sent.byPath[WT].submissions![0].error).toBeUndefined()
+    const queued = reviewsReducer(failed, {
+      type: 'reviews/submissionDelivered',
+      payload: { worktreePath: WT, id: 's1', state: 'queued', targetTabId: 'term', at: 7 }
+    })
+    expect(queued.byPath[WT].submissions![0]).toMatchObject({ state: 'queued', targetTabId: 'term' })
+    expect(queued.byPath[WT].submissions![0].error).toBeUndefined()
     expect(
       reviewsReducer(sent, {
         type: 'reviews/submissionDelivered',

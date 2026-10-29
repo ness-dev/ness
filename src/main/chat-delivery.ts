@@ -1,6 +1,7 @@
 import type { AppState } from '../shared/state'
 import { getLeaves, type TerminalTab } from '../shared/state/terminals'
 import { worktreeHandle } from '../shared/state/worktrees'
+import type { TerminalDeliveryOutcome, TerminalSettled } from './terminal-delivery'
 
 export interface ChatDeliveryDeps {
   /** Injects a user turn into a running json-mode chat session. */
@@ -15,6 +16,14 @@ export interface ChatDeliveryDeps {
    *  renderer's own respawn: JsonClaudeManager.create no-ops when the
    *  session is already running, so whichever side goes second is a no-op. */
   respawn: (worktreePath: string, tabId: string) => void
+  /** Types into a terminal agent tab once it's idle (TerminalDeliveryQueue).
+   *  Absent ⇒ terminal tabs can't receive. */
+  terminal?: (
+    worktreePath: string,
+    tabId: string,
+    message: string,
+    onSettled?: (result: TerminalSettled) => void
+  ) => TerminalDeliveryOutcome
 }
 
 export type ChatDeliveryResult =
@@ -116,10 +125,15 @@ export type TabDeliveryFailure =
   | 'no-tab'
   | 'not-agent-tab'
   | 'terminal-unsupported'
+  | 'no-hooks'
+  | 'tab-closed'
   | 'wake-failed'
 
+/** `queued`: a terminal tab that was busy, at a permission prompt, or not
+ *  running yet. The message is typed in when it next goes idle, and
+ *  `onSettled` reports how that ended. */
 export type TabDeliveryResult =
-  | { ok: true; tabId: string; woke: boolean }
+  | { ok: true; tabId: string; woke: boolean; queued?: boolean }
   | { ok: false; reason: TabDeliveryFailure }
 
 function findTab(state: AppState, worktreePath: string, tabId: string): TerminalTab | null {
@@ -132,10 +146,9 @@ function findTab(state: AppState, worktreePath: string, tabId: string): Terminal
   return null
 }
 
-/** Deliver a message into one specific agent tab, waking it if it's
- *  asleep. A json-claude tab's id is its session id. Terminal agent tabs
- *  can't receive yet — that needs either a channel into the running CLI
- *  or a typed paste gated on its hook status.
+/** Deliver a message into one specific agent tab. A Chat tab is woken
+ *  or restarted if need be (its id is its session id). A terminal tab gets
+ *  the message typed in once its agent is idle — see TerminalDeliveryQueue.
  *
  *  Same cost caveat as deliverToWorktreeChat: waking spawns a subprocess,
  *  so never call this from inside a store listener. */
@@ -144,7 +157,8 @@ export function deliverToTab(
   deps: ChatDeliveryDeps,
   worktreePath: string,
   tabId: string,
-  message: string
+  message: string,
+  onSettled?: (result: TerminalSettled) => void
 ): TabDeliveryResult {
   if (deps.hasSession(tabId) && state.jsonClaude.sessions[tabId]?.worktreePath === worktreePath) {
     deps.send(tabId, message)
@@ -152,7 +166,12 @@ export function deliverToTab(
   }
   const tab = findTab(state, worktreePath, tabId)
   if (!tab) return { ok: false, reason: 'no-tab' }
-  if (tab.type === 'agent') return { ok: false, reason: 'terminal-unsupported' }
+  if (tab.type === 'agent') {
+    if (!deps.terminal) return { ok: false, reason: 'terminal-unsupported' }
+    const outcome = deps.terminal(worktreePath, tabId, message, onSettled)
+    if (outcome.state === 'failed') return { ok: false, reason: outcome.reason }
+    return { ok: true, tabId, woke: false, queued: outcome.state === 'queued' }
+  }
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
   if ((tab.mode ?? 'awake') === 'asleep') deps.wake(worktreePath, tabId)
   else deps.respawn(worktreePath, tabId)
@@ -169,7 +188,11 @@ export function describeTabDeliveryFailure(reason: TabDeliveryFailure): string {
     case 'not-agent-tab':
       return 'that tab is not an agent tab'
     case 'terminal-unsupported':
-      return 'delivery to terminal agent tabs is not supported yet — only Chat tabs can receive it'
+      return 'this Ness build cannot type into terminal agent tabs'
+    case 'no-hooks':
+      return "Ness's status hooks aren't installed, so it can't tell when that terminal tab is idle — accept the hooks prompt, or use a Chat tab"
+    case 'tab-closed':
+      return 'the tab was closed before it was ready for the message'
     case 'wake-failed':
       return "failed to start that Chat tab's agent"
   }

@@ -117,7 +117,10 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
             typeof s.id === 'string' &&
             typeof s.summary === 'string' &&
             Array.isArray(s.commentIds) &&
-            (s.state === 'draft' || s.state === 'sent' || s.state === 'failed') &&
+            (s.state === 'draft' ||
+              s.state === 'queued' ||
+              s.state === 'sent' ||
+              s.state === 'failed') &&
             (s.verdict === 'approve' || s.verdict === 'changes-requested' || s.verdict === 'comment')
         )
       : []
@@ -131,7 +134,14 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
         c.anchor &&
         typeof c.anchor.snippet === 'string'
     )
-    if (submissions.length > 0) out[path] = { comments: valid, submissions }
+    // The terminal-delivery queue is in memory, so anything still queued
+    // when Ness quit will never be typed in.
+    const settled = submissions.map((s) =>
+      s.state === 'queued'
+        ? { ...s, state: 'failed', error: 'Ness restarted before the tab was ready for it' }
+        : s
+    )
+    if (settled.length > 0) out[path] = { comments: valid, submissions: settled }
     else if (valid.length > 0) out[path] = { comments: valid }
   }
   return out

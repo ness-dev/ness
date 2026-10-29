@@ -322,7 +322,7 @@ const TOOLS = [
   {
     name: 'send_message',
     description:
-      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific agent tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Only Chat tabs can receive messages for now; a terminal tab is refused.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
+      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific agent tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. A terminal tab gets the message typed in when its agent is idle; if it is busy the message is queued until then, and the result says so.\n\nWithout `tab`, delivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -969,6 +969,17 @@ async function handleToolCall(name, args) {
       tab: tab || undefined,
       message: args.message
     })
+    if (r.queued) {
+      return (
+        'Queued for tab ' +
+        r.tab +
+        ' in ' +
+        r.worktreePath +
+        ': its agent is busy or waiting on a permission prompt, so the message will be typed in as soon as it is idle. Sent as "' +
+        r.from +
+        '".'
+      )
+    }
     return (
       'Delivered to ' +
       r.worktreePath +
@@ -1045,6 +1056,9 @@ async function handleToolCall(name, args) {
     })
     const what =
       'Review submitted (' + args.verdict + ', ' + r.commentCount + ' open comment' + (r.commentCount === 1 ? '' : 's') + ')'
+    if (r.delivery && r.delivery.ok && r.delivery.queued) {
+      return what + ' and queued for tab ' + r.delivery.tabId + ': it will be typed in as soon as that agent is idle.'
+    }
     if (r.delivery && r.delivery.ok) {
       return what + ' and delivered to tab ' + r.delivery.tabId + (r.delivery.woke ? ' (woke it)' : '') + '.'
     }

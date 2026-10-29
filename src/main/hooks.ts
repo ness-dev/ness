@@ -173,6 +173,30 @@ export function onStopEvent(listener: StopListener): () => void {
   }
 }
 
+const sessionStartListeners = new Set<(terminalId: string) => void>()
+
+/** Subscribe to SessionStart hook events. The agent's TUI is starting up
+ *  with nothing in flight — the only "ready for input" signal a freshly
+ *  launched or resumed session gives before its first turn (Stop covers
+ *  every later one). Returns an unsubscribe fn. */
+export function onSessionStartEvent(listener: (terminalId: string) => void): () => void {
+  sessionStartListeners.add(listener)
+  return () => {
+    sessionStartListeners.delete(listener)
+  }
+}
+
+function emitSessionStartIfRelevant(terminalId: string, ev: HookEvent): void {
+  if (normalizeHookEvent(ev.event) !== 'SessionStart') return
+  for (const l of sessionStartListeners) {
+    try {
+      l(terminalId)
+    } catch (err) {
+      log('hooks', 'session-start listener error', err instanceof Error ? err.message : err)
+    }
+  }
+}
+
 function emitStopIfRelevant(terminalId: string, ev: HookEvent): void {
   if (ev.event !== 'Stop') return
   const p = ev.payload as Record<string, unknown> | null
@@ -260,6 +284,7 @@ export function tailLog(terminalId: string, store: Store): void {
         }
       }
       emitStopIfRelevant(terminalId, ev)
+      emitSessionStartIfRelevant(terminalId, ev)
       const update = deriveStatus(terminalId, ev)
       if (update) {
         store.dispatch({

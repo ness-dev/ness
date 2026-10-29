@@ -22,7 +22,6 @@ import {
   submitReview,
   type ReviewServiceDeps
 } from './review-service'
-import type { TabDeliveryResult } from './chat-delivery'
 
 const WT = '/wt'
 
@@ -56,7 +55,7 @@ function comment(id: string, over: Partial<ReviewComment> = {}): ReviewComment {
 
 function setup(
   comments: ReviewComment[] = [],
-  deliver: (wt: string, tab: string, msg: string) => TabDeliveryResult = (_w, tabId) => ({
+  deliver: ReviewServiceDeps['deliver'] = (_w, tabId) => ({
     ok: true,
     tabId,
     woke: false
@@ -222,7 +221,41 @@ describe('submitReview', () => {
     expect(result.delivery).toMatchObject({ ok: false, tabId: 'term' })
     const sub = store.getSnapshot().state.reviews.byPath[WT].submissions![0]
     expect(sub.state).toBe('failed')
-    expect(sub.error).toMatch(/terminal agent tabs is not supported yet/)
+    expect(sub.error).toMatch(/cannot type into terminal agent tabs/)
+  })
+
+  it('marks a terminal delivery queued, then sent once it is typed in', () => {
+    let settle: ((r: { ok: true } | { ok: false; reason: 'tab-closed' }) => void) | undefined
+    const { store, deps } = setup([comment('mine')], (_w, tabId, _m, onSettled) => {
+      settle = onSettled
+      return { ok: true, tabId, woke: false, queued: true }
+    })
+    const result = submitReview(deps, WT, author, {
+      verdict: 'comment',
+      summary: '',
+      targetTabId: 'term',
+      autoSend: true
+    })
+    if ('error' in result) throw new Error(result.error)
+    expect(result.delivery).toMatchObject({ ok: true, queued: true })
+    const sub = () => store.getSnapshot().state.reviews.byPath[WT].submissions![0]
+    expect(sub().state).toBe('queued')
+    expect(sendReviewSubmission(deps, WT, sub().id)).toMatchObject({ ok: false })
+    settle!({ ok: true })
+    expect(sub()).toMatchObject({ state: 'sent', targetTabId: 'term' })
+  })
+
+  it('marks a queued delivery failed when the tab closes first', () => {
+    const { store, deps } = setup([comment('mine')], (_w, tabId, _m, onSettled) => {
+      queueMicrotask(() => onSettled?.({ ok: false, reason: 'tab-closed' }))
+      return { ok: true, tabId, woke: false, queued: true }
+    })
+    submitReview(deps, WT, author, { verdict: 'comment', summary: '', targetTabId: 'term', autoSend: true })
+    return Promise.resolve().then(() => {
+      const sub = store.getSnapshot().state.reviews.byPath[WT].submissions![0]
+      expect(sub.state).toBe('failed')
+      expect(sub.error).toMatch(/closed/)
+    })
   })
 
   it('rejects targeting its own tab or a tab that is not an agent tab', () => {

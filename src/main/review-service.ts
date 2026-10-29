@@ -13,16 +13,22 @@ import { tabLabel, type AgentTabInfo } from '../shared/agent-tabs'
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { describeTabDeliveryFailure, type TabDeliveryResult } from './chat-delivery'
+import type { TerminalSettled } from './terminal-delivery'
 import { addReviewReply, refreshReviewAnchors } from './review-comments'
 
 export interface ReviewServiceDeps {
   store: Store
   listAgentTabs: (worktreePath: string) => AgentTabInfo[]
-  deliver: (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
+  deliver: (
+    worktreePath: string,
+    tabId: string,
+    message: string,
+    onSettled?: (result: TerminalSettled) => void
+  ) => TabDeliveryResult
 }
 
 export type ReviewSendResult =
-  | { ok: true; tabId: string; woke: boolean }
+  | { ok: true; tabId: string; woke: boolean; queued?: boolean }
   | { ok: false; error: string; tabId?: string }
 
 /** Author record for a comment, reply or review written from `tabId`.
@@ -150,6 +156,9 @@ export function sendReviewSubmission(
   const state = deps.store.getSnapshot().state
   const submission = findSubmission(state, worktreePath, submissionId)
   if (!submission) return { ok: false, error: 'Review not found' }
+  if (submission.state === 'queued') {
+    return { ok: false, error: 'Already queued — it goes in when that tab is idle' }
+  }
   const reviewerTabId = submission.author.kind === 'agent' ? submission.author.tabId : null
   const target =
     targetTabId ??
@@ -162,7 +171,7 @@ export function sendReviewSubmission(
       payload: {
         worktreePath,
         id: submissionId,
-        state: result.ok ? 'sent' : 'failed',
+        state: !result.ok ? 'failed' : result.queued ? 'queued' : 'sent',
         targetTabId: target,
         at: Date.now(),
         error: result.ok ? undefined : result.error
@@ -179,11 +188,17 @@ export function sendReviewSubmission(
   const message = wrapAutomatedMessage('review', formatReviewSubmission(submission, comments), {
     from: submission.author.kind === 'agent' ? submission.author.label : undefined
   })
-  const result = deps.deliver(worktreePath, target, message)
+  const result = deps.deliver(worktreePath, target, message, (settled) => {
+    record(
+      settled.ok
+        ? { ok: true, tabId: target, woke: false }
+        : { ok: false, error: describeTabDeliveryFailure(settled.reason), tabId: target }
+    )
+  })
   if (!result.ok) {
     return record({ ok: false, error: describeTabDeliveryFailure(result.reason), tabId: target })
   }
-  return record({ ok: true, tabId: result.tabId, woke: result.woke })
+  return record({ ok: true, tabId: result.tabId, woke: result.woke, queued: result.queued })
 }
 
 export interface SubmitReviewInput {

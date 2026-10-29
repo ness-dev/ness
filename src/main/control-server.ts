@@ -1061,9 +1061,13 @@ async function handleRequest(
           error: `${describeTabDeliveryFailure(result.reason)} — the message was not sent`
         })
       }
-      log('control', `message ${terminalId} -> ${targetPath}#${tab} (woke=${result.woke})`)
+      log(
+        'control',
+        `message ${terminalId} -> ${targetPath}#${tab} (woke=${result.woke} queued=${!!result.queued})`
+      )
       return sendJson(res, 200, {
-        delivered: true,
+        delivered: !result.queued,
+        ...(result.queued ? { queued: true } : {}),
         worktreePath: targetPath,
         tab,
         from,

@@ -44,7 +44,9 @@ export interface ReviewComment {
 
 export type ReviewVerdict = 'approve' | 'changes-requested' | 'comment'
 
-export type ReviewSubmissionState = 'draft' | 'sent' | 'failed'
+/** 'queued': handed to a terminal tab that wasn't ready for input; it is
+ *  typed in once the tab's agent goes idle. */
+export type ReviewSubmissionState = 'draft' | 'queued' | 'sent' | 'failed'
 
 /** A finished review: a verdict and summary over the author's comments
  *  that were open when it was submitted. Delivered to one agent tab, the
@@ -269,6 +271,8 @@ export function reviewsReducer(state: ReviewsState, event: ReviewsEvent): Review
         if (targetTabId) updated.targetTabId = targetTabId
         if (next === 'sent') {
           updated.sentAt = at
+          delete updated.error
+        } else if (next === 'queued') {
           delete updated.error
         } else {
           updated.error = error ?? 'Delivery failed'

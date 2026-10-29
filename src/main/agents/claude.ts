@@ -15,6 +15,7 @@ export const defaultCommand = 'claude'
 export const assignsSessionId = true
 
 export const hookEvents = [
+  'SessionStart',
   'UserPromptSubmit',
   'PreToolUse',
   'PostToolUse',

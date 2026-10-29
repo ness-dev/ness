@@ -33,7 +33,6 @@ function useTabLabels(worktreePath: string): Map<string, string> {
 export function AgentTabPicker({
   worktreePath,
   excludeTabId,
-  terminalNote,
   disabled,
   className,
   children,
@@ -41,8 +40,6 @@ export function AgentTabPicker({
 }: {
   worktreePath: string
   excludeTabId?: string
-  /** Shown beside terminal tabs, e.g. when they can't receive yet. */
-  terminalNote?: string
   disabled?: boolean
   className: string
   children: React.ReactNode
@@ -119,13 +116,7 @@ export function AgentTabPicker({
               )}
               <span className="truncate flex-1">{t.label}</span>
               <span className="shrink-0 text-faint">
-                {t.kind === 'terminal' && terminalNote
-                  ? terminalNote
-                  : i === 0
-                    ? 'most recent'
-                    : t.asleep
-                      ? 'asleep'
-                      : ''}
+                {i === 0 ? 'most recent' : t.asleep ? 'asleep' : ''}
               </span>
             </button>
           ))}
@@ -172,7 +163,9 @@ function SubmissionCard({
   const status =
     submission.state === 'sent'
       ? `Sent to ${target ?? 'agent'}`
-      : submission.state === 'failed'
+      : submission.state === 'queued'
+        ? `Queued for ${target ?? 'agent'} · goes in when it's idle`
+        : submission.state === 'failed'
         ? `Not sent${target ? ` to ${target}` : ''}`
         : target
           ? `Draft · will go to ${target}`
@@ -199,13 +192,15 @@ function SubmissionCard({
               ? 'text-danger'
               : submission.state === 'sent'
                 ? 'text-success'
-                : 'text-faint'
+                : submission.state === 'queued'
+                  ? 'text-warning'
+                  : 'text-faint'
           }`}
         >
           {status}
         </span>
         <div className="flex-1" />
-        {submission.state !== 'sent' && (
+        {(submission.state === 'draft' || submission.state === 'failed') && (
           <>
             <button
               onClick={() => send()}
@@ -218,7 +213,6 @@ function SubmissionCard({
             <AgentTabPicker
               worktreePath={worktreePath}
               excludeTabId={reviewerTabId}
-              terminalNote="not supported yet"
               disabled={sending}
               onPick={(id) => send(id)}
               className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-faint hover:text-fg cursor-pointer disabled:opacity-30"

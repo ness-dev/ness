@@ -668,10 +668,17 @@ describe('control-server /messages with a tab', () => {
   })
 
   it('reports why a tab could not receive the message', async () => {
-    sendToTab.mockReturnValueOnce({ ok: false, reason: 'terminal-unsupported' })
+    sendToTab.mockReturnValueOnce({ ok: false, reason: 'no-hooks' })
     const r = await call('POST', '/messages', { tab: AUTHOR_TAB, message: 'hi' })
     expect(r.status).toBe(409)
-    expect(r.json.error).toMatch(/terminal agent tabs is not supported yet/)
+    expect(r.json.error).toMatch(/status hooks aren't installed/)
+  })
+
+  it('reports a message held for a busy terminal tab as queued, not delivered', async () => {
+    sendToTab.mockReturnValueOnce({ ok: true, tabId: AUTHOR_TAB, woke: false, queued: true })
+    const r = await call('POST', '/messages', { tab: AUTHOR_TAB, message: 'hi' })
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({ delivered: false, queued: true, tab: AUTHOR_TAB })
   })
 })
 

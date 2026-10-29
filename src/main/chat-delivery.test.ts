@@ -303,6 +303,30 @@ describe('deliverToTab', () => {
     expect(deliverToTab(state, deps(), A, 'nope', 'hi')).toEqual({ ok: false, reason: 'no-tab' })
   })
 
+  it('hands terminal agent tabs to the terminal queue and reports a queued delivery', () => {
+    const tree: PaneNode = {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [{ id: 't1', type: 'agent', label: 'Claude' }],
+      activeTabId: 't1'
+    }
+    const state = makeState({ panes: { [A]: tree } })
+    const settled = vi.fn()
+    const terminal = vi.fn(() => ({ state: 'queued' as const }))
+    expect(deliverToTab(state, { ...deps(), terminal }, A, 't1', 'hi', settled)).toEqual({
+      ok: true,
+      tabId: 't1',
+      woke: false,
+      queued: true
+    })
+    expect(terminal).toHaveBeenCalledWith(A, 't1', 'hi', settled)
+    const refused = vi.fn(() => ({ state: 'failed' as const, reason: 'no-hooks' as const }))
+    expect(deliverToTab(state, { ...deps(), terminal: refused }, A, 't1', 'hi')).toEqual({
+      ok: false,
+      reason: 'no-hooks'
+    })
+  })
+
   it('reports a failed wake', () => {
     const state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
     const d = { ...deps(), wake: vi.fn(), respawn: vi.fn(), hasSession: () => false }

@@ -572,4 +572,16 @@ describe('mcp-bridge review tools', () => {
     const missing = await callTool('send_message', { message: 'hi' })
     expect(missing.result.isError).toBe(true)
   })
+
+  it('send_message and submit_review explain a queued terminal delivery', async () => {
+    const responses = [
+      { delivered: false, queued: true, worktreePath: '/wt', tab: 'term', from: 'WT · Reviewer', woke: false },
+      { commentCount: 1, state: 'queued', targetTabId: 'term', delivery: { ok: true, tabId: 'term', woke: false, queued: true } }
+    ]
+    await start((req, body, res) => json(res, 200, responses.shift()))
+    const msg = await callTool('send_message', { tab: 'term', message: 'hi' })
+    expect(msg.result.content[0].text).toMatch(/^Queued for tab term in \/wt/)
+    const review = await callTool('submit_review', { verdict: 'comment', summary: 's' })
+    expect(review.result.content[0].text).toMatch(/queued for tab term/)
+  })
 })

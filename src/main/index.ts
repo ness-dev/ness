@@ -143,7 +143,8 @@ import {
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
-import { watchStatusDir } from './hooks'
+import { watchStatusDir, onSessionStartEvent } from './hooks'
+import { TerminalDeliveryQueue } from './terminal-delivery'
 import { getAgent, type AgentKind } from './agents'
 import { buildClaudeLaunchSettings } from './claude-launch'
 import { HARNESS_REPO_OWNER, HARNESS_REPO_NAME } from '../shared/constants'
@@ -160,6 +161,7 @@ import { startControlServer, type BrowserTabSummary } from './control-server'
 import {
   deliverToTab,
   deliverToWorktreeChat,
+  type ChatDeliveryDeps,
   describeWorktree,
   resolveWorktreeQuery
 } from './chat-delivery'
@@ -1277,7 +1279,16 @@ const activityDeriver = new ActivityDeriver(store)
 
 // How anything in main reaches a worktree's agent chat. Shared by the CI
 // notifier and the send_message MCP tool so both route (and wake) alike.
-const chatDeliveryDeps = {
+const terminalDelivery = new TerminalDeliveryQueue(store, {
+  hasPty: (id) => ptyManager.hasTerminal(id),
+  write: (id, data) => ptyManager.write(id, data),
+  hooksEnabled: () => store.getSnapshot().state.hooks.consent === 'accepted',
+  onSessionStart: onSessionStartEvent
+})
+
+const chatDeliveryDeps: ChatDeliveryDeps = {
+  terminal: (worktreePath, tabId, message, onSettled) =>
+    terminalDelivery.deliver(worktreePath, tabId, message, onSettled),
   send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
   wake: (worktreePath: string, tabId: string) =>
@@ -1296,8 +1307,15 @@ const listWorktreeAgentTabs = (worktreePath: string) =>
 const reviewServiceDeps: ReviewServiceDeps = {
   store,
   listAgentTabs: listWorktreeAgentTabs,
-  deliver: (worktreePath, tabId, message) =>
-    deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+  deliver: (worktreePath, tabId, message, onSettled) =>
+    deliverToTab(
+      store.getSnapshot().state,
+      chatDeliveryDeps,
+      worktreePath,
+      tabId,
+      message,
+      onSettled
+    )
 }
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
@@ -5193,6 +5211,8 @@ async function runBoot(): Promise<void> {
   ciNotifier.start()
 
   tabActivity.start()
+
+  terminalDelivery.start()
 
   autoSleepMonitor.start()
 
