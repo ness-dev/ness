@@ -195,6 +195,43 @@ describe('CodexChatProvider', () => {
     expect(server.received).toContainEqual({ id: 99, result: { decision: 'accept' } })
   })
 
+  it('maps a deny with "interrupt turn" to cancel', async () => {
+    const { provider, opts, server } = setup()
+    ;(opts.requestApproval as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ behavior: 'deny', interrupt: true })
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    server.emit({
+      id: 5,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-new', itemId: 'e', command: 'rm -rf x', commandActions: [] }
+    })
+    await settle()
+    expect(server.received).toContainEqual({ id: 5, result: { decision: 'cancel' } })
+  })
+
+  it('closes tool cards left open by an interrupted turn', async () => {
+    const { provider, session, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    provider.send('s1', 'go')
+    server.emit({ method: 'turn/started', params: { threadId: 'thread-new', turn: { id: 'turn-1' } } })
+    server.emit({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-new',
+        turnId: 'turn-1',
+        item: { type: 'commandExecution', id: 'cmd-1', command: 'sleep 30', cwd: '/x', status: 'inProgress', commandActions: [], aggregatedOutput: null, exitCode: null }
+      }
+    })
+    server.emit({
+      method: 'turn/completed',
+      params: { threadId: 'thread-new', turn: { id: 'turn-1', status: 'interrupted', error: null, items: [] } }
+    })
+    await settle()
+    const result = session().entries.find((e) => e.kind === 'tool_result')
+    expect(result?.blocks?.[0]).toMatchObject({ toolUseId: 'cmd-1', content: 'Interrupted', isError: true })
+  })
+
   it('steers a busy turn instead of starting a new one', async () => {
     const { provider, session, server } = setup({ 'turn/steer': () => ({ turnId: 'turn-1' }) })
     provider.create('s1', process.cwd(), 'default')

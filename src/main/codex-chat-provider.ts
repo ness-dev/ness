@@ -91,6 +91,9 @@ interface CodexInstance {
   /** agentMessage / reasoning item id → the entry streaming it. */
   streamingEntries: Map<string, string>
   fileChanges: Map<string, CodexFileChange[]>
+  /** Tool items started but not completed. An interrupted turn never
+   *  completes them, so turn/completed closes whatever is left. */
+  openToolItems: Set<string>
   pendingDeltas: Map<string, { text: string; thinking: string }>
   flushTimer: NodeJS.Timeout | null
   /** Turn whose failure an `error` notification already reported, so the
@@ -157,6 +160,7 @@ export class CodexChatProvider implements ChatProvider {
       outbox: [],
       streamingEntries: new Map(),
       fileChanges: new Map(),
+      openToolItems: new Set(),
       pendingDeltas: new Map(),
       flushTimer: null,
       erroredTurnId: null
@@ -479,6 +483,18 @@ export class CodexChatProvider implements ChatProvider {
       case 'turn/completed': {
         const turn = params.turn as CodexTurn
         this.flushDeltas(inst)
+        for (const itemId of inst.openToolItems) {
+          this.store.dispatch({
+            type: 'jsonClaude/toolResultAttached',
+            payload: {
+              sessionId: inst.sessionId,
+              toolUseId: itemId,
+              content: turn.status === 'interrupted' ? 'Interrupted' : 'Did not finish',
+              isError: true
+            }
+          })
+        }
+        inst.openToolItems.clear()
         inst.activeTurnId = null
         if (turn.status === 'failed' && turn.error && inst.erroredTurnId !== turn.id) {
           this.appendAgentError(inst.sessionId, describeCodexError(turn.error.message))
@@ -514,6 +530,7 @@ export class CodexChatProvider implements ChatProvider {
     if (item.type === 'fileChange') inst.fileChanges.set(item.id, (item as { changes: CodexFileChange[] }).changes)
     const block = toolUseBlockFor(item)
     if (!block) return
+    inst.openToolItems.add(item.id)
     this.appendEntry(sessionId, {
       entryId: this.nextEntryId(sessionId, 'a'),
       kind: 'assistant',
@@ -554,6 +571,7 @@ export class CodexChatProvider implements ChatProvider {
     }
     const result = toolResultFor(item)
     if (!result) return
+    inst.openToolItems.delete(item.id)
     inst.fileChanges.delete(item.id)
     this.opts.cancelApprovalForToolUse(sessionId, item.id)
     this.store.dispatch({
@@ -636,7 +654,10 @@ export class CodexChatProvider implements ChatProvider {
       ...(toolUseId ? { toolUseId } : {})
     })
     if (this.instances.get(inst.sessionId) !== inst) return
-    inst.client.respond(id, { decision: result.behavior === 'allow' ? 'accept' : 'decline' })
+    // Codex's decision carries no message, so a deny note can't reach the
+    // model; "interrupt turn" maps to cancel, which ends the turn.
+    const decision = result.behavior === 'allow' ? 'accept' : result.interrupt ? 'cancel' : 'decline'
+    inst.client.respond(id, { decision })
   }
 
   // ---------------------------------------------------------------------
