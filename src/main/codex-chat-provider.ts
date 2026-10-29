@@ -1055,7 +1055,9 @@ export function toolUseBlockFor(item: CodexThreadItem): JsonClaudeMessageBlock |
     }
     case 'fileChange': {
       const it = item as Extract<CodexThreadItem, { type: 'fileChange' }>
-      return { type: 'tool_use', id: it.id, name: APPLY_PATCH_TOOL, input: { changes: summarizeChanges(it.changes) } }
+      // Diffs ride on the tool_use so ApplyPatchCard can render them.
+      const changes = it.changes.map((c) => ({ path: c.path, kind: c.kind.type, diff: c.diff }))
+      return { type: 'tool_use', id: it.id, name: APPLY_PATCH_TOOL, input: { changes } }
     }
     case 'mcpToolCall': {
       const it = item as Extract<CodexThreadItem, { type: 'mcpToolCall' }>
@@ -1082,7 +1084,7 @@ export function toolResultFor(item: CodexThreadItem): { content: string; isError
     case 'fileChange': {
       const it = item as Extract<CodexThreadItem, { type: 'fileChange' }>
       if (it.status === 'declined') return { content: 'Declined', isError: true }
-      const body = it.changes.map((c) => `${c.kind.type} ${c.path}\n${c.diff}`).join('\n')
+      const body = it.changes.map((c) => `${c.kind.type} ${c.path}`).join('\n')
       return { content: body, isError: it.status === 'failed' }
     }
     case 'mcpToolCall': {

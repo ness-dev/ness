@@ -126,6 +126,7 @@ const BUILTIN_ICONS: Record<string, ToolIcon> = {
   Read: ReadIcon,
   Edit: EditIcon,
   MultiEdit: EditIcon,
+  ApplyPatch: EditIcon,
   Write: WriteIcon,
   Bash: BashIcon,
   Grep: GrepIcon,

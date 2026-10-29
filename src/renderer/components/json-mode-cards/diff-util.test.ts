@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { unifiedDiff } from './diff-util'
+import { parsePatchLines, unifiedDiff } from './diff-util'
 
 describe('unifiedDiff', () => {
   it('returns empty array for identical input', () => {
@@ -45,5 +45,27 @@ describe('unifiedDiff', () => {
     const out = unifiedDiff(oldStr, newStr)
     const seps = out.filter((l) => l.kind === 'hunk-sep')
     expect(seps.length).toBe(1)
+  })
+})
+
+describe('parsePatchLines', () => {
+  it('numbers lines from the hunk header for an update', () => {
+    expect(parsePatchLines('@@ -1,3 +1,3 @@\n line one\n-line two\n+line 2\n line three\n', 'update')).toEqual([
+      { kind: 'context', text: 'line one', oldLn: 1, newLn: 1 },
+      { kind: 'remove', text: 'line two', oldLn: 2, newLn: null },
+      { kind: 'add', text: 'line 2', oldLn: null, newLn: 2 },
+      { kind: 'context', text: 'line three', oldLn: 3, newLn: 3 }
+    ])
+  })
+
+  it('separates multiple hunks', () => {
+    const lines = parsePatchLines('@@ -1 +1 @@\n-a\n+b\n@@ -10 +10 @@\n-c\n+d\n', 'update')
+    expect(lines.map((l) => l.kind)).toEqual(['remove', 'add', 'hunk-sep', 'remove', 'add'])
+    expect(lines[3]).toMatchObject({ oldLn: 10 })
+  })
+
+  it('treats an add as all-new and a delete as all-removed', () => {
+    expect(parsePatchLines('brand new\n', 'add')).toEqual([{ kind: 'add', text: 'brand new', oldLn: null, newLn: 1 }])
+    expect(parsePatchLines('x\ny\n', 'delete').map((l) => l.kind)).toEqual(['remove', 'remove'])
   })
 })

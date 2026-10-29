@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { unifiedDiff, langForPath, highlightLine } from './diff-util'
+import { unifiedDiff, langForPath, highlightLine, type DiffLine } from './diff-util'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
 
 export function UnifiedDiff({
@@ -11,8 +11,20 @@ export function UnifiedDiff({
   newStr: string
   filePath?: string
 }): JSX.Element {
-  const lang = filePath ? langForPath(filePath) : null
   const lines = useMemo(() => unifiedDiff(oldStr, newStr), [oldStr, newStr])
+  return <DiffLines lines={lines} filePath={filePath} />
+}
+
+/** Renders already-diffed lines — from `unifiedDiff` for Claude's Edit, or
+ *  `parsePatchLines` for a patch an agent reported (Codex). */
+export function DiffLines({
+  lines,
+  filePath
+}: {
+  lines: DiffLine[]
+  filePath?: string
+}): JSX.Element {
+  const lang = filePath ? langForPath(filePath) : null
   const { query } = useFind()
 
   if (lines.length === 0) {
