@@ -15,6 +15,7 @@ import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
+import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
 import { bundledCodexBinPath } from './codex-binary'
 import { getChatCapabilities } from '../shared/agent-registry'
 import { buildRelocationPreamble } from './fork-relocation'
@@ -472,7 +473,29 @@ const codexChatProvider = new CodexChatProvider(store, {
   cancelApprovalsForSession: (sessionId, reason) =>
     approvalBridge.cancelPendingForSession(sessionId, reason),
   cancelApprovalForToolUse: (sessionId, toolUseId) =>
-    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId)
+    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId),
+  getMcpServers: (sessionId): Record<string, StdioMcpServer> => {
+    if (store.getSnapshot().state.settings.harnessMcpEnabled === false) return {}
+    const controlServer = getControlServerInfo()
+    if (!controlServer) return {}
+    const scope = resolveCallerScope(sessionId)
+    return {
+      'ness-control': nessControlMcpServer({
+        sessionId,
+        controlServer,
+        bridgeScriptPath: getBridgeScriptPath(),
+        scope: scope
+          ? { worktreePath: scope.worktreePath, repoRoot: scope.repoRoot, isMain: scope.isMain }
+          : null
+      })
+    }
+  },
+  getDeveloperInstructions: (worktreePath) =>
+    buildClaudeLaunchSettings({
+      cwd: worktreePath,
+      worktrees: store.getSnapshot().state.worktrees.list,
+      config
+    }).systemPrompt
 })
 const chatRouter = new ChatRouter(store, { claude: jsonClaudeManager, codex: codexChatProvider })
 // Warm the probe so the first Codex terminal tab doesn't wait on a login shell.

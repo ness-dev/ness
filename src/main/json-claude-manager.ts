@@ -38,6 +38,7 @@ import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
 import type { ChatImageInput, ChatProvider, ForkOutcome, RewindOutcome } from './chat-provider'
+import { nessControlMcpServer } from './ness-control-mcp'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
 
@@ -620,26 +621,12 @@ export class JsonClaudeManager implements ChatProvider {
     if (this.opts.isHarnessMcpEnabled()) {
       const controlInfo = this.opts.getControlServer()
       if (controlInfo) {
-        const scope = this.opts.getCallerScope(sessionId)
-        const controlEnv: Record<string, string> = {
-          ELECTRON_RUN_AS_NODE: '1',
-          HARNESS_PORT: String(controlInfo.port),
-          HARNESS_TOKEN: controlInfo.token,
-          // The bridge keys every control-server call by terminal id —
-          // for json-claude tabs the tab id IS the session id.
-          HARNESS_TERMINAL_ID: sessionId,
-          HARNESS_SESSION_ID: sessionId
-        }
-        if (scope) {
-          controlEnv.HARNESS_WORKTREE_ID = scope.worktreePath
-          controlEnv.HARNESS_REPO_ROOT = scope.repoRoot
-          if (scope.isMain) controlEnv.HARNESS_IS_MAIN = '1'
-        }
-        mcpServers['ness-control'] = {
-          command: process.execPath,
-          args: [this.opts.getControlBridgeScriptPath()],
-          env: controlEnv
-        }
+        mcpServers['ness-control'] = nessControlMcpServer({
+          sessionId,
+          controlServer: controlInfo,
+          bridgeScriptPath: this.opts.getControlBridgeScriptPath(),
+          scope: this.opts.getCallerScope(sessionId)
+        })
       }
     }
     const mcpConfig = { mcpServers }

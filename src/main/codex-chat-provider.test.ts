@@ -235,6 +235,67 @@ describe('CodexChatProvider', () => {
     expect(result?.blocks?.[0]).toMatchObject({ toolUseId: 'cmd-1', content: 'Interrupted', isError: true })
   })
 
+  it('passes Ness MCP servers and developer instructions on thread/start', async () => {
+    const { provider, opts, server } = setup()
+    opts.getMcpServers = () => ({ 'ness-control': { command: '/bin/node', args: ['bridge.js'], env: { HARNESS_PORT: '1' } } })
+    opts.getDeveloperInstructions = () => 'You are running inside Ness.'
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    expect(server.received.find((m) => m.method === 'thread/start')?.params).toMatchObject({
+      developerInstructions: 'You are running inside Ness.',
+      config: { mcp_servers: { 'ness-control': { command: '/bin/node', args: ['bridge.js'] } } }
+    })
+  })
+
+  it('relays an MCP tool-call approval as an mcp__ tool and answers in elicitation shape', async () => {
+    const { provider, opts, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    server.emit({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-new',
+        turnId: 't',
+        item: { type: 'mcpToolCall', id: 'mcp-1', server: 'ness-control', tool: 'send_message', status: 'inProgress', arguments: {} }
+      }
+    })
+    server.emit({
+      id: 42,
+      method: 'mcpServer/elicitation/request',
+      params: {
+        threadId: 'thread-new',
+        serverName: 'ness-control',
+        mode: 'form',
+        message: 'Allow the ness-control MCP server to run tool "send_message"?',
+        _meta: { codex_approval_kind: 'mcp_tool_call', tool_params: { worktree: 'repo/x', message: 'hi' } },
+        requestedSchema: { type: 'object', properties: {} }
+      }
+    })
+    await settle()
+    expect(opts.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'mcp__ness-control__send_message',
+        input: { worktree: 'repo/x', message: 'hi' },
+        toolUseId: 'mcp-1'
+      })
+    )
+    expect(server.received).toContainEqual({ id: 42, result: { action: 'accept', content: {}, _meta: null } })
+  })
+
+  it('declines MCP elicitations that are not tool-call approvals', async () => {
+    const { provider, opts, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    server.emit({
+      id: 43,
+      method: 'mcpServer/elicitation/request',
+      params: { threadId: 'thread-new', serverName: 'other', mode: 'form', message: 'Pick a color', _meta: null, requestedSchema: {} }
+    })
+    await settle()
+    expect(opts.requestApproval).not.toHaveBeenCalled()
+    expect(server.received).toContainEqual({ id: 43, result: { action: 'decline', content: null, _meta: null } })
+  })
+
   it('steers a busy turn instead of starting a new one', async () => {
     const { provider, session, server } = setup({ 'turn/steer': () => ({ turnId: 'turn-1' }) })
     provider.create('s1', process.cwd(), 'default')

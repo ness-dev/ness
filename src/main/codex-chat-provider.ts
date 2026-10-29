@@ -42,6 +42,7 @@ import type {
   ForkOutcome,
   RewindOutcome
 } from './chat-provider'
+import type { StdioMcpServer } from './ness-control-mcp'
 import {
   CodexAppServerClient,
   type CodexFileChange,
@@ -82,6 +83,12 @@ export interface CodexChatProviderOptions {
   cancelApprovalForToolUse: (sessionId: string, toolUseId: string) => void
   spawnProcess?: (bin: string, args: string[], cwd: string) => ChildProcessWithoutNullStreams
   resumeRetry?: { intervalMs: number; windowMs: number }
+  /** MCP servers the thread should run (Ness's own ness-control bridge),
+   *  passed as per-thread config overrides so ~/.codex/config.toml is
+   *  never touched. */
+  getMcpServers?: (sessionId: string) => Record<string, StdioMcpServer>
+  /** Ness's system prompt, sent as Codex developer instructions. */
+  getDeveloperInstructions?: (worktreePath: string) => string | undefined
 }
 
 interface CodexInstance {
@@ -101,6 +108,9 @@ interface CodexInstance {
   /** Tool items started but not completed. An interrupted turn never
    *  completes them, so turn/completed closes whatever is left. */
   openToolItems: Set<string>
+  /** In-flight MCP tool calls, so an approval request (which names only
+   *  the server and tool) can be tied back to its tool card. */
+  openMcpCalls: Map<string, { server: string; tool: string }>
   pendingDeltas: Map<string, { text: string; thinking: string }>
   flushTimer: NodeJS.Timeout | null
   /** Turn whose failure an `error` notification already reported, so the
@@ -168,6 +178,7 @@ export class CodexChatProvider implements ChatProvider {
       streamingEntries: new Map(),
       fileChanges: new Map(),
       openToolItems: new Set(),
+      openMcpCalls: new Map(),
       pendingDeltas: new Map(),
       flushTimer: null,
       erroredTurnId: null
@@ -346,11 +357,15 @@ export class CodexChatProvider implements ChatProvider {
       inst.client.notify('initialized')
 
       const model = this.opts.getModel(modelOverride)
+      const mcpServers = this.opts.getMcpServers?.(sessionId) ?? {}
+      const developerInstructions = this.opts.getDeveloperInstructions?.(inst.worktreePath)
       const threadParams = {
         cwd: inst.worktreePath,
         approvalPolicy: APPROVAL_POLICY,
         sandbox: SANDBOX,
-        ...(model ? { model } : {})
+        ...(model ? { model } : {}),
+        ...(developerInstructions ? { developerInstructions } : {}),
+        ...(Object.keys(mcpServers).length > 0 ? { config: { mcp_servers: mcpServers } } : {})
       }
       let resp: CodexThreadResponse | null = null
       let forked = false
@@ -585,6 +600,10 @@ export class CodexChatProvider implements ChatProvider {
       return
     }
     if (item.type === 'fileChange') inst.fileChanges.set(item.id, (item as { changes: CodexFileChange[] }).changes)
+    if (item.type === 'mcpToolCall') {
+      const call = item as { server: string; tool: string }
+      inst.openMcpCalls.set(item.id, { server: call.server, tool: call.tool })
+    }
     const block = toolUseBlockFor(item)
     if (!block) return
     inst.openToolItems.add(item.id)
@@ -629,6 +648,7 @@ export class CodexChatProvider implements ChatProvider {
     const result = toolResultFor(item)
     if (!result) return
     inst.openToolItems.delete(item.id)
+    inst.openMcpCalls.delete(item.id)
     inst.fileChanges.delete(item.id)
     this.opts.cancelApprovalForToolUse(sessionId, item.id)
     this.store.dispatch({
@@ -692,6 +712,21 @@ export class CodexChatProvider implements ChatProvider {
       )
       return
     }
+    if (method === 'mcpServer/elicitation/request') {
+      const call = parseMcpToolApproval(params)
+      if (call) {
+        const toolUseId = [...inst.openMcpCalls.entries()]
+          .reverse()
+          .find(([, c]) => c.server === call.server && c.tool === call.tool)?.[0]
+        void this.relayApproval(inst, id, `mcp__${call.server}__${call.tool}`, call.args, toolUseId, 'elicitation')
+        return
+      }
+      // A real form-filling elicitation from some MCP server. Ness has no
+      // UI for those yet; declining lets the server carry on without.
+      log('codex-chat', `declined MCP elicitation server=${String(params.serverName)} sessionId=${inst.sessionId}`)
+      inst.client.respond(id, { action: 'decline', content: null, _meta: null })
+      return
+    }
     log('codex-chat', `unhandled server request ${method} sessionId=${inst.sessionId}`)
     inst.client.respondError(id, -32601, `Ness does not handle ${method}`)
   }
@@ -701,7 +736,8 @@ export class CodexChatProvider implements ChatProvider {
     id: number | string,
     toolName: string,
     input: Record<string, unknown>,
-    toolUseId?: string
+    toolUseId?: string,
+    replyShape: 'decision' | 'elicitation' = 'decision'
   ): Promise<void> {
     const result = await this.opts.requestApproval({
       requestId: `${inst.sessionId}-codex-${id}`,
@@ -714,6 +750,10 @@ export class CodexChatProvider implements ChatProvider {
     // Codex's decision carries no message, so a deny note can't reach the
     // model; "interrupt turn" maps to cancel, which ends the turn.
     const decision = result.behavior === 'allow' ? 'accept' : result.interrupt ? 'cancel' : 'decline'
+    if (replyShape === 'elicitation') {
+      inst.client.respond(id, { action: decision, content: decision === 'accept' ? {} : null, _meta: null })
+      return
+    }
     inst.client.respond(id, { decision })
   }
 
@@ -838,6 +878,24 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp'
+}
+
+/** Codex asks before every MCP tool call with an elicitation tagged
+ *  `codex_approval_kind: "mcp_tool_call"`. The tool's name is only in the
+ *  human-readable message; its arguments are in `_meta.tool_params`. */
+export function parseMcpToolApproval(
+  params: Record<string, unknown>
+): { server: string; tool: string; args: Record<string, unknown> } | null {
+  const meta = params._meta as { codex_approval_kind?: unknown; tool_params?: unknown } | null | undefined
+  if (meta?.codex_approval_kind !== 'mcp_tool_call') return null
+  const server = typeof params.serverName === 'string' ? params.serverName : null
+  const match = typeof params.message === 'string' ? params.message.match(/run tool "([^"]+)"/) : null
+  if (!server || !match) return null
+  const args =
+    meta.tool_params && typeof meta.tool_params === 'object' && !Array.isArray(meta.tool_params)
+      ? (meta.tool_params as Record<string, unknown>)
+      : {}
+  return { server, tool: match[1], args }
 }
 
 export function buildUserInput(text: string, images?: ChatImageInput[]): CodexUserInput[] {
