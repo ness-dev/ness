@@ -8,7 +8,7 @@ import {
 import { useDroppable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { WorkspacePane, TerminalTab, PtyStatus, AgentKind } from '../types'
-import { AGENT_REGISTRY, agentDisplayName } from '../../shared/agent-registry'
+import { AGENT_REGISTRY, agentDisplayName, supportsChat } from '../../shared/agent-registry'
 import { Tooltip } from './Tooltip'
 import { AgentIcon } from './AgentIcon'
 import { repoNameColor } from './RepoIcon'
@@ -676,9 +676,9 @@ export function TerminalPanel({
         >
           <SortableContext items={pane.tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
             {pane.tabs.map((tab) => {
-              const isClaudeAgent = tab.type === 'agent' && tab.agentKind === 'claude'
+              const isChatCapableAgent = tab.type === 'agent' && supportsChat(tab.agentKind)
               const isJsonClaude = tab.type === 'json-claude'
-              const convertible = !!onConvertTabType && (isClaudeAgent || isJsonClaude)
+              const convertible = !!onConvertTabType && (isChatCapableAgent || isJsonClaude)
               return (
                 <SortableTab
                   key={tab.id}

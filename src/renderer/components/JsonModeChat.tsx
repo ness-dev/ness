@@ -31,7 +31,8 @@ import {
   ShieldAlert,
   Sparkles,
   GitBranch,
-  GitBranchPlus
+  GitBranchPlus,
+  Loader2
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
@@ -57,7 +58,13 @@ import {
 } from './composer-height'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
-import { CLAUDE_MODELS } from '../../shared/agent-registry'
+import {
+  CLAUDE_MODELS,
+  type ModelOption,
+  agentDisplayName,
+  getChatCapabilities,
+  supportsConversationFork
+} from '../../shared/agent-registry'
 import {
   parseImageAlt,
   parseImageTitle,
@@ -339,9 +346,9 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 // its behavior without stepping on any harvested entry.
 const MODEL_COMMAND_NAME = 'model'
 
-function claudeModelDisplayName(id: string | undefined): string {
+function modelDisplayName(options: readonly ModelOption[], id: string | undefined): string {
   if (!id) return ''
-  return CLAUDE_MODELS.find((m) => m.id === id)?.displayName ?? id
+  return options.find((m) => m.id === id)?.displayName ?? id
 }
 
 function formatTokenCount(n: number): string {
@@ -770,6 +777,35 @@ function RateLimitWarningCard({
   )
 }
 
+function AgentErrorCard({ message }: { message: string }): JSX.Element {
+  return (
+    <div
+      className="my-2 border border-danger/40 bg-danger/5 overflow-hidden"
+      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+    >
+      <div
+        className="flex items-center gap-2 bg-danger/10 border-b border-danger/20"
+        style={{
+          paddingInline: 'var(--chat-chrome-px)',
+          paddingBlock: 'var(--chat-chrome-py)',
+          fontSize: 'var(--chat-chrome-text)'
+        }}
+      >
+        <AlertOctagon className="icon-xs text-danger shrink-0" />
+        <span
+          className="font-semibold shrink-0 text-danger"
+          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+        >
+          Turn failed
+        </span>
+      </div>
+      <div className="px-3 py-2 text-xs text-fg/80">
+        <HighlightedText text={message} />
+      </div>
+    </div>
+  )
+}
+
 function RateLimitErrorCard({
   message,
   detail
@@ -1125,6 +1161,15 @@ function renderEntries(
       })
       continue
     }
+    if (entry.kind === 'error' && entry.errorKind === 'agent-error') {
+      rows.push({
+        key: entry.entryId,
+        entryId: entry.entryId,
+        type: 'tool',
+        node: <AgentErrorCard message={entry.errorMessage ?? 'The agent reported an error'} />
+      })
+      continue
+    }
     if (entry.kind === 'error' && entry.errorKind === 'rate-limit-error') {
       rows.push({
         key: entry.entryId,
@@ -1343,6 +1388,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   const worktrees = useWorktrees()
   const aliases = useAliases()
   const cameFromTerminalDefault = defaultClaudeTabType === 'xterm'
+  const chatCaps = getChatCapabilities(session?.agentKind)
+  const canForkIntoWorktree =
+    conversationForkEnabled && supportsConversationFork(session?.agentKind ?? 'claude')
+  const hasMessageMenu = chatCaps.rewind || chatCaps.fork || canForkIntoWorktree
   const isMac =
     typeof window !== 'undefined' &&
     (window.__HARNESS_PLATFORM__
@@ -1364,9 +1413,11 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     ? `${modKeySymbol}⇧↵`
     : `${modKeySymbol}Shift+Enter`
   const interruptSendHotkeyAria = `${modKeyWord}+Shift+Enter`
+  const agentName =
+    session?.agentKind && session.agentKind !== 'claude' ? agentDisplayName(session.agentKind) : 'Claude'
   const composerPlaceholder = sendOnEnter
-    ? 'Message Claude — Enter to send, Shift+Enter for newline'
-    : `Message Claude — ${modKeyWord}+Enter to send`
+    ? `Message ${agentName} — Enter to send, Shift+Enter for newline`
+    : `Message ${agentName} — ${modKeyWord}+Enter to send`
   const [draft, setDraft] = useState('')
   // Mention/popover state. `dismissed` carries the draft text at which
   // the user pressed Escape — comparing against the live draft is how we
@@ -1808,6 +1859,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // by a frame or two, which is invisible to the user.
   const entries = session?.entries ?? []
   const entriesHydrated = session?.entriesHydrated ?? false
+  const historyPending = session?.historyPending ?? false
   const deferredEntries = useDeferredValue(entries)
   const find = useFindController(entries, scrollRef)
   // Find's corpus comes from entries[], not the DOM, so it counts matches in
@@ -2078,8 +2130,8 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // there's no fork point to resolve and no assistant-message guard.
   const performForkIntoWorktree = useCallback(() => {
     setRewindMenu(null)
-    openForkIntoWorktree({ sessionId, worktreePath })
-  }, [sessionId, worktreePath])
+    openForkIntoWorktree({ sessionId, worktreePath, agentKind: session?.agentKind ?? 'claude' })
+  }, [sessionId, worktreePath, session?.agentKind])
   useEffect(() => {
     if (!rewindMenu) return
     const onAway = (): void => setRewindMenu(null)
@@ -2169,6 +2221,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   }
 
   const slashTrigger = useMemo(() => {
+    if (!chatCaps.slashCommands && !chatCaps.modelPicker) return null
     if (session?.state === 'exited') return null
     const trig = findTrigger(draft, cursorPos, '/')
     if (!trig) return null
@@ -2178,7 +2231,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // literal slashes followed by punctuation without it lingering.
     if (!/^[a-zA-Z0-9:-]*$/.test(trig.query)) return null
     return trig
-  }, [draft, cursorPos, session?.state])
+  }, [draft, cursorPos, session?.state, chatCaps.slashCommands, chatCaps.modelPicker])
 
   const mentionTrigger = useMemo<{ start: number; query: string } | null>(() => {
     if (session?.state === 'exited') return null
@@ -2190,19 +2243,30 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // inserted `/model ` this dedicated detector takes over and drives
   // the model picker off whatever the user types next.
   const modelPickerTrigger = useMemo<{ query: string } | null>(() => {
+    if (!chatCaps.modelPicker) return null
     if (session?.state === 'exited') return null
     const m = draft.match(/^\/model(?:\s+([\s\S]*))?$/)
     if (!m) return null
     return { query: m[1] ?? '' }
-  }, [draft, session?.state])
+  }, [draft, session?.state, chatCaps.modelPicker])
 
+  // A provider that can list its models (Codex, per signed-in account)
+  // puts them on the session; Claude's picker keeps the static catalog.
+  const sessionModels = session?.availableModels
+  const modelOptions = useMemo<readonly ModelOption[]>(
+    () =>
+      sessionModels
+        ? sessionModels.map((m) => ({ id: m.id, displayName: m.displayName, tier: 'current' as const }))
+        : CLAUDE_MODELS,
+    [sessionModels]
+  )
   const modelIdToDisplay = useMemo(() => {
     const map = new Map<string, string>()
-    for (const m of CLAUDE_MODELS) map.set(m.id, m.displayName)
+    for (const m of modelOptions) map.set(m.id, m.displayName)
     return map
-  }, [])
+  }, [modelOptions])
 
-  const currentModelDisplay = claudeModelDisplayName(session?.currentModel)
+  const currentModelDisplay = modelDisplayName(modelOptions, session?.currentModel)
 
   // Gated on the setting that grants the agent send_message in the first
   // place — tagging a worktree it has no tool to reach is a dead end.
@@ -2232,7 +2296,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
         icon: <Sparkles className="icon-xs" />
       }
       const q = modelPickerTrigger.query.trim().toLowerCase()
-      const searchTargets = CLAUDE_MODELS.map((m) => ({
+      const searchTargets = modelOptions.map((m) => ({
         id: m.id,
         // Fuzzy against "Display Name (id)" so both a friendly typo
         // like "opus47" and an id like "claude-opus-4-7" both hit.
@@ -2273,10 +2337,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
       // list as the CLI-harvested commands. It's client-side only —
       // stream-json mode never advertises /model itself. Dedupe in case
       // the CLI ever starts advertising it.
-      const harvested = (session?.slashCommands ?? []).filter(
-        (n) => n !== MODEL_COMMAND_NAME
-      )
-      const all = [MODEL_COMMAND_NAME, ...harvested]
+      const harvested = chatCaps.slashCommands
+        ? (session?.slashCommands ?? []).filter((n) => n !== MODEL_COMMAND_NAME)
+        : []
+      const all = chatCaps.modelPicker ? [MODEL_COMMAND_NAME, ...harvested] : harvested
       const ranked =
         q.length === 0
           ? all.map((name) => ({ name, indices: undefined as number[] | undefined }))
@@ -2331,7 +2395,10 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     session?.slashCommands,
     session?.currentModel,
     currentModelDisplay,
-    modelIdToDisplay
+    modelIdToDisplay,
+    modelOptions,
+    chatCaps.slashCommands,
+    chatCaps.modelPicker
   ])
 
   // Clamp the selection index when the item list shrinks (e.g. the user
@@ -2518,7 +2585,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // to the requested model (empty = clear override). This catches
     // Cmd+Enter bypass of the popover, or any dismissed-popover path
     // that lands here with a literal `/model …` draft.
-    const modelMatch = text.match(/^\/model(?:\s+([\s\S]+))?$/)
+    const modelMatch = chatCaps.modelPicker ? text.match(/^\/model(?:\s+([\s\S]+))?$/) : null
     if (modelMatch) {
       const arg = (modelMatch[1] ?? '').trim()
       void backend.setJsonClaudeTabModel(sessionId, arg).catch(() => {
@@ -2679,51 +2746,55 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           style={{ left: rewindMenu.x, top: rewindMenu.y }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            disabled={rewindMenu.disabledReason !== null}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (rewindMenu.disabledReason !== null) return
-              void performRewind(rewindMenu.entryId)
-            }}
-            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-              rewindMenu.disabledReason
-                ? 'text-muted cursor-not-allowed opacity-60'
-                : 'text-danger hover:bg-panel cursor-pointer'
-            }`}
-          >
-            <RotateCcw className="icon-xs shrink-0" />
-            <div className="flex flex-col">
-              <span>Rewind to here</span>
-              <span className="text-xs text-muted">
-                {rewindMenu.disabledReason ?? 'drops everything after this'}
-              </span>
-            </div>
-          </button>
-          <button
-            type="button"
-            disabled={rewindMenu.forkDisabledReason !== null}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (rewindMenu.forkDisabledReason !== null) return
-              void performFork(rewindMenu.entryId)
-            }}
-            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-              rewindMenu.forkDisabledReason
-                ? 'text-muted cursor-not-allowed opacity-60'
-                : 'text-fg-bright hover:bg-panel cursor-pointer'
-            }`}
-          >
-            <GitBranch className="icon-xs shrink-0" />
-            <div className="flex flex-col">
-              <span>Fork chat here</span>
-              <span className="text-xs text-muted">
-                {rewindMenu.forkDisabledReason ?? 'opens a new tab with history up to here'}
-              </span>
-            </div>
-          </button>
-          {conversationForkEnabled && (
+          {chatCaps.rewind && (
+            <button
+              type="button"
+              disabled={rewindMenu.disabledReason !== null}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (rewindMenu.disabledReason !== null) return
+                void performRewind(rewindMenu.entryId)
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                rewindMenu.disabledReason
+                  ? 'text-muted cursor-not-allowed opacity-60'
+                  : 'text-danger hover:bg-panel cursor-pointer'
+              }`}
+            >
+              <RotateCcw className="icon-xs shrink-0" />
+              <div className="flex flex-col">
+                <span>Rewind to here</span>
+                <span className="text-xs text-muted">
+                  {rewindMenu.disabledReason ?? 'drops everything after this'}
+                </span>
+              </div>
+            </button>
+          )}
+          {chatCaps.fork && (
+            <button
+              type="button"
+              disabled={rewindMenu.forkDisabledReason !== null}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (rewindMenu.forkDisabledReason !== null) return
+                void performFork(rewindMenu.entryId)
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                rewindMenu.forkDisabledReason
+                  ? 'text-muted cursor-not-allowed opacity-60'
+                  : 'text-fg-bright hover:bg-panel cursor-pointer'
+              }`}
+            >
+              <GitBranch className="icon-xs shrink-0" />
+              <div className="flex flex-col">
+                <span>Fork chat here</span>
+                <span className="text-xs text-muted">
+                  {rewindMenu.forkDisabledReason ?? 'opens a new tab with history up to here'}
+                </span>
+              </div>
+            </button>
+          )}
+          {canForkIntoWorktree && (
             <button
               type="button"
               onClick={(e) => {
@@ -2812,8 +2883,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             // shortly after mount — rendering the bright sparkle card in
             // that window flashes loudly on tabs that actually have history.
             // Render blank during the fetch; a spinner's appear-then-
-            // disappear would itself be a flash.
-            entriesHydrated ? (
+            // disappear would itself be a flash. A provider that loads
+            // history from the agent (Codex) takes seconds rather than a
+            // frame, so that case does get a quiet loading line.
+            historyPending ? (
+              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
+                <Loader2 className="icon-xs animate-spin" />
+                Loading conversation…
+              </div>
+            ) : entriesHydrated ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
                 <div className="relative mb-6">
                   <div
@@ -2866,7 +2944,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 ? entries[entryIndexById.get(targetEntryId) ?? -1]
                 : undefined
               const onContextMenu =
-                targetEntryId && targetEntry?.kind === 'assistant'
+                hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
                   ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
                   : undefined
               const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
@@ -3145,13 +3223,15 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
               <span className={`w-1.5 h-1.5 rounded-full ${stateDot}`} />
               <span>{state}</span>
             </div>
-            <button
-              onClick={cyclePermissionMode}
-              className={`px-1.5 py-0.5 rounded border text-xs cursor-pointer hover:opacity-80 transition-opacity ${modeBadgeStyle}`}
-              title="Click to cycle permission mode. Applies mid-turn — no restart."
-            >
-              {modeBadgeLabel}
-            </button>
+            {chatCaps.permissionModes && (
+              <button
+                onClick={cyclePermissionMode}
+                className={`px-1.5 py-0.5 rounded border text-xs cursor-pointer hover:opacity-80 transition-opacity ${modeBadgeStyle}`}
+                title="Click to cycle permission mode. Applies mid-turn — no restart."
+              >
+                {modeBadgeLabel}
+              </button>
+            )}
             <div className="flex-1" />
             {busy && (
               <button

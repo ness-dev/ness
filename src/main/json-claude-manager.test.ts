@@ -67,6 +67,7 @@ import { Store } from './store'
 import { JsonClaudeManager } from './json-claude-manager'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import type { ClaudeLaunchSettings } from './claude-launch'
+import { describeChatProviderContract } from './test-support/chat-provider-contract'
 
 describe('JsonClaudeManager', () => {
   beforeEach(() => {
@@ -887,4 +888,53 @@ describe('JsonClaudeManager', () => {
       expect(new Set(ids).size).toBe(ids.length)
     })
   })
+})
+
+describeChatProviderContract('claude', () => {
+  spawnedProcs.length = 0
+  spawnCalls.length = 0
+  const store = new Store()
+  const provider = new JsonClaudeManager(store, {
+    getClaudeCommand: () => 'claude',
+    getUseSystemClaude: () => false,
+    getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
+    closeApprovalSession: vi.fn(),
+    cancelApprovalForToolUse: vi.fn(),
+    getClaudeEnvVars: () => ({}),
+    getControlServer: () => null,
+    getControlBridgeScriptPath: () => '/tmp/bridge.js',
+    isHarnessMcpEnabled: () => false,
+    getCallerScope: () => null,
+    getLaunchSettings: () => ({ tuiFullscreen: true })
+  })
+  const proc = (): ReturnType<typeof makeFakeProc> => sessionProcs().at(-1)!
+  const emit = (line: unknown): void => {
+    proc().stdout.emit('data', Buffer.from(JSON.stringify(line) + '\n'))
+  }
+  return {
+    agentKind: 'claude',
+    store,
+    provider,
+    worktreePath: '/tmp/contract-wt',
+    settle: async () => {},
+    receivedUserText: () =>
+      proc()
+        .stdin.write.mock.calls.map(([raw]) => JSON.parse(String(raw)))
+        .filter((f) => f.type === 'user')
+        .map((f) => {
+          const content = f.message.content
+          if (typeof content === 'string') return content
+          return content
+            .filter((b: { type: string }) => b.type === 'text')
+            .map((b: { text: string }) => b.text)
+            .join('')
+        }),
+    replyAndFinish: async (_sid, text) => {
+      emit({ type: 'assistant', message: { id: 'msg_contract', content: [{ type: 'text', text }] } })
+      emit({ type: 'result' })
+    },
+    crash: async () => {
+      proc().emit('exit', 1, null)
+    }
+  }
 })

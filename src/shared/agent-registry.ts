@@ -9,11 +9,45 @@ export interface AgentInfo {
    * discovers it from the first hook event. */
   assignsSessionId: boolean
   /** Whether a conversation can be forked INTO a new worktree running this
-   * agent. Requires a transcript format Ness can rewrite and a CLI flag
-   * to resume it by id — only Claude Code qualifies today. Agents that
-   * assign their own session ids can't be handed a pre-seeded one at all. */
+   * agent. Claude copies its transcript into the new worktree's project
+   * dir; Codex's new chat tab runs thread/fork on the source thread at
+   * boot. Either way the new worktree runs the same agent as the source. */
   supportsConversationFork: boolean
+  /** Present when this agent can back a Chat tab. Absent means the agent
+   *  only runs in Terminal tabs. */
+  chat?: ChatCapabilities
 }
+
+/** What a Chat tab can offer for a given agent. The renderer gates
+ *  affordances on these rather than on the agent kind, so a new chat
+ *  provider only has to declare what it supports. */
+export interface ChatCapabilities {
+  /** Drop everything after a message and continue from there. */
+  rewind: boolean
+  /** Copy the conversation up to a message into a new tab. */
+  fork: boolean
+  /** Claude's permission-mode cycle (default / acceptEdits / plan / auto). */
+  permissionModes: boolean
+  /** Agent-advertised slash commands. */
+  slashCommands: boolean
+  /** The synthetic `/model` picker. Its list comes from the session's
+   *  `availableModels` when the provider reports one, else CLAUDE_MODELS. */
+  modelPicker: boolean
+  /** A deny can carry a note the agent reads. Codex's approval reply is a
+   *  bare decision, so the approval card hides the note there. */
+  approvalDenyReason: boolean
+  /** An approval can be answered with edited tool input ("Allow with
+   *  edits"). Codex runs the command it asked about or nothing. */
+  approvalEditInput: boolean
+}
+
+/** The agents with a ChatProvider in main. ChatRouter requires one per
+ *  kind listed here, and agent-registry.test.ts requires this list to match
+ *  the registry entries that declare `chat` — so giving an agent chat
+ *  capabilities fails a test until it's listed here, and listing it fails
+ *  typecheck until main registers its provider. */
+export const CHAT_AGENT_KINDS = ['claude', 'codex'] as const satisfies readonly AgentKind[]
+export type ChatAgentKind = (typeof CHAT_AGENT_KINDS)[number]
 
 export const AGENT_REGISTRY: AgentInfo[] = [
   {
@@ -21,14 +55,32 @@ export const AGENT_REGISTRY: AgentInfo[] = [
     displayName: 'Claude Code',
     vendor: 'Anthropic',
     assignsSessionId: true,
-    supportsConversationFork: true
+    supportsConversationFork: true,
+    chat: {
+      rewind: true,
+      fork: true,
+      permissionModes: true,
+      slashCommands: true,
+      modelPicker: true,
+      approvalDenyReason: true,
+      approvalEditInput: true
+    }
   },
   {
     kind: 'codex',
     displayName: 'Codex',
     vendor: 'OpenAI',
     assignsSessionId: false,
-    supportsConversationFork: false
+    supportsConversationFork: true,
+    chat: {
+      rewind: true,
+      fork: true,
+      permissionModes: false,
+      slashCommands: false,
+      modelPicker: true,
+      approvalDenyReason: false,
+      approvalEditInput: false
+    }
   },
   {
     kind: 'cursor',
@@ -147,4 +199,24 @@ export function agentDisplayName(kind: AgentKind | undefined): string {
 
 export function supportsConversationFork(kind: AgentKind): boolean {
   return getAgentInfo(kind).supportsConversationFork
+}
+
+export function supportsChat(kind: AgentKind | undefined): boolean {
+  return !!getAgentInfo(kind ?? 'claude').chat
+}
+
+const NO_CHAT_CAPABILITIES: ChatCapabilities = {
+  rewind: false,
+  fork: false,
+  permissionModes: false,
+  slashCommands: false,
+  modelPicker: false,
+  approvalDenyReason: false,
+  approvalEditInput: false
+}
+
+/** A missing kind means Claude — chat sessions and tabs created before
+ *  `agentKind` existed were all Claude. */
+export function getChatCapabilities(kind: AgentKind | undefined): ChatCapabilities {
+  return getAgentInfo(kind ?? 'claude').chat ?? NO_CHAT_CAPABILITIES
 }

@@ -263,3 +263,60 @@ describe('ApprovalBridge — abandoned tool calls', () => {
     ).toBe('allow')
   })
 })
+
+describe('ApprovalBridge.requestApproval (in-process providers)', () => {
+  function boot(rules: StoredPermissionRule[] = []): { store: TestStore; bridge: ApprovalBridge } {
+    const store = new TestStore()
+    store.dispatch({ type: 'permissions/loaded', payload: { rules } })
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: 's1', worktreePath: '/tmp/wt', agentKind: 'codex' }
+    })
+    const bridge = new ApprovalBridge(store as unknown as Store)
+    openBridges.push(bridge)
+    return { store, bridge }
+  }
+
+  it('allows a request matching the global allowlist without a card', async () => {
+    const { store, bridge } = boot([rule('Bash', 'npm test:*')])
+    const result = await bridge.requestApproval({
+      requestId: 'r1',
+      sessionId: 's1',
+      toolName: 'Bash',
+      input: { command: 'npm test -- --watch' },
+      toolUseId: 'item-1'
+    })
+    expect(result.behavior).toBe('allow')
+    expect(store.getSnapshot().state.jsonClaude.pendingApprovals).toEqual({})
+  })
+
+  it('surfaces a card and resolves with the user decision', async () => {
+    const { store, bridge } = boot()
+    const pending = bridge.requestApproval({
+      requestId: 'r2',
+      sessionId: 's1',
+      toolName: 'Bash',
+      input: { command: 'rm -rf build' },
+      toolUseId: 'item-2'
+    })
+    const cards = store.getSnapshot().state.jsonClaude.pendingApprovals
+    expect(Object.keys(cards)).toEqual(['r2'])
+
+    expect(bridge.resolveApproval('r2', { behavior: 'deny', message: 'no' })).toBe(true)
+    await expect(pending).resolves.toEqual({ behavior: 'deny', message: 'no' })
+    expect(store.getSnapshot().state.jsonClaude.pendingApprovals).toEqual({})
+  })
+
+  it('cancelPendingForSession denies outstanding in-process requests', async () => {
+    const { store, bridge } = boot()
+    const pending = bridge.requestApproval({
+      requestId: 'r3',
+      sessionId: 's1',
+      toolName: 'Bash',
+      input: { command: 'make deploy' }
+    })
+    bridge.cancelPendingForSession('s1', 'session ended')
+    await expect(pending).resolves.toEqual({ behavior: 'deny', message: 'session ended' })
+    expect(store.getSnapshot().state.jsonClaude.pendingApprovals).toEqual({})
+  })
+})

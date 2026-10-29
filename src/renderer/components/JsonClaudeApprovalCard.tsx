@@ -13,6 +13,7 @@ import { ArgsBlock } from './json-mode-cards/ArgsDisplay'
 import { useJsonClaudeSession, useSettings } from '../store'
 import { useBackend } from '../backend'
 import { useViewport } from '../hooks/useViewport'
+import { getChatCapabilities } from '../../shared/agent-registry'
 import {
   suggestPermissionPatterns,
   type PermissionPatternSuggestion
@@ -113,6 +114,7 @@ export function JsonClaudeApprovalCard({
 
   const session = useJsonClaudeSession(approval.sessionId)
   const cwd = session?.worktreePath
+  const chatCaps = getChatCapabilities(session?.agentKind)
 
   const suggestions = useMemo(
     () => suggestPermissionPatterns(approval.toolName, approval.input),
@@ -366,12 +368,14 @@ export function JsonClaudeApprovalCard({
                 {sessionGrantLabel}
               </button>
             )}
-            <button
-              onClick={() => setMode('edit')}
-              className={BTN_NEUTRAL}
-            >
-              Allow with edits
-            </button>
+            {chatCaps.approvalEditInput && (
+              <button
+                onClick={() => setMode('edit')}
+                className={BTN_NEUTRAL}
+              >
+                Allow with edits
+              </button>
+            )}
             <button
               onClick={() => setMode('always')}
               title="Save a rule in Ness so future matching tool calls skip the prompt — across sessions, app restarts, and every worktree."
@@ -478,12 +482,14 @@ export function JsonClaudeApprovalCard({
 
       {mode === 'deny' && (
         <div className="px-3 py-2 space-y-2">
-          <textarea
-            value={denyMessage}
-            onChange={(e) => setDenyMessage(e.target.value)}
-            placeholder="Reason shown to Claude (optional)"
-            className="w-full bg-app/40 border border-border rounded p-2 text-xs outline-none focus:border-danger min-h-[60px] resize-none"
-          />
+          {chatCaps.approvalDenyReason && (
+            <textarea
+              value={denyMessage}
+              onChange={(e) => setDenyMessage(e.target.value)}
+              placeholder="Reason shown to Claude (optional)"
+              className="w-full bg-app/40 border border-border rounded p-2 text-xs outline-none focus:border-danger min-h-[60px] resize-none"
+            />
+          )}
           <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none">
             <input
               type="checkbox"

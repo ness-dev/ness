@@ -209,6 +209,33 @@ describe('PanesFSM.restoreFromConfig', () => {
     expect(agentTab?.mode).toBeUndefined()
     expect(chatTab?.mode).toBe('asleep')
   })
+
+  it('restores a codex chat tab’s providerSessionId', async () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/restore-codex'
+    await fsm.restoreFromConfig({
+      _ignored: {
+        [wtPath]: {
+          type: 'leaf',
+          id: 'pane-1',
+          tabs: [
+            {
+              id: 'chat-1',
+              type: 'json-claude',
+              label: 'Chat',
+              agentKind: 'codex',
+              sessionId: 'chat-1',
+              providerSessionId: 'thread-1'
+            }
+          ],
+          activeTabId: 'chat-1'
+        }
+      }
+    })
+    fsm.ensureInitialized(wtPath)
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs[0].providerSessionId).toBe('thread-1')
+  })
 })
 
 describe('PanesFSM.ensureInitialized', () => {
@@ -415,5 +442,178 @@ describe('PanesFSM.openFileTab', () => {
     const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
     expect(leaf.tabs.filter((t) => t.type === 'file')).toHaveLength(1)
     expect(leaf.activeTabId).toBe('file-src/a.ts')
+  })
+})
+
+describe('PanesFSM chat-provider gating', () => {
+  it('refuses to convert an agent tab whose agent has no chat provider', () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/cursor'
+    seedLeaf(store, wtPath, {
+      type: 'leaf',
+      id: 'pane-1',
+      tabs: [{ id: 'agent-1', type: 'agent', label: 'Cursor Agent', agentKind: 'cursor' }],
+      activeTabId: 'agent-1'
+    })
+
+    fsm.convertTabType(wtPath, 'agent-1', 'json-claude')
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs[0].type).toBe('agent')
+    expect(leaf.tabs[0].id).toBe('agent-1')
+  })
+
+  it('opens an agent without a chat provider as a terminal tab even when chat is the default', () => {
+    const store = new Store()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      getDefaultClaudeTabType: () => 'json'
+    })
+    const wtPath = '/tmp/cursor-default'
+    store.dispatch({
+      type: 'worktrees/listChanged',
+      payload: [
+        {
+          path: wtPath,
+          branch: 'feature',
+          head: '',
+          isBare: false,
+          isMain: false,
+          createdAt: 0,
+          repoRoot: '/tmp/repo'
+        }
+      ]
+    })
+
+    fsm.ensureInitialized(wtPath, { agentKind: 'cursor' })
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs.some((t) => t.type === 'json-claude')).toBe(false)
+    expect(leaf.tabs.find((t) => t.type === 'agent')?.agentKind).toBe('cursor')
+  })
+
+  it('opens a codex chat tab when chat is the default', () => {
+    const store = new Store()
+    const startJsonClaudeWithPrompt = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      getDefaultClaudeTabType: () => 'json',
+      startJsonClaudeWithPrompt
+    })
+    const wtPath = '/tmp/codex-chat'
+    store.dispatch({
+      type: 'worktrees/listChanged',
+      payload: [
+        {
+          path: wtPath,
+          branch: 'feature',
+          head: '',
+          isBare: false,
+          isMain: false,
+          createdAt: 0,
+          repoRoot: '/tmp/repo'
+        }
+      ]
+    })
+
+    fsm.ensureInitialized(wtPath, { agentKind: 'codex', initialPrompt: 'hi' })
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    const chat = leaf.tabs.find((t) => t.type === 'json-claude')
+    expect(chat?.agentKind).toBe('codex')
+    expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith(chat!.id, wtPath, 'hi')
+  })
+
+  it('carries agentKind onto a split chat clone', () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/split-kind'
+    const sourceTabId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc'
+    seedLeaf(store, wtPath, {
+      type: 'leaf',
+      id: 'pane-source',
+      tabs: [
+        {
+          id: sourceTabId,
+          type: 'json-claude',
+          label: 'Chat',
+          sessionId: sourceTabId,
+          mode: 'awake',
+          agentKind: 'codex'
+        }
+      ],
+      activeTabId: sourceTabId
+    })
+
+    const newPane = fsm.splitPane(wtPath, 'pane-source', 'horizontal')
+
+    expect(newPane!.tabs[0].agentKind).toBe('codex')
+  })
+})
+
+describe('PanesFSM.setTabProviderSessionId', () => {
+  it('records the id on the tab in whichever worktree holds it and persists', () => {
+    const store = new Store()
+    const persist = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist,
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null
+    })
+    seedLeaf(store, '/wt/one', {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [{ id: 'chat-1', type: 'json-claude', label: 'Chat', sessionId: 'chat-1', agentKind: 'codex' }],
+      activeTabId: 'chat-1'
+    })
+
+    fsm.setTabProviderSessionId('chat-1', 'thread-1')
+
+    const leaf = store.getSnapshot().state.terminals.panes['/wt/one'] as PaneLeaf
+    expect(leaf.tabs[0].providerSessionId).toBe('thread-1')
+    expect(persist).toHaveBeenCalled()
+  })
+
+  it('does nothing for an unknown tab', () => {
+    const store = new Store()
+    const persist = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist,
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null
+    })
+    fsm.setTabProviderSessionId('nope', 'thread-1')
+    expect(persist).not.toHaveBeenCalled()
+  })
+})
+
+describe('PanesFSM forked Codex conversations', () => {
+  it('opens a Codex fork in Chat even when Terminal is the default tab type', () => {
+    const store = new Store()
+    const startJsonClaudeWithPrompt = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      getDefaultClaudeTabType: () => 'xterm',
+      startJsonClaudeWithPrompt
+    })
+    const wtPath = '/tmp/codex-fork'
+    store.dispatch({
+      type: 'worktrees/listChanged',
+      payload: [
+        { path: wtPath, branch: 'spinoff', head: '', isBare: false, isMain: false, createdAt: 0, repoRoot: '/tmp/repo' }
+      ]
+    })
+
+    fsm.ensureInitialized(wtPath, { agentKind: 'codex', forkedSessionId: 'fork-1', initialPrompt: 'carry on' })
+
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    const chat = leaf.tabs.find((t) => t.type === 'json-claude')
+    expect(chat).toMatchObject({ id: 'fork-1', agentKind: 'codex' })
+    expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith('fork-1', wtPath, 'carry on')
   })
 })

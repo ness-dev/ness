@@ -1,3 +1,4 @@
+import { getAgentInfo } from '../agent-registry'
 export type PtyStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval'
 
 export interface PendingTool {
@@ -35,7 +36,8 @@ export interface TerminalTab {
    *  hydrate as 'asleep' so app launch doesn't construct an xterm or
    *  spawn a subprocess per tab; they wake on first focus. */
   mode?: 'awake' | 'asleep'
-  /** For agent tabs: which CLI agent this tab runs. */
+  /** For agent and json-claude tabs: which CLI agent this tab runs.
+   *  Missing means Claude. */
   agentKind?: AgentKind
   /** For agent + json-claude tabs: override the model resolved from
    *  settings (claudeModel/codexModel). Set when a worktree was spawned
@@ -52,6 +54,9 @@ export interface TerminalTab {
   commitHash?: string
   /** For agent tabs: UUID passed to the agent CLI so the tab resumes its own session. */
   sessionId?: string
+  /** For json-claude tabs whose agent assigns its own conversation ids
+   *  (Codex threads): that id. The tab id and sessionId stay Ness's. */
+  providerSessionId?: string
   /** For agent tabs: one-shot kickoff prompt. In-memory only — main strips it before persistence. */
   initialPrompt?: string
   /** For agent tabs: one-shot teleport session id. In-memory only — main strips it before persistence. */
@@ -142,8 +147,8 @@ export function findTabById(
  *  existed, and the default in PanesFSM.addTab. */
 export function isClaudeBackedTab(tab: TerminalTab | null | undefined): boolean {
   if (!tab) return false
-  if (tab.type === 'json-claude') return true
-  return tab.type === 'agent' && (tab.agentKind ?? 'claude') === 'claude'
+  if (tab.type !== 'agent' && tab.type !== 'json-claude') return false
+  return (tab.agentKind ?? 'claude') === 'claude'
 }
 
 export function hasAnyTabs(node: PaneNode): boolean {
@@ -305,6 +310,10 @@ export type TerminalsEvent =
         newType: 'agent' | 'json-claude'
         newLabel: string
       }
+    }
+  | {
+      type: 'terminals/tabProviderSessionIdChanged'
+      payload: { worktreePath: string; tabId: string; providerSessionId: string }
     }
   | {
       type: 'terminals/tabSlept'
@@ -609,26 +618,52 @@ export function terminalsReducer(
           // --resume picks it up after the swap. Carry it across either
           // way, generating one if the source tab somehow lacked it.
           const sessionId = t.sessionId ?? newId
+          const agentKind = t.agentKind ?? 'claude'
           changed = true
           if (newType === 'json-claude') {
+            // An agent that assigns its own ids (Codex) put its own id in
+            // the terminal tab's sessionId; the chat side keeps it as the
+            // provider id so it resumes the same conversation.
+            const ownIds = !getAgentInfo(agentKind).assignsSessionId
             return {
               id: newId,
               type: 'json-claude' as const,
               label: newLabel,
               sessionId,
-              mode: 'awake' as const
+              mode: 'awake' as const,
+              ...(agentKind !== 'claude' ? { agentKind } : {}),
+              ...(ownIds && t.sessionId ? { providerSessionId: t.sessionId } : {})
             }
           }
           return {
             id: newId,
             type: 'agent' as const,
-            agentKind: 'claude' as const,
+            agentKind,
             label: newLabel,
-            sessionId
+            sessionId: t.providerSessionId ?? sessionId
           }
         })
         const activeTabId = leaf.activeTabId === tabId ? newId : leaf.activeTabId
         return { ...leaf, tabs, activeTabId }
+      })
+      if (!changed) return state
+      return { ...state, panes: { ...state.panes, [worktreePath]: updated } }
+    }
+    case 'terminals/tabProviderSessionIdChanged': {
+      const { worktreePath, tabId, providerSessionId } = event.payload
+      const tree = state.panes[worktreePath]
+      if (!tree) return state
+      let changed = false
+      const updated = mapLeaves(tree, (leaf) => {
+        const i = leaf.tabs.findIndex((t) => t.id === tabId)
+        if (i === -1 || leaf.tabs[i].providerSessionId === providerSessionId) return leaf
+        changed = true
+        const tabs = [
+          ...leaf.tabs.slice(0, i),
+          { ...leaf.tabs[i], providerSessionId },
+          ...leaf.tabs.slice(i + 1)
+        ]
+        return { ...leaf, tabs }
       })
       if (!changed) return state
       return { ...state, panes: { ...state.panes, [worktreePath]: updated } }

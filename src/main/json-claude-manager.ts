@@ -1,3 +1,5 @@
+// The Claude ChatProvider (see chat-provider.ts).
+//
 // Runs `claude -p --input-format stream-json --output-format stream-json`
 // as a long-lived subprocess per json-claude tab. Mirrors PtyManager's
 // lifecycle shape (create / send / kill / killAll) and dispatches state
@@ -35,6 +37,14 @@ import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
+import type {
+  ChatImageInput,
+  ChatProvider,
+  ForkIntoWorktreeParams,
+  ForkOutcome,
+  RewindOutcome
+} from './chat-provider'
+import { nessControlMcpServer } from './ness-control-mcp'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
 
@@ -206,17 +216,6 @@ export function hasForkableTranscript(sessionId: string, worktreePath: string): 
   return existsSync(transcriptPathFor(sessionId, worktreePath))
 }
 
-export interface RewindOutcome {
-  ok: boolean
-  reason?: string
-}
-
-export interface ForkOutcome {
-  ok: boolean
-  newSessionId?: string
-  reason?: string
-}
-
 export interface ForkTranscriptParams {
   sourceSessionId: string
   sourceWorktreePath: string
@@ -335,7 +334,7 @@ export function forkTranscript(params: ForkTranscriptParams): ForkOutcome {
   return { ok: true, newSessionId }
 }
 
-export class JsonClaudeManager {
+export class JsonClaudeManager implements ChatProvider {
   private instances = new Map<string, JsonClaudeInstance>()
   private store: Store
   private opts: JsonClaudeManagerOptions
@@ -361,6 +360,20 @@ export class JsonClaudeManager {
 
   hasSession(sessionId: string): boolean {
     return this.instances.has(sessionId)
+  }
+
+  transcriptPath(sessionId: string, worktreePath: string): string {
+    return transcriptPathFor(sessionId, worktreePath)
+  }
+
+  canForkIntoWorktree(sessionId: string, worktreePath: string): boolean {
+    return hasForkableTranscript(sessionId, worktreePath)
+  }
+
+  /** Copies the transcript into the destination's project dir under a new
+   *  session id; the new tab's `--resume` picks it up from there. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    return forkTranscript(params)
   }
 
   /** Mint the next chat entry id for a session. `kind` distinguishes the
@@ -628,26 +641,12 @@ export class JsonClaudeManager {
     if (this.opts.isHarnessMcpEnabled()) {
       const controlInfo = this.opts.getControlServer()
       if (controlInfo) {
-        const scope = this.opts.getCallerScope(sessionId)
-        const controlEnv: Record<string, string> = {
-          ELECTRON_RUN_AS_NODE: '1',
-          HARNESS_PORT: String(controlInfo.port),
-          HARNESS_TOKEN: controlInfo.token,
-          // The bridge keys every control-server call by terminal id —
-          // for json-claude tabs the tab id IS the session id.
-          HARNESS_TERMINAL_ID: sessionId,
-          HARNESS_SESSION_ID: sessionId
-        }
-        if (scope) {
-          controlEnv.HARNESS_WORKTREE_ID = scope.worktreePath
-          controlEnv.HARNESS_REPO_ROOT = scope.repoRoot
-          if (scope.isMain) controlEnv.HARNESS_IS_MAIN = '1'
-        }
-        mcpServers['ness-control'] = {
-          command: process.execPath,
-          args: [this.opts.getControlBridgeScriptPath()],
-          env: controlEnv
-        }
+        mcpServers['ness-control'] = nessControlMcpServer({
+          sessionId,
+          controlServer: controlInfo,
+          bridgeScriptPath: this.opts.getControlBridgeScriptPath(),
+          scope: this.opts.getCallerScope(sessionId)
+        })
       }
     }
     const mcpConfig = { mcpServers }
@@ -870,7 +869,7 @@ export class JsonClaudeManager {
   send(
     sessionId: string,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const inst = this.instances.get(sessionId)
     if (!inst) return
@@ -908,7 +907,7 @@ export class JsonClaudeManager {
   private writeUserTurn(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     this.appendUserEntry(inst, text, images, {
       entryId: this.nextEntryId(inst.sessionId, 'u')
@@ -923,9 +922,7 @@ export class JsonClaudeManager {
   private appendUserEntry(
     inst: JsonClaudeInstance,
     text: string,
-    images:
-      | Array<{ mediaType: string; data: string; path: string }>
-      | undefined,
+    images: ChatImageInput[] | undefined,
     extra: { entryId: string; isQueued?: boolean }
   ): void {
     const hasImages = !!images && images.length > 0
@@ -965,7 +962,7 @@ export class JsonClaudeManager {
   private writeUserStdin(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const hasImages = !!images && images.length > 0
     const annotatedText = hasImages

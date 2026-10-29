@@ -115,8 +115,12 @@ export function foldCodexLines(text: string, state: FoldState): void {
       const lastUsage = info?.last_token_usage as Record<string, unknown> | undefined
       if (!lastUsage || !state.currentModel) continue
 
-      const inputTokens = (lastUsage.input_tokens as number) ?? 0
+      // OpenAI's input_tokens INCLUDES the cached ones (cached_input_tokens
+      // is a subset), unlike Claude's, where cache reads are counted
+      // separately. priceFor follows Claude's convention, so bill only the
+      // uncached remainder at the full input rate.
       const cachedInputTokens = (lastUsage.cached_input_tokens as number) ?? 0
+      const inputTokens = Math.max(0, ((lastUsage.input_tokens as number) ?? 0) - cachedInputTokens)
       const outputTokens = (lastUsage.output_tokens as number) ?? 0
       const reasoningTokens = (lastUsage.reasoning_output_tokens as number) ?? 0
 

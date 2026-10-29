@@ -4,6 +4,8 @@
 // JsonClaudeManager, and its per-tool approval flow rides an MCP bridge
 // instead of the terminal-hook status dir.
 
+import type { AgentKind } from './terminals'
+
 export type JsonClaudeSessionState =
   | 'idle'
   | 'connecting'
@@ -277,6 +279,7 @@ export interface JsonClaudeChatEntry {
     | 'rate-limit-warning'
     | 'rate-limit-error'
     | 'auth-failure'
+    | 'agent-error'
   /** For kind === 'error'. Human-readable detail (exitReason, rate-limit
    *  retry-at timestamp, original auth error string, etc.). */
   errorMessage?: string
@@ -302,6 +305,10 @@ export interface JsonClaudeChatEntry {
    *  jsonl line carrying this id, which is the natural end of the
    *  assistant's turn. */
   apiMessageId?: string
+  /** Codex turn this entry belongs to. Codex rewinds and forks at turn
+   *  boundaries (thread/revert, thread/fork), so assistant entries carry
+   *  the id of the turn that produced them. */
+  turnId?: string
   /** For errorKind === 'rate-limit-warning' | 'rate-limit-error'.
    *  Structured detail sourced from the SDK's `rate_limit_info`
    *  payload. All fields optional because the wire shape is sparse —
@@ -343,6 +350,9 @@ export interface JsonClaudeBackgroundAgent {
 export interface JsonClaudeSession {
   sessionId: string
   worktreePath: string
+  /** Which agent backs this chat. Missing means Claude — every session
+   *  predating the field was. Fixed for the session's lifetime. */
+  agentKind?: AgentKind
   state: JsonClaudeSessionState
   exitCode: number | null
   exitReason: string | null
@@ -357,6 +367,11 @@ export interface JsonClaudeSession {
    *  flash during the fetch window. The reducer flips this true on
    *  `entriesSeeded`. Server-side it's always true. */
   entriesHydrated: boolean
+  /** True while the provider is still loading this session's history from
+   *  the agent (Codex reads it over app-server after its subprocess is up,
+   *  well after `entriesHydrated` flips). The renderer shows a loading
+   *  state rather than the empty-chat card while it's set. */
+  historyPending?: boolean
   /** Last text of the most recent user submission; used by the renderer to
    *  pair the echo against the user-card it just rendered optimistically. */
   busy: boolean
@@ -376,6 +391,10 @@ export interface JsonClaudeSession {
    *  show the effective model even when no `--model` was passed and the
    *  CLI fell back to its own default. Empty until init lands. */
   currentModel?: string
+  /** Models this session's agent offers, when its provider can list them
+   *  (Codex's model/list depends on the signed-in account). Absent for
+   *  Claude, whose picker uses the static CLAUDE_MODELS list. */
+  availableModels?: Array<{ id: string; displayName: string }>
   /** Audit map of tool calls that were auto-approved by the LLM-based
    *  reviewer (instead of going through the user UI). Keyed by toolUseId
    *  so the per-tool card can render a small "auto-approved" badge.
@@ -441,6 +460,9 @@ export type JsonClaudeEvent =
       payload: {
         sessionId: string
         worktreePath: string
+        /** Omitted for Claude. Ignored when the session already exists —
+         *  a respawn can't change which agent backs it. */
+        agentKind?: AgentKind
         /** Permission mode applied only when this session id has no
          *  prior slice entry (fresh tab). When the session already
          *  exists (resume / re-attach / mode-change respawn), the
@@ -557,6 +579,14 @@ export type JsonClaudeEvent =
   | {
       type: 'jsonClaude/currentModelChanged'
       payload: { sessionId: string; model: string }
+    }
+  | {
+      type: 'jsonClaude/availableModelsChanged'
+      payload: { sessionId: string; models: Array<{ id: string; displayName: string }> }
+    }
+  | {
+      type: 'jsonClaude/historyPendingChanged'
+      payload: { sessionId: string; pending: boolean }
     }
   | {
       type: 'jsonClaude/compactBoundaryReceived'
@@ -762,6 +792,7 @@ export function jsonClaudeReducer(
       // kill+respawn the same way permissionMode does. Reset exit
       // bookkeeping.
       const existing = state.sessions[sessionId]
+      const agentKind = existing ? existing.agentKind : event.payload.agentKind
       return {
         ...state,
         sessions: {
@@ -769,6 +800,7 @@ export function jsonClaudeReducer(
           [sessionId]: {
             sessionId,
             worktreePath,
+            ...(agentKind && agentKind !== 'claude' ? { agentKind } : {}),
             state: 'connecting',
             exitCode: null,
             exitReason: null,
@@ -786,6 +818,7 @@ export function jsonClaudeReducer(
             ...(existing?.currentModel !== undefined
               ? { currentModel: existing.currentModel }
               : {}),
+            ...(existing?.availableModels ? { availableModels: existing.availableModels } : {}),
             autoApprovedDecisions: existing?.autoApprovedDecisions ?? {},
             sessionToolApprovals: existing?.sessionToolApprovals ?? [],
             sessionAllowedDecisions: existing?.sessionAllowedDecisions ?? {},
@@ -1096,6 +1129,31 @@ export function jsonClaudeReducer(
             ...session,
             slashCommands: event.payload.slashCommands
           }
+        }
+      }
+    }
+    case 'jsonClaude/availableModelsChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: { ...session, availableModels: event.payload.models }
+        }
+      }
+    }
+    case 'jsonClaude/historyPendingChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      if (!!session.historyPending === event.payload.pending) return state
+      const { historyPending: _drop, ...rest } = session
+      void _drop
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: event.payload.pending ? { ...rest, historyPending: true } : rest
         }
       }
     }

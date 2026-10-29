@@ -16,7 +16,8 @@ import {
   removeLeaf
 } from '../shared/state/terminals'
 import type { PersistedPaneNode } from './persistence'
-import { agentDisplayName, getAgentInfo, supportsConversationFork } from '../shared/agent-registry'
+import { persistedTabFields } from './pane-persistence'
+import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
 import { log } from './debug'
 
 interface PanesFSMOptions {
@@ -70,14 +71,6 @@ function newPaneId(): string {
 
 function newSplitId(): string {
   return `split-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function stripTransientTabFields(tab: TerminalTab): TerminalTab {
-  if (!tab.initialPrompt && !tab.teleportSessionId) return tab
-  const { initialPrompt: _ip, teleportSessionId: _ts, ...rest } = tab
-  void _ip
-  void _ts
-  return rest
 }
 
 export class PanesFSM {
@@ -169,18 +162,7 @@ export class PanesFSM {
       : null
     let claimedLatest = false
     const tabs: TerminalTab[] = allTabs.map((t): TerminalTab => {
-      const base: TerminalTab = {
-        id: t.id,
-        type: t.type,
-        label: t.label,
-        agentKind: t.agentKind,
-        sessionId: t.sessionId,
-        url: t.url,
-        command: t.command,
-        cwd: t.cwd,
-        model: t.model,
-        ...(t.customLabel ? { customLabel: t.customLabel } : {})
-      }
+      const base: TerminalTab = persistedTabFields(t)
       // Persisted json-claude and shell tabs hydrate as 'asleep' so app
       // launch doesn't construct an xterm + spawn a subprocess per tab
       // across every restored worktree. The renderer wakes them on
@@ -263,14 +245,19 @@ export class PanesFSM {
     const model = opts?.model && opts.model.trim() ? opts.model.trim() : undefined
     const shellTabId = `shell-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
     // Branch to a json-claude default tab when the user has opted in
-    // and the kind is Claude. teleport sessions stay on xterm (json-
+    // and the agent has a chat provider. teleport sessions stay on xterm (json-
     // claude has no `--resume <id>` analog for an arbitrary external
     // session today). initialPrompt is honored for both — for the
     // json-claude side we pre-spawn the subprocess and send it as the
     // first message via startJsonClaudeWithPrompt below.
+    // An agent that assigns its own session ids can't be handed the forked
+    // conversation's id on a terminal command line — the fork only becomes
+    // a real conversation inside its chat provider (Codex forks the thread
+    // when the chat tab boots). So such a fork can only open in Chat.
+    const forkNeedsChat = !!opts?.forkedSessionId && !agentInfo.assignsSessionId
     const wantsJson =
-      agentKind === 'claude' &&
-      this.opts.getDefaultClaudeTabType?.() === 'json' &&
+      supportsChat(agentKind) &&
+      (this.opts.getDefaultClaudeTabType?.() === 'json' || forkNeedsChat) &&
       !opts?.teleportSessionId
     let agentTab: TerminalTab
     let jsonClaudeKickoff: { sessionId: string; initialPrompt?: string; model?: string } | null = null
@@ -282,6 +269,7 @@ export class PanesFSM {
         label: 'Chat',
         sessionId,
         mode: 'awake',
+        ...(agentKind !== 'claude' ? { agentKind } : {}),
         model
       }
       jsonClaudeKickoff = { sessionId, initialPrompt: opts?.initialPrompt, model }
@@ -492,10 +480,9 @@ export class PanesFSM {
     if (!tab) return
     if (tab.type === newType) return
     if (tab.type !== 'agent' && tab.type !== 'json-claude') return
-    if (tab.type === 'agent' && tab.agentKind && tab.agentKind !== 'claude') {
-      // Only Claude agent tabs have a json-claude counterpart; refuse
-      // to swap a Codex tab.
-      log('panes-fsm', `convertTabType refused for non-claude agent kind=${tab.agentKind}`)
+    if (!supportsChat(tab.agentKind)) {
+      // Only agents with a chat provider have a json-claude counterpart.
+      log('panes-fsm', `convertTabType refused for agent without chat kind=${tab.agentKind}`)
       return
     }
     const sessionId = tab.sessionId ?? crypto.randomUUID()
@@ -512,10 +499,23 @@ export class PanesFSM {
       newType === 'json-claude'
         ? sessionId
         : `agent-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
-    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName('claude')
+    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName(tab.agentKind)
     this.store.dispatch({
       type: 'terminals/tabTypeChanged',
       payload: { worktreePath: wtPath, tabId, newId, newType, newLabel }
+    })
+    this.opts.persist(this.buildPersistPayload())
+  }
+
+  /** Record the agent's own id for a chat tab's conversation (a Codex
+   *  thread id) so a restart resumes it. No-op if the tab is gone. */
+  setTabProviderSessionId(tabId: string, providerSessionId: string): void {
+    const panes = this.store.getSnapshot().state.terminals.panes
+    const wtPath = Object.keys(panes).find((p) => findLeafByTabId(panes[p], tabId))
+    if (!wtPath) return
+    this.store.dispatch({
+      type: 'terminals/tabProviderSessionIdChanged',
+      payload: { worktreePath: wtPath, tabId, providerSessionId }
     })
     this.opts.persist(this.buildPersistPayload())
   }
@@ -744,7 +744,7 @@ export class PanesFSM {
       // a brand-new session with no existing jsonl on disk — that drives
       // startJsonClaudeSession to use --session-id (new) rather than
       // --resume. Carry over only fields that make sense for a fresh
-      // chat (label, model) — never copy initialPrompt/teleportSessionId.
+      // chat (label, agent, model) — never copy initialPrompt/teleportSessionId.
       const sessionId = crypto.randomUUID()
       tab = {
         id: sessionId,
@@ -752,6 +752,7 @@ export class PanesFSM {
         label: sourceActive!.label,
         sessionId,
         mode: 'awake',
+        ...(sourceActive!.agentKind ? { agentKind: sourceActive!.agentKind } : {}),
         model: sourceActive!.model
       }
     } else {
@@ -819,4 +820,3 @@ export class PanesFSM {
   }
 }
 
-export { stripTransientTabFields }

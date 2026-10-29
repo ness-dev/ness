@@ -60,7 +60,9 @@
     "asarUnpack": [
       "**/node_modules/node-pty/**/*",
       "**/node_modules/@anthropic-ai/claude-code/**/*",
-      "**/node_modules/@anthropic-ai/claude-code-*/**/*"
+      "**/node_modules/@anthropic-ai/claude-code-*/**/*",
+      "**/node_modules/@openai/codex/**/*",
+      "**/node_modules/@openai/codex-*/**/*"
     ],
     "extraResources": [
       {
@@ -142,6 +144,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@openai/codex": "0.165.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@types/diff": "^7.0.2",
     "@xterm/addon-fit": "^0.11.0",
