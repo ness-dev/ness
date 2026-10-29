@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Send, Clipboard, Check, MessageSquare, GitCommitHorizontal, ArrowUp, ChevronDown } from 'lucide-react'
-import type { ChangedFile, BranchCommit } from '../types'
-import type { ReviewComment } from './ReviewFileTree'
+import type { ChangedFile, BranchCommit, ReviewCommentStatus } from '../types'
 import { ReviewFileTree } from './ReviewFileTree'
 import { ReviewDiffPane } from './ReviewDiffPane'
 import { ResizeHandle } from './ResizeHandle'
 import { Tooltip } from './Tooltip'
 import { useBackend } from '../backend'
+import { useReviewComments } from '../store'
+import { formatReviewComments } from '../review-format'
 import { setReviewProgress, clearReviewProgress } from '../review-progress'
 
 interface ReviewPaneProps {
@@ -18,8 +19,6 @@ interface ReviewPaneProps {
   toCommit?: string
   onSendToAgent?: (text: string) => void
 }
-
-let commentIdCounter = 0
 
 export function ReviewPane({
   tabId,
@@ -33,7 +32,7 @@ export function ReviewPane({
   const [files, setFiles] = useState<ChangedFile[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set())
-  const [comments, setComments] = useState<ReviewComment[]>([])
+  const comments = useReviewComments(worktreePath)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   const [fileTreeWidth, setFileTreeWidth] = useState<number>(240)
   // Hoisted above ReviewDiffPane so the choice persists as the reviewer
@@ -76,11 +75,10 @@ export function ReviewPane({
           if (prev && result.some((f) => f.path === prev)) return prev
           return result[0]?.path ?? null
         })
-        // The reviewed set / comments belong to the previous file set;
-        // wipe them when the selection changes so progress reflects the
-        // new file set.
+        // The reviewed set belongs to the previous file set; wipe it when
+        // the selection changes so progress reflects the new file set.
+        // Comments live in the reviews slice and survive the switch.
         setReviewedFiles(new Set())
-        setComments([])
       })
       .catch(() => {
         if (!cancelled) setFiles([])
@@ -89,6 +87,12 @@ export function ReviewPane({
       cancelled = true
     }
   }, [worktreePath, backend, isWholeBranch, isSingleCommit, fromCommit, toCommit])
+
+  // Re-anchor against HEAD on open and whenever a file is opened, so
+  // comments follow commits that landed since they were written.
+  useEffect(() => {
+    void backend.refreshReviewAnchors(worktreePath, selectedFile ?? undefined)
+  }, [backend, worktreePath, selectedFile])
 
   // Push "(N/M)" up to the tab strip. Clear on unmount.
   useEffect(() => {
@@ -143,34 +147,50 @@ export function ReviewPane({
   }, [])
 
   const handleAddComment = useCallback(
-    (lineNumber: number, body: string) => {
-      if (!selectedFile) return
-      setComments((prev) => [
-        ...prev,
-        {
-          id: `comment-${++commentIdCounter}`,
-          filePath: selectedFile,
-          lineNumber,
-          body,
-          timestamp: Date.now()
-        }
-      ])
+    async (lineNumber: number, body: string): Promise<string | null> => {
+      if (!selectedFile) return 'No file selected'
+      const res = await backend.addReviewComment(worktreePath, {
+        filePath: selectedFile,
+        line: lineNumber,
+        side: 'new',
+        body,
+        view: isWholeBranch ? undefined : { fromCommit, toCommit }
+      })
+      return 'error' in res ? res.error : null
     },
-    [selectedFile]
+    [backend, worktreePath, selectedFile, isWholeBranch, fromCommit, toCommit]
   )
 
-  const handleDeleteComment = useCallback((id: string) => {
-    setComments((prev) => prev.filter((c) => c.id !== id))
-  }, [])
+  const handleDeleteComment = useCallback(
+    (id: string) => {
+      void backend.deleteReviewComment(worktreePath, id)
+    },
+    [backend, worktreePath]
+  )
 
-  const formatComments = useCallback((): string => {
-    if (comments.length === 0) return ''
-    const lines = ['Review feedback on your changes:', '']
+  const handleSetCommentStatus = useCallback(
+    (id: string, status: ReviewCommentStatus) => {
+      void backend.setReviewCommentStatus(worktreePath, id, status)
+    },
+    [backend, worktreePath]
+  )
+
+  const filesInView = useMemo(() => new Set(files.map((f) => f.path)), [files])
+  const { openCount, openElsewhere } = useMemo(() => {
+    let open = 0
+    let elsewhere = 0
     for (const c of comments) {
-      lines.push(`${c.filePath}:${c.lineNumber} — ${c.body}`)
+      if (c.status !== 'open') continue
+      open++
+      if (!filesInView.has(c.filePath)) elsewhere++
     }
-    return lines.join('\n')
-  }, [comments])
+    return { openCount: open, openElsewhere: elsewhere }
+  }, [comments, filesInView])
+
+  const formatComments = useCallback(
+    (): string => formatReviewComments(comments),
+    [comments]
+  )
 
   const handleFileTreeResize = useCallback((delta: number) => {
     setFileTreeWidth((w) => {
@@ -278,16 +298,27 @@ export function ReviewPane({
             )}
 
             {comments.length > 0 && (
-              <span className="flex items-center gap-1 text-info ml-2">
-                <MessageSquare className="icon-xs" />
-                {comments.length}
-              </span>
+              <Tooltip
+                label={
+                  `${openCount} open of ${comments.length}` +
+                  (openElsewhere > 0 ? ` · ${openElsewhere} open on files outside this selection` : '')
+                }
+              >
+                <span
+                  className={`flex items-center gap-1 ml-2 tabular-nums ${
+                    openCount > 0 ? 'text-info' : 'text-faint'
+                  }`}
+                >
+                  <MessageSquare className="icon-xs" />
+                  {openCount}
+                </span>
+              </Tooltip>
             )}
 
-            <Tooltip label="Copy comments to clipboard">
+            <Tooltip label="Copy open comments to clipboard">
               <button
                 onClick={handleCopyComments}
-                disabled={comments.length === 0}
+                disabled={openCount === 0}
                 className="ml-2 flex items-center gap-1 px-2 py-1 rounded border border-border text-faint hover:text-fg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
               >
                 <Clipboard className="icon-xs" />
@@ -295,10 +326,10 @@ export function ReviewPane({
               </button>
             </Tooltip>
 
-            <Tooltip label="Send all comments to the active agent terminal">
+            <Tooltip label="Send open comments to the active agent terminal">
               <button
                 onClick={handleSendToAgent}
-                disabled={comments.length === 0 || !onSendToAgent}
+                disabled={openCount === 0 || !onSendToAgent}
                 className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
               >
                 <Send className="icon-xs" />
@@ -357,6 +388,7 @@ export function ReviewPane({
             }}
             onAddComment={handleAddComment}
             onDeleteComment={handleDeleteComment}
+            onSetCommentStatus={handleSetCommentStatus}
             wordWrap={wordWrap}
             onWordWrapChange={setWordWrap}
           />

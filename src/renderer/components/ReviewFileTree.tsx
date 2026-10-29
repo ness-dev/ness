@@ -1,14 +1,11 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { ChevronRight, Folder, FolderOpen, FileText } from 'lucide-react'
-import type { ChangedFile } from '../types'
+import type { ChangedFile, ReviewComment } from '../types'
 import { isEditableTarget } from '../hotkeys'
 
-export interface ReviewComment {
-  id: string
-  filePath: string
-  lineNumber: number
-  body: string
-  timestamp: number
+interface CommentCounts {
+  open: number
+  total: number
 }
 
 interface ReviewFileTreeProps {
@@ -170,10 +167,16 @@ export function ReviewFileTree({
     [tree, effectiveCollapsed]
   )
 
-  const commentCountByFile = new Map<string, number>()
-  for (const c of comments) {
-    commentCountByFile.set(c.filePath, (commentCountByFile.get(c.filePath) ?? 0) + 1)
-  }
+  const commentCountByFile = useMemo(() => {
+    const m = new Map<string, CommentCounts>()
+    for (const c of comments) {
+      const counts = m.get(c.filePath) ?? { open: 0, total: 0 }
+      counts.total++
+      if (c.status === 'open') counts.open++
+      m.set(c.filePath, counts)
+    }
+    return m
+  }, [comments])
 
   const navigateFile = useCallback(
     (delta: number) => {
@@ -284,7 +287,7 @@ interface TreeBranchProps {
   collapsedDirs: Set<string>
   selectedFile: string | null
   reviewedFiles: Set<string>
-  commentCountByFile: Map<string, number>
+  commentCountByFile: Map<string, CommentCounts>
   onSelectFile: (path: string) => void
   onToggleReviewed: (path: string) => void
   onToggleDir: (dir: string) => void
@@ -313,7 +316,7 @@ function TreeBranch({
               depth={depth}
               selected={child.path === selectedFile}
               reviewed={reviewedFiles.has(child.path)}
-              commentCount={commentCountByFile.get(child.path) ?? 0}
+              commentCounts={commentCountByFile.get(child.path)}
               onSelect={() => onSelectFile(child.path)}
               onToggleReviewed={() => onToggleReviewed(child.path)}
             />
@@ -385,7 +388,7 @@ function FileRow({
   depth,
   selected,
   reviewed,
-  commentCount,
+  commentCounts,
   onSelect
 }: {
   file: ChangedFile
@@ -393,7 +396,7 @@ function FileRow({
   depth: number
   selected: boolean
   reviewed: boolean
-  commentCount: number
+  commentCounts: CommentCounts | undefined
   onSelect: () => void
   onToggleReviewed: () => void
 }): JSX.Element {
@@ -415,9 +418,14 @@ function FileRow({
 
       <span className="truncate flex-1 text-fg">{name}</span>
 
-      {commentCount > 0 && (
+      {commentCounts && commentCounts.open > 0 && (
         <span className="shrink-0 text-xs bg-info/20 text-info px-1 rounded-full tabular-nums">
-          {commentCount}
+          {commentCounts.open}
+        </span>
+      )}
+      {commentCounts && commentCounts.open === 0 && (
+        <span className="shrink-0 text-xs bg-border/50 text-faint px-1 rounded-full tabular-nums">
+          {commentCounts.total}
         </span>
       )}
     </div>
