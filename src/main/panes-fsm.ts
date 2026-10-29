@@ -16,6 +16,7 @@ import {
   removeLeaf
 } from '../shared/state/terminals'
 import type { PersistedPaneNode } from './persistence'
+import { persistedTabFields } from './pane-persistence'
 import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
 import { log } from './debug'
 
@@ -70,14 +71,6 @@ function newPaneId(): string {
 
 function newSplitId(): string {
   return `split-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function stripTransientTabFields(tab: TerminalTab): TerminalTab {
-  if (!tab.initialPrompt && !tab.teleportSessionId) return tab
-  const { initialPrompt: _ip, teleportSessionId: _ts, ...rest } = tab
-  void _ip
-  void _ts
-  return rest
 }
 
 export class PanesFSM {
@@ -169,19 +162,7 @@ export class PanesFSM {
       : null
     let claimedLatest = false
     const tabs: TerminalTab[] = allTabs.map((t): TerminalTab => {
-      const base: TerminalTab = {
-        id: t.id,
-        type: t.type,
-        label: t.label,
-        agentKind: t.agentKind,
-        sessionId: t.sessionId,
-        ...(t.providerSessionId ? { providerSessionId: t.providerSessionId } : {}),
-        url: t.url,
-        command: t.command,
-        cwd: t.cwd,
-        model: t.model,
-        ...(t.customLabel ? { customLabel: t.customLabel } : {})
-      }
+      const base: TerminalTab = persistedTabFields(t)
       // Persisted json-claude and shell tabs hydrate as 'asleep' so app
       // launch doesn't construct an xterm + spawn a subprocess per tab
       // across every restored worktree. The renderer wakes them on
@@ -839,4 +820,3 @@ export class PanesFSM {
   }
 }
 
-export { stripTransientTabFields }

@@ -52,7 +52,8 @@ import { PRPoller } from './pr-poller'
 import { WorktreesFSM } from './worktrees-fsm'
 import { WorktreeDeletionFSM } from './worktree-deletion-fsm'
 import { sweepWorktreeTrashOnBoot } from './worktree-trash'
-import { PanesFSM, stripTransientTabFields } from './panes-fsm'
+import { PanesFSM } from './panes-fsm'
+import { treeToPersistedNode } from './pane-persistence'
 import { ActivityDeriver } from './activity-deriver'
 import { CiNotifier } from './ci-notifier'
 import { AutoSleepMonitor } from './auto-sleep-monitor'
@@ -962,7 +963,7 @@ function persistPanes(panes: Record<string, PaneNode>): void {
   for (const [wtPath, tree] of Object.entries(panes)) {
     const wt = store.getSnapshot().state.worktrees.list.find((w) => w.path === wtPath)
     const repoRoot = wt?.repoRoot || '__orphan__'
-    const persisted = treeToPersistedNode(tree)
+    const persisted = treeToPersistedNode(tree, (tabId) => browserManager.getUrl(tabId))
     if (persisted) {
       if (!nested[repoRoot]) nested[repoRoot] = {}
       nested[repoRoot][wtPath] = persisted
@@ -970,59 +971,6 @@ function persistPanes(panes: Record<string, PaneNode>): void {
   }
   config.panes = nested
   saveConfig(config)
-}
-
-function treeToPersistedNode(node: PaneNode): PersistedPaneNode | null {
-  if (node.type === 'leaf') {
-    const tabs = node.tabs
-      .filter(
-        (t) =>
-          t.type === 'agent' ||
-          t.type === 'shell' ||
-          t.type === 'browser' ||
-          t.type === 'json-claude'
-      )
-      .map((t) => {
-        const stripped = stripTransientTabFields(t as TerminalTab)
-        // For browser tabs, the tab's state.url field is set once at
-        // creation and never updated — navigation events flow into the
-        // `browser` slice, not the pane tree. Pull the live URL from the
-        // BrowserManager so the persisted snapshot reflects where the
-        // user actually navigated to.
-        const liveUrl =
-          stripped.type === 'browser' ? browserManager.getUrl(stripped.id) : null
-        return {
-          id: stripped.id,
-          type: stripped.type as 'agent' | 'shell' | 'browser' | 'json-claude',
-          label: stripped.label,
-          agentKind: stripped.agentKind,
-          sessionId: stripped.sessionId,
-          ...(stripped.providerSessionId ? { providerSessionId: stripped.providerSessionId } : {}),
-          url: liveUrl || stripped.url,
-          command: stripped.command,
-          cwd: stripped.cwd,
-          model: stripped.model,
-          ...(stripped.customLabel ? { customLabel: stripped.customLabel } : {})
-        }
-      })
-    if (tabs.length === 0) return null
-    const validActive = tabs.some((t) => t.id === node.activeTabId)
-      ? node.activeTabId
-      : tabs[0].id
-    return { type: 'leaf', id: node.id, tabs, activeTabId: validActive }
-  }
-  const left = treeToPersistedNode(node.children[0])
-  const right = treeToPersistedNode(node.children[1])
-  if (!left && !right) return null
-  if (!left) return right
-  if (!right) return left
-  return {
-    type: 'split',
-    id: node.id,
-    direction: node.direction,
-    children: [left, right],
-    ratio: node.ratio
-  }
 }
 
 // IMPORTANT — construction order is load-bearing.
