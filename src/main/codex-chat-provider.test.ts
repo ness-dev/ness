@@ -68,7 +68,7 @@ function setup(handlers: Record<string, (params: Record<string, unknown>) => unk
   const store = new Store(initialState)
   const server = fakeAppServer({
     initialize: () => ({}),
-    'thread/start': () => ({ thread: { id: 'thread-new' }, model: 'gpt-test' }),
+    'thread/start': () => ({ thread: { id: 'thread-new', path: '/tmp/rollout-new.jsonl' }, model: 'gpt-test' }),
     'thread/resume': (p) => ({ thread: { id: p.threadId }, model: 'gpt-test' }),
     'turn/start': () => ({ turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } }),
     'thread/turns/list': () => ({ data: [], nextCursor: null }),
@@ -302,6 +302,25 @@ describe('CodexChatProvider', () => {
     await settle()
     expect(opts.requestApproval).not.toHaveBeenCalled()
     expect(server.received).toContainEqual({ id: 43, result: { action: 'decline', content: null, _meta: null } })
+  })
+
+  it('turns token usage into a context snapshot and exposes the rollout path', async () => {
+    const { provider, store, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    expect(provider.transcriptPath('s1')).toBe('/tmp/rollout-new.jsonl')
+    server.emit({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-new',
+        turnId: 't',
+        tokenUsage: { total: { totalTokens: 50000 }, last: { totalTokens: 15000 }, modelContextWindow: 258400 }
+      }
+    })
+    await settle()
+    const snap = store.getSnapshot().state.contextWindow.byTerminal['s1']
+    expect(snap).toMatchObject({ usedTokens: 15000, limit: 258400, model: 'gpt-test', measured: true })
+    expect(snap.autocompactAt).toBe(Math.round(258400 * 0.84))
   })
 
   it('steers a busy turn instead of starting a new one', async () => {

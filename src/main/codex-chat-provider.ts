@@ -34,6 +34,12 @@ import type {
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
+import {
+  cloneCategories,
+  emptyCategories,
+  type ContextSnapshot
+} from '../shared/state/context-window'
+import { AUTOCOMPACT_FRACTION } from '../shared/context-limits'
 import { log } from './debug'
 import type { ApprovalResult } from './approval-bridge'
 import type {
@@ -52,6 +58,11 @@ import {
   type CodexTurnsPage,
   type CodexUserInput
 } from './codex-app-server'
+
+interface CodexTokenUsage {
+  last?: { totalTokens: number }
+  modelContextWindow?: number | null
+}
 
 const APPROVAL_POLICY = 'on-request'
 const SANDBOX = 'workspace-write'
@@ -98,6 +109,9 @@ interface CodexInstance {
   worktreePath: string
   threadId: string | null
   model: string | null
+  /** The thread's rollout file, for cost accounting. */
+  transcriptPath: string | null
+  compactions: number
   activeTurnId: string | null
   ready: boolean
   /** Turns requested before the thread was ready. */
@@ -142,6 +156,11 @@ export class CodexChatProvider implements ChatProvider {
     return this.instances.has(sessionId)
   }
 
+  /** The running thread's rollout jsonl, which the cost tracker can fold. */
+  transcriptPath(sessionId: string): string | null {
+    return this.instances.get(sessionId)?.transcriptPath ?? null
+  }
+
   /** History is read from the Codex thread once the subprocess is up. */
   seedFromTranscript(): void {}
 
@@ -172,6 +191,8 @@ export class CodexChatProvider implements ChatProvider {
       worktreePath,
       threadId: null,
       model: null,
+      transcriptPath: null,
+      compactions: 0,
       activeTurnId: null,
       ready: false,
       outbox: [],
@@ -430,6 +451,7 @@ export class CodexChatProvider implements ChatProvider {
       if (this.instances.get(sessionId) !== inst) return
       inst.threadId = resp.thread.id
       inst.model = resp.model
+      inst.transcriptPath = resp.thread.path ?? null
       log('codex-chat', `ready sessionId=${sessionId} thread=${inst.threadId} model=${inst.model}`)
       if (forked) await this.seedHistory(inst, true)
       else if (existing && existing === inst.threadId) await this.seedHistory(inst, false)
@@ -565,6 +587,12 @@ export class CodexChatProvider implements ChatProvider {
         return
       case 'item/reasoning/summaryTextDelta':
         this.queueDelta(inst, params.itemId as string, params.delta as string, 'thinking')
+        return
+      case 'thread/tokenUsage/updated':
+        this.publishContext(inst, params.tokenUsage as CodexTokenUsage | undefined)
+        return
+      case 'thread/compacted':
+        inst.compactions += 1
         return
       case 'error': {
         if (params.willRetry === true) return
@@ -776,6 +804,40 @@ export class CodexChatProvider implements ChatProvider {
       return
     }
     inst.client.respond(id, { decision })
+  }
+
+  /** Codex reports usage per request rather than leaving a transcript to
+   *  analyze, so its snapshot has the totals but no category breakdown. */
+  private publishContext(inst: CodexInstance, usage: CodexTokenUsage | undefined): void {
+    if (!usage?.last) return
+    const limit = usage.modelContextWindow ?? 0
+    const snapshot: ContextSnapshot = {
+      sessionId: inst.sessionId,
+      transcriptPath: inst.transcriptPath ?? '',
+      model: inst.model,
+      limit,
+      usedTokens: usage.last.totalTokens,
+      categories: cloneCategories(emptyCategories),
+      autocompactAt: Math.round(limit * AUTOCOMPACT_FRACTION),
+      compactions: inst.compactions,
+      discoverableTools: [],
+      measured: true,
+      updatedAt: Date.now()
+    }
+    const prev = this.store.getSnapshot().state.contextWindow.byTerminal[inst.sessionId]
+    if (
+      prev &&
+      prev.usedTokens === snapshot.usedTokens &&
+      prev.limit === snapshot.limit &&
+      prev.model === snapshot.model &&
+      prev.compactions === snapshot.compactions
+    ) {
+      return
+    }
+    this.store.dispatch({
+      type: 'contextWindow/snapshotUpdated',
+      payload: { terminalId: inst.sessionId, snapshot }
+    })
   }
 
   // ---------------------------------------------------------------------

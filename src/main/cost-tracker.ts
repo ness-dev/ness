@@ -80,7 +80,14 @@ export class CostTracker {
   private interestedClients = new Set<string>()
   private lastStops = new Map<string, StopEvent>()
 
-  constructor(private store: Store) {}
+  /** `resolveChatTranscriptPath` returns a chat session's history file
+   *  when its provider doesn't keep Claude's `~/.claude/projects` layout
+   *  (Codex keeps rollout files under `~/.codex/sessions`). Null falls back
+   *  to the Claude path. */
+  constructor(
+    private store: Store,
+    private resolveChatTranscriptPath: (sessionId: string) => string | null = () => null
+  ) {}
 
   start(): void {
     this.unsubscribeHook = onStopEvent((ev) => this.handleStop(ev))
@@ -164,10 +171,9 @@ export class CostTracker {
     const session =
       this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
     if (!session) return
-    const transcriptPath = jsonClaudeTranscriptPath(
-      session.worktreePath,
-      sessionId
-    )
+    const transcriptPath =
+      this.resolveChatTranscriptPath(sessionId) ??
+      jsonClaudeTranscriptPath(session.worktreePath, sessionId)
     try {
       const entry = this.parseIncremental(sessionId, transcriptPath)
       if (!entry || Object.keys(entry.byModel).length === 0) return

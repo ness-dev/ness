@@ -703,7 +703,7 @@ function getLanAddresses(): Array<{ iface: string; address: string }> {
 // Tails Claude Code session jsonl transcripts on Stop hook events,
 // sums per-model usage, and dispatches costs/usageUpdated. See
 // src/main/cost-tracker.ts and src/shared/state/costs.ts.
-const costTracker = new CostTracker(store)
+const costTracker = new CostTracker(store, (sessionId) => codexChatProvider.transcriptPath(sessionId))
 costTracker.start()
 
 // CostPanel is collapsed-by-default. Renderer signals its expand state
