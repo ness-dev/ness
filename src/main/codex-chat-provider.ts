@@ -59,6 +59,11 @@ import {
   type CodexUserInput
 } from './codex-app-server'
 
+interface CodexPlanStep {
+  step: string
+  status: 'pending' | 'inProgress' | 'completed'
+}
+
 interface CodexTokenUsage {
   last?: { totalTokens: number }
   modelContextWindow?: number | null
@@ -594,6 +599,9 @@ export class CodexChatProvider implements ChatProvider {
       case 'thread/compacted':
         inst.compactions += 1
         return
+      case 'turn/plan/updated':
+        this.publishPlan(inst, params.plan as CodexPlanStep[] | undefined, turnId)
+        return
       case 'error': {
         if (params.willRetry === true) return
         const error = params.error as { message?: string } | undefined
@@ -806,6 +814,25 @@ export class CodexChatProvider implements ChatProvider {
     inst.client.respond(id, { decision })
   }
 
+  /** Codex's plan updates become the same TodoWrite tool call Claude makes,
+   *  so the todos panel and the TodoWrite card render them unchanged. */
+  private publishPlan(inst: CodexInstance, plan: CodexPlanStep[] | undefined, turnId?: string): void {
+    if (!Array.isArray(plan)) return
+    const { sessionId } = inst
+    const toolUseId = `${sessionId}-plan-${(this.entrySeqBySession.get(sessionId) ?? 0) + 1}`
+    this.appendEntry(sessionId, {
+      entryId: this.nextEntryId(sessionId, 'a'),
+      kind: 'assistant',
+      blocks: [{ type: 'tool_use', id: toolUseId, name: 'TodoWrite', input: { todos: planToTodos(plan) } }],
+      timestamp: Date.now(),
+      ...(turnId ? { turnId } : {})
+    })
+    this.store.dispatch({
+      type: 'jsonClaude/toolResultAttached',
+      payload: { sessionId, toolUseId, content: '', isError: false }
+    })
+  }
+
   /** Codex reports usage per request rather than leaving a transcript to
    *  analyze, so its snapshot has the totals but no category breakdown. */
   private publishContext(inst: CodexInstance, usage: CodexTokenUsage | undefined): void {
@@ -979,6 +1006,15 @@ export function parseMcpToolApproval(
       ? (meta.tool_params as Record<string, unknown>)
       : {}
   return { server, tool: match[1], args }
+}
+
+export function planToTodos(
+  plan: Array<{ step: string; status: string }>
+): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> {
+  return plan.map((p) => ({
+    content: p.step,
+    status: p.status === 'completed' ? 'completed' : p.status === 'inProgress' ? 'in_progress' : 'pending'
+  }))
 }
 
 export function buildUserInput(text: string, images?: ChatImageInput[]): CodexUserInput[] {

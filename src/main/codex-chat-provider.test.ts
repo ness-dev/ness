@@ -17,6 +17,7 @@ import {
   type CodexChatProviderOptions
 } from './codex-chat-provider'
 import type { CodexTurn } from './codex-app-server'
+import { getLatestTodos } from '../shared/state/json-claude-todos'
 
 type Msg = { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown }
 
@@ -321,6 +322,31 @@ describe('CodexChatProvider', () => {
     const snap = store.getSnapshot().state.contextWindow.byTerminal['s1']
     expect(snap).toMatchObject({ usedTokens: 15000, limit: 258400, model: 'gpt-test', measured: true })
     expect(snap.autocompactAt).toBe(Math.round(258400 * 0.84))
+  })
+
+  it('maps plan updates to a TodoWrite call the todos panel reads', async () => {
+    const { provider, session, server } = setup()
+    provider.create('s1', process.cwd(), 'default')
+    await settle()
+    server.emit({
+      method: 'turn/plan/updated',
+      params: {
+        threadId: 'thread-new',
+        turnId: 't1',
+        plan: [
+          { step: 'Read the code', status: 'completed' },
+          { step: 'Write the fix', status: 'inProgress' },
+          { step: 'Run tests', status: 'pending' }
+        ]
+      }
+    })
+    await settle()
+    expect(getLatestTodos(session())).toEqual([
+      { content: 'Read the code', status: 'completed' },
+      { content: 'Write the fix', status: 'in_progress' },
+      { content: 'Run tests', status: 'pending' }
+    ])
+    expect(session().entries.some((e) => e.kind === 'tool_result')).toBe(true)
   })
 
   it('steers a busy turn instead of starting a new one', async () => {
