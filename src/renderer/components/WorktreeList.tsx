@@ -1,4 +1,4 @@
-import { useCallback, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
@@ -11,6 +11,7 @@ import type {
 } from '../worktree-list-model'
 import { repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type WorktreeListVariant } from './WorktreeTab'
+import type { WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
 import { Tooltip } from './Tooltip'
@@ -143,8 +144,8 @@ export function WorktreeList({
     [snoozeDays, backend]
   )
 
-  const rowActionsFor = useCallback(
-    (row: WorktreeRowModel) => {
+  const buildRowActionHandlers = useCallback(
+    (row: WorktreeRowModel): WorktreeRowActionHandlers => {
       const { worktree, deleting } = row
       const locked = worktree.isMain || deleting
       return {
@@ -169,6 +170,22 @@ export function WorktreeList({
     },
     [beginContinue, onSnoozeRow, backend, onContinueWorktree, onPruneWorktrees, onDeleteWorktree]
   )
+
+  // Cached per row object so WorktreeTab's memo holds: rows are
+  // reference-stable across renders until their data changes, and the
+  // cache resets whenever a handler it closes over does.
+  const rowActionsCache = useMemo(
+    () => new WeakMap<WorktreeRowModel, WorktreeRowActionHandlers>(),
+    [buildRowActionHandlers]
+  )
+  const rowActionsFor = (row: WorktreeRowModel): WorktreeRowActionHandlers => {
+    let actions = rowActionsCache.get(row)
+    if (!actions) {
+      actions = buildRowActionHandlers(row)
+      rowActionsCache.set(row, actions)
+    }
+    return actions
+  }
 
   const renderGroup = (
     section: WorktreeRepoSectionModel,
@@ -199,8 +216,8 @@ export function WorktreeList({
               detailPrefs={detailPrefs}
               isEditingAlias={editingAliasPath === row.path}
               actions={rowActionsFor(row)}
-              onClick={() => onSelectWorktree(row.path)}
-              onStartAliasEdit={() => onStartAliasEdit(row.path)}
+              onSelect={onSelectWorktree}
+              onStartAliasEdit={onStartAliasEdit}
               onEndAliasEdit={onEndAliasEdit}
             />
             {onSelectTab && !row.deleting && row.path === activeWorktreeId && (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { memo, useEffect, useRef, useState, type ReactElement } from 'react'
 import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
@@ -37,12 +37,15 @@ interface WorktreeTabProps {
   detailPrefs: SidebarDetailPrefs
   isEditingAlias: boolean
   actions: WorktreeRowActionHandlers
-  onClick: () => void
-  onStartAliasEdit: () => void
+  onSelect: (path: string) => void
+  onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
 }
 
-export function WorktreeTab({
+/** Memoized: switching worktrees re-renders the list, and every prop here is
+ *  kept reference-stable so only the two rows whose `isActive` flipped
+ *  re-render. */
+export const WorktreeTab = memo(function WorktreeTab({
   row,
   variant,
   isActive,
@@ -51,10 +54,11 @@ export function WorktreeTab({
   detailPrefs,
   isEditingAlias,
   actions,
-  onClick,
-  onStartAliasEdit,
+  onSelect,
+  onStartAliasEdit: onStartAliasEditForPath,
   onEndAliasEdit
 }: WorktreeTabProps): JSX.Element {
+  const onStartAliasEdit = (): void => onStartAliasEditForPath(row.path)
   const backend = useBackend()
   const touch = variant === 'touch'
   const { worktree, prStatus, displayStatus, pendingTool, shellActive, deleting, alias, isPinned } = row
@@ -131,7 +135,7 @@ export function WorktreeTab({
 
   return (
     <div
-      onClick={onClick}
+      onClick={() => onSelect(row.path)}
       onContextMenu={
         touch
           ? undefined
@@ -271,7 +275,7 @@ export function WorktreeTab({
       )}
     </div>
   )
-}
+})
 
 /** Hover-revealed icon buttons. Desktop only — there is no hover on touch. */
 function DesktopRowActions({ actions }: { actions: WorktreeRowAction[] }): JSX.Element | null {
