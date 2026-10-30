@@ -29,6 +29,10 @@ export function taskTitle(row: WorktreeRowModel): string {
 
 interface TaskListViewProps {
   model: WorktreeListModel
+  /** Owning backend per worktree path. Like the sidebar, this view spans
+   *  backends but renders above every BackendScope, so nested tab rows
+   *  need to be told which store to read. */
+  pathBackendId?: Record<string, string>
   activeWorktreeId: string | null
   activeTabId: string | null
   /** Same `useWorktreeCollapse` values the sidebar reads, so switching repo
@@ -55,6 +59,7 @@ interface TaskListViewProps {
  *  both at once would put the same list on screen twice. */
 export function TaskListView({
   model,
+  pathBackendId,
   activeWorktreeId,
   activeTabId,
   unifiedRepos,
@@ -160,6 +165,7 @@ export function TaskListView({
                         {!row.deleting && (
                           <WorktreeTabRows
                             worktreePath={row.path}
+                            backendId={pathBackendId?.[row.path] ?? null}
                             activeTabId={row.path === activeWorktreeId ? activeTabId : null}
                             onSelectTab={onSelectTab}
                           />

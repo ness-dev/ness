@@ -797,7 +797,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
     activePaneId,
     setActivePaneId,
     activeWorktreeId,
-    setActiveWorktreeId
+    setActiveWorktreeId,
+    pathBackendId: mergedData.pathBackendId
   })
 
   // Hoisted out of the WorkspaceView JSX below. Every worktree stays mounted,
@@ -1064,6 +1065,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <div className="fixed inset-0 z-50 flex">
       <TaskListView
         model={worktreeListModel}
+        pathBackendId={mergedData.pathBackendId}
         activeWorktreeId={activeWorktreeId}
         activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
         unifiedRepos={unifiedRepos}
@@ -1658,6 +1660,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenAssignedPR={handleOpenAssignedPR}
             agentCount={agentWorktreeCount}
             onSelectWorktree={handleSidebarSelectWorktree}
+            pathBackendId={mergedData.pathBackendId}
             onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {

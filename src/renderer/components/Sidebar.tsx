@@ -20,6 +20,7 @@ interface SidebarProps {
   /** Non-main worktrees. Used to decide whether to show the "spawn your first agent" nudge. */
   agentCount: number
   onSelectWorktree: (path: string) => void
+  pathBackendId?: Record<string, string>
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
@@ -59,6 +60,7 @@ export function Sidebar({
   onOpenAssignedPR,
   agentCount,
   onSelectWorktree,
+  pathBackendId,
   onSelectTab,
   onDismissPendingWorktree,
   onNewWorktree,
@@ -161,6 +163,7 @@ export function Sidebar({
           onStartAliasEdit={onStartAliasEdit}
           onEndAliasEdit={onEndAliasEdit}
           onSelectWorktree={onSelectWorktree}
+          pathBackendId={pathBackendId}
           onSelectTab={onSelectTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}
