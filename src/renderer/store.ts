@@ -47,6 +47,7 @@ import {
 import { WebSocketClientTransport } from '../shared/transport/transport-websocket'
 import { initBackend, getBackend } from './backend'
 import { useBackendScope, type BackendScopeId } from './backend-scope'
+import { SegmentedSelector, type BackendSegment } from './backend-segments'
 
 /** Stable id for the in-process Electron backend. Mirrors the value in
  *  src/main/persistence.ts; duplicated here because main isn't
@@ -409,6 +410,104 @@ const subscribeForBackend = createScopedSubscribe(registry)
 function getStateFor(backendId: string): AppState {
   return registry.getStore(backendId)?.getState() ?? initialState
 }
+
+/** Fires on an event in ANY registered backend's store, or on the
+ *  registry's membership changing. Module-level so its identity is stable
+ *  for `useSyncExternalStore`.
+ *
+ *  Re-subscribes wholesale on a membership change rather than diffing:
+ *  backends are added and removed a handful of times per session, so the
+ *  simple version costs nothing and can't leak a listener for a store
+ *  that went away. */
+function subscribeAllBackends(cb: () => void): () => void {
+  let storeUnsubs: (() => void)[] = []
+  const attach = (): void => {
+    storeUnsubs = registry
+      .getAllIds()
+      .map((id) => registry.getStore(id)?.subscribe(cb))
+      .filter((u): u is () => void => typeof u === 'function')
+  }
+  attach()
+  const listUnsub = registry.subscribeList(() => {
+    for (const u of storeUnsubs) u()
+    attach()
+    cb()
+  })
+  return () => {
+    for (const u of storeUnsubs) u()
+    listUnsub()
+  }
+}
+
+/** One backend's state, paired with the connection metadata a merged view
+ *  needs to label and route it. */
+export interface BackendStateEntry {
+  backendId: string
+  label: string
+  kind: 'local' | 'remote'
+  state: AppState
+}
+
+/** Projects every registered backend into a `BackendStateEntry`, reusing
+ *  entries whose state and connection metadata are unchanged.
+ *
+ *  Reference stability is mandatory, not an optimization: this feeds
+ *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
+ *  read — and it is read on every store event from every backend. */
+const allBackendStatesSelector = new SegmentedSelector<
+  { state: AppState; connection: BackendConnection | undefined },
+  BackendStateEntry
+>(
+  (source) => [source.state, source.connection],
+  (source, backendId) => ({
+    backendId,
+    label: source.connection?.label ?? backendId,
+    kind: source.connection?.kind ?? 'remote',
+    state: source.state
+  })
+)
+
+/** Unwraps the selector's segments to bare entries. The extra memo is
+ *  load-bearing: `.map()` allocates, so without it `getSnapshot` would
+ *  return a fresh array on every read even when every segment was reused,
+ *  and `useSyncExternalStore` would re-render forever. */
+let backendStatesCache: {
+  segments: readonly BackendSegment<BackendStateEntry>[]
+  values: readonly BackendStateEntry[]
+} | null = null
+
+const getAllBackendStatesSnapshot = (): readonly BackendStateEntry[] => {
+  const segments = allBackendStatesSelector.select(
+    registry.getAllIds().map((id) => ({
+      id,
+      state: {
+        state: getStateFor(id),
+        connection: registry.getConnection(id)
+      }
+    }))
+  )
+  if (backendStatesCache && backendStatesCache.segments === segments) {
+    return backendStatesCache.values
+  }
+  const values = segments.map((segment) => segment.value)
+  backendStatesCache = { segments, values }
+  return values
+}
+
+/** Every registered backend's state at once, for views that span all of
+ *  them rather than following the active one — principally the merged
+ *  worktree sidebar. */
+export function useAllBackendStates(): readonly BackendStateEntry[] {
+  return useSyncExternalStore(
+    subscribeAllBackends,
+    getAllBackendStatesSnapshot,
+    getAllBackendStatesServerSnapshot
+  )
+}
+
+const EMPTY_BACKEND_STATES: readonly BackendStateEntry[] = []
+const getAllBackendStatesServerSnapshot = (): readonly BackendStateEntry[] =>
+  EMPTY_BACKEND_STATES
 
 /** Server-assigned identity for this renderer wrt the active backend.
  *  Per-backend — when active flips, this value can change. Components

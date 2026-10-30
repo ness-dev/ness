@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
 import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
-import { useBackend } from './backend'
+import { getBackendFor, useBackend } from './backend'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
 import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
@@ -29,6 +29,7 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
 import { BackendScope } from './backend-scope'
+import { useMergedWorktrees } from './hooks/useMergedWorktrees'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
@@ -105,13 +106,25 @@ function DesktopApp(): JSX.Element {
   // id their panes must route through — see the BackendScope in the
   // worktree map.
   const activeBackendId = useActiveBackend().id
+  // Worktrees from every registered backend, each tagged with its owner.
+  // The sidebar model is built from the same merged inputs (see
+  // useWorktreeListModel), so rows and mounted workspaces can't disagree
+  // about which backends exist.
+  const mergedData = useMergedWorktrees()
+  const mergedWorktrees = mergedData.worktrees
+  const mergedPanes = mergedData.panes
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
-  const wtState = useWorktrees()
-  const worktrees = wtState.list
-  const pendingWorktrees = wtState.pending
-  const pendingDeletions = wtState.pendingDeletions ?? []
+  //
+  // These read the MERGED list, not the active backend's. Leaving them
+  // active-scoped silently broke selecting a remote row: the
+  // "active id points at something that no longer exists" guard below
+  // validates activeWorktreeId against this array, so a remote worktree's
+  // path looked stale the instant it was selected and got reset back.
+  const worktrees = mergedData.flatWorktrees
+  const pendingWorktrees = mergedData.pendingWorktrees
+  const pendingDeletions = mergedData.pendingDeletions
   const pendingDeletionByPath = useMemo(() => {
     const m: Record<string, (typeof pendingDeletions)[number]> = {}
     for (const d of pendingDeletions) m[d.path] = d
@@ -207,7 +220,7 @@ function DesktopApp(): JSX.Element {
   // Per-worktree last-active timestamps — derived in main by the
   // activity-deriver, dispatched as terminals/lastActiveChanged events.
   const lastActive = useLastActive()
-  const repoRoots = wtState.repoRoots
+  const repoRoots = mergedData.repoRoots
   // Per-repo config lives in the main-process store. Active repo derived
   // below from the focused worktree.
   const repoConfigs = useRepoConfigs()
@@ -666,8 +679,13 @@ const setQuestStep = useCallback((next: QuestStep) => {
   useEffect(() => {
     if (!activeWorktreeId) return
     if (isPendingId(activeWorktreeId)) return
-    void backend.panesEnsureInitialized(activeWorktreeId)
-  }, [activeWorktreeId])
+    // Routed to the worktree's OWNING backend, not the active one. App sits
+    // above every BackendScope, so the default `backend` here is
+    // active-routed — which would ask the local backend to initialize panes
+    // for a path that only exists on a remote, leaving the remote worktree
+    // permanently tab-less and unselectable.
+    void getBackendFor(selectedBackendId).panesEnsureInitialized(activeWorktreeId)
+  }, [activeWorktreeId, selectedBackendId])
 
   // If the active id points at something that no longer exists — a
   // finished deletion, a dismissed pending creation, a stale focus after
@@ -787,15 +805,23 @@ const setQuestStep = useCallback((next: QuestStep) => {
 
   const handleSidebarSelectWorktree = useCallback(
     (path: string) => {
-      switchWorktree(path, () => {
-        setShowNewWorktree(false)
-        setShowActivity(false)
-        setShowCleanup(false)
-        setShowCommandCenter(false)
-        setShowTaskList(false)
-      })
+      switchWorktree(
+        path,
+        () => {
+          setShowNewWorktree(false)
+          setShowActivity(false)
+          setShowCleanup(false)
+          setShowCommandCenter(false)
+          setShowTaskList(false)
+        },
+        // Rows span backends now, so the selected worktree's owner is
+        // whichever backend contributed it — NOT the active chip. Without
+        // this, selecting a remote row leaves the chrome reading the local
+        // backend for a worktree that isn't in it.
+        mergedData.pathBackendId[path]
+      )
     },
-    [switchWorktree]
+    [switchWorktree, mergedData.pathBackendId]
   )
 
   const handleSidebarSelectTab = useCallback(
@@ -1692,27 +1718,28 @@ const setQuestStep = useCallback((next: QuestStep) => {
         {!singleScreenMode && sidebarVisible && (
           <div className="shrink-0 flex flex-col"><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleSidebarResize} /></div></div>
         )}
-        {/* Render ALL worktrees' terminals to keep PTYs alive across switches */}
-        {worktrees.map((wt) => {
-          const paneTree = panes[wt.path]
+        {/* Render ALL worktrees' terminals to keep PTYs alive across switches.
+            Now spans every backend, not just the active one — each subtree is
+            pinned to its owning backend below, so a remote worktree's panes
+            keep streaming while a local one is on screen. */}
+        {mergedWorktrees.map(({ backendId, worktree: wt }) => {
+          const paneTree = mergedPanes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
           const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
           return (
             <div
-              key={wt.path}
+              key={`${backendId}\u0000${wt.path}`}
               className="flex-1 min-w-0"
               style={{ display: isVisible ? 'flex' : 'none' }}
             >
               {/* Pins this worktree's panes to the backend that owns it, so
                   their requests, sends and terminal:data subscriptions go to
-                  the right transport even though every worktree stays mounted.
-                  Today every row comes from the active backend's store, so
-                  this is the active id and the scope is a no-op; once the
-                  sidebar merges rows across backends, each row carries its
-                  own id and only this value changes. */}
-              <BackendScope backendId={activeBackendId}>
+                  the right transport even though every worktree stays
+                  mounted. This is what lets a local and a remote worktree be
+                  live at the same time. */}
+              <BackendScope backendId={backendId}>
               <ErrorBoundary label={`worktree:${wt.path}`}>
                 <WorkspaceView
                   worktreePath={wt.path}

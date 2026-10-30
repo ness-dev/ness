@@ -1,15 +1,6 @@
 import { useMemo } from 'react'
-import {
-  useAppState,
-  useWorktrees,
-  usePanes,
-  useTerminals,
-  usePrs,
-  useSnooze,
-  usePinned,
-  useAliases,
-  useAssignedPRs
-} from '../store'
+import { useAppState, usePanes } from '../store'
+import { useMergedWorktrees } from './useMergedWorktrees'
 import { getLeaves } from '../../shared/state/terminals'
 import type { TerminalTab } from '../types'
 import { buildWorktreeListModel, type WorktreeListModel } from '../worktree-list-model'
@@ -36,62 +27,49 @@ export function useTabsByWorktree(): Record<string, TerminalTab[]> {
  *  `useAppState` / `useAliasForPath` / `useMetaHeld` subscriptions per row,
  *  which is CLAUDE.md anti-pattern #4 (N subscriptions over whole maps) and
  *  would have doubled once mobile started rendering the same rows. */
+/** Builds the sidebar model from EVERY registered backend's worktrees, not
+ *  just the active one — the point of the whole per-worktree-remotes
+ *  change. `viewerLogin` stays active-scoped: it's a fact about whichever
+ *  backend resolved a GitHub token, not a property of the merged list.
+ *
+ *  Inputs are merged upstream in `useMergedWorktrees`; see that file for
+ *  why merging inputs beats concatenating per-backend models. */
 export function useWorktreeListModel(
   collapse: Pick<WorktreeCollapseState, 'unifiedRepos' | 'collapsedRepos' | 'isGroupCollapsed'>,
   options: { assignOrdinals?: boolean } = {}
 ): WorktreeListModel {
   const { assignOrdinals = true } = options
-  const wtState = useWorktrees()
-  const terminals = useTerminals()
-  const prs = usePrs()
-  const snooze = useSnooze()
-  const pinned = usePinned()
-  const aliases = useAliases()
-  const assignedPRs = useAssignedPRs()
+  const merged = useMergedWorktrees()
   const viewerLogin = useAppState((s) => s.settings.viewerLogin)
-  const tabsByWorktree = useTabsByWorktree()
 
   const { unifiedRepos, collapsedRepos, isGroupCollapsed } = collapse
 
   return useMemo(
     () =>
       buildWorktreeListModel({
-        worktrees: wtState.list,
-        repoRoots: wtState.repoRoots,
-        pendingWorktrees: wtState.pending,
-        pendingDeletions: wtState.pendingDeletions ?? [],
-        tabsByWorktree,
-        statuses: terminals.statuses,
-        pendingTools: terminals.pendingTools,
-        shellActivity: terminals.shellActivity,
-        prStatuses: prs.byPath,
-        mergedPaths: prs.mergedByPath,
-        snoozeByPath: snooze.byPath,
-        pinnedPaths: pinned.byPath,
-        aliases: aliases.byPath,
+        worktrees: merged.flatWorktrees,
+        repoRoots: merged.repoRoots,
+        pendingWorktrees: merged.pendingWorktrees,
+        pendingDeletions: merged.pendingDeletions,
+        tabsByWorktree: merged.tabsByWorktree,
+        statuses: merged.statuses,
+        pendingTools: merged.pendingTools,
+        shellActivity: merged.shellActivity,
+        prStatuses: merged.prStatuses,
+        mergedPaths: merged.mergedPaths,
+        snoozeByPath: merged.snoozeByPath,
+        pinnedPaths: merged.pinnedPaths,
+        aliases: merged.aliases,
         viewerLogin,
-        assignedPRsByRepo: assignedPRs.byRepo,
+        assignedPRsByRepo: merged.assignedPRsByRepo,
         unifiedRepos,
         collapsedRepos,
         isGroupCollapsed,
         assignOrdinals
       }),
     [
-      wtState.list,
-      wtState.repoRoots,
-      wtState.pending,
-      wtState.pendingDeletions,
-      tabsByWorktree,
-      terminals.statuses,
-      terminals.pendingTools,
-      terminals.shellActivity,
-      prs.byPath,
-      prs.mergedByPath,
-      snooze.byPath,
-      pinned.byPath,
-      aliases.byPath,
+      merged,
       viewerLogin,
-      assignedPRs.byRepo,
       unifiedRepos,
       collapsedRepos,
       isGroupCollapsed,
