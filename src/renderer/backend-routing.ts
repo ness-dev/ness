@@ -33,10 +33,12 @@ import { getBackendFor, useBackend } from './backend'
  *  whichever backend the user currently has selected — the active backend
  *  is the correct target, not a lookup.
  *
- *  Known gap: `pruneWorktrees(repoRoot)` acts on an existing repo and so
- *  belongs to that repo's host, but it has no worktree path to resolve the
- *  owner from. Routing it needs a repoRoot → backendId map, which doesn't
- *  exist yet; it stays active-routed until then. */
+ *  Several entries take an object or an id rather than a path, so the
+ *  first-parameter heuristic can't see them and they're listed by hand:
+ *  creation (`runPending*`) targets a repo that lives on one machine, the
+ *  pending entry it produces lives there too (`retryPending` /
+ *  `dismissPendingWorktree`), and `pruneWorktrees` acts on an existing
+ *  repo. All route via the repo or pending owner maps. */
 export type WorktreeScopedMethod =
   | 'addReviewComment'
   | 'addReviewReply'
@@ -45,6 +47,7 @@ export type WorktreeScopedMethod =
   | 'clearActivityLog'
   | 'clearAlias'
   | 'continueWorktree'
+  | 'dismissPendingWorktree'
   | 'deleteReviewComment'
   | 'dismissPendingDeletion'
   | 'getBranchCommits'
@@ -85,6 +88,7 @@ export type WorktreeScopedMethod =
   | 'panesSplitPane'
   | 'panesWakeTab'
   | 'pinWorktree'
+  | 'pruneWorktrees'
   | 'readJsonClaudeAttachmentImage'
   | 'readWorktreeFile'
   | 'readWorktreeFileBinary'
@@ -93,6 +97,9 @@ export type WorktreeScopedMethod =
   | 'refreshReviewAnchors'
   | 'removeWorktree'
   | 'requestMergeConflictFix'
+  | 'retryPendingWorktree'
+  | 'runPendingPRWorktree'
+  | 'runPendingWorktree'
   | 'runTool'
   | 'setAlias'
   | 'setCiNotifyOverride'
@@ -131,10 +138,23 @@ export function useGlobalBackend(): GlobalBackend {
 export function useBackendForWorktree(
   pathBackendId: Record<string, string>
 ): (worktreePath: string) => ElectronAPI {
-  const ref = useRef(pathBackendId)
-  ref.current = pathBackendId
-  return useCallback(
-    (worktreePath: string) => getBackendFor(ref.current[worktreePath] ?? null),
-    []
-  )
+  return useBackendResolver(pathBackendId)
+}
+
+/** Resolves the backend owning a repo root. A repo lives on exactly one
+ *  machine, so for operations that take a repo rather than a worktree —
+ *  creating a worktree, most obviously — the repo IS the routing key. */
+export function useBackendForRepo(
+  repoBackendId: Record<string, string>
+): (repoRoot: string) => ElectronAPI {
+  return useBackendResolver(repoBackendId)
+}
+
+/** Shared implementation. See the identity-stability note above. */
+function useBackendResolver(
+  ownerById: Record<string, string>
+): (key: string) => ElectronAPI {
+  const ref = useRef(ownerById)
+  ref.current = ownerById
+  return useCallback((key: string) => getBackendFor(ref.current[key] ?? null), [])
 }

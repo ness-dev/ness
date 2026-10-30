@@ -810,6 +810,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleDismissRepoPrompt
   } = useWorktreeHandlers({
     pathBackendId: mergedData.pathBackendId,
+    repoBackendId: mergedData.repoBackendId,
+    pendingBackendId: mergedData.pendingBackendId,
     worktrees,
     pendingWorktrees,
     repoRoots,

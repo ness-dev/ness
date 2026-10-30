@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AddRepoResult, Worktree, PendingWorktree, PRStatus, TerminalTab, AgentKind, ForkSource } from '../types'
 import { markTerminalClosing } from '../components/XTerminal'
 import { useActiveBackend } from '../store'
-import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
+import { useGlobalBackend, useBackendForWorktree, useBackendForRepo } from '../backend-routing'
 import { randomUUID } from '../uuid'
 
 interface UseWorktreeHandlersArgs {
@@ -10,6 +10,16 @@ interface UseWorktreeHandlersArgs {
    *  every BackendScope, so per-worktree calls must be routed explicitly.
    *  See backend-routing.ts. */
   pathBackendId: Record<string, string>
+  /** Which backend owns each repo root. Creating a worktree targets a
+   *  repo, and a repo lives on exactly one machine — so the repo the user
+   *  picked already decides where the worktree is created. That's why
+   *  there's no separate backend picker: it would be a second way to say
+   *  the same thing, and a way to say it inconsistently. */
+  repoBackendId: Record<string, string>
+  /** Which backend each pending-creation entry lives on. Creation can now
+   *  land on a remote, so retry/dismiss have to follow the entry rather
+   *  than assuming the active backend owns it. */
+  pendingBackendId: Record<string, string>
   worktrees: Worktree[]
   pendingWorktrees: PendingWorktree[]
   repoRoots: string[]
@@ -38,7 +48,9 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     setActiveWorktreeId,
     setActivePaneId,
     setShowNewWorktree,
-    pathBackendId
+    pathBackendId,
+    repoBackendId,
+    pendingBackendId
   } = args
 
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
@@ -50,6 +62,8 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   const activeBackend = useActiveBackend()
   const backend = useGlobalBackend()
   const backendFor = useBackendForWorktree(pathBackendId)
+  const backendForRepo = useBackendForRepo(repoBackendId)
+  const backendForPending = useBackendForRepo(pendingBackendId)
 
   // Path of a freshly-created worktree we want to focus once it appears in the
   // worktrees list. Set on a successful create; the effect below switches to it
@@ -179,7 +193,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   }, [])
 
   const handlePruneWorktrees = useCallback(async (repoRoot: string) => {
-    await backend.pruneWorktrees(repoRoot)
+    await backendForRepo(repoRoot).pruneWorktrees(repoRoot)
   }, [])
 
   const handleSubmitNewWorktree = useCallback(
@@ -202,7 +216,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       //
       // Main handles everything: addWorktree → setup script → ensureInitialized
       // (with the prompt embedded in the new agent tab) → outcome.
-      const result = await backend.runPendingWorktree({
+      const result = await backendForRepo(repoRoot).runPendingWorktree({
         id,
         repoRoot,
         branchName,
@@ -242,7 +256,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Same flow as handleSubmitNewWorktree: hold the modal open, switch to the
       // real worktree once it's in the list (success) or to the pending entry's
       // failure screen (otherwise).
-      const result = await backend.runPendingPRWorktree({
+      const result = await backendForRepo(repoRoot).runPendingPRWorktree({
         id,
         repoRoot,
         prNumber,
@@ -262,12 +276,12 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   )
 
   const handleRetryPendingWorktree = useCallback((id: string) => {
-    void backend.retryPendingWorktree(id)
+    void backendForPending(id).retryPendingWorktree(id)
   }, [])
 
   const handleDismissPendingWorktree = useCallback(
     (id: string) => {
-      void backend.dismissPendingWorktree(id)
+      void backendForPending(id).dismissPendingWorktree(id)
       setActiveWorktreeId((prev) => (prev === id ? null : prev))
     },
     [setActiveWorktreeId]
@@ -278,7 +292,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // "Continue anyway" from a setup-failed screen. Main already recorded
       // createdPath on the pending entry.
       const entry = pendingWorktrees.find((p) => p.id === id)
-      void backend.dismissPendingWorktree(id)
+      void backendForPending(id).dismissPendingWorktree(id)
       if (entry?.createdPath) {
         setActiveWorktreeId(entry.createdPath)
       } else {

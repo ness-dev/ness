@@ -61,6 +61,10 @@ export interface MergedWorktreeData {
   repoBackendId: Record<string, string>
   /** Display metadata per backend id, for labelling rows by origin. */
   backendMeta: Record<string, { label: string; kind: 'local' | 'remote' }>
+  /** Which backend each pending-creation entry lives on, keyed by pending
+   *  id. Creation can now target a remote, so retry/dismiss must follow the
+   *  entry rather than assuming the active backend owns it. */
+  pendingBackendId: Record<string, string>
   /** Pane trees, merged. Keyed by worktree path like the slice itself. */
   panes: BackendStateEntry['state']['terminals']['panes']
 }
@@ -87,6 +91,7 @@ export function useMergedWorktrees(): MergedWorktreeData {
       pathBackendId: {},
       repoBackendId: {},
       backendMeta: {},
+      pendingBackendId: {},
       panes: {}
     }
 
@@ -107,6 +112,9 @@ export function useMergedWorktrees(): MergedWorktreeData {
       merged.backendMeta[backendId] = { label, kind }
       for (const root of state.worktrees.repoRoots) merged.repoBackendId[root] = backendId
       merged.repoRoots.push(...state.worktrees.repoRoots)
+      for (const pending of state.worktrees.pending) {
+        merged.pendingBackendId[pending.id] = backendId
+      }
       merged.pendingWorktrees.push(...state.worktrees.pending)
       merged.pendingDeletions.push(...(state.worktrees.pendingDeletions ?? []))
 
