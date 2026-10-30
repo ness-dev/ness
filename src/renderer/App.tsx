@@ -83,8 +83,12 @@ const SIDEBAR_MAX_PX = 400
 export default function App(): JSX.Element {
   const { isMobile } = useViewport()
   const active = useActiveTheme()
-  // Narrow selector, not useSettings() — App re-rendering re-renders the whole
-  // tree beneath it, so it must not subscribe to the entire settings slice.
+  // Narrow selector, not useSettings() — App re-rendering re-renders the
+  // whole tree beneath it (DesktopApp is not memoized), so it must not
+  // subscribe to the entire settings slice. useActiveTheme above narrows
+  // for the same reason; before it did, it subscribed to the whole slice
+  // and this selector saved nothing.
+  //
   // Local rather than active: nessieColor is client-owned (see
   // CLIENT_OWNED_SETTING_KEYS), so it must not change when the user
   // switches to a remote backend.

@@ -4,7 +4,7 @@ import {
   DEFAULT_LIGHT_THEME,
   DEFAULT_DARK_THEME
 } from '../../shared/state/settings'
-import { useSettings } from '../store'
+import { useLocalAppState } from '../store'
 import { THEME_OPTIONS, type ThemeOption } from '../themes'
 import { useSystemColorScheme } from './useSystemColorScheme'
 
@@ -64,7 +64,26 @@ export function resolveTheme(
 }
 
 export function useActiveTheme(): ResolvedTheme {
-  const { themeMode, themeLight, themeDark, customThemes } = useSettings()
+  // Four narrow selectors rather than one `useSettings()`. The root `App`
+  // component calls this hook, and `DesktopApp` beneath it isn't memoized
+  // — so a whole-slice subscription here re-rendered the entire tree on
+  // ANY settings change, including unrelated ones like `claudeCommand`.
+  // That also silently defeated the narrow `nessieColor` selector sitting
+  // one line below the call site, which was added to avoid exactly this.
+  //
+  // Local rather than active: theme is client-owned (see
+  // CLIENT_OWNED_SETTING_KEYS), so it must not follow the active backend.
+  // `useSettings()` already overlays these fields from the client store,
+  // so this is the same value by a cheaper subscription — stated
+  // explicitly here so the ownership is visible at the read site.
+  //
+  // The extra listeners are ~free: each selector is a property read that
+  // returns a reference-stable value, so non-theme events compare equal
+  // and never reach the reducer-to-render path.
+  const themeMode = useLocalAppState((s) => s.settings.themeMode)
+  const themeLight = useLocalAppState((s) => s.settings.themeLight)
+  const themeDark = useLocalAppState((s) => s.settings.themeDark)
+  const customThemes = useLocalAppState((s) => s.settings.customThemes)
   const osScheme = useSystemColorScheme()
   return useMemo(() => {
     const wantMode = themeMode === 'system' ? osScheme : themeMode
