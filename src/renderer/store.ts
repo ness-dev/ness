@@ -46,6 +46,7 @@ import {
 } from '../shared/editor-resolve'
 import { WebSocketClientTransport } from '../shared/transport/transport-websocket'
 import { initBackend, getBackend } from './backend'
+import { useBackendScope, type BackendScopeId } from './backend-scope'
 
 /** Stable id for the in-process Electron backend. Mirrors the value in
  *  src/main/persistence.ts; duplicated here because main isn't
@@ -346,6 +347,69 @@ function subscribeActive(cb: () => void): () => void {
   }
 }
 
+/** Minimal shape `createScopedSubscribe` needs from a registry. Keeps the
+ *  factory testable with a stub instead of a live `BackendsRegistry`. */
+export interface ScopedSubscribeRegistry {
+  getStore(id: string): { subscribe(cb: () => void): () => void } | undefined
+  subscribeList(cb: () => void): () => void
+}
+
+/** Builds the per-backend-id `subscribe` functions that scoped hooks hand
+ *  to `useSyncExternalStore`.
+ *
+ *  Memoized per id, and that's the whole reason this exists:
+ *  `useSyncExternalStore` re-subscribes whenever the `subscribe` argument
+ *  changes identity, so a fresh closure per render would detach and
+ *  reattach a store listener on every commit. The unscoped path gets this
+ *  for free by using one module-level `subscribeActive`; scoped callers
+ *  need one stable function per backend instead.
+ *
+ *  Each subscription also tracks registry membership, mirroring how
+ *  `subscribeActive` swaps on active-id changes. A subtree can mount
+ *  before its backend finishes connecting (hydration is async and
+ *  deliberately non-blocking), and without the swap that subtree would
+ *  hold a no-op unsubscribe forever and never render its data. */
+export function createScopedSubscribe(
+  reg: ScopedSubscribeRegistry
+): (backendId: string) => (cb: () => void) => () => void {
+  const byId = new Map<string, (cb: () => void) => () => void>()
+  return (backendId: string) => {
+    const existing = byId.get(backendId)
+    if (existing) return existing
+    const subscribe = (cb: () => void): (() => void) => {
+      let storeUnsub = reg.getStore(backendId)?.subscribe(cb) ?? noop
+      const listUnsub = reg.subscribeList(() => {
+        storeUnsub()
+        const next = reg.getStore(backendId)
+        storeUnsub = next ? next.subscribe(cb) : noop
+        // Tell the consumer to re-read: the store it was reading either
+        // just appeared or just went away.
+        cb()
+      })
+      return () => {
+        storeUnsub()
+        listUnsub()
+      }
+    }
+    byId.set(backendId, subscribe)
+    return subscribe
+  }
+}
+
+function noop(): void {
+  /* no store to detach from */
+}
+
+const subscribeForBackend = createScopedSubscribe(registry)
+
+/** A specific backend's mirror, or `initialState` if it isn't registered
+ *  (yet). Returning initial rather than throwing keeps a subtree that
+ *  mounted ahead of its backend's connect rendering empty instead of
+ *  crashing — the subscribe above re-fires once the store lands. */
+function getStateFor(backendId: string): AppState {
+  return registry.getStore(backendId)?.getState() ?? initialState
+}
+
 /** Server-assigned identity for this renderer wrt the active backend.
  *  Per-backend — when active flips, this value can change. Components
  *  using `useSyncExternalStore` (via the slice hooks below) re-render
@@ -407,7 +471,8 @@ export async function initStore(): Promise<void> {
   // as the standalone web client).
   initBackend({
     getActiveTransport: () => registry.getActiveTransport(),
-    getLocalTransport: () => localTransport
+    getLocalTransport: () => localTransport,
+    getTransportFor: (backendId) => registry.getTransport(backendId)
   })
 
   const [snapshot, id] = await Promise.all([
@@ -684,14 +749,44 @@ function getActiveState(): AppState {
   return registry.getActiveStore().getState()
 }
 
-/** Selector hook reading from the **active** backend's store. Re-fires
- *  on inner-store events AND on active-backend changes (so switching
- *  backends triggers a re-render that reads fresh state from the new
- *  active store). */
+/** Selector hook reading from whichever backend the calling subtree is
+ *  scoped to — see `BackendScope`. Outside any scope that's the **active**
+ *  backend, and the hook behaves exactly as it always did: re-firing on
+ *  inner-store events and on active-backend changes.
+ *
+ *  Inside a scope it reads that backend's mirror instead, which is what
+ *  lets a remote worktree's panes render their own data while a local
+ *  worktree's panes stay mounted beside them.
+ *
+ *  Every slice hook below funnels through here, so all 35 of them became
+ *  scope-aware with this one change — no per-hook variants to keep in
+ *  step. */
 export function useAppState<T>(selector: (s: AppState) => T): T {
+  const scope = useBackendScope()
   return useSyncExternalStore(
-    subscribeActive,
-    () => selector(getActiveState()),
+    scope ? subscribeForBackend(scope) : subscribeActive,
+    () => selector(scope ? getStateFor(scope) : getActiveState()),
+    () => selector(initialState)
+  )
+}
+
+/** Selector hook pinned to an explicitly-named backend, for callers that
+ *  know the id but aren't rendered inside that backend's subtree.
+ *
+ *  App.tsx is the motivating case: it holds the selected worktree and
+ *  reads per-worktree values (alias, PR status) for the title bar and
+ *  chrome, but it sits ABOVE every `BackendScope` — so a plain
+ *  `useAppState` there would read the active backend even when the
+ *  selected worktree belongs to a different one.
+ *
+ *  Pass `null` to follow the active backend. */
+export function useAppStateFor<T>(
+  backendId: BackendScopeId,
+  selector: (s: AppState) => T
+): T {
+  return useSyncExternalStore(
+    backendId ? subscribeForBackend(backendId) : subscribeActive,
+    () => selector(backendId ? getStateFor(backendId) : getActiveState()),
     () => selector(initialState)
   )
 }

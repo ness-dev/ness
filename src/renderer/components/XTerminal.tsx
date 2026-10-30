@@ -6,8 +6,9 @@ import { ProgressAddon } from '@xterm/addon-progress'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import type { StateEvent } from '../../shared/state'
-import { getClientId, subscribeActiveTransportReconnect, useSettings, useTerminalSession } from '../store'
-import { getBackend, useBackend } from '../backend'
+import { getClientId, LOCAL_BACKEND_ID, subscribeActiveTransportReconnect, useSettings, useTerminalSession } from '../store'
+import { getBackendFor, useBackend } from '../backend'
+import { useBackendScope } from '../backend-scope'
 import {
   makeFileLinkProvider,
   loadWorktreeFiles,
@@ -125,6 +126,34 @@ function effectiveTerminalFontSize(): number {
   return scaledEditorFontSize(currentFontSize, currentUiScale)
 }
 
+/** Which backend owns each live terminal, so the module-scope helpers
+ *  below can reach the right transport.
+ *
+ *  The component knows its backend from `useBackendScope()`, but these
+ *  helpers run outside React: `applyFontToAll` sweeps every mounted
+ *  terminal across every worktree, and `markTerminalClosing` is called
+ *  imperatively from tab-close paths. Both used the active-routed
+ *  singleton, which sends a resize or a scrollback-clear for a remote
+ *  worktree's terminal to whichever backend happens to be selected. */
+const terminalBackends = new Map<string, string | null>()
+
+export function registerTerminalBackend(
+  terminalId: string,
+  backendId: string | null
+): void {
+  terminalBackends.set(terminalId, backendId)
+}
+
+export function forgetTerminalBackend(terminalId: string): void {
+  terminalBackends.delete(terminalId)
+}
+
+/** The owning backend for a terminal, falling back to active-routed for an
+ *  id we never saw registered (shouldn't happen; harmless if it does). */
+function backendForTerminal(terminalId: string) {
+  return getBackendFor(terminalBackends.get(terminalId) ?? null)
+}
+
 function applyFontToAll(): void {
   for (const [id, term] of terminalRegistry) {
     term.options.fontFamily = currentFontFamily
@@ -134,7 +163,7 @@ function applyFontToAll(): void {
     try {
       fit.fit()
       const dims = fit.proposeDimensions()
-      if (dims) getBackend().resizeTerminal(id, dims.cols, dims.rows)
+      if (dims) backendForTerminal(id).resizeTerminal(id, dims.cols, dims.rows)
     } catch {
       // ignore — terminal may not be visible
     }
@@ -155,7 +184,13 @@ let fontCacheInitialized = false
 function initFontCache(): void {
   if (fontCacheInitialized) return
   fontCacheInitialized = true
-  const backend = getBackend()
+  // Explicitly the client's own backend, not the active one. Terminal font
+  // family/size and uiScale describe how THIS window renders, so they must
+  // not change when the user selects a worktree on another machine. Note
+  // this path reads the snapshot straight off the transport rather than
+  // through `useSettings()`, so it needs its own pinning — the hook-level
+  // client-owned-settings overlay doesn't reach it.
+  const backend = getBackendFor(LOCAL_BACKEND_ID)
   void backend.getStateSnapshot().then(({ state }) => {
     currentFontFamily = state.settings.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY
     currentFontSize = state.settings.terminalFontSize || DEFAULT_TERMINAL_FONT_SIZE
@@ -214,7 +249,7 @@ function sanitizeTerminalData(data: string): string {
  * ownership lives in main (PtyManager), so this is a one-shot fire-and-forget
  * IPC with no renderer-side suppression needed. */
 export function markTerminalClosing(id: string): void {
-  getBackend().clearTerminalHistory(id)
+  backendForTerminal(id).clearTerminalHistory(id)
 }
 
 // Read the bg/fg from CSS vars set by theme-apply.ts, then build the full
@@ -295,6 +330,9 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
   // top.
   initFontCache()
   const backend = useBackend()
+  // Recorded into `terminalBackends` on mount so the module-scope helpers
+  // (font sweep, scrollback clear) can route to this terminal's backend.
+  const backendScope = useBackendScope()
   const chatPromotionDismissed = useSettings().chatPromotionDismissed
   const plainClickOpensInApp = useSettings().terminalPlainClickOpensInApp
 
@@ -591,6 +629,7 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
     fitAddonRef.current = fitAddon
     terminalRegistry.set(terminalId, terminal)
     fitRegistry.set(terminalId, fitAddon)
+    registerTerminalBackend(terminalId, backendScope)
 
     // One-time host preamble (e.g. the Quake boot banner). Written here,
     // before the history replay / PTY spawn below, so it always sits above
@@ -785,6 +824,10 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
       backend.leaveTerminal(terminalId)
       terminalRegistry.delete(terminalId)
       fitRegistry.delete(terminalId)
+      // Deliberately AFTER leaveTerminal above, which still needs to reach
+      // this terminal's backend. markTerminalClosing can also fire from a
+      // tab-close path after unmount, so it tolerates a missing entry.
+      forgetTerminalBackend(terminalId)
       resizeObserver.disconnect()
       cleanupData?.()
       cleanupExit?.()

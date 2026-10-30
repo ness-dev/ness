@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { useAppState, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
+import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
 import { useBackend } from './backend'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
@@ -28,6 +28,7 @@ import { QuestCard } from './components/QuestCard'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
+import { BackendScope } from './backend-scope'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
@@ -99,6 +100,11 @@ function DesktopApp(): JSX.Element {
   // Multi-backend RPC surface — routes through the active backend's
   // transport (local IPC handle for local, WS direct for remotes).
   const backend = useBackend()
+  // Which backend the mounted worktree subtrees belong to. Every row in
+  // `worktrees` below was read out of this backend's store, so this is the
+  // id their panes must route through — see the BackendScope in the
+  // worktree map.
+  const activeBackendId = useActiveBackend().id
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
@@ -1685,6 +1691,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
               className="flex-1 min-w-0"
               style={{ display: isVisible ? 'flex' : 'none' }}
             >
+              {/* Pins this worktree's panes to the backend that owns it, so
+                  their requests, sends and terminal:data subscriptions go to
+                  the right transport even though every worktree stays mounted.
+                  Today every row comes from the active backend's store, so
+                  this is the active id and the scope is a no-op; once the
+                  sidebar merges rows across backends, each row carries its
+                  own id and only this value changes. */}
+              <BackendScope backendId={activeBackendId}>
               <ErrorBoundary label={`worktree:${wt.path}`}>
                 <WorkspaceView
                   worktreePath={wt.path}
@@ -1730,6 +1744,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   }
                 />
               </ErrorBoundary>
+              </BackendScope>
             </div>
           )
         })}
