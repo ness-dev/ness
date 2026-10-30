@@ -184,6 +184,9 @@ export interface ControlServerDeps {
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
   clearAlias: (worktreePath: string) => void
+  /** Whether agents may name their own tab. Re-read per request so the
+   * toggle takes effect without restarting the bridge. */
+  getAgentTabNamingEnabled: () => boolean
   /** Rename one tab in the pane tree. Returns false when the rename was
    *  refused — for `source: 'agent'`, that means the user had already
    *  named the tab themselves. */
@@ -562,6 +565,12 @@ async function handleRequest(
   // no way to rename someone else's tab. A name the user typed wins
   // permanently, which the reducer enforces and this reports back.
   if (req.method === 'POST' && path === '/tab-name') {
+    if (!deps.getAgentTabNamingEnabled()) {
+      return sendJson(res, 403, {
+        error:
+          'agent tab naming is disabled in Ness settings (Settings → Agents → General → Agent tab naming)'
+      })
+    }
     const { scope, terminalId } = resolveScope(req, deps)
     if (!terminalId) {
       return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
@@ -939,7 +948,8 @@ async function handleRequest(
       scope,
       browser: deps.getBrowserPerms(),
       conversationFork: { enabled: deps.getConversationForkEnabled() },
-      messaging: { enabled: deps.messaging.isEnabled() }
+      messaging: { enabled: deps.messaging.isEnabled() },
+      tabNaming: { enabled: deps.getAgentTabNamingEnabled() }
     })
   }
 

@@ -705,7 +705,11 @@ async function getToolPerms() {
   const s = await getScopeInfo()
   return {
     browser: s.browser || { enabled: true, mode: 'full' },
-    messaging: s.messaging || { enabled: false }
+    messaging: s.messaging || { enabled: false },
+    // Defaults on when /scope can't say, matching the setting's own
+    // default — and matching the browser gates' permissive-on-failure
+    // posture rather than hiding a feature the user has enabled.
+    tabNaming: s.tabNaming || { enabled: true }
   }
 }
 
@@ -726,6 +730,7 @@ async function getRendersMarkdown() {
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (t.name === 'send_message') return perms.messaging.enabled
+    if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true

@@ -584,6 +584,20 @@ describe('settingsReducer', () => {
     expect(off.worktreeMessagingEnabled).toBe(false)
   })
 
+  it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
+    expect(initialSettings.agentTabNamingEnabled).toBe(true)
+    const off = apply(initialSettings, {
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: false
+    })
+    expect(off.agentTabNamingEnabled).toBe(false)
+    const on = apply(off, {
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: true
+    })
+    expect(on.agentTabNamingEnabled).toBe(true)
+  })
+
   it('browserToolsModeChanged switches between view and full', () => {
     expect(initialSettings.browserToolsMode).toBe('full')
     const view = apply(initialSettings, {
