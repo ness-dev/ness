@@ -1017,6 +1017,20 @@ export function useAliasForPath(path: string | null | undefined): string | undef
   return useAppState((s) => (path ? s.aliases.byPath[path] : undefined))
 }
 
+/** Alias for a worktree on an explicitly-named backend.
+ *
+ *  `useAliasForPath` resolves its store from the enclosing `BackendScope`,
+ *  which is right for anything rendered inside a worktree's subtree. App
+ *  chrome — the window title, the sidebar header — sits above every scope
+ *  but still describes the *selected* worktree, which may belong to a
+ *  backend other than the active one. Those callers pass its id. */
+export function useAliasForWorktree(
+  backendId: BackendScopeId,
+  path: string | null | undefined
+): string | undefined {
+  return useAppStateFor(backendId, (s) => (path ? s.aliases.byPath[path] : undefined))
+}
+
 /** The global "Always allow" tool grants. Only the Settings panel reads
  *  the whole list — the matcher that consults it lives in main. */
 export function usePermissionRules() {

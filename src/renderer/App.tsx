@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
+import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { useBackend } from './backend'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
@@ -131,17 +131,31 @@ function DesktopApp(): JSX.Element {
   // copy so its highlight moves on the first frame, while the real switch
   // renders in a transition behind it.
   const [sidebarActiveId, setSidebarActiveId] = useOptimistic(activeWorktreeId)
+  // Which backend the SELECTED worktree belongs to. Distinct from
+  // `activeBackendId` above: that's whose rows are currently listed, this
+  // is whose worktree is open. They're the same today, because the sidebar
+  // only lists one backend's worktrees — once rows merge across backends
+  // they diverge, and every read describing the open worktree has to follow
+  // this one rather than the chip.
+  //
+  // A path is only unique WITHIN a backend, so this is the other half of
+  // the worktree's identity, not a convenience.
+  const [selectedBackendId, setSelectedBackendId] = useState<string>(activeBackendId)
   const switchWorktree = useCallback(
-    (path: string, alsoInTransition?: () => void) => {
+    (path: string, alsoInTransition?: () => void, backendId?: string) => {
       startTransition(() => {
         setSidebarActiveId(path)
         setActiveWorktreeId(path)
+        // Defaults to the backend whose rows are on screen, which is where
+        // every selectable row comes from today. Callers pass an explicit id
+        // once the sidebar lists more than one backend.
+        setSelectedBackendId(backendId ?? activeBackendId)
         alsoInTransition?.()
       })
     },
-    [setSidebarActiveId]
+    [setSidebarActiveId, activeBackendId]
   )
-  const activeAlias = useAliasForPath(activeWorktreeId)
+  const activeAlias = useAliasForWorktree(selectedBackendId, activeWorktreeId)
   useEffect(() => {
     if (!activeWorktreeId) {
       document.title = 'Ness'
