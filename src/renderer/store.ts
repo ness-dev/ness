@@ -458,7 +458,35 @@ const allBackendStatesSelector = new SegmentedSelector<
   { state: AppState; connection: BackendConnection | undefined },
   BackendStateEntry
 >(
-  (source) => [source.state, source.connection],
+  // Keyed on the SLICES the merged sidebar reads, never on `source.state`.
+  // The store does `this.state = rootReducer(this.state, event)`, so the
+  // AppState object is replaced on every event — keying on it means every
+  // backend's segment is rebuilt dozens of times a second while an agent
+  // streams, and `useMergedWorktrees` re-walks every worktree's pane tree
+  // each time. With ~80 worktrees across backends that is a beachball.
+  //
+  // (backend-segments.ts documents exactly this trap. I wrote that comment
+  // and then keyed on the state object anyway — hence this one.)
+  //
+  // Must stay in step with what `useMergedWorktrees` actually reads: a
+  // slice consumed there but missing here is a stale sidebar.
+  (source) => [
+    source.connection,
+    source.state.worktrees.list,
+    source.state.worktrees.repoRoots,
+    source.state.worktrees.pending,
+    source.state.worktrees.pendingDeletions,
+    source.state.terminals.panes,
+    source.state.terminals.statuses,
+    source.state.terminals.pendingTools,
+    source.state.terminals.shellActivity,
+    source.state.prs.byPath,
+    source.state.prs.mergedByPath,
+    source.state.snooze.byPath,
+    source.state.pinned.byPath,
+    source.state.aliases.byPath,
+    source.state.assignedPRs.byRepo
+  ],
   (source, backendId) => ({
     backendId,
     label: source.connection?.label ?? backendId,

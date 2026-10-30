@@ -112,7 +112,6 @@ function DesktopApp(): JSX.Element {
   // about which backends exist.
   const mergedData = useMergedWorktrees()
   const mergedWorktrees = mergedData.worktrees
-  const mergedPanes = mergedData.panes
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
@@ -187,7 +186,12 @@ function DesktopApp(): JSX.Element {
   // and dispatches every mutation as an IPC method call. Per-client UI
   // focus (which pane in each worktree the user last interacted with) is
   // still renderer-local — like activeWorktreeId.
-  const panes = usePanes()
+  // Pane trees across ALL backends. `usePanes()` would be the active
+  // backend's slice only, which silently breaks every cross-backend lookup
+  // below: `activeWorkspaceVisible` would find no tree for a remote
+  // worktree and render the "Select a worktree to begin" fallback at the
+  // same time as the workspace it claims isn't there.
+  const panes = mergedData.panes
   const [activePaneId, setActivePaneId] = useState<Record<string, string>>({})
 
   // Derived flat-tab views — preserved so the read-heavy parts of the app
@@ -1723,7 +1727,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             pinned to its owning backend below, so a remote worktree's panes
             keep streaming while a local one is on screen. */}
         {mergedWorktrees.map(({ backendId, worktree: wt }) => {
-          const paneTree = mergedPanes[wt.path]
+          const paneTree = panes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
@@ -1912,7 +1916,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
-          <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
+          <BackendScope backendId={selectedBackendId}><div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
             activeRepoRoot={activeRepoRoot}
@@ -1934,7 +1938,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenReview={handleOpenActiveReview}
             onCollapse={handleCollapseRightColumn}
             onBuildCustomTool={handleBuildCustomTool}
-          /></div></div>
+          /></div></div></BackendScope>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
