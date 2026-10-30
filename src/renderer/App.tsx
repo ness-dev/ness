@@ -121,6 +121,19 @@ function DesktopApp(): JSX.Element {
   // App has no ambient handle that can reach these methods — see
   // backend-routing.ts for why.
   const backendFor = useBackendForWorktree(mergedData.pathBackendId)
+  // Worktrees the user has actually opened this session, keyed the same way
+  // the render loop keys its rows.
+  //
+  // Mounting every worktree keeps PTYs alive across switches, which is right
+  // for local ones — the processes are already on this machine. It is NOT
+  // right across a network: mounting a remote worktree fires pty:create on
+  // ITS backend, so mounting all of them at once asks a remote to spawn a
+  // shell and an agent for every worktree it hosts the moment we connect.
+  // On a large fleet that is enough to take the box down, which it did.
+  // Remote worktrees therefore mount on first open and stay mounted after.
+  const [openedWorktrees, setOpenedWorktrees] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
@@ -689,6 +702,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Wake-on-activation: merged worktrees stay asleep at boot, so we need
   // to force pane init on first focus. No-op for paths that already have
   // panes (ensureInitialized in main returns early).
+  useEffect(() => {
+    if (!activeWorktreeId) return
+    const key = `${selectedBackendId}\u0000${activeWorktreeId}`
+    setOpenedWorktrees((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+  }, [activeWorktreeId, selectedBackendId])
+
   useEffect(() => {
     if (!activeWorktreeId) return
     if (isPendingId(activeWorktreeId)) return
@@ -1740,11 +1759,19 @@ const setQuestStep = useCallback((next: QuestStep) => {
             Now spans every backend, not just the active one — each subtree is
             pinned to its owning backend below, so a remote worktree's panes
             keep streaming while a local one is on screen. */}
-        {mergedWorktrees.map(({ backendId, worktree: wt }) => {
+        {mergedWorktrees.map(({ backendId, backendKind, worktree: wt }) => {
           const paneTree = panes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
+          const mountKey = `${backendId}\u0000${wt.path}`
+          // Local worktrees mount eagerly (cheap, keeps PTYs warm); remote
+          // ones only once opened, so connecting never fans out across the
+          // network. See openedWorktrees above.
+          const eagerMount = backendKind === 'local'
+          const everOpened = openedWorktrees.has(mountKey)
+          const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
+          if (!eagerMount && !everOpened && !isSelected) return null
           const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
           return (
             <div
