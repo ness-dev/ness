@@ -53,9 +53,16 @@ export async function addReviewComment(
   const sha = await sideCommit(worktreePath, input.side, input.view)
   if (!sha) return { error: `Could not resolve the ${input.side} side of the diff` }
   const content = await readFileAtCommit(worktreePath, sha, input.filePath)
-  const snippet = content == null ? null : snippetAt(splitLines(content), input.line)
+  if (content == null) {
+    return { error: `${input.filePath} does not exist at ${sha.slice(0, 7)} (${input.side} side)` }
+  }
+  const lines = splitLines(content)
+  const snippet = snippetAt(lines, input.line)
   if (snippet == null) {
-    return { error: `${input.filePath}:${input.line} does not exist at ${sha.slice(0, 7)}` }
+    const count = content.endsWith('\n') ? lines.length - 1 : lines.length
+    return {
+      error: `line ${input.line} is out of range: ${input.filePath} has ${count} lines at ${sha.slice(0, 7)} (${input.side} side)`
+    }
   }
   const comment: ReviewComment = {
     id: randomUUID(),

@@ -427,3 +427,177 @@ describe('mcp-bridge log-size cap on startup', () => {
     expect(statSync(logPath).size).toBeGreaterThan(seedSize)
   })
 })
+
+describe('mcp-bridge review tools', () => {
+  let stub
+  let bridge
+
+  afterEach(async () => {
+    if (bridge) await bridge.kill()
+    if (stub) await stub.close()
+  })
+
+  function json(res, status, body) {
+    res.writeHead(status, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(body))
+  }
+
+  async function start(handler) {
+    stub = await startStub((req, body, res, captured) => {
+      if (req.url === '/scope') {
+        return json(res, 200, { scope: null, messaging: { enabled: true } })
+      }
+      return handler(req, body, res, captured)
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+  }
+
+  let nextId = 10
+  async function callTool(name, args) {
+    bridge.send({
+      jsonrpc: '2.0',
+      id: nextId++,
+      method: 'tools/call',
+      params: { name, arguments: args }
+    })
+    return bridge.next()
+  }
+
+  it('advertises the review tools and list_tabs', async () => {
+    await start((req, body, res) => json(res, 404, {}))
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const names = (await bridge.next()).result.tools.map((t) => t.name)
+    for (const n of [
+      'list_review_comments',
+      'add_review_comment',
+      'reply_to_comment',
+      'resolve_comment',
+      'submit_review',
+      'request_review',
+      'list_tabs'
+    ]) {
+      expect(names).toContain(n)
+    }
+  })
+
+  it('add_review_comment forwards to POST /reviews/comments', async () => {
+    await start((req, body, res) =>
+      json(res, 200, { comment: { id: 'c-1', file: body.file, line: body.line, side: 'new' } })
+    )
+    const r = await callTool('add_review_comment', { file: 'src/a.ts', line: 12, body: 'nit' })
+    expect(r.result.isError).toBeFalsy()
+    expect(r.result.content[0].text).toBe('Added comment c-1 on src/a.ts:12')
+    const post = stub.captured.find((c) => c.url === '/reviews/comments')
+    expect(post.method).toBe('POST')
+    expect(post.terminalId).toBe('test-terminal')
+    expect(post.body).toEqual({ file: 'src/a.ts', line: 12, body: 'nit' })
+  })
+
+  it('add_review_comment validates locally and surfaces server range errors', async () => {
+    await start((req, body, res) => json(res, 422, { error: 'line 900 is out of range: src/a.ts has 40 lines' }))
+    const bad = await callTool('add_review_comment', { file: 'src/a.ts', line: 0, body: 'x' })
+    expect(bad.result.isError).toBe(true)
+    expect(stub.captured.find((c) => c.url === '/reviews/comments')).toBeUndefined()
+    const r = await callTool('add_review_comment', { file: 'src/a.ts', line: 900, body: 'x' })
+    expect(r.result.isError).toBe(true)
+    expect(r.result.content[0].text).toMatch(/has 40 lines/)
+  })
+
+  it('list_review_comments passes filters as query params', async () => {
+    await start((req, body, res) => json(res, 200, { comments: [{ id: 'c-1' }] }))
+    const r = await callTool('list_review_comments', { status: 'open', file: 'src/a.ts' })
+    expect(JSON.parse(r.result.content[0].text)).toEqual([{ id: 'c-1' }])
+    expect(stub.captured.some((c) => c.url === '/reviews/comments?status=open&file=src%2Fa.ts')).toBe(true)
+  })
+
+  it('reply_to_comment and resolve_comment map comment_id to commentId', async () => {
+    await start((req, body, res) =>
+      json(res, 200, {
+        comment: {
+          id: 'c-1',
+          file: 'src/a.ts',
+          line: 3,
+          status: req.url === '/reviews/resolve' && body.resolved ? 'resolved' : 'open'
+        }
+      })
+    )
+    const reply = await callTool('reply_to_comment', { comment_id: 'c-1', body: 'fixed' })
+    expect(reply.result.content[0].text).toMatch(/Replied to src\/a.ts:3/)
+    expect(stub.captured.find((c) => c.url === '/reviews/replies').body).toEqual({
+      commentId: 'c-1',
+      body: 'fixed'
+    })
+    const resolved = await callTool('resolve_comment', { comment_id: 'c-1' })
+    expect(resolved.result.content[0].text).toMatch(/^Resolved/)
+    const reopened = await callTool('resolve_comment', { comment_id: 'c-1', resolved: false })
+    expect(reopened.result.content[0].text).toMatch(/^Reopened/)
+  })
+
+  it('submit_review explains a held draft, a delivery, and a failed delivery', async () => {
+    const responses = [
+      { commentCount: 2, state: 'draft', targetTabId: 'author', delivery: null },
+      { commentCount: 1, state: 'sent', targetTabId: 'author', delivery: { ok: true, tabId: 'author', woke: true } },
+      { commentCount: 0, state: 'failed', targetTabId: 'term', delivery: { ok: false, error: 'not supported yet' } }
+    ]
+    await start((req, body, res) => json(res, 200, responses.shift()))
+    const draft = await callTool('submit_review', { verdict: 'changes-requested', summary: 's' })
+    expect(draft.result.content[0].text).toMatch(/held as a draft.*tab author/)
+    const sent = await callTool('submit_review', { verdict: 'approve', summary: 's' })
+    expect(sent.result.content[0].text).toMatch(/delivered to tab author \(woke it\)/)
+    const failed = await callTool('submit_review', { verdict: 'comment', summary: 's', tab: 'term' })
+    expect(failed.result.content[0].text).toMatch(/NOT delivered: not supported yet/)
+    expect(stub.captured.filter((c) => c.url === '/reviews/submit').at(-1).body).toEqual({
+      verdict: 'comment',
+      summary: 's',
+      tab: 'term'
+    })
+  })
+
+  it('request_review opens a reviewer and says what happens next', async () => {
+    const responses = [
+      { reviewerTabId: 'rev-1', reused: false },
+      { reviewerTabId: 'rev-1', reused: true }
+    ]
+    await start((req, body, res) => json(res, 200, responses.shift()))
+    const first = await callTool('request_review', { context: 'added div' })
+    expect(first.result.isError).toBeFalsy()
+    expect(first.result.content[0].text).toMatch(/Opened a reviewer Chat tab \(tab rev-1\)/)
+    expect(first.result.content[0].text).toMatch(/comes back to you as a message/)
+    expect(stub.captured.find((c) => c.url === '/reviews/request').body).toEqual({
+      context: 'added div'
+    })
+    const second = await callTool('request_review', { context: 'round two' })
+    expect(second.result.content[0].text).toMatch(/Asked the existing reviewer/)
+  })
+
+  it('request_review requires context and surfaces a refusal', async () => {
+    await start((req, body, res) => json(res, 409, { error: 'only a Chat tab can request a review' }))
+    const missing = await callTool('request_review', {})
+    expect(missing.result.isError).toBe(true)
+    expect(stub.captured.find((c) => c.url === '/reviews/request')).toBeUndefined()
+    const refused = await callTool('request_review', { context: 'x' })
+    expect(refused.result.isError).toBe(true)
+    expect(refused.result.content[0].text).toMatch(/only a Chat tab/)
+  })
+
+  it('submit_review rejects an unknown verdict locally', async () => {
+    await start((req, body, res) => json(res, 200, {}))
+    const r = await callTool('submit_review', { verdict: 'lgtm', summary: 's' })
+    expect(r.result.isError).toBe(true)
+    expect(stub.captured.find((c) => c.url === '/reviews/submit')).toBeUndefined()
+  })
+
+  it('send_message accepts a tab without a worktree', async () => {
+    await start((req, body, res) =>
+      json(res, 200, { delivered: true, worktreePath: '/wt', tab: 'author', from: 'WT · Reviewer', woke: false })
+    )
+    const r = await callTool('send_message', { tab: 'author', message: 'hi' })
+    expect(r.result.isError).toBeFalsy()
+    expect(r.result.content[0].text).toBe('Delivered to /wt (tab author), sent as "WT · Reviewer"')
+    expect(stub.captured.find((c) => c.url === '/messages').body).toEqual({ tab: 'author', message: 'hi' })
+    const missing = await callTool('send_message', { message: 'hi' })
+    expect(missing.result.isError).toBe(true)
+  })
+})

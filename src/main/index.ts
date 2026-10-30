@@ -109,7 +109,7 @@ import { isWorktreeMerged } from '../shared/state/prs'
 import type { ForkSource } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
-import type { ReviewCommentStatus, ReviewSide } from '../shared/state/reviews'
+import type { ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../shared/state/reviews'
 import {
   addReviewComment,
   addReviewReply,
@@ -139,6 +139,9 @@ import {
   type SidebarDetailPrefs,
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
+  type AgentReviewDelivery,
+  type ReviewAgentChoice,
+  DEFAULT_REVIEW_PROMPT,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -157,10 +160,25 @@ import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
 import {
+  deliverToTab,
   deliverToWorktreeChat,
   describeWorktree,
   resolveWorktreeQuery
 } from './chat-delivery'
+import { listChatTabs } from '../shared/agent-tabs'
+import { ReviewSpawner } from './review-spawner'
+import {
+  agentAuthor,
+  buildUserReviewContext,
+  listReviewComments,
+  pickAuthorTab,
+  requestReview,
+  replyToReviewComment,
+  sendReviewSubmission,
+  setReviewCommentResolved,
+  submitReview,
+  type ReviewServiceDeps
+} from './review-service'
 import { buildMergeConflictMessage } from './merge-conflict-request'
 import { writeMcpConfigForTerminal, pruneMcpConfigs, getBridgeScriptPath } from './mcp-config'
 import { getControlServerInfo } from './control-server'
@@ -1089,6 +1107,11 @@ function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
  *  (kickoff + wake), so all paths produce the same dispatch + seed +
  *  create order. Idempotent — every provider's create() short-circuits
  *  if the instance is already running. */
+/** Permission mode a reviewer Chat tab starts in. 'plan' is the tightest
+ *  mode that still lets it read the branch and call the review tools;
+ *  the rest of "don't edit this branch" is said in the request prompt. */
+const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
+
 function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
   if (chatRouter.hasSession(sessionId)) return
   const tab = findJsonClaudeTab(sessionId)
@@ -1108,8 +1131,14 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
       sessionId,
       worktreePath,
       ...(tab.agentKind ? { agentKind: tab.agentKind } : {}),
-      defaultPermissionMode:
-        store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
+      // A reviewer reads the branch and comments on it; it has no reason
+      // to edit, and acceptEdits (the usual default) would let it change
+      // the author's working tree without anyone seeing. Read off the
+      // tab's reviewOf link rather than remembered per session, so a
+      // reviewer that is reloaded or woken comes back in the same mode.
+      defaultPermissionMode: tab.reviewOf
+        ? REVIEWER_PERMISSION_MODE
+        : store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
     }
   })
   chatRouter.seedFromTranscript(sessionId, worktreePath)
@@ -1268,13 +1297,42 @@ const chatDeliveryDeps = {
   send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
   wake: (worktreePath: string, tabId: string) =>
-    panesFSM.wakeJsonClaudeTab(worktreePath, tabId)
+    panesFSM.wakeJsonClaudeTab(worktreePath, tabId),
+  respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)
 }
 
 // Injects a "CI is failing" message into a worktree's agent chat when its
 // PR checks go red. Kept out of PRPoller so the poller stays ignorant of
 // chat sessions.
 const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
+
+const listWorktreeChatTabs = (worktreePath: string) =>
+  listChatTabs(store.getSnapshot().state, worktreePath)
+const reviewServiceDeps: ReviewServiceDeps = {
+  store,
+  listChatTabs: listWorktreeChatTabs,
+  openReviewer: (worktreePath, requesterTabId, prompt, opts) =>
+    panesFSM.openReviewerTab(worktreePath, requesterTabId, prompt, opts),
+  reviewDefaults: () => {
+    const s = store.getSnapshot().state.settings
+    return {
+      agentKind: s.reviewAgent === 'inherit' ? undefined : s.reviewAgent,
+      model: s.reviewModel || undefined,
+      prompt: s.reviewPrompt || DEFAULT_REVIEW_PROMPT
+    }
+  },
+  deliver: (worktreePath, tabId, message) =>
+    deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+}
+
+// Step 3's counterpart to request_review: when a worktree's PR checks go
+// green, open a reviewer for its author tab on the same path a hand-made
+// request takes. Declared after reviewServiceDeps, which it closes over.
+const reviewSpawner = new ReviewSpawner(store, {
+  isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
+  requestReview: (worktreePath, requesterTabId, context) =>
+    requestReview(reviewServiceDeps, worktreePath, requesterTabId, context)
+})
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
 // settings.autoSleepMinutes). Constructed after panesFSM since it
@@ -4435,6 +4493,59 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setAgentReviewDelivery', (_ctx, value: AgentReviewDelivery) => {
+    if (value !== 'draft' && value !== 'auto') return false
+    if (value === 'auto') config.agentReviewDelivery = 'auto'
+    else delete config.agentReviewDelivery
+    saveConfig(config)
+    store.dispatch({ type: 'settings/agentReviewDeliveryChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setReviewAgent', (_ctx, value: ReviewAgentChoice) => {
+    if (value !== 'inherit' && value !== 'claude' && value !== 'codex' && value !== 'cursor') {
+      return false
+    }
+    if (value === 'inherit') delete config.reviewAgent
+    else config.reviewAgent = value
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewAgentChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setReviewModel', (_ctx, value: string) => {
+    if (typeof value !== 'string') return false
+    const trimmed = value.trim()
+    if (trimmed) config.reviewModel = trimmed
+    else delete config.reviewModel
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewModelChanged', payload: trimmed })
+    return true
+  })
+
+  transport.onRequest('config:setReviewPrompt', (_ctx, prompt: string) => {
+    if (typeof prompt !== 'string') return false
+    const trimmed = prompt.trim()
+    // Empty restores the bundled default rather than leaving a reviewer
+    // with no instructions at all.
+    if (trimmed && trimmed !== DEFAULT_REVIEW_PROMPT) config.reviewPrompt = trimmed
+    else delete config.reviewPrompt
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/reviewPromptChanged',
+      payload: trimmed || DEFAULT_REVIEW_PROMPT
+    })
+    return true
+  })
+
+  transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
+    if (enabled) config.autoReviewOnGreenCi = true
+    else delete config.autoReviewOnGreenCi
+    saveConfig(config)
+    store.dispatch({ type: 'settings/autoReviewOnGreenCiChanged', payload: enabled === true })
+    return true
+  })
+
   transport.onRequest('config:setPreventSleepUntil', (_ctx, value: number | null) => {
     // null / invalid → clear; a positive epoch-ms → arm. Session-only: never
     // written to config.json — the WakeLockController owns expiry and the
@@ -4928,6 +5039,86 @@ function registerIpcHandlers(): void {
     }
   )
 
+  transport.onRequest('reviews:editComment', (_ctx, worktreePath: string, id: string, body: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    if (typeof body !== 'string' || !body.trim()) return false
+    store.dispatch({
+      type: 'reviews/commentEdited',
+      payload: { worktreePath, id, body: body.trim() }
+    })
+    return true
+  })
+
+  // "Request AI review" in the PR panel. The user has no tab of their
+  // own to be the requester, so the review is aimed at the worktree's
+  // author Chat tab — the same tab the CI-green spawner would pick, and
+  // where the finished review is delivered.
+  transport.onRequest('reviews:requestForWorktree', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) {
+      return { ok: false, error: 'No worktree' }
+    }
+    const state = store.getSnapshot().state
+    const author = pickAuthorTab(state, worktreePath)
+    if (!author) {
+      return {
+        ok: false,
+        error: 'No Chat tab in this worktree to review for — open one and try again'
+      }
+    }
+    const result = requestReview(
+      reviewServiceDeps,
+      worktreePath,
+      author,
+      buildUserReviewContext(state.prs.byPath[worktreePath])
+    )
+    log('review', `user requested review for ${worktreePath}: ${JSON.stringify(result)}`)
+    return result
+  })
+
+  transport.onRequest('reviews:listChatTabs', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) return []
+    return listWorktreeChatTabs(worktreePath)
+  })
+
+  transport.onRequest(
+    'reviews:editSubmission',
+    (_ctx, worktreePath: string, id: string, summary: string, verdict: ReviewVerdict) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+      if (typeof summary !== 'string') return false
+      if (verdict !== 'approve' && verdict !== 'changes-requested' && verdict !== 'comment') {
+        return false
+      }
+      store.dispatch({
+        type: 'reviews/submissionEdited',
+        payload: { worktreePath, id, summary: summary.trim(), verdict }
+      })
+      return true
+    }
+  )
+
+  transport.onRequest('reviews:deleteSubmission', (_ctx, worktreePath: string, id: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    store.dispatch({ type: 'reviews/submissionDeleted', payload: { worktreePath, id } })
+    return true
+  })
+
+  transport.onRequest(
+    'reviews:sendSubmission',
+    (_ctx, worktreePath: string, id: string, targetTabId?: string) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') {
+        return { ok: false, error: 'Invalid request' }
+      }
+      const result = sendReviewSubmission(
+        reviewServiceDeps,
+        worktreePath,
+        id,
+        typeof targetTabId === 'string' && targetTabId ? targetTabId : undefined
+      )
+      log('review', `send ${id} -> ${result.ok ? result.tabId : `failed: ${result.error}`}`)
+      return result
+    }
+  )
+
   transport.onRequest(
     'reviews:refreshAnchors',
     async (_ctx, worktreePath: string, filePath?: string) => {
@@ -5120,6 +5311,8 @@ async function runBoot(): Promise<void> {
 
   ciNotifier.start()
 
+  reviewSpawner.start()
+
   autoSleepMonitor.start()
 
   wakeLockController.start()
@@ -5284,6 +5477,39 @@ async function runBoot(): Promise<void> {
           chatDeliveryDeps,
           worktreePath,
           message
+        ),
+      sendToTab: (worktreePath, tabId, message) =>
+        deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+    },
+    listChatTabs: listWorktreeChatTabs,
+    reviews: {
+      list: (worktreePath, filter) => listReviewComments(store, worktreePath, filter),
+      addComment: (worktreePath, callerTabId, input) =>
+        addReviewComment(store, worktreePath, {
+          ...input,
+          author: agentAuthor(store.getSnapshot().state, worktreePath, callerTabId)
+        }),
+      reply: (worktreePath, callerTabId, commentId, body) =>
+        replyToReviewComment(
+          store,
+          worktreePath,
+          commentId,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
+          body
+        ),
+      setResolved: (worktreePath, commentId, resolved) =>
+        setReviewCommentResolved(store, worktreePath, commentId, resolved),
+      request: (worktreePath, callerTabId, context) =>
+        requestReview(reviewServiceDeps, worktreePath, callerTabId, context),
+      submit: (worktreePath, callerTabId, input) =>
+        submitReview(
+          reviewServiceDeps,
+          worktreePath,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
+          {
+            ...input,
+            holdAsDraft: store.getSnapshot().state.settings.agentReviewDelivery === 'draft'
+          }
         )
     },
     browser: {

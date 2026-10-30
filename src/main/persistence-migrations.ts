@@ -41,6 +41,8 @@ export interface PersistedTab {
    *  is user-set and locks agents out — which is also what every label
    *  written before this field existed restores as. */
   customLabelSource?: 'agent'
+  /** For a reviewer Chat tab: the tab that requested the review. */
+  reviewOf?: string
 }
 
 export interface PersistedPane {

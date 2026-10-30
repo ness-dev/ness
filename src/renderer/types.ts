@@ -11,9 +11,21 @@ import type {
   ReviewComment,
   ReviewCommentStatus,
   ReviewSide,
-  ReviewAuthor
+  ReviewAuthor,
+  ReviewSubmission,
+  ReviewVerdict
 } from '../shared/state/reviews'
-export type { ReviewComment, ReviewCommentStatus, ReviewSide, ReviewAuthor }
+export type {
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewSide,
+  ReviewAuthor,
+  ReviewSubmission,
+  ReviewVerdict
+}
+
+import type { ChatTabInfo } from '../shared/agent-tabs'
+export type { ChatTabInfo }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
 export type { ToolSpec, ToolRunResult }
@@ -27,8 +39,13 @@ export type { SessionCostSummary, ClaudeAuthInfo, SubscriptionTier }
 import type { AddRepoResult } from '../shared/repo-pick'
 export type { AddRepoResult }
 
-import type { PreventSleepMode, SidebarTabsExpansion } from '../shared/state/settings'
-export type { PreventSleepMode }
+import type {
+  AgentReviewDelivery,
+  ReviewAgentChoice,
+  PreventSleepMode,
+  SidebarTabsExpansion
+} from '../shared/state/settings'
+export type { AgentReviewDelivery, ReviewAgentChoice, PreventSleepMode }
 
 /** Per-kind dirtiness flags for a worktree. `git` reflects
  *  uncommitted changes; `scratchpad` reflects a non-empty scratchpad
@@ -403,6 +420,11 @@ export interface ElectronAPI {
   setJsonModeTranscriptWindow(value: number): Promise<boolean>
   setAutoSleepMinutes(value: number): Promise<boolean>
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
+  setAgentReviewDelivery(value: AgentReviewDelivery): Promise<boolean>
+  setAutoReviewOnGreenCi(enabled: boolean): Promise<boolean>
+  setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
+  setReviewModel(value: string): Promise<boolean>
+  setReviewPrompt(prompt: string): Promise<boolean>
   setPreventSleepUntil(value: number | null): Promise<boolean>
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>
   setWarnBeforeQuitting(enabled: boolean): Promise<boolean>
@@ -501,6 +523,24 @@ export interface ElectronAPI {
   ): Promise<boolean>
   addReviewReply(worktreePath: string, commentId: string, body: string): Promise<boolean>
   refreshReviewAnchors(worktreePath: string, filePath?: string): Promise<boolean>
+  editReviewComment(worktreePath: string, id: string, body: string): Promise<boolean>
+  listReviewTargets(worktreePath: string): Promise<ChatTabInfo[]>
+  /** Opens a reviewer for this worktree's author Chat tab. */
+  requestAiReview(
+    worktreePath: string
+  ): Promise<{ ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }>
+  editReviewSubmission(
+    worktreePath: string,
+    id: string,
+    summary: string,
+    verdict: ReviewVerdict
+  ): Promise<boolean>
+  deleteReviewSubmission(worktreePath: string, id: string): Promise<boolean>
+  sendReviewSubmission(
+    worktreePath: string,
+    id: string,
+    targetTabId?: string
+  ): Promise<{ ok: true; tabId: string; woke: boolean } | { ok: false; error: string }>
   setAlias(path: string, alias: string): Promise<boolean>
   clearAlias(path: string): Promise<boolean>
   openInEditor(worktreePath: string, filePath?: string): Promise<{ ok: true } | { ok: false; error: string }>
