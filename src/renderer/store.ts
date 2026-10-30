@@ -36,6 +36,10 @@ import {
 import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import { EMPTY_REVIEW_COMMENTS, type ReviewComment } from '../shared/state/reviews'
+import {
+  mergeClientOwnedSettings,
+  type SettingsState
+} from '../shared/state/settings'
 import type { LocalTransportHandle, BackendConnection } from './types'
 import type { BootstrapProgress, SshBootstrapState } from '../shared/state/ssh-bootstrap'
 import {
@@ -696,8 +700,62 @@ export function useAppState<T>(selector: (s: AppState) => T): T {
   )
 }
 
-export function useSettings() {
-  return useAppState((s) => s.settings)
+/** Fires on changes to EITHER the client's own store or the active
+ *  backend's, since `useSettings` reads a merge of both. When active is
+ *  local these are the same store and the callback fires twice per event;
+ *  the 1-entry memo below makes the second read free, and React collapses
+ *  the pair into one render. */
+function subscribeClientAndActive(cb: () => void): () => void {
+  const offActive = subscribeActive(cb)
+  const offLocal = subscribeLocal(cb)
+  return () => {
+    offActive()
+    offLocal()
+  }
+}
+
+/** 1-entry memo keyed on both input references. `getSnapshot` MUST be
+ *  reference-stable for unchanged inputs — returning a fresh merge on
+ *  every read makes useSyncExternalStore detect perpetual change and
+ *  spin. Both slices come straight out of their reducers, which preserve
+ *  identity when nothing in them changed, so reference equality on the
+ *  two inputs is a sound cache key. */
+let settingsMergeCache: {
+  client: SettingsState
+  backend: SettingsState
+  merged: SettingsState
+} | null = null
+
+const getSettingsSnapshot = (): SettingsState => {
+  const client = getLocalState().settings
+  const backend = getActiveState().settings
+  const cached = settingsMergeCache
+  if (cached && cached.client === client && cached.backend === backend) {
+    return cached.merged
+  }
+  const merged = mergeClientOwnedSettings(client, backend)
+  settingsMergeCache = { client, backend, merged }
+  return merged
+}
+
+const getSettingsServerSnapshot = (): SettingsState => initialState.settings
+
+/** The active backend's settings, with the client-owned subset
+ *  (appearance, hotkeys, local-window behavior) overlaid from this
+ *  client's own store — see `CLIENT_OWNED_SETTING_KEYS`. Without the
+ *  overlay, switching to a remote backend re-themed and re-scaled the
+ *  window to whatever that machine had saved.
+ *
+ *  No-op in the web client, which registers its WS transport as the
+ *  registry's local backend and is always single-backend: client and
+ *  backend are the same object, so the merge returns it untouched and
+ *  the browser keeps reading the settings of the server serving it. */
+export function useSettings(): SettingsState {
+  return useSyncExternalStore(
+    subscribeClientAndActive,
+    getSettingsSnapshot,
+    getSettingsServerSnapshot
+  )
 }
 
 export function usePrs() {

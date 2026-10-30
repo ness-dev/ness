@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { useAppState, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
+import { useAppState, useLocalAppState, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
 import { useBackend } from './backend'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
@@ -85,7 +85,10 @@ export default function App(): JSX.Element {
   const active = useActiveTheme()
   // Narrow selector, not useSettings() — App re-rendering re-renders the whole
   // tree beneath it, so it must not subscribe to the entire settings slice.
-  const nessieColor = useAppState((s) => s.settings.nessieColor)
+  // Local rather than active: nessieColor is client-owned (see
+  // CLIENT_OWNED_SETTING_KEYS), so it must not change when the user
+  // switches to a remote backend.
+  const nessieColor = useLocalAppState((s) => s.settings.nessieColor)
   useEffect(() => {
     applyTheme(active, nessieColor)
     getBackend().setLastEffectiveAppBg(effectiveAppBg(active))
