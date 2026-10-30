@@ -21,6 +21,7 @@ interface SidebarProps {
   agentCount: number
   onSelectWorktree: (path: string) => void
   pathBackendId?: Record<string, string>
+  originByPath?: Record<string, string>
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
@@ -61,6 +62,7 @@ export function Sidebar({
   agentCount,
   onSelectWorktree,
   pathBackendId,
+  originByPath,
   onSelectTab,
   onDismissPendingWorktree,
   onNewWorktree,
@@ -164,6 +166,7 @@ export function Sidebar({
           onEndAliasEdit={onEndAliasEdit}
           onSelectWorktree={onSelectWorktree}
           pathBackendId={pathBackendId}
+          originByPath={originByPath}
           onSelectTab={onSelectTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}

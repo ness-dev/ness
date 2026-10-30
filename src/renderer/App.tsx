@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { LOCAL_BACKEND_ID, useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -121,6 +121,23 @@ function DesktopApp(): JSX.Element {
   // App has no ambient handle that can reach these methods — see
   // backend-routing.ts for why.
   const backendFor = useBackendForWorktree(mergedData.pathBackendId)
+  // Backend label per worktree path, for rows that aren't on this machine.
+  // Local ones are deliberately absent — badging the common case is noise,
+  // and the badge's job is to make "this acts on another machine" obvious
+  // before you act, not to annotate everything.
+  const originByPath = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const { backendId, backendLabel, worktree } of mergedData.worktrees) {
+      // Keyed on the registry's local entry, NOT on connection `kind`. In
+      // the web client the serving backend is registered kind:'remote'
+      // (it genuinely is, over a socket), so a kind test badges every row
+      // including the one you're attached to — noise, and it buries the
+      // signal the badge exists to carry.
+      if (backendId === LOCAL_BACKEND_ID) continue
+      out[worktree.path] = backendLabel || backendId
+    }
+    return out
+  }, [mergedData.worktrees])
   // Worktrees the user has actually opened this session, keyed the same way
   // the render loop keys its rows.
   //
@@ -174,20 +191,27 @@ function DesktopApp(): JSX.Element {
   //
   // A path is only unique WITHIN a backend, so this is the other half of
   // the worktree's identity, not a convenience.
-  const [selectedBackendId, setSelectedBackendId] = useState<string>(activeBackendId)
+  // DERIVED, never stored. Every path that changes the selected worktree
+  // would otherwise have to remember to update a stored copy, and six of
+  // them didn't: hotkey cycling (x2), Command Center, Command Palette,
+  // "go to main", and the stale-focus reset. Each left the chrome reading
+  // a different backend than the one hosting the open worktree.
+  //
+  // The owner map is the single source of truth, so selecting a worktree
+  // by ANY route now implies its backend. Ambiguous only when two backends
+  // share an absolute path — the known composite-identity gap.
+  const selectedBackendId =
+    (activeWorktreeId ? mergedData.pathBackendId[activeWorktreeId] : undefined) ??
+    activeBackendId
   const switchWorktree = useCallback(
-    (path: string, alsoInTransition?: () => void, backendId?: string) => {
+    (path: string, alsoInTransition?: () => void) => {
       startTransition(() => {
         setSidebarActiveId(path)
         setActiveWorktreeId(path)
-        // Defaults to the backend whose rows are on screen, which is where
-        // every selectable row comes from today. Callers pass an explicit id
-        // once the sidebar lists more than one backend.
-        setSelectedBackendId(backendId ?? activeBackendId)
         alsoInTransition?.()
       })
     },
-    [setSidebarActiveId, activeBackendId]
+    [setSidebarActiveId]
   )
   const activeAlias = useAliasForWorktree(selectedBackendId, activeWorktreeId)
   useEffect(() => {
@@ -847,15 +871,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowCleanup(false)
           setShowCommandCenter(false)
           setShowTaskList(false)
-        },
-        // Rows span backends now, so the selected worktree's owner is
-        // whichever backend contributed it — NOT the active chip. Without
-        // this, selecting a remote row leaves the chrome reading the local
-        // backend for a worktree that isn't in it.
-        mergedData.pathBackendId[path]
+        }
       )
     },
-    [switchWorktree, mergedData.pathBackendId]
+    [switchWorktree]
   )
 
   const handleSidebarSelectTab = useCallback(
@@ -1691,6 +1710,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             agentCount={agentWorktreeCount}
             onSelectWorktree={handleSidebarSelectWorktree}
             pathBackendId={mergedData.pathBackendId}
+            originByPath={originByPath}
             onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {
@@ -1759,7 +1779,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             Now spans every backend, not just the active one — each subtree is
             pinned to its owning backend below, so a remote worktree's panes
             keep streaming while a local one is on screen. */}
-        {mergedWorktrees.map(({ backendId, backendKind, worktree: wt }) => {
+        {mergedWorktrees.map(({ backendId, worktree: wt }) => {
           const paneTree = panes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
@@ -1768,7 +1788,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           // Local worktrees mount eagerly (cheap, keeps PTYs warm); remote
           // ones only once opened, so connecting never fans out across the
           // network. See openedWorktrees above.
-          const eagerMount = backendKind === 'local'
+          const eagerMount = backendId === LOCAL_BACKEND_ID
           const everOpened = openedWorktrees.has(mountKey)
           const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
           if (!eagerMount && !everOpened && !isSelected) return null

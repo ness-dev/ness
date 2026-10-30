@@ -55,6 +55,12 @@ export interface MergedWorktreeData {
   /** Which backend owns each worktree path — what `BackendScope` needs
    *  when rendering a row's workspace. */
   pathBackendId: Record<string, string>
+  /** Which backend owns each repo root. Worktree creation targets a repo,
+   *  and a repo lives on exactly one backend, so the repo choice is what
+   *  decides where a new worktree is created. */
+  repoBackendId: Record<string, string>
+  /** Display metadata per backend id, for labelling rows by origin. */
+  backendMeta: Record<string, { label: string; kind: 'local' | 'remote' }>
   /** Pane trees, merged. Keyed by worktree path like the slice itself. */
   panes: BackendStateEntry['state']['terminals']['panes']
 }
@@ -79,6 +85,8 @@ export function useMergedWorktrees(): MergedWorktreeData {
       aliases: {},
       assignedPRsByRepo: {},
       pathBackendId: {},
+      repoBackendId: {},
+      backendMeta: {},
       panes: {}
     }
 
@@ -96,6 +104,8 @@ export function useMergedWorktrees(): MergedWorktreeData {
         merged.pathBackendId[worktree.path] = backendId
       }
 
+      merged.backendMeta[backendId] = { label, kind }
+      for (const root of state.worktrees.repoRoots) merged.repoBackendId[root] = backendId
       merged.repoRoots.push(...state.worktrees.repoRoots)
       merged.pendingWorktrees.push(...state.worktrees.pending)
       merged.pendingDeletions.push(...(state.worktrees.pendingDeletions ?? []))

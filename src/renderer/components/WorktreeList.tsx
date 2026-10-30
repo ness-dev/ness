@@ -45,6 +45,8 @@ interface WorktreeListProps {
   /** Owning backend per worktree path, so nested tab rows read the right
    *  store. The sidebar sits above every BackendScope. */
   pathBackendId?: Record<string, string>
+  /** Backend label per worktree path, present only for non-local ones. */
+  originByPath?: Record<string, string>
   /** When provided, worktrees list their tabs as child rows, per the
    *  sidebarTabsExpansion setting. */
   onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
@@ -71,6 +73,7 @@ export function WorktreeList({
   onEndAliasEdit,
   onSelectWorktree,
   pathBackendId,
+  originByPath,
   onSelectTab,
   onToggleGroup,
   onToggleRepo,
@@ -222,6 +225,7 @@ export function WorktreeList({
               detailPrefs={detailPrefs}
               isEditingAlias={editingAliasPath === row.path}
               actions={rowActionsFor(row)}
+              originLabel={originByPath?.[row.path]}
               onSelect={onSelectWorktree}
               onStartAliasEdit={onStartAliasEdit}
               onEndAliasEdit={onEndAliasEdit}
