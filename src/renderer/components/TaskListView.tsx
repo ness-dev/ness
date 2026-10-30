@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { ChevronDown, ChevronRight, GitPullRequest, Hand, Loader2, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, GitPullRequest, Hand, Loader2 } from 'lucide-react'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { WorktreeListModel, WorktreeRowModel } from '../worktree-list-model'
 import { STATUS_COLORS, STATUS_LABELS, prIconStyle, prIconTitle } from '../worktree-row-style'
@@ -33,7 +33,11 @@ interface TaskListViewProps {
  *  uses, but three glyphs maximum per row — status, title, PR — so the view
  *  answers "what am I working on and what do I look at next" and nothing
  *  else. Content sits in a centered, max-width column: the point is a
- *  readable list, not a wall that grows with the window. */
+ *  readable list, not a wall that grows with the window.
+ *
+ *  Rendered as a full-screen overlay (Settings / My week chrome) rather
+ *  than in the center column, because it duplicates the sidebar — showing
+ *  both at once would put the same list on screen twice. */
 export function TaskListView({
   model,
   activeWorktreeId,
@@ -55,21 +59,21 @@ export function TaskListView({
   const total = sections.reduce((n, s) => n + s.groups.reduce((m, g) => m + g.rows.length, 0), 0)
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-bg">
-      <div className="drag-region px-4 py-4 border-b border-border flex items-center gap-6 shrink-0">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-fg-bright tracking-tight no-drag">Tasks</h1>
-          <p className="text-xs text-dim mt-0.5 no-drag">
-            {total} worktree{total === 1 ? '' : 's'}
-          </p>
-        </div>
+    <div className="flex-1 flex flex-col min-w-0 bg-app relative overflow-hidden">
+      <div className="drag-region h-10 shrink-0 border-b border-border relative">
         <button
           onClick={onClose}
-          className="no-drag p-2 rounded hover:bg-surface text-muted hover:text-fg cursor-pointer"
-          title="Close (Esc)"
+          className="no-drag absolute left-20 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-muted hover:text-fg-bright transition-colors cursor-pointer"
         >
-          <X className="icon-base" />
+          <ArrowLeft className="icon-sm" />
+          Back
+          <kbd className="text-xs text-faint bg-bg px-1.5 py-0.5 rounded border border-border font-mono">
+            ESC
+          </kbd>
         </button>
+        <span className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 text-sm font-medium text-fg pointer-events-none">
+          Tasks
+        </span>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto py-6">

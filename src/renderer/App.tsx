@@ -827,7 +827,6 @@ const setQuestStep = useCallback((next: QuestStep) => {
     !showActivity &&
     !showCleanup &&
     !showCommandCenter &&
-    !showTaskList &&
     reportIssueState === null &&
     !!activeWorktreeId &&
     !isPendingId(activeWorktreeId) &&
@@ -1008,6 +1007,20 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const myWeekOverlay = showMyWeek ? (
     <div className="fixed inset-0 z-50 flex">
       <WeeklyWrappedScreen onClose={() => setShowMyWeek(false)} />
+    </div>
+  ) : null
+
+  const taskListOverlay = showTaskList ? (
+    <div className="fixed inset-0 z-50 flex">
+      <TaskListView
+        model={worktreeListModel}
+        activeWorktreeId={activeWorktreeId}
+        activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
+        onClose={() => setShowTaskList(false)}
+        onSelect={handleSidebarSelectWorktree}
+        onSelectTab={handleSidebarSelectTab}
+        onToggleGroup={toggleGroup}
+      />
     </div>
   ) : null
 
@@ -1385,6 +1398,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       </div>
       {settingsOverlay}
       {myWeekOverlay}
+      {taskListOverlay}
       {repoPickerOverlay}
       {repoAddPromptOverlay}
       </HotkeysProvider>
@@ -1406,7 +1420,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       return !!tree && getLeaves(tree).some((l) => l.tabs.length > 0)
     })()
   const inContentOverlay =
-    showNewWorktree || showActivity || showCleanup || showCommandCenter || showTaskList || reportIssueState !== null
+    showNewWorktree || showActivity || showCleanup || showCommandCenter || reportIssueState !== null
   const activeIsPending =
     isPendingId(activeWorktreeId) && pendingWorktrees.some((p) => p.id === activeWorktreeId)
   const activeIsDeleting = !!activeWorktreeId && !!pendingDeletionByPath[activeWorktreeId]
@@ -1609,13 +1623,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenActivity={() => setShowActivity(true)}
             onOpenCleanup={() => setShowCleanup(true)}
-            onOpenTaskList={() => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(false)
-              setShowTaskList(true)
-            }}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1644,13 +1652,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(true)
             }}
             onOpenCleanup={() => setShowCleanup(true)}
-            onOpenTaskList={() => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(false)
-              setShowTaskList(true)
-            }}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1673,7 +1675,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
-          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
+          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
           return (
             <div
               key={wt.path}
@@ -1717,7 +1719,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     singleScreenMode || sidebarVisible ? 0 : 48
                   }
                   topBarTrailingExtendPx={
-                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null
+                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null
                       ? rightColumnHidden
                         ? 48
                         : rightPanelWidth + 1
@@ -1796,17 +1798,6 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onToggleGroup={toggleGroup}
           />
         )}
-        {showTaskList && (
-          <TaskListView
-            model={worktreeListModel}
-            activeWorktreeId={activeWorktreeId}
-            activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
-            onClose={() => setShowTaskList(false)}
-            onSelect={handleSidebarSelectWorktree}
-            onSelectTab={handleSidebarSelectTab}
-            onToggleGroup={toggleGroup}
-          />
-        )}
         {showCenterFallback && (
           <div className="flex-1 min-w-0 flex flex-col">
             <div
@@ -1828,7 +1819,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             </div>
           </div>
         )}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
+        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
           const pending = pendingWorktrees.find((p) => p.id === activeWorktreeId)
           if (!pending) return null
           return (
@@ -1840,7 +1831,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             />
           )
         })()}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
+        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
           <DeletingWorktreeScreen
             deletion={pendingDeletionByPath[activeWorktreeId]}
             onDismiss={handleDismissPendingDeletion}
@@ -1858,10 +1849,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
             out. macOS app-region rects are union/diff'd in DOM order (last wins per pixel), so a
             `drag-region` here — rendered after the tab bar — would re-mark the tab pixels as
             draggable and swallow clicks on tabs that overflow above the right column. */}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
@@ -1886,7 +1877,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onBuildCustomTool={handleBuildCustomTool}
           /></div></div>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && !showTaskList && reportIssueState === null && rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
             worktreePath={activeWorktreeId}
             onExpand={() => setRightColumnHidden(false)}
@@ -1916,6 +1907,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     </div>
     {settingsOverlay}
     {myWeekOverlay}
+    {taskListOverlay}
     {repoPickerOverlay}
     {repoAddPromptOverlay}
     {showPerfMonitor && <PerfMonitorHUD onClose={() => setShowPerfMonitor(false)} />}
