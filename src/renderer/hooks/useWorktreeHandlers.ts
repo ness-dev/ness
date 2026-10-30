@@ -2,10 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AddRepoResult, Worktree, PendingWorktree, PRStatus, TerminalTab, AgentKind, ForkSource } from '../types'
 import { markTerminalClosing } from '../components/XTerminal'
 import { useActiveBackend } from '../store'
-import { useBackend } from '../backend'
+import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
 import { randomUUID } from '../uuid'
 
 interface UseWorktreeHandlersArgs {
+  /** Which backend owns each worktree path. This hook is created above
+   *  every BackendScope, so per-worktree calls must be routed explicitly.
+   *  See backend-routing.ts. */
+  pathBackendId: Record<string, string>
   worktrees: Worktree[]
   pendingWorktrees: PendingWorktree[]
   repoRoots: string[]
@@ -33,7 +37,8 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     activeWorktreeId,
     setActiveWorktreeId,
     setActivePaneId,
-    setShowNewWorktree
+    setShowNewWorktree,
+    pathBackendId
   } = args
 
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
@@ -43,7 +48,8 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     | null
   >(null)
   const activeBackend = useActiveBackend()
-  const backend = useBackend()
+  const backend = useGlobalBackend()
+  const backendFor = useBackendForWorktree(pathBackendId)
 
   // Path of a freshly-created worktree we want to focus once it appears in the
   // worktrees list. Set on a successful create; the effect below switches to it
@@ -286,12 +292,12 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     async (path: string, newBranchName: string) => {
       const repoRoot = worktreeRepoByPath[path]
       if (!repoRoot) return
-      const result = await backend.continueWorktree(repoRoot, path, newBranchName)
+      const result = await backendFor(path).continueWorktree(repoRoot, path, newBranchName)
       // Main's worktree:continue handler doesn't refresh the store yet — ask
       // for a list refresh so the new branch name shows up.
       void backend.refreshWorktreesList()
       // Branch changed — re-fetch PR status for this worktree.
-      void backend.refreshPRsOne(path)
+      void backendFor(path).refreshPRsOne(path)
       if (result.stashConflict) {
         window.alert(
           `Checked out ${newBranchName}, but your uncommitted changes did not apply cleanly and are still in the stash.\n\nRun \`git stash pop\` inside the worktree after resolving conflicts.`
@@ -316,7 +322,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Check for dirty changes — git tracked + per-worktree scratchpad
       // notes are reported separately so the dialog can name exactly
       // what's about to be lost.
-      const dirty = await backend.isWorktreeDirty(path)
+      const dirty = await backendFor(path).isWorktreeDirty(path)
       if (dirty.git || dirty.scratchpad) {
         const parts: string[] = []
         if (dirty.git) parts.push('uncommitted changes')
@@ -331,10 +337,10 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       const tabs = terminalTabs[path] || []
       for (const tab of tabs) {
         if (tab.type !== 'diff' && tab.type !== 'file') markTerminalClosing(tab.id)
-        backend.killTerminal(tab.id)
+        backendFor(path).killTerminal(tab.id)
       }
       // Clean up pane state — main owns the panes map
-      void backend.panesClearForWorktree(path)
+      void backendFor(path).panesClearForWorktree(path)
       setActivePaneId((prev) => {
         const next = { ...prev }
         delete next[path]
@@ -350,7 +356,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       if (!repoRoot) return
       // Only git-tracked dirtiness needs `git worktree remove --force`;
       // a scratchpad note is invisible to git.
-      void backend.removeWorktree(
+      void backendFor(path).removeWorktree(
         repoRoot,
         path,
         dirty.git,
@@ -389,9 +395,9 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         const tabs = terminalTabs[path] || []
         for (const tab of tabs) {
           if (tab.type !== 'diff' && tab.type !== 'file') markTerminalClosing(tab.id)
-          backend.killTerminal(tab.id)
+          backendFor(path).killTerminal(tab.id)
         }
-        void backend.panesClearForWorktree(path)
+        void backendFor(path).panesClearForWorktree(path)
         setActivePaneId((prev) => {
           const next = { ...prev }
           delete next[path]
@@ -400,7 +406,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         const pr = prStatuses[path]
         const repoRoot = worktreeRepoByPath[path]
         if (repoRoot) {
-          void backend.removeWorktree(
+          void backendFor(path).removeWorktree(
             repoRoot,
             path,
             force,
@@ -427,7 +433,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
 
   const handleDismissPendingDeletion = useCallback(
     (path: string) => {
-      void backend.dismissPendingDeletion(path)
+      void backendFor(path).dismissPendingDeletion(path)
       setActiveWorktreeId((prev) => {
         if (prev !== path) return prev
         const next = worktrees.find((w) => w.path !== path)

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
 import { useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
-import { getBackendFor, useBackend } from './backend'
+import { getBackendFor } from './backend'
+import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
 import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
@@ -100,7 +101,11 @@ export default function App(): JSX.Element {
 function DesktopApp(): JSX.Element {
   // Multi-backend RPC surface — routes through the active backend's
   // transport (local IPC handle for local, WS direct for remotes).
-  const backend = useBackend()
+  //
+  // Narrowed: App renders above every BackendScope, so this handle must not
+  // be able to reach worktree-scoped methods. Those go through
+  // `backendFor(path)` below. See backend-routing.ts.
+  const backend = useGlobalBackend()
   // Which backend the mounted worktree subtrees belong to. Every row in
   // `worktrees` below was read out of this backend's store, so this is the
   // id their panes must route through — see the BackendScope in the
@@ -112,6 +117,10 @@ function DesktopApp(): JSX.Element {
   // about which backends exist.
   const mergedData = useMergedWorktrees()
   const mergedWorktrees = mergedData.worktrees
+  // Routes a per-worktree call to the backend hosting that worktree.
+  // App has no ambient handle that can reach these methods — see
+  // backend-routing.ts for why.
+  const backendFor = useBackendForWorktree(mergedData.pathBackendId)
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
@@ -611,15 +620,15 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Ask main for a single-worktree PR refresh. Used by the activity observer
   // when a terminal enters the "waiting" state (likely just pushed).
   const fetchPRStatus = useCallback((wtPath: string) => {
-    void backend.refreshPRsOne(wtPath)
-  }, [])
+    void backendFor(wtPath).refreshPRsOne(wtPath)
+  }, [backendFor])
 
   // Ask main for a stale-only single-worktree refresh. Used when the user
   // activates a worktree — main dedups internally so rapid switching won't
   // hammer the GitHub API.
   const fetchPRStatusIfStale = useCallback((wtPath: string) => {
-    void backend.refreshPRsOneIfStale(wtPath)
-  }, [])
+    void backendFor(wtPath).refreshPRsOneIfStale(wtPath)
+  }, [backendFor])
 
   // On window focus, ask main for a stale-only bulk refresh. Main dedups
   // against its own lastAllFetchAt clock. Announcements piggyback on the
@@ -757,6 +766,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleConfirmRepoResolve,
     handleDismissRepoPrompt
   } = useWorktreeHandlers({
+    pathBackendId: mergedData.pathBackendId,
     worktrees,
     pendingWorktrees,
     repoRoots,
@@ -852,8 +862,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
     [activeWorktreeId, handleOpenPR]
   )
   const handleOpenActiveReview = useCallback(() => {
-    if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
-  }, [activeWorktreeId])
+    if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
+  }, [activeWorktreeId, backendFor])
   const handleCollapseRightColumn = useCallback(() => setRightColumnHidden(true), [])
   const handleBuildCustomTool = useCallback((branch: string, prompt: string) => {
     setNewWorktreePrefill({ branch, prompt })
@@ -943,6 +953,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Sidebar-aware hotkey handlers + the resolved binding map for tooltips.
   // The hook also subscribes to keystrokes via useHotkeys internally.
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
+    pathBackendId: mergedData.pathBackendId,
     worktrees,
     repoRoots,
     unifiedRepos,
@@ -1951,7 +1962,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
             }}
             onReview={() => {
-              if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
+              if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
             }}
             onFileQuickOpen={() => {
               setShowHotkeyCheatsheet(false)

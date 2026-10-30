@@ -1,9 +1,10 @@
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import type { AgentKind, TerminalTab, PaneNode } from '../types'
 import { getLeaves, findLeaf, findLeafByTabId } from '../../shared/state/terminals'
 import { agentDisplayName, getAgentInfo } from '../../shared/agent-registry'
 import { focusTerminalById, markTerminalClosing } from '../components/XTerminal'
-import { getBackendFor, useBackend } from '../backend'
+import { useBackend } from '../backend'
+import { useBackendForWorktree } from '../backend-routing'
 import { randomUUID } from '../uuid'
 import { useSettings } from '../store'
 
@@ -40,22 +41,10 @@ export function useTabHandlers({
   pathBackendId
 }: UseTabHandlersArgs) {
   const backend = useBackend()
-  /** The backend owning `worktreePath`. Falls back to the active-routed
-   *  singleton for a path we have no owner for (shouldn't happen once the
-   *  merged list is populated).
-   *
-   *  Reads the owner map through a ref so this function's identity never
-   *  changes. A dozen handlers below call it, and if it were memoized on
-   *  `pathBackendId` every one of their dependency arrays would need it
-   *  added — miss one and that handler keeps routing by a stale owner map,
-   *  which is invisible until a backend is added or removed mid-session.
-   *  A stable identity plus a fresh read removes the whole class. */
-  const pathBackendIdRef = useRef(pathBackendId)
-  pathBackendIdRef.current = pathBackendId
-  const backendFor = useCallback(
-    (worktreePath: string) => getBackendFor(pathBackendIdRef.current[worktreePath] ?? null),
-    []
-  )
+  // Shared with App rather than reimplemented — one definition of "which
+  // backend owns this worktree", and one place that gets the ref-based
+  // identity stability right. See backend-routing.ts.
+  const backendFor = useBackendForWorktree(pathBackendId)
   const openPrInBrowserTab = useSettings().openPrInBrowserTab
   const appendTabToPane = useCallback(
     (worktreePath: string, tab: TerminalTab, paneId?: string) => {

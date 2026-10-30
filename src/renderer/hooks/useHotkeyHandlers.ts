@@ -14,13 +14,17 @@ import {
   usePinned,
   useJsonClaudePendingApprovals
 } from '../store'
-import { useBackend } from '../backend'
+import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
 import { SCALES } from '../../shared/state/settings'
 import { QUESTION_TOOL_NAME } from '../../shared/state/json-claude'
 import { advancePreventSleep, PREVENT_SLEEP_META, PREVENT_SLEEP_TOAST_KEY } from '../prevent-sleep'
 import { showToast } from '../toast'
 
 interface UseHotkeyHandlersArgs {
+  /** Which backend owns each worktree path. This hook is created above
+   *  every BackendScope, so per-worktree calls must be routed explicitly.
+   *  See backend-routing.ts. */
+  pathBackendId: Record<string, string>
   worktrees: Worktree[]
   repoRoots: string[]
   unifiedRepos: boolean
@@ -107,7 +111,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     handleSplitPane,
     handleRefreshWorktrees,
     setShowSettings,
-    onStartAliasEdit
+    onStartAliasEdit,
+    pathBackendId
   } = args
 
   // Mirror the sidebar's grouping/rendering order so hotkey navigation
@@ -194,7 +199,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
   // The connections list always starts with Local at index 0; Cmd+Shift+1
   // is "back to local".
   const connections = useConnections()
-  const backend = useBackend()
+  const backend = useGlobalBackend()
+  const backendFor = useBackendForWorktree(pathBackendId)
   const switchToBackendByIndex = useCallback(
     (index: number) => {
       const target = connections[index]
@@ -335,7 +341,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       },
       openInEditor: () => {
         if (!activeWorktreeId) return
-        backend.openInEditor(activeWorktreeId)
+        backendFor(activeWorktreeId).openInEditor(activeWorktreeId)
       },
       toggleCommandCenter: () => setShowCommandCenter((v) => !v),
       toggleTaskList: () => setShowTaskList((v) => !v),
@@ -372,7 +378,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       togglePerfMonitor: () => setShowPerfMonitor((v) => !v),
       hotkeyCheatsheet: () => setShowHotkeyCheatsheet((v) => !v),
       openReview: () => {
-        if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
+        if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
       },
       toggleQuakeTerminal: () => {
         // Read live keyboard focus: only open when it's inside a workspace
