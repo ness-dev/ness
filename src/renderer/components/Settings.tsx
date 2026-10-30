@@ -438,6 +438,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    agentTabNamingEnabled,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -2129,6 +2130,38 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     />
                   </div>
                 )}
+              </div>
+
+              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">
+                Agent tab naming
+              </h3>
+              <div className="bg-panel-raised border border-border rounded-lg p-4">
+                <p className="text-xs text-dim mb-3">
+                  Lets an agent name the tab it&apos;s running in, so a worktree
+                  holding four sessions doesn&apos;t show four tabs called
+                  &quot;Claude&quot;. An agent can only ever rename its own tab.
+                  If you rename a tab yourself, your name is final and the
+                  agent is refused from then on — turning this off is for
+                  stopping agents naming tabs at all, not for protecting one
+                  tab. Only takes effect on the next agent session.
+                </p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={agentTabNamingEnabled}
+                    onChange={(e) => { void backend.setAgentTabNamingEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Let agents name their own tab</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">set_tab_name</code>{' '}
+                      MCP tool and asks agents to keep the name current. Your own
+                      renaming (double-click the tab,{' '}
+                      <HotkeyBadge binding={bindingToString(resolvedHotkeys.renameTab)} />, or
+                      the right-click menu) works either way.
+                    </div>
+                  </div>
+                </label>
               </div>
 
               <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">

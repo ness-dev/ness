@@ -546,16 +546,37 @@ export class PanesFSM {
     this.commit(wtPath, updated)
   }
 
-  renameTab(wtPath: string, tabId: string, label: string): void {
+  /** Returns whether the rename landed. An agent rename is refused when
+   *  the user has named the tab themselves, and the control server needs
+   *  to tell the agent that so it stops trying. */
+  renameTab(
+    wtPath: string,
+    tabId: string,
+    label: string,
+    source: 'user' | 'agent'
+  ): boolean {
     const tree = this.getTree(wtPath)
-    if (!tree) return
+    if (!tree) return false
     const leaf = findLeafByTabId(tree, tabId)
-    if (!leaf) return
+    if (!leaf) return false
+    const tab = leaf.tabs.find((t) => t.id === tabId)
+    if (!tab) return false
+    // Mirrors the reducer's lock rule. Checked here rather than inferred
+    // from a no-op dispatch so re-setting the same name — which the
+    // reducer also treats as no change — isn't reported as a refusal.
+    if (
+      source === 'agent' &&
+      tab.customLabel !== undefined &&
+      tab.customLabelSource !== 'agent'
+    ) {
+      return false
+    }
     this.store.dispatch({
       type: 'terminals/tabRenamed',
-      payload: { worktreePath: wtPath, tabId, label }
+      payload: { worktreePath: wtPath, tabId, label, source }
     })
     this.opts.persist(this.buildPersistPayload())
+    return true
   }
 
   /** Activate the existing review tab for this worktree, or create one if

@@ -21,6 +21,15 @@ import { parseAutomatedMessage } from '../shared/state/json-claude'
 
 const setAlias = vi.fn<(worktreePath: string, alias: string) => void>()
 const clearAlias = vi.fn<(worktreePath: string) => void>()
+/** Stands in for PanesFSM.renameTab. Tests that need a refusal (the tab
+ *  carries a user-set name) flip `renameTabApplies`. */
+let renameTabApplies = true
+/** Mutable so a test can flip the setting off without restarting the
+ *  server — mirrors how the real dep re-reads config per request. */
+let agentTabNamingEnabled = true
+const renameTab = vi.fn<
+  (worktreePath: string, tabId: string, label: string, source: 'user' | 'agent') => boolean
+>(() => renameTabApplies)
 /** Stands in for the real `git branch -m`. Tests that need a failure flip
  *  `renameFailure` rather than re-registering the mock. */
 let renameFailure: string | null = null
@@ -109,6 +118,8 @@ const deps: ControlServerDeps = {
   },
   setAlias: (path, alias) => setAlias(path, alias),
   clearAlias: (path) => clearAlias(path),
+  getAgentTabNamingEnabled: () => agentTabNamingEnabled,
+  renameTab: (path, tabId, label, source) => renameTab(path, tabId, label, source),
   messaging: {
     isEnabled: () => messagingEnabled,
     resolveTarget: (query) => {
@@ -241,6 +252,84 @@ describe('control-server /worktrees/rename endpoint', () => {
       { terminalId: 'unknown-terminal' }
     )
     expect(r.status).toBe(400)
+  })
+})
+
+describe('control-server /tab-name endpoint', () => {
+  it('renames the caller\'s own tab, resolved entirely from scope', async () => {
+    renameTab.mockClear()
+    const r = await call('POST', '/tab-name', { name: 'Agent Tab Rename' })
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({ name: 'Agent Tab Rename', applied: true, clamped: false })
+    expect(renameTab).toHaveBeenCalledWith(
+      CALLER_WORKTREE,
+      CALLER_TERMINAL,
+      'Agent Tab Rename',
+      'agent'
+    )
+  })
+
+  it('ignores any tabId / worktreePath in the body — the caller cannot target another tab', async () => {
+    renameTab.mockClear()
+    await call('POST', '/tab-name', {
+      name: 'Sneaky',
+      tabId: 'someone-elses-tab',
+      worktreePath: EXPLICIT_WORKTREE
+    })
+    expect(renameTab).toHaveBeenCalledWith(CALLER_WORKTREE, CALLER_TERMINAL, 'Sneaky', 'agent')
+  })
+
+  it('clamps a too-long name to 32 chars and says so', async () => {
+    const r = await call('POST', '/tab-name', { name: 'N'.repeat(80) })
+    expect(r.status).toBe(200)
+    expect((r.json.name as string).length).toBe(32)
+    expect(r.json.clamped).toBe(true)
+  })
+
+  it('reports applied: false with reason user-set when the rename is refused', async () => {
+    renameTabApplies = false
+    const r = await call('POST', '/tab-name', { name: 'Agent Pick' })
+    renameTabApplies = true
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({ name: 'Agent Pick', applied: false, reason: 'user-set' })
+  })
+
+  it('rejects an empty name rather than treating it as a reset', async () => {
+    renameTab.mockClear()
+    const r = await call('POST', '/tab-name', { name: '   ' })
+    expect(r.status).toBe(400)
+    expect(renameTab).not.toHaveBeenCalled()
+  })
+
+  it('returns 403 and never renames when the setting is off', async () => {
+    renameTab.mockClear()
+    agentTabNamingEnabled = false
+    const r = await call('POST', '/tab-name', { name: 'Agent Pick' })
+    agentTabNamingEnabled = true
+    expect(r.status).toBe(403)
+    expect(String(r.json.error)).toContain('disabled in Ness settings')
+    expect(renameTab).not.toHaveBeenCalled()
+  })
+
+  it('reports the tab-naming gate on /scope so the bridge can hide the tool', async () => {
+    const on = await get('/scope')
+    expect(on.json.tabNaming).toEqual({ enabled: true })
+    agentTabNamingEnabled = false
+    const off = await get('/scope')
+    agentTabNamingEnabled = true
+    expect(off.json.tabNaming).toEqual({ enabled: false })
+  })
+
+  it('returns 400 without the terminal-id header and 404 when it resolves to nothing', async () => {
+    const noHeader = await call('POST', '/tab-name', { name: 'X' }, { terminalId: null })
+    expect(noHeader.status).toBe(400)
+    const unknown = await call(
+      'POST',
+      '/tab-name',
+      { name: 'X' },
+      { terminalId: 'unknown-terminal' }
+    )
+    expect(unknown.status).toBe(404)
   })
 })
 

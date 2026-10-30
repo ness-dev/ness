@@ -2934,6 +2934,21 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setAgentTabNamingEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
+    if (enabled) {
+      delete config.agentTabNamingEnabled
+    } else {
+      config.agentTabNamingEnabled = false
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: config.agentTabNamingEnabled !== false
+    })
+    return true
+  })
+
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.worktreeMessagingEnabled = true
@@ -3360,7 +3375,7 @@ function registerIpcHandlers(): void {
   transport.onRequest(
     'panes:renameTab',
     (_ctx, wtPath: string, tabId: string, label: string) => {
-      panesFSM.renameTab(wtPath, tabId, label)
+      panesFSM.renameTab(wtPath, tabId, label, 'user')
       return true
     }
   )
@@ -5247,6 +5262,9 @@ async function runBoot(): Promise<void> {
     clearAlias: (worktreePath) => {
       store.dispatch({ type: 'aliases/cleared', payload: { path: worktreePath } })
     },
+    getAgentTabNamingEnabled: () => config.agentTabNamingEnabled !== false,
+    renameTab: (worktreePath, tabId, label, source) =>
+      panesFSM.renameTab(worktreePath, tabId, label, source),
     renameBranch: async (worktreePath, newBranch) => {
       const result = await renameWorktreeBranch(worktreePath, newBranch)
       // The gitdir HEAD watcher would catch this on its own, but the tool

@@ -519,7 +519,7 @@ function TabChip({ tab, active, status, shellActivity, onSelect, onConvertTabTyp
         }
       >
         <TabIcon tab={tab} shellActivity={shellActivity} status={status} />
-        <span className="max-w-[140px] truncate">{tab.label}</span>
+        <span className="max-w-[140px] truncate">{tab.customLabel ?? tab.label}</span>
       </button>
       {menu && onConvertTabType && (
         <div
@@ -685,7 +685,7 @@ function NonRunnableTabPlaceholder({ tab }: { tab: TerminalTab }): JSX.Element {
     <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="text-sm text-fg-bright">{label} — desktop only</div>
       <div className="text-xs text-dim max-w-xs">
-        {tab.label}
+        {tab.customLabel ?? tab.label}
       </div>
       {tab.type === 'browser' && tab.url && (
         <a

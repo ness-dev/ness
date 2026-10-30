@@ -374,6 +374,14 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default off. */
   worktreeMessagingEnabled: boolean
+  /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
+   *  guidance to keep their tab name current. Default ON — unlike the
+   *  experimental toggles this gates a cosmetic, reversible action. Off
+   *  hides the tool and strips the guidance rather than rejecting the
+   *  call, so an agent isn't told about something that will fail. The
+   *  user's own rename (double-click / Cmd+L / context menu) is never
+   *  affected. */
+  agentTabNamingEnabled: boolean
   /** Controls whether new Claude tabs spawn as the terminal-hosted TUI
    *  ('xterm') or the React chat interface ('json'). Internal values are
    *  unchanged; the user-facing label is "Terminal" / "Chat". */
@@ -542,6 +550,7 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
   | { type: 'settings/autoApprovePermissionsChanged'; payload: boolean }
@@ -622,6 +631,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: false,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
+  agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
   autoApprovePermissions: false,
@@ -789,6 +799,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/agentTabNamingEnabledChanged':
+      return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':
       return { ...state, defaultClaudeTabType: event.payload }
     case 'settings/chatPromotionDismissedChanged':

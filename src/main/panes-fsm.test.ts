@@ -617,3 +617,55 @@ describe('PanesFSM forked Codex conversations', () => {
     expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith('fork-1', wtPath, 'carry on')
   })
 })
+
+describe('PanesFSM.renameTab', () => {
+  const seed = (tab: Partial<TerminalTab>): { fsm: PanesFSM; store: Store; persist: ReturnType<typeof vi.fn> } => {
+    const store = new Store()
+    const persist = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist,
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null
+    })
+    seedLeaf(store, '/wt/a', {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [{ id: 't1', type: 'json-claude', label: 'Chat', ...tab }],
+      activeTabId: 't1'
+    })
+    return { fsm, store, persist }
+  }
+  const labelOf = (store: Store): string | undefined =>
+    (store.getSnapshot().state.terminals.panes['/wt/a'] as PaneLeaf).tabs[0].customLabel
+
+  it('applies and persists an agent rename of an unnamed tab', () => {
+    const { fsm, store, persist } = seed({})
+    expect(fsm.renameTab('/wt/a', 't1', 'Tab Rename', 'agent')).toBe(true)
+    expect(labelOf(store)).toBe('Tab Rename')
+    expect(persist).toHaveBeenCalled()
+  })
+
+  it('reports false and persists nothing when the user already named the tab', () => {
+    const { fsm, store, persist } = seed({ customLabel: 'Mine' })
+    expect(fsm.renameTab('/wt/a', 't1', 'Agent Pick', 'agent')).toBe(false)
+    expect(labelOf(store)).toBe('Mine')
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('reports true for an idempotent agent re-set, so it reads as applied rather than refused', () => {
+    const { fsm } = seed({ customLabel: 'Same', customLabelSource: 'agent' })
+    expect(fsm.renameTab('/wt/a', 't1', 'Same', 'agent')).toBe(true)
+  })
+
+  it('lets a user rename override an agent-set name', () => {
+    const { fsm, store } = seed({ customLabel: 'Agent Pick', customLabelSource: 'agent' })
+    expect(fsm.renameTab('/wt/a', 't1', 'Mine', 'user')).toBe(true)
+    expect(labelOf(store)).toBe('Mine')
+  })
+
+  it('reports false for an unknown worktree or tab', () => {
+    const { fsm } = seed({})
+    expect(fsm.renameTab('/wt/missing', 't1', 'X', 'user')).toBe(false)
+    expect(fsm.renameTab('/wt/a', 'missing', 'X', 'user')).toBe(false)
+  })
+})
