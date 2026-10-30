@@ -1759,14 +1759,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
         )}
         {showCommandCenter && (
           <CommandCenter
-            worktrees={worktrees}
-            worktreeStatuses={worktreeStatuses}
-            worktreePendingTools={worktreePendingTools}
-            prStatuses={prStatuses}
-            mergedPaths={mergedPaths}
+            model={worktreeListModel}
             lastActive={lastActive}
             tailLines={tailLines}
             terminalTabs={terminalTabs}
+            unifiedRepos={unifiedRepos}
+            onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
             onClose={() => setShowCommandCenter(false)}
             onSelect={(path) => {
               setShowCommandCenter(false)
@@ -1775,7 +1773,6 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowCleanup(false)
               setActiveWorktreeId(path)
             }}
-            isGroupCollapsed={isGroupCollapsed}
             onToggleGroup={toggleGroup}
           />
         )}
