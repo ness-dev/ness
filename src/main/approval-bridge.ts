@@ -35,7 +35,6 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { isReviewTool } from '../shared/review-tools'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -404,18 +403,6 @@ export class ApprovalBridge {
     //      repo — unlike Claude's per-worktree settings.local.json, which
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
-    // The review tools touch only Ness's own review state, and a review
-    // calls them five to ten times — prompting would mean a stream of
-    // approvals per review. See review-tools.ts.
-    if (!isQuestion && isReviewTool(basePayload.toolName)) {
-      this.resolveAllowed(respond, basePayload)
-      log(
-        'approval-bridge',
-        `review-tool-allowed session=${basePayload.sessionId} tool=${basePayload.toolName}`
-      )
-      return
-    }
-
     const rootState = this.store.getSnapshot().state
     if (!isQuestion) {
       const matched = findMatchingRule(
