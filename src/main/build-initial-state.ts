@@ -37,6 +37,7 @@ import {
   BOTTOM_ICON_KEYS,
   resolveBottomIconOrder,
   type PreventSleepMode,
+  DEFAULT_REVIEW_PROMPT,
   type BottomIconKey
 } from '../shared/state/settings'
 import {
@@ -282,6 +283,14 @@ export function buildInitialAppState(
         : 'off',
       agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
       autoReviewOnGreenCi: config.autoReviewOnGreenCi === true,
+      reviewAgent:
+        config.reviewAgent === 'claude' ||
+        config.reviewAgent === 'codex' ||
+        config.reviewAgent === 'cursor'
+          ? config.reviewAgent
+          : 'inherit',
+      reviewModel: config.reviewModel || '',
+      reviewPrompt: config.reviewPrompt || DEFAULT_REVIEW_PROMPT,
       // The temporary "+1h" timer never survives a relaunch — always seed null.
       preventSleepUntil: null,
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),

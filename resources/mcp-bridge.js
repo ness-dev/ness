@@ -1051,11 +1051,8 @@ async function handleToolCall(name, args) {
       who +
       ' (tab ' +
       r.reviewerTabId +
-      ') for another look at this branch. ' +
-      (r.autoSends
-        ? 'Its review will be delivered to you as a message when it submits.'
-        : 'Its review waits in the Review tab for the user to send, so it may be a while — the user may also edit or drop comments first.') +
-      ' End your turn now; you will be woken when it arrives.'
+      ') to look at this branch. Its review comes back to you as a message when it submits. ' +
+      'End your turn now; you will be woken when it arrives.'
     )
   }
   if (name === 'list_review_comments') {

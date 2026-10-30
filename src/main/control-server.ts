@@ -165,9 +165,6 @@ export interface ReviewQueries {
     callerTabId: string,
     context: string
   ) => { ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }
-  /** Whether agent-submitted reviews are delivered immediately or held as
-   *  a draft, so the requester can be told which to expect. */
-  autoSends: () => boolean
 }
 
 /** Scope derived from the caller's terminal id on every request. The
@@ -1036,8 +1033,7 @@ async function handleRequest(
       if (!result.ok) return sendJson(res, 409, { error: result.error })
       return sendJson(res, 200, {
         reviewerTabId: result.reviewerTabId,
-        reused: result.reused,
-        autoSends: deps.reviews.autoSends()
+        reused: result.reused
       })
     }
 

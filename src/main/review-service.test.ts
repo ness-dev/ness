@@ -69,6 +69,7 @@ function setup(
   deps: ReviewServiceDeps
   deliver: ReturnType<typeof vi.fn>
   openReviewer: ReturnType<typeof vi.fn>
+  reviewDefaults: ReturnType<typeof vi.fn>
 } {
   const state: AppState = {
     ...initialState,
@@ -78,13 +79,15 @@ function setup(
   const store = new Store(state)
   const deliverFn = vi.fn(deliver)
   const openReviewer = vi.fn(() => ({ tabId: 'new-reviewer', reused: false }))
+  const reviewDefaults = vi.fn(() => ({ prompt: 'REVIEW INSTRUCTIONS' }) as ReturnType<ReviewServiceDeps['reviewDefaults']>)
   const deps: ReviewServiceDeps = {
     store,
     listChatTabs: (wt) => listChatTabs(store.getSnapshot().state, wt),
     openReviewer,
+    reviewDefaults,
     deliver: deliverFn
   }
-  return { store, deps, deliver: deliverFn, openReviewer }
+  return { store, deps, deliver: deliverFn, openReviewer, reviewDefaults }
 }
 
 describe('agentAuthor', () => {
@@ -191,7 +194,7 @@ describe('submitReview', () => {
     const result = submitReview(deps, WT, author, {
       verdict: 'changes-requested',
       summary: ' fix it ',
-      autoSend: false
+      holdAsDraft: true
     })
     if ('error' in result) throw new Error(result.error)
     expect(result.delivery).toBeNull()
@@ -211,7 +214,7 @@ describe('submitReview', () => {
     const result = submitReview(deps, WT, author, {
       verdict: 'approve',
       summary: 'lgtm',
-      autoSend: true
+      holdAsDraft: false
     })
     if ('error' in result) throw new Error(result.error)
     expect(result.delivery).toEqual({ ok: true, tabId: 'author', woke: false })
@@ -234,7 +237,7 @@ describe('submitReview', () => {
       verdict: 'comment',
       summary: '',
       targetTabId: 'chat2',
-      autoSend: true
+      holdAsDraft: false
     })
     if ('error' in result) throw new Error(result.error)
     expect(result.delivery).toMatchObject({ ok: false, tabId: 'chat2' })
@@ -249,7 +252,7 @@ describe('submitReview', () => {
       verdict: 'comment',
       summary: '',
       targetTabId: 'term',
-      autoSend: false
+      holdAsDraft: true
     })
     expect(r).toEqual({ error: expect.stringMatching(/only go to Chat tabs/) })
   })
@@ -261,7 +264,7 @@ describe('submitReview', () => {
         verdict: 'comment',
         summary: '',
         targetTabId: 'reviewer',
-        autoSend: false
+        holdAsDraft: true
       })
     ).toHaveProperty('error')
     expect(
@@ -269,7 +272,7 @@ describe('submitReview', () => {
         verdict: 'comment',
         summary: '',
         targetTabId: 'sh',
-        autoSend: false
+        holdAsDraft: true
       })
     ).toHaveProperty('error')
   })
@@ -282,7 +285,7 @@ describe('sendReviewSubmission', () => {
       deps,
       WT,
       { kind: 'agent', tabId: 'reviewer', label: 'Reviewer' },
-      { verdict: 'comment', summary: '', autoSend: false }
+      { verdict: 'comment', summary: '', holdAsDraft: true }
     )
     if ('error' in result) throw new Error(result.error)
     store.dispatch({
@@ -345,6 +348,17 @@ describe('requestReview', () => {
     expect(parsed).toMatchObject({ source: 'review-request', from: 'Codex Chat' })
     expect(parsed?.body).toContain('Codex Chat has finished a piece of work')
     expect(parsed?.body).toContain('Added div with a zero guard.')
+    expect(parsed?.body).toContain('REVIEW INSTRUCTIONS')
+  })
+
+  it('uses the configured reviewer agent and model instead of inheriting', () => {
+    const { deps, openReviewer, reviewDefaults } = setup()
+    reviewDefaults.mockReturnValue({ agentKind: 'codex', model: 'opus', prompt: 'be thorough' })
+    requestReview(deps, WT, 'author', 'please review')
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex', model: 'opus' })
+    expect(parseAutomatedMessage(openReviewer.mock.calls[0][2] as unknown as string)?.body).toContain(
+      'be thorough'
+    )
   })
 
   it('reads as another look when that tab already has a reviewer', () => {
@@ -355,10 +369,10 @@ describe('requestReview', () => {
     expect(parseAutomatedMessage(prompt)?.body).toContain('pushed changes and is asking for another look')
   })
 
-  it('inherits the requester’s agent so a Codex worktree gets a Codex reviewer', () => {
+  it('inherits the requester’s agent when the setting is "same as the requester"', () => {
     const { deps, openReviewer } = setup()
     requestReview(deps, WT, 'chat2', 'please review')
-    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex' })
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex', model: undefined })
   })
 
   it('refuses a terminal tab, since the review could not be delivered back', () => {
@@ -381,6 +395,41 @@ describe('requestReview', () => {
       ok: false,
       error: 'caller tab is not in this worktree'
     })
+  })
+})
+
+describe('a requested review ignores the draft setting', () => {
+  it('delivers even when the user chose to hold reviews as drafts', () => {
+    const { store, deps, deliver } = setup([
+      comment('mine', { author: { kind: 'agent', tabId: 'rev-of-author', label: 'Reviewer' } })
+    ])
+    const result = submitReview(
+      deps,
+      WT,
+      { kind: 'agent', tabId: 'rev-of-author', label: 'Reviewer' },
+      { verdict: 'changes-requested', summary: 'one fix', holdAsDraft: true }
+    )
+    if ('error' in result) throw new Error(result.error)
+    // The requester asked for this and is waiting on it, so holding it
+    // as a draft would stall that agent until a human noticed.
+    expect(deliver.mock.calls[0][1]).toBe('author')
+    expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0]).toMatchObject({
+      state: 'sent',
+      targetTabId: 'author'
+    })
+  })
+
+  it('still holds a review nobody asked for', () => {
+    const { store, deps, deliver } = setup([comment('mine')])
+    const result = submitReview(
+      deps,
+      WT,
+      { kind: 'agent', tabId: 'reviewer', label: 'Reviewer' },
+      { verdict: 'comment', summary: 'fyi', holdAsDraft: true }
+    )
+    if ('error' in result) throw new Error(result.error)
+    expect(deliver).not.toHaveBeenCalled()
+    expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0].state).toBe('draft')
   })
 })
 
@@ -416,7 +465,7 @@ describe('reviewRequester', () => {
       deps,
       WT,
       { kind: 'agent', tabId: 'rev-of-author', label: 'Reviewer' },
-      { verdict: 'approve', summary: 'lgtm', autoSend: true }
+      { verdict: 'approve', summary: 'lgtm', holdAsDraft: false }
     )
     if ('error' in result) throw new Error(result.error)
     expect(deliver.mock.calls[0][1]).toBe('author')

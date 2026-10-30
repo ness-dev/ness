@@ -604,7 +604,7 @@ export class PanesFSM {
     wtPath: string,
     requesterTabId: string,
     prompt: string,
-    opts?: { agentKind?: AgentKind; label?: string }
+    opts?: { agentKind?: AgentKind; model?: string; label?: string }
   ): { tabId: string; reused: boolean } {
     const existing = this.findReviewerTab(wtPath, requesterTabId)
     if (existing) {
@@ -624,7 +624,8 @@ export class PanesFSM {
       sessionId,
       mode: 'awake',
       reviewOf: requesterTabId,
-      ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {})
+      ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {}),
+      ...(opts?.model?.trim() ? { model: opts.model.trim() } : {})
     }
     this.addTab(wtPath, tab)
     this.openReviewTab(wtPath)

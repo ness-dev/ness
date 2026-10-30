@@ -25,8 +25,11 @@ export interface ReviewServiceDeps {
     worktreePath: string,
     requesterTabId: string,
     prompt: string,
-    opts?: { agentKind?: AgentKind; label?: string }
+    opts?: { agentKind?: AgentKind; model?: string; label?: string }
   ) => { tabId: string; reused: boolean }
+  /** The user's review settings: which agent and model a reviewer runs
+   *  as, and what it is told to do. */
+  reviewDefaults: () => { agentKind?: AgentKind; model?: string; prompt: string }
 }
 
 export type ReviewSendResult =
@@ -224,6 +227,7 @@ export function sendReviewSubmission(
 export function buildReviewRequest(
   requesterLabel: string,
   context: string,
+  instructions: string,
   opts?: { reRequest?: boolean }
 ): string {
   const body = [
@@ -231,7 +235,10 @@ export function buildReviewRequest(
       ? `${requesterLabel} has pushed changes and is asking for another look at this branch.`
       : `${requesterLabel} has finished a piece of work on this branch and is asking you to review it.`,
     '',
-    context.trim()
+    `What ${requesterLabel} says about it:`,
+    context.trim(),
+    '',
+    instructions.trim()
   ].join('\n')
   return wrapAutomatedMessage('review-request', body, { from: requesterLabel })
 }
@@ -267,11 +274,14 @@ export function requestReview(
     }
   }
   const reRequest = hasReviewer(state, worktreePath, requesterTabId)
+  const defaults = deps.reviewDefaults()
   const opened = deps.openReviewer(
     worktreePath,
     requesterTabId,
-    buildReviewRequest(tabLabel(requester), context, { reRequest }),
-    { agentKind: requester.agentKind }
+    buildReviewRequest(tabLabel(requester), context, defaults.prompt, { reRequest }),
+    // 'inherit' leaves agentKind undefined here, so the reviewer runs the
+    // same agent as the tab that asked.
+    { agentKind: defaults.agentKind ?? requester.agentKind, model: defaults.model }
   )
   return { ok: true, reviewerTabId: opened.tabId, reused: opened.reused }
 }
@@ -295,8 +305,12 @@ export interface SubmitReviewInput {
   /** Explicit author tab. Must be a Chat tab in the worktree other than
    *  the reviewer's. */
   targetTabId?: string
-  /** Deliver now instead of holding a draft. */
-  autoSend: boolean
+  /** The user's "hold agent reviews as drafts" preference. Ignored for a
+   *  review that was requested: the requester asked for it and ended its
+   *  turn waiting, so holding it would stall that agent until a human
+   *  noticed the draft and pressed Send. The setting is there to vet
+   *  reviews nobody asked for. */
+  holdAsDraft: boolean
 }
 
 export type SubmitReviewResult =
@@ -329,11 +343,9 @@ export function submitReview(
     .map((c) => c.id)
   // An explicit `tab` wins, then the tab that requested this review, then
   // the most recent other Chat tab.
+  const requester = reviewRequester(state, worktreePath, reviewerTabId)
   const targetTabId =
-    input.targetTabId ??
-    reviewRequester(state, worktreePath, reviewerTabId) ??
-    pickReviewTarget(tabs, reviewerTabId) ??
-    undefined
+    input.targetTabId ?? requester ?? pickReviewTarget(tabs, reviewerTabId) ?? undefined
   const submission: ReviewSubmission = {
     id: randomUUID(),
     author,
@@ -345,7 +357,7 @@ export function submitReview(
     ...(targetTabId ? { targetTabId } : {})
   }
   deps.store.dispatch({ type: 'reviews/submissionAdded', payload: { worktreePath, submission } })
-  if (!input.autoSend) return { submission, delivery: null }
+  if (input.holdAsDraft && !requester) return { submission, delivery: null }
   const delivery = sendReviewSubmission(deps, worktreePath, submission.id)
   const latest = findSubmission(deps.store.getSnapshot().state, worktreePath, submission.id)
   return { submission: latest ?? submission, delivery }

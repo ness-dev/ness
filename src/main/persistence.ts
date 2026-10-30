@@ -392,6 +392,12 @@ export interface Config {
   /** Absent ⇒ 'draft'. */
   agentReviewDelivery?: 'auto'
   autoReviewOnGreenCi?: boolean
+  /** Absent ⇒ 'inherit' (same agent as the requester). */
+  reviewAgent?: 'claude' | 'codex' | 'cursor'
+  /** Absent/empty ⇒ the agent's configured default model. */
+  reviewModel?: string
+  /** Absent ⇒ DEFAULT_REVIEW_PROMPT. */
+  reviewPrompt?: string
 }
 
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'

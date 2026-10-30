@@ -404,8 +404,9 @@ export class ApprovalBridge {
     //      repo — unlike Claude's per-worktree settings.local.json, which
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
-    // The review tools touch only Ness's own review state, and prompting
-    // per call would stall every unattended review on its first tool.
+    // The review tools touch only Ness's own review state, and a review
+    // calls them five to ten times — prompting would mean a stream of
+    // approvals per review. See review-tools.ts.
     if (!isQuestion && isReviewTool(basePayload.toolName)) {
       this.resolveAllowed(respond, basePayload)
       log(

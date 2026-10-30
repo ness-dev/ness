@@ -101,7 +101,6 @@ const reviews = {
       ? { ok: false, error: 'only a Chat tab can request a review' }
       : { ok: true, reviewerTabId: 'reviewer-tab', reused: false }
   ),
-  autoSends: vi.fn(() => true),
   submit: vi.fn<ControlServerDeps['reviews']['submit']>((_wt, tabId, input) => ({
     submission: {
       id: 'sub-1',
@@ -859,7 +858,7 @@ describe('control-server /reviews endpoints', () => {
       CALLER_TERMINAL,
       'added div, please check'
     )
-    expect(r.json).toEqual({ reviewerTabId: 'reviewer-tab', reused: false, autoSends: true })
+    expect(r.json).toEqual({ reviewerTabId: 'reviewer-tab', reused: false })
     expect((await call('POST', '/reviews/request', { context: '  ' })).status).toBe(400)
     const refused = await call('POST', '/reviews/request', { context: 'fail please' })
     expect(refused.status).toBe(409)

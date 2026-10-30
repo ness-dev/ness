@@ -5,10 +5,12 @@
  *  shown there before (or after) it is delivered. Nothing here touches
  *  the repo or the outside world.
  *
- *  ApprovalBridge auto-approves them. A reviewer that has to ask
- *  permission for each of its own tools can't review anything
- *  unattended, which is the point of request_review and the CI-green
- *  spawner. */
+ *  ApprovalBridge auto-approves them. Not because a reviewer runs
+ *  unattended — a prompt only pauses it until someone approves — but
+ *  because of volume: a single review calls these five to ten times, so
+ *  prompting would mean a stream of approvals for every review, each one
+ *  about Ness's own review state rather than the user's repo. Tools that
+ *  touch anything outside it still prompt as usual. */
 const REVIEW_TOOL_SUFFIXES = [
   'list_review_comments',
   'add_review_comment',

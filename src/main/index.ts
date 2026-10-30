@@ -140,6 +140,8 @@ import {
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
   type AgentReviewDelivery,
+  type ReviewAgentChoice,
+  DEFAULT_REVIEW_PROMPT,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -1309,6 +1311,14 @@ const reviewServiceDeps: ReviewServiceDeps = {
   listChatTabs: listWorktreeChatTabs,
   openReviewer: (worktreePath, requesterTabId, prompt, opts) =>
     panesFSM.openReviewerTab(worktreePath, requesterTabId, prompt, opts),
+  reviewDefaults: () => {
+    const s = store.getSnapshot().state.settings
+    return {
+      agentKind: s.reviewAgent === 'inherit' ? undefined : s.reviewAgent,
+      model: s.reviewModel || undefined,
+      prompt: s.reviewPrompt || DEFAULT_REVIEW_PROMPT
+    }
+  },
   deliver: (worktreePath, tabId, message) =>
     deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
 }
@@ -4490,6 +4500,42 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setReviewAgent', (_ctx, value: ReviewAgentChoice) => {
+    if (value !== 'inherit' && value !== 'claude' && value !== 'codex' && value !== 'cursor') {
+      return false
+    }
+    if (value === 'inherit') delete config.reviewAgent
+    else config.reviewAgent = value
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewAgentChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setReviewModel', (_ctx, value: string) => {
+    if (typeof value !== 'string') return false
+    const trimmed = value.trim()
+    if (trimmed) config.reviewModel = trimmed
+    else delete config.reviewModel
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewModelChanged', payload: trimmed })
+    return true
+  })
+
+  transport.onRequest('config:setReviewPrompt', (_ctx, prompt: string) => {
+    if (typeof prompt !== 'string') return false
+    const trimmed = prompt.trim()
+    // Empty restores the bundled default rather than leaving a reviewer
+    // with no instructions at all.
+    if (trimmed && trimmed !== DEFAULT_REVIEW_PROMPT) config.reviewPrompt = trimmed
+    else delete config.reviewPrompt
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/reviewPromptChanged',
+      payload: trimmed || DEFAULT_REVIEW_PROMPT
+    })
+    return true
+  })
+
   transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
     if (enabled) config.autoReviewOnGreenCi = true
     else delete config.autoReviewOnGreenCi
@@ -5427,7 +5473,6 @@ async function runBoot(): Promise<void> {
         setReviewCommentResolved(store, worktreePath, commentId, resolved),
       request: (worktreePath, callerTabId, context) =>
         requestReview(reviewServiceDeps, worktreePath, callerTabId, context),
-      autoSends: () => store.getSnapshot().state.settings.agentReviewDelivery === 'auto',
       submit: (worktreePath, callerTabId, input) =>
         submitReview(
           reviewServiceDeps,
@@ -5435,7 +5480,7 @@ async function runBoot(): Promise<void> {
           agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
           {
             ...input,
-            autoSend: store.getSnapshot().state.settings.agentReviewDelivery === 'auto'
+            holdAsDraft: store.getSnapshot().state.settings.agentReviewDelivery === 'draft'
           }
         )
     },

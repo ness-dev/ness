@@ -256,6 +256,21 @@ export type PreventSleepMode = 'off' | 'while-agents-running' | 'always'
  *  straight away. Human-sent reviews always go immediately. */
 export type AgentReviewDelivery = 'draft' | 'auto'
 
+/** Which agent a reviewer Chat tab spawns with. 'inherit' means the same
+ *  agent as the tab that asked for the review. */
+export type ReviewAgentChoice = 'inherit' | AgentKindSetting
+
+/** What a reviewer is told to do. The requester's own context is added
+ *  underneath, and the tool mechanics (how to comment, that submit_review
+ *  is what sends it) are appended by Ness and not editable here. */
+export const DEFAULT_REVIEW_PROMPT = `Review this branch the way a careful colleague would.
+
+Read the diff first. Leave each concrete issue as an inline comment on the line it belongs to, and keep it specific: what is wrong, why it matters, and what to do instead. Prefer a few substantial points over a long list of nits.
+
+Look for: correctness bugs and unhandled edge cases, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
+
+Do not change any code — you share this checkout with the author.`
+
 /** Stable keys for each icon in the sidebar's bottom launcher strip. New
  *  entries can be added at the end; renaming an existing key would strand
  *  existing users' pinned/unpinned choices, so avoid it. The `settings` and
@@ -489,6 +504,13 @@ export interface SettingsState {
   preventSleepMode: PreventSleepMode
   /** Default 'draft'. See AgentReviewDelivery. */
   agentReviewDelivery: AgentReviewDelivery
+  /** Agent for reviewer tabs. Default 'inherit'. */
+  reviewAgent: ReviewAgentChoice
+  /** Model pin for reviewer tabs, e.g. a stronger model than the author
+   *  runs on. Empty ⇒ that agent's configured default. */
+  reviewModel: string
+  /** Instructions handed to a reviewer. See DEFAULT_REVIEW_PROMPT. */
+  reviewPrompt: string
   /** Open a reviewer Chat tab automatically when a worktree's PR checks
    *  go green. Off by default — it spawns an agent on its own. */
   autoReviewOnGreenCi: boolean
@@ -586,6 +608,9 @@ export type SettingsEvent =
   | { type: 'settings/showAssignedPRsChanged'; payload: boolean }
   | { type: 'settings/preventSleepModeChanged'; payload: PreventSleepMode }
   | { type: 'settings/agentReviewDeliveryChanged'; payload: AgentReviewDelivery }
+  | { type: 'settings/reviewAgentChanged'; payload: ReviewAgentChoice }
+  | { type: 'settings/reviewModelChanged'; payload: string }
+  | { type: 'settings/reviewPromptChanged'; payload: string }
   | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
@@ -666,6 +691,9 @@ export const initialSettings: SettingsState = {
   showAssignedPRs: false,
   preventSleepMode: 'off',
   agentReviewDelivery: 'draft',
+  reviewAgent: 'inherit',
+  reviewModel: '',
+  reviewPrompt: DEFAULT_REVIEW_PROMPT,
   autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
@@ -1004,6 +1032,12 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return state.autoReviewOnGreenCi === event.payload
         ? state
         : { ...state, autoReviewOnGreenCi: event.payload }
+    case 'settings/reviewAgentChanged':
+      return state.reviewAgent === event.payload ? state : { ...state, reviewAgent: event.payload }
+    case 'settings/reviewModelChanged':
+      return state.reviewModel === event.payload ? state : { ...state, reviewModel: event.payload }
+    case 'settings/reviewPromptChanged':
+      return state.reviewPrompt === event.payload ? state : { ...state, reviewPrompt: event.payload }
     case 'settings/agentReviewDeliveryChanged':
       return state.agentReviewDelivery === event.payload
         ? state

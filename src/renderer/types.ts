@@ -41,10 +41,11 @@ export type { AddRepoResult }
 
 import type {
   AgentReviewDelivery,
+  ReviewAgentChoice,
   PreventSleepMode,
   SidebarTabsExpansion
 } from '../shared/state/settings'
-export type { AgentReviewDelivery, PreventSleepMode }
+export type { AgentReviewDelivery, ReviewAgentChoice, PreventSleepMode }
 
 /** Per-kind dirtiness flags for a worktree. `git` reflects
  *  uncommitted changes; `scratchpad` reflects a non-empty scratchpad
@@ -421,6 +422,9 @@ export interface ElectronAPI {
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
   setAgentReviewDelivery(value: AgentReviewDelivery): Promise<boolean>
   setAutoReviewOnGreenCi(enabled: boolean): Promise<boolean>
+  setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
+  setReviewModel(value: string): Promise<boolean>
+  setReviewPrompt(prompt: string): Promise<boolean>
   setPreventSleepUntil(value: number | null): Promise<boolean>
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>
   setWarnBeforeQuitting(enabled: boolean): Promise<boolean>

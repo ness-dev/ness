@@ -48,6 +48,7 @@ import {
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
   type AgentReviewDelivery,
+  type ReviewAgentChoice,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -334,6 +335,9 @@ export function buildBackend(
       req('config:setAgentReviewDelivery', value),
     setAutoReviewOnGreenCi: (enabled: boolean) =>
       req('config:setAutoReviewOnGreenCi', enabled),
+    setReviewAgent: (value: ReviewAgentChoice) => req('config:setReviewAgent', value),
+    setReviewModel: (value: string) => req('config:setReviewModel', value),
+    setReviewPrompt: (prompt: string) => req('config:setReviewPrompt', prompt),
     setPreventSleepUntil: (value: number | null) =>
       reqConfig('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),

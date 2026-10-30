@@ -11,6 +11,7 @@ import {
   usePermissionRules
 } from '../store'
 import { useBackend } from '../backend'
+import type { ReviewAgentChoice } from '../../shared/state/settings'
 import { LEGACY_REPO_CONFIG_FILENAME } from '../../shared/state/repo-configs'
 import type { UpdaterStatus, MergeStrategy, RepoConfig, AgentKind, SidebarDensity, SidebarDetailPrefs, Worktree, PRStatus } from '../types'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
@@ -444,6 +445,9 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     agentTabNamingEnabled,
     agentReviewDelivery,
     autoReviewOnGreenCi,
+    reviewAgent,
+    reviewModel,
+    reviewPrompt,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -1057,6 +1061,24 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     await backend.setHarnessSystemPromptMain('')
     setSystemPromptSaveResult({ ok: true, message: 'Reset to defaults' })
     setTimeout(() => setSystemPromptSaveResult(null), 2000)
+  }, [])
+
+  const [reviewPromptDraft, setReviewPromptDraft] = useState<string>(reviewPrompt)
+  useEffect(() => { setReviewPromptDraft(reviewPrompt) }, [reviewPrompt])
+  const [reviewModelDraft, setReviewModelDraft] = useState<string>(reviewModel)
+  useEffect(() => { setReviewModelDraft(reviewModel) }, [reviewModel])
+  const [reviewPromptSaveResult, setReviewPromptSaveResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const handleSaveReviewPrompt = useCallback(async () => {
+    await backend.setReviewPrompt(reviewPromptDraft)
+    setReviewPromptSaveResult({ ok: true, message: 'Saved · the next review uses this' })
+    setTimeout(() => setReviewPromptSaveResult(null), 2000)
+  }, [reviewPromptDraft])
+
+  const handleResetReviewPrompt = useCallback(async () => {
+    await backend.setReviewPrompt('')
+    setReviewPromptSaveResult({ ok: true, message: 'Reset to default' })
+    setTimeout(() => setReviewPromptSaveResult(null), 2000)
   }, [])
 
   const handleSavePrReviewPrompt = useCallback(async () => {
@@ -4064,20 +4086,21 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   second Chat tab to review the branch and shows the Review tab beside it. The
                   reviewer leaves inline comments, then submits — and Ness delivers the review back
                   to whichever tab asked for it. Reviewer tabs start in plan mode and are told not
-                  to change the branch they are reviewing. Choose what happens when a review is
-                  submitted.
+                  to change the branch they are reviewing. A requested review is always delivered —
+                  the agent that asked is waiting on it. The choice below is for a review nobody
+                  asked for, e.g. one you started by hand in a Chat tab.
                 </p>
                 <fieldset className="grid grid-cols-2 gap-2">
                   {([
                     {
                       id: 'draft',
                       label: 'Hold as a draft',
-                      hint: 'Wait in the Review tab so you can edit or delete comments, then send it yourself.'
+                      hint: 'An unrequested review waits in the Review tab so you can edit or delete comments, then send it yourself.'
                     },
                     {
                       id: 'auto',
                       label: 'Send automatically',
-                      hint: "Deliver straight to the author's agent tab."
+                      hint: "Deliver every review straight to the author's agent tab."
                     }
                   ] as const).map((opt) => {
                     const isActive = agentReviewDelivery === opt.id
@@ -4104,6 +4127,67 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     )
                   })}
                 </fieldset>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
+                  <p className="text-xs text-dim mb-2">
+                    Which agent reviews. Pick a different one — or a stronger model below — to get a
+                    second opinion rather than the same brain twice.
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={reviewAgent}
+                      onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
+                      className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="inherit">Same as the requester</option>
+                      <option value="claude">Claude</option>
+                      <option value="codex">Codex</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={reviewModelDraft}
+                      onChange={(e) => setReviewModelDraft(e.target.value)}
+                      onBlur={() => { void backend.setReviewModel(reviewModelDraft) }}
+                      placeholder="Model (optional, e.g. opus)"
+                      className="flex-1 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg" />
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
+                  <p className="text-xs text-dim mb-2">
+                    What a reviewer is told to look for. The requester&apos;s own description of the
+                    work is added above it, and Ness appends how to use the review tools.
+                  </p>
+                  <textarea
+                    value={reviewPromptDraft}
+                    onChange={(e) => setReviewPromptDraft(e.target.value)}
+                    rows={10}
+                    spellCheck={false}
+                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={handleSaveReviewPrompt}
+                      disabled={reviewPromptDraft === reviewPrompt}
+                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleResetReviewPrompt}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="icon-xs" />
+                      Reset to default
+                    </button>
+                    {reviewPromptSaveResult && (
+                      <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
+                        {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
                 <label className="flex items-start gap-3 cursor-pointer mt-4">
                   <input
