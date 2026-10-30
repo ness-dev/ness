@@ -1016,6 +1016,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
         model={worktreeListModel}
         activeWorktreeId={activeWorktreeId}
         activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
+        unifiedRepos={unifiedRepos}
+        repoCount={repoRoots.length}
+        onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
         onClose={() => setShowTaskList(false)}
         onSelect={handleSidebarSelectWorktree}
         onSelectTab={handleSidebarSelectTab}

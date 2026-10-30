@@ -1,5 +1,15 @@
 import { useEffect } from 'react'
-import { ArrowLeft, ChevronDown, ChevronRight, GitPullRequest, Hand, Loader2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  GitPullRequest,
+  Hand,
+  Layers,
+  Loader2,
+  Rows3
+} from 'lucide-react'
+import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { WorktreeListModel, WorktreeRowModel } from '../worktree-list-model'
 import { STATUS_COLORS, STATUS_LABELS, prIconStyle, prIconTitle } from '../worktree-row-style'
@@ -21,6 +31,11 @@ interface TaskListViewProps {
   model: WorktreeListModel
   activeWorktreeId: string | null
   activeTabId: string | null
+  /** Same `useWorktreeCollapse` values the sidebar reads, so switching repo
+   *  grouping or collapsing a group here does it in both places at once. */
+  unifiedRepos: boolean
+  repoCount: number
+  onToggleUnifiedRepos: () => void
   onClose: () => void
   onSelect: (worktreePath: string) => void
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
@@ -42,6 +57,9 @@ export function TaskListView({
   model,
   activeWorktreeId,
   activeTabId,
+  unifiedRepos,
+  repoCount,
+  onToggleUnifiedRepos,
   onClose,
   onSelect,
   onSelectTab,
@@ -74,6 +92,26 @@ export function TaskListView({
         <span className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 text-sm font-medium text-fg pointer-events-none">
           Tasks
         </span>
+        <div className="no-drag absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <Tooltip
+            label={
+              repoCount <= 1
+                ? 'Merge repos into one list (add another repo to enable)'
+                : unifiedRepos
+                  ? 'Split by repo'
+                  : 'Merge repos into one list'
+            }
+            side="bottom"
+          >
+            <button
+              onClick={onToggleUnifiedRepos}
+              disabled={repoCount <= 1}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-1 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-dim"
+            >
+              {unifiedRepos ? <Rows3 className="icon-sm" /> : <Layers className="icon-sm" />}
+            </button>
+          </Tooltip>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto py-6">
