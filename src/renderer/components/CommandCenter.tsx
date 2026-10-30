@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, GitPullRequest, ChevronDown, ChevronRight, Layers, Rows3 } from 'lucide-react'
+import {
+  X,
+  GitPullRequest,
+  ChevronDown,
+  ChevronRight,
+  Layers,
+  LayoutGrid,
+  LayoutList,
+  Rows3
+} from 'lucide-react'
 import { useSettings } from '../store'
 import { useBackend } from '../backend'
 import type { PendingTool, TerminalTab, ActivityLog, ActivityRecord } from '../types'
@@ -14,6 +23,7 @@ import {
   type DisplayStatus
 } from '../worktree-row-style'
 import { repoNameColor } from './RepoIcon'
+import { TaskListView } from './TaskListView'
 import { formatPendingTool } from '../pending-tool'
 
 interface CommandCenterProps {
@@ -21,10 +31,13 @@ interface CommandCenterProps {
   lastActive: Record<string, number>
   tailLines: Record<string, string>
   terminalTabs: Record<string, TerminalTab[]>
+  activeWorktreeId: string | null
+  activeTabId: string | null
   unifiedRepos: boolean
   onToggleUnifiedRepos: () => void
   onClose: () => void
   onSelect: (worktreePath: string) => void
+  onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
 }
 
@@ -73,13 +86,25 @@ export function CommandCenter({
   lastActive,
   tailLines,
   terminalTabs,
+  activeWorktreeId,
+  activeTabId,
   unifiedRepos,
   onToggleUnifiedRepos,
   onClose,
   onSelect,
+  onSelectTab,
   onToggleGroup
 }: CommandCenterProps): JSX.Element {
   const backend = useBackend()
+  // POC toggle between the card grid and the dense task list. Per-client
+  // view preference, so it stays renderer state (same class as the
+  // collapse/width prefs in useWorktreeCollapse).
+  const [listMode, setListMode] = useState<boolean>(
+    () => localStorage.getItem('harness:commandCenterListMode') === '1'
+  )
+  useEffect(() => {
+    localStorage.setItem('harness:commandCenterListMode', listMode ? '1' : '0')
+  }, [listMode])
   // Activity log for per-worktree mini timelines.
   const [log, setLog] = useState<ActivityLog>({})
   useEffect(() => {
@@ -208,6 +233,14 @@ export function CommandCenter({
           <StatCount label="Idle" value={counts.idle} dot="bg-faint" />
         </div>
 
+        <button
+          onClick={() => setListMode((v) => !v)}
+          className="no-drag p-2 rounded hover:bg-surface text-muted hover:text-fg cursor-pointer"
+          title={listMode ? 'Show session cards' : 'Show task list'}
+        >
+          {listMode ? <LayoutGrid className="icon-base" /> : <LayoutList className="icon-base" />}
+        </button>
+
         {multiRepo && (
           <button
             onClick={onToggleUnifiedRepos}
@@ -227,7 +260,9 @@ export function CommandCenter({
         </button>
       </div>
 
-      {/* Live stacked bar graph */}
+      {/* Live stacked bar graph. Omitted in list mode — the whole point of
+          that view is that nothing on screen is there to be watched. */}
+      {!listMode && (
       <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-xs uppercase tracking-wider text-faint">Last minute</span>
@@ -254,8 +289,19 @@ export function CommandCenter({
           })}
         </div>
       </div>
+      )}
 
-      {/* Grouped grid of session cards */}
+      {listMode ? (
+        <TaskListView
+          model={model}
+          activeWorktreeId={activeWorktreeId}
+          activeTabId={activeTabId}
+          onSelect={onSelect}
+          onSelectTab={onSelectTab}
+          onToggleGroup={onToggleGroup}
+        />
+      ) : (
+      /* Grouped grid of session cards */
       <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
         {totalCards === 0 && (
           <div className="h-full flex items-center justify-center text-dim">
@@ -315,6 +361,7 @@ export function CommandCenter({
           </div>
         ))}
       </div>
+      )}
     </div>
   )
 }

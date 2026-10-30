@@ -1763,8 +1763,11 @@ const setQuestStep = useCallback((next: QuestStep) => {
             lastActive={lastActive}
             tailLines={tailLines}
             terminalTabs={terminalTabs}
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
             unifiedRepos={unifiedRepos}
             onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
+            onSelectTab={handleSidebarSelectTab}
             onClose={() => setShowCommandCenter(false)}
             onSelect={(path) => {
               setShowCommandCenter(false)
