@@ -35,7 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { checkReviewerTool } from '../shared/review-readonly'
+import { checkReviewerTool, isReviewTool } from '../shared/review-readonly'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -408,6 +408,17 @@ export class ApprovalBridge {
     //      repo — unlike Claude's per-worktree settings.local.json, which
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
+    // The review tools touch only Ness's own review state, and prompting
+    // per call would stall every unattended review on its first tool.
+    if (!isQuestion && isReviewTool(basePayload.toolName)) {
+      this.resolveAllowed(respond, basePayload)
+      log(
+        'approval-bridge',
+        `review-tool-allowed session=${basePayload.sessionId} tool=${basePayload.toolName}`
+      )
+      return
+    }
+
     // Reviewer sessions are decided first: a global "Always allow Edit"
     // grant must not let a reviewer edit the branch it is reviewing.
     if (this.deps?.isReadOnlySession?.(basePayload.sessionId)) {

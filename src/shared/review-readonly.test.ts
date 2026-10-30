@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { checkReviewerTool } from './review-readonly'
+import { checkReviewerTool, isReviewTool } from './review-readonly'
 
 const allowed = (tool: string, input: Record<string, unknown> = {}): boolean =>
   checkReviewerTool(tool, input).allowed
@@ -59,5 +59,16 @@ describe('checkReviewerTool', () => {
   it('catches a mutation hidden later in a chain', () => {
     expect(bash('git diff && git commit -am wip')).toBe(false)
     expect(bash('cat a.ts | tee b.ts')).toBe(false)
+  })
+
+})
+
+describe('isReviewTool', () => {
+  it('matches the review tools bare or MCP-prefixed, and nothing else', () => {
+    expect(isReviewTool('submit_review')).toBe(true)
+    expect(isReviewTool('mcp__ness-control__list_review_comments')).toBe(true)
+    expect(isReviewTool('mcp__ness-control__request_review')).toBe(true)
+    expect(isReviewTool('Bash')).toBe(false)
+    expect(isReviewTool('mcp__other__create_worktree')).toBe(false)
   })
 })

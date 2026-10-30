@@ -25,15 +25,27 @@ const DENIED_TOOLS = new Set([
   'apply_patch'
 ])
 
-/** Review tools are writes, but writing review comments is the job. */
+/** The ness-control review tools. These only read the diff and write
+ *  Ness's own review state — comments the user can edit or delete in the
+ *  Review tab, and a submitted review that is shown there before (or
+ *  after) it is delivered. Nothing here touches the repo or the outside
+ *  world, and a reviewer that has to ask permission for each of them
+ *  can't review anything unattended, so they are auto-approved rather
+ *  than merely not-denied. */
 const REVIEW_TOOL_SUFFIXES = [
+  'list_review_comments',
   'add_review_comment',
   'reply_to_comment',
   'resolve_comment',
   'submit_review',
-  'list_review_comments',
+  'request_review',
   'list_tabs'
 ]
+
+/** True for a ness-control review tool, bare or MCP-prefixed. */
+export function isReviewTool(toolName: string): boolean {
+  return REVIEW_TOOL_SUFFIXES.some((t) => toolName === t || toolName.endsWith(`__${t}`))
+}
 
 /** Shell commands that change the repo, the working tree, or the world.
  *  Matched against the whole command string, so a pipeline or `&&` chain
@@ -67,9 +79,7 @@ export function checkReviewerTool(
   toolName: string,
   input: Record<string, unknown>
 ): ReadOnlyVerdict {
-  if (REVIEW_TOOL_SUFFIXES.some((t) => toolName === t || toolName.endsWith(`__${t}`))) {
-    return ALLOWED
-  }
+  if (isReviewTool(toolName)) return ALLOWED
   if (DENIED_TOOLS.has(toolName)) {
     return {
       allowed: false,
