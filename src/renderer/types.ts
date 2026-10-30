@@ -525,6 +525,10 @@ export interface ElectronAPI {
   refreshReviewAnchors(worktreePath: string, filePath?: string): Promise<boolean>
   editReviewComment(worktreePath: string, id: string, body: string): Promise<boolean>
   listReviewTargets(worktreePath: string): Promise<ChatTabInfo[]>
+  /** Opens a reviewer for this worktree's author Chat tab. */
+  requestAiReview(
+    worktreePath: string
+  ): Promise<{ ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }>
   editReviewSubmission(
     worktreePath: string,
     id: string,

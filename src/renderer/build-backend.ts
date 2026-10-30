@@ -503,6 +503,7 @@ export function buildBackend(
     editReviewComment: (worktreePath: string, id: string, body: string) =>
       req('reviews:editComment', worktreePath, id, body),
     listReviewTargets: (worktreePath: string) => req('reviews:listChatTabs', worktreePath),
+    requestAiReview: (worktreePath: string) => req('reviews:requestForWorktree', worktreePath),
     editReviewSubmission: (
       worktreePath: string,
       id: string,

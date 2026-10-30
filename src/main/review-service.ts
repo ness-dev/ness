@@ -222,6 +222,48 @@ export function sendReviewSubmission(
   return record({ ok: true, tabId: result.tabId, woke: result.woke })
 }
 
+/** The tab a review is for when nobody asked by hand: the most recently
+ *  active Chat tab that isn't itself a reviewer. Chat only, since the
+ *  finished review has to be delivered back to it. Shared by the CI-green
+ *  spawner and the "Request AI review" button so both pick the same tab. */
+export function pickAuthorTab(state: AppState, worktreePath: string): string | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  let best: string | null = null
+  let bestTs = -1
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type !== 'json-claude' || tab.reviewOf) continue
+      const entries = state.jsonClaude.sessions[tab.id]?.entries
+      const ts = entries?.[entries.length - 1]?.timestamp ?? 0
+      if (ts > bestTs) {
+        best = tab.id
+        bestTs = ts
+      }
+    }
+  }
+  return best
+}
+
+/** Context for a review the user asked for from the PR panel. The
+ *  reviewer has no requester prose to go on, so it gets the PR instead. */
+export function buildUserReviewContext(pr?: {
+  number: number
+  title: string
+  url: string
+  branch: string
+} | null): string {
+  const lines = ['The user asked for this review from the Pull Request panel.']
+  if (pr) {
+    lines.push('', `PR #${pr.number}: ${pr.title}`, pr.url)
+  }
+  lines.push(
+    '',
+    'Review the whole branch against its base. Start from the diff in the Review tab.'
+  )
+  return lines.join('\n')
+}
+
 /** The configured review model, unless it belongs to a different agent —
  *  a Codex model pinned while the reviewer resolves to Claude would be
  *  passed to --model verbatim and fail at spawn. Dropping it falls back

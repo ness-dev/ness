@@ -169,7 +169,9 @@ import { listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
 import {
   agentAuthor,
+  buildUserReviewContext,
   listReviewComments,
+  pickAuthorTab,
   requestReview,
   replyToReviewComment,
   sendReviewSubmission,
@@ -5045,6 +5047,32 @@ function registerIpcHandlers(): void {
       payload: { worktreePath, id, body: body.trim() }
     })
     return true
+  })
+
+  // "Request AI review" in the PR panel. The user has no tab of their
+  // own to be the requester, so the review is aimed at the worktree's
+  // author Chat tab — the same tab the CI-green spawner would pick, and
+  // where the finished review is delivered.
+  transport.onRequest('reviews:requestForWorktree', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) {
+      return { ok: false, error: 'No worktree' }
+    }
+    const state = store.getSnapshot().state
+    const author = pickAuthorTab(state, worktreePath)
+    if (!author) {
+      return {
+        ok: false,
+        error: 'No Chat tab in this worktree to review for — open one and try again'
+      }
+    }
+    const result = requestReview(
+      reviewServiceDeps,
+      worktreePath,
+      author,
+      buildUserReviewContext(state.prs.byPath[worktreePath])
+    )
+    log('review', `user requested review for ${worktreePath}: ${JSON.stringify(result)}`)
+    return result
   })
 
   transport.onRequest('reviews:listChatTabs', (_ctx, worktreePath: string) => {

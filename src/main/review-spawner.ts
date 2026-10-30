@@ -1,7 +1,7 @@
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
 import type { PRStatus } from '../shared/state/prs'
-import { getLeaves } from '../shared/state/terminals'
+import { pickAuthorTab } from './review-service'
 import { log } from './debug'
 
 /** Identity of a green build: the commit it went green on. Statuses
@@ -122,7 +122,7 @@ export class ReviewSpawner {
       log('review-spawner', `skip ${path} @ ${shaKey}: auto-review off for this worktree`)
       return
     }
-    const author = this.pickAuthorTab(path)
+    const author = pickAuthorTab(this.store.getSnapshot().state, path)
     if (!author) {
       log('review-spawner', `skip ${path} @ ${shaKey}: no Chat tab to review for`)
       this.handledSha.delete(path)
@@ -138,27 +138,5 @@ export class ReviewSpawner {
       }
       log('review-spawner', `opened reviewer for ${path} @ ${shaKey}`)
     })
-  }
-
-  /** The author tab: most recently active Chat tab that isn't a reviewer.
-   *  Chat only, since the review has to be delivered back to it. */
-  private pickAuthorTab(worktreePath: string): string | null {
-    const state = this.store.getSnapshot().state
-    const tree = state.terminals.panes[worktreePath]
-    if (!tree) return null
-    let best: string | null = null
-    let bestTs = -1
-    for (const leaf of getLeaves(tree)) {
-      for (const tab of leaf.tabs) {
-        if (tab.type !== 'json-claude' || tab.reviewOf) continue
-        const entries = state.jsonClaude.sessions[tab.id]?.entries
-        const ts = entries?.[entries.length - 1]?.timestamp ?? 0
-        if (ts > bestTs) {
-          best = tab.id
-          bestTs = ts
-        }
-      }
-    }
-    return best
   }
 }
