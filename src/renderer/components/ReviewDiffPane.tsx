@@ -72,7 +72,8 @@ function countLines(text: string): number {
 }
 
 /** View zones need a height up front. Approximates one editor line per
- *  text line; long lines that soft-wrap will clip, as before. */
+ *  text line; the zone is then resized to the rendered height, which is
+ *  what catches soft-wrapped comments. */
 function zoneHeightInLines(comment: ReviewComment): number {
   let lines = countLines(comment.body)
   for (const r of comment.replies ?? []) lines += countLines(r.body)
@@ -358,6 +359,7 @@ interface ViewZoneEntry {
   root: Root
   domNode: HTMLDivElement
   stickyWrapper: HTMLDivElement
+  observer: ResizeObserver
 }
 
 export function ReviewDiffPane({
@@ -488,14 +490,33 @@ export function ReviewDiffPane({
         stickyWrapper.style.position = 'sticky'
         stickyWrapper.style.left = '0'
         stickyWrapper.style.width = `${contentWidth}px`
+        // Contain the comment's margins so the measured height includes them.
+        stickyWrapper.style.display = 'flow-root'
         domNode.appendChild(stickyWrapper)
 
-        const zoneId = accessor.addZone({
+        const zone: monaco.editor.IViewZone = {
           afterLineNumber: item.lineNumber,
           heightInLines: item.comment ? zoneHeightInLines(item.comment) : 7,
           domNode,
           suppressMouseDown: false
+        }
+        const zoneId = accessor.addZone(zone)
+
+        // Size the zone to what actually rendered: comments soft-wrap, and
+        // a line-count estimate let long ones spill over the code below.
+        // Monaco re-reads the zone object on layoutZone.
+        const observer = new ResizeObserver(() => {
+          const height = Math.ceil(stickyWrapper.getBoundingClientRect().height)
+          if (height <= 0 || zone.heightInPx === height) return
+          zone.heightInPx = height
+          delete zone.heightInLines
+          try {
+            modifiedEd.changeViewZones((a) => a.layoutZone(zoneId))
+          } catch {
+            // editor disposed
+          }
         })
+        observer.observe(stickyWrapper)
 
         const root = createRoot(stickyWrapper)
         const c = item.comment
@@ -522,7 +543,7 @@ export function ReviewDiffPane({
           )
         }
 
-        entries.push({ zoneId, root, domNode, stickyWrapper })
+        entries.push({ zoneId, root, domNode, stickyWrapper, observer })
       }
     })
     viewZonesRef.current = entries
@@ -537,7 +558,10 @@ export function ReviewDiffPane({
       } catch {
         // disposed
       }
-      for (const z of entries) z.root.unmount()
+      for (const z of entries) {
+        z.observer.disconnect()
+        z.root.unmount()
+      }
       viewZonesRef.current = []
     }
   }, [editor, placed, commentLine, onAddComment, onDeleteComment, onSetCommentStatus, onEditComment])
