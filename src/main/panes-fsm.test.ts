@@ -669,3 +669,75 @@ describe('PanesFSM.renameTab', () => {
     expect(fsm.renameTab('/wt/a', 'missing', 'X', 'user')).toBe(false)
   })
 })
+
+describe('PanesFSM.openReviewerTab', () => {
+  function build() {
+    const store = new Store()
+    const startJsonClaudeWithPrompt = vi.fn()
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null,
+      startJsonClaudeWithPrompt
+    })
+    return { fsm, store, startJsonClaudeWithPrompt }
+  }
+  const WT = '/wt/review'
+  const seed = (store: Store, tabs: PaneLeaf['tabs']): void =>
+    seedLeaf(store, WT, { type: 'leaf', id: 'p', tabs, activeTabId: tabs[0].id })
+
+  const tabsOf = (store: Store): PaneLeaf['tabs'] =>
+    (store.getSnapshot().state.terminals.panes[WT] as PaneLeaf).tabs
+
+  it('opens a Chat tab linked to the requester, plus the Review tab, and kicks it off', () => {
+    const { fsm, store, startJsonClaudeWithPrompt } = build()
+    seed(store, [{ id: 'author', type: 'json-claude', label: 'Chat' }])
+    const { tabId, reused } = fsm.openReviewerTab(WT, 'author', 'please review')
+    expect(reused).toBe(false)
+    expect(tabId).toMatch(UUID_RE)
+    const tabs = tabsOf(store)
+    const reviewer = tabs.find((t) => t.id === tabId)
+    expect(reviewer).toMatchObject({
+      type: 'json-claude',
+      label: 'Reviewer',
+      reviewOf: 'author',
+      mode: 'awake'
+    })
+    expect(tabs.some((t) => t.type === 'review')).toBe(true)
+    // Focus lands on the reviewer, not the Review tab it just opened.
+    expect((store.getSnapshot().state.terminals.panes[WT] as PaneLeaf).activeTabId).toBe(tabId)
+    expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith(tabId, WT, 'please review')
+  })
+
+  it('reuses the reviewer already open for that requester', () => {
+    const { fsm, store, startJsonClaudeWithPrompt } = build()
+    seed(store, [
+      { id: 'author', type: 'json-claude', label: 'Chat' },
+      { id: 'rev', type: 'json-claude', label: 'Reviewer', reviewOf: 'author', mode: 'asleep' }
+    ])
+    const result = fsm.openReviewerTab(WT, 'author', 'round two')
+    expect(result).toEqual({ tabId: 'rev', reused: true })
+    expect(tabsOf(store).filter((t) => t.type === 'json-claude')).toHaveLength(2)
+    // startJsonClaudeWithPrompt revives a slept reviewer and delivers the turn.
+    expect(startJsonClaudeWithPrompt).toHaveBeenCalledWith('rev', WT, 'round two')
+  })
+
+  it('gives each requester its own reviewer', () => {
+    const { fsm, store } = build()
+    seed(store, [
+      { id: 'a', type: 'json-claude', label: 'Chat' },
+      { id: 'b', type: 'json-claude', label: 'Chat' }
+    ])
+    const first = fsm.openReviewerTab(WT, 'a', 'x')
+    const second = fsm.openReviewerTab(WT, 'b', 'y')
+    expect(second.tabId).not.toBe(first.tabId)
+    expect(tabsOf(store).filter((t) => t.reviewOf).map((t) => t.reviewOf).sort()).toEqual(['a', 'b'])
+  })
+
+  it('carries a non-Claude agent onto the reviewer', () => {
+    const { fsm, store } = build()
+    seed(store, [{ id: 'author', type: 'json-claude', label: 'Chat', agentKind: 'codex' }])
+    const { tabId } = fsm.openReviewerTab(WT, 'author', 'x', { agentKind: 'codex' })
+    expect(tabsOf(store).find((t) => t.id === tabId)).toMatchObject({ agentKind: 'codex' })
+  })
+})

@@ -164,9 +164,11 @@ import {
   resolveWorktreeQuery
 } from './chat-delivery'
 import { listChatTabs } from '../shared/agent-tabs'
+import { ReviewSpawner } from './review-spawner'
 import {
   agentAuthor,
   listReviewComments,
+  requestReview,
   replyToReviewComment,
   sendReviewSubmission,
   setReviewCommentResolved,
@@ -449,7 +451,10 @@ const approvalBridge = new ApprovalBridge(store, {
   isAutoApproveEnabled: () =>
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
-    store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
+    store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
+  // A reviewer tab may read the branch but not change it. Keyed on the
+  // tab's reviewOf link, so it survives a reload with the tab.
+  isReadOnlySession: (sessionId) => !!findJsonClaudeTab(sessionId)?.reviewOf
 })
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
@@ -1294,9 +1299,20 @@ const listWorktreeChatTabs = (worktreePath: string) =>
 const reviewServiceDeps: ReviewServiceDeps = {
   store,
   listChatTabs: listWorktreeChatTabs,
+  openReviewer: (worktreePath, requesterTabId, prompt, opts) =>
+    panesFSM.openReviewerTab(worktreePath, requesterTabId, prompt, opts),
   deliver: (worktreePath, tabId, message) =>
     deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
 }
+
+// Step 3's counterpart to request_review: when a worktree's PR checks go
+// green, open a reviewer for its author tab on the same path a hand-made
+// request takes. Declared after reviewServiceDeps, which it closes over.
+const reviewSpawner = new ReviewSpawner(store, {
+  isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
+  requestReview: (worktreePath, requesterTabId, context) =>
+    requestReview(reviewServiceDeps, worktreePath, requesterTabId, context)
+})
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
 // settings.autoSleepMinutes). Constructed after panesFSM since it
@@ -4466,6 +4482,14 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
+    if (enabled) config.autoReviewOnGreenCi = true
+    else delete config.autoReviewOnGreenCi
+    saveConfig(config)
+    store.dispatch({ type: 'settings/autoReviewOnGreenCiChanged', payload: enabled === true })
+    return true
+  })
+
   transport.onRequest('config:setPreventSleepUntil', (_ctx, value: number | null) => {
     // null / invalid → clear; a positive epoch-ms → arm. Session-only: never
     // written to config.json — the WakeLockController owns expiry and the
@@ -5205,6 +5229,8 @@ async function runBoot(): Promise<void> {
 
   ciNotifier.start()
 
+  reviewSpawner.start()
+
   autoSleepMonitor.start()
 
   wakeLockController.start()
@@ -5391,6 +5417,9 @@ async function runBoot(): Promise<void> {
         ),
       setResolved: (worktreePath, commentId, resolved) =>
         setReviewCommentResolved(store, worktreePath, commentId, resolved),
+      request: (worktreePath, callerTabId, context) =>
+        requestReview(reviewServiceDeps, worktreePath, callerTabId, context),
+      autoSends: () => store.getSnapshot().state.settings.agentReviewDelivery === 'auto',
       submit: (worktreePath, callerTabId, input) =>
         submitReview(
           reviewServiceDeps,

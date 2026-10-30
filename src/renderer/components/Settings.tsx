@@ -443,6 +443,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     worktreeMessagingEnabled,
     agentTabNamingEnabled,
     agentReviewDelivery,
+    autoReviewOnGreenCi,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -4058,10 +4059,12 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   </span>
                 </div>
                 <p className="text-xs text-dim mb-3">
-                  An agent can review a worktree&apos;s branch through the
-                  ness-control review tools, leaving comments in the Review tab
-                  and then submitting the review. Choose what happens when it
-                  submits.
+                  An agent that has finished a piece of work can call
+                  <code className="bg-panel px-1 rounded text-xs">request_review</code>, which opens a
+                  second Chat tab to review the branch and shows the Review tab beside it. The
+                  reviewer leaves inline comments, then submits — and Ness delivers the review back
+                  to whichever tab asked for it. A reviewer tab can read the branch but is blocked
+                  from editing it. Choose what happens when a review is submitted.
                 </p>
                 <fieldset className="grid grid-cols-2 gap-2">
                   {([
@@ -4100,6 +4103,20 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     )
                   })}
                 </fieldset>
+
+                <label className="flex items-start gap-3 cursor-pointer mt-4">
+                  <input
+                    type="checkbox"
+                    checked={autoReviewOnGreenCi}
+                    onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                    </div>
+                  </div>
+                </label>
               </div>
 
               {/* Auto-approve safe tool calls sub-card */}

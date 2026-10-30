@@ -17,6 +17,8 @@ import {
   listReviewComments,
   pickReviewTarget,
   replyToReviewComment,
+  requestReview,
+  reviewRequester,
   sendReviewSubmission,
   setReviewCommentResolved,
   submitReview,
@@ -33,6 +35,7 @@ const tree: PaneNode = {
     { id: 'reviewer', type: 'agent', label: 'Claude', customLabel: 'Reviewer' },
     { id: 'term', type: 'agent', label: 'Codex', agentKind: 'codex' },
     { id: 'chat2', type: 'json-claude', label: 'Codex Chat', agentKind: 'codex' },
+    { id: 'rev-of-author', type: 'json-claude', label: 'Reviewer', reviewOf: 'author' },
     { id: 'sh', type: 'shell', label: 'zsh' }
   ],
   activeTabId: 'reviewer'
@@ -61,7 +64,12 @@ function setup(
     tabId,
     woke: false
   })
-): { store: Store; deps: ReviewServiceDeps; deliver: ReturnType<typeof vi.fn> } {
+): {
+  store: Store
+  deps: ReviewServiceDeps
+  deliver: ReturnType<typeof vi.fn>
+  openReviewer: ReturnType<typeof vi.fn>
+} {
   const state: AppState = {
     ...initialState,
     terminals: { ...initialState.terminals, panes: { [WT]: tree } },
@@ -69,12 +77,14 @@ function setup(
   }
   const store = new Store(state)
   const deliverFn = vi.fn(deliver)
+  const openReviewer = vi.fn(() => ({ tabId: 'new-reviewer', reused: false }))
   const deps: ReviewServiceDeps = {
     store,
     listChatTabs: (wt) => listChatTabs(store.getSnapshot().state, wt),
+    openReviewer,
     deliver: deliverFn
   }
-  return { store, deps, deliver: deliverFn }
+  return { store, deps, deliver: deliverFn, openReviewer }
 }
 
 describe('agentAuthor', () => {
@@ -111,7 +121,7 @@ describe('pickReviewTarget', () => {
   it('lists only Chat tabs, so terminal tabs are never picked', () => {
     const { store } = setup()
     const tabs = listChatTabs(store.getSnapshot().state, WT)
-    expect(tabs.map((t) => t.id)).toEqual(['author', 'chat2'])
+    expect(tabs.map((t) => t.id)).toEqual(['author', 'chat2', 'rev-of-author'])
     expect(tabs[1]).toMatchObject({ label: 'Codex Chat', agentKind: 'codex' })
   })
 
@@ -315,6 +325,104 @@ describe('sendReviewSubmission', () => {
     expect(sendReviewSubmission(deps, WT, 'missing')).toEqual({
       ok: false,
       error: 'Review not found'
+    })
+  })
+})
+
+describe('requestReview', () => {
+  it('opens a reviewer for the caller and tells it who asked', () => {
+    const { deps, openReviewer } = setup()
+    // 'chat2' has no reviewer yet, so this is a first review.
+    const r = requestReview(deps, WT, 'chat2', '  Added div with a zero guard.  ')
+    expect(r).toEqual({ ok: true, reviewerTabId: 'new-reviewer', reused: false })
+    const [wt, requester, prompt] = openReviewer.mock.calls[0] as unknown as [
+      string,
+      string,
+      string
+    ]
+    expect([wt, requester]).toEqual([WT, 'chat2'])
+    const parsed = parseAutomatedMessage(prompt)
+    expect(parsed).toMatchObject({ source: 'review-request', from: 'Codex Chat' })
+    expect(parsed?.body).toContain('Codex Chat has finished a piece of work')
+    expect(parsed?.body).toContain('Added div with a zero guard.')
+  })
+
+  it('reads as another look when that tab already has a reviewer', () => {
+    const { deps, openReviewer } = setup()
+    requestReview(deps, WT, 'author', 'round two')
+    // 'rev-of-author' is already open for this requester.
+    const prompt = openReviewer.mock.calls[0][2] as unknown as string
+    expect(parseAutomatedMessage(prompt)?.body).toContain('pushed changes and is asking for another look')
+  })
+
+  it('inherits the requester’s agent so a Codex worktree gets a Codex reviewer', () => {
+    const { deps, openReviewer } = setup()
+    requestReview(deps, WT, 'chat2', 'please review')
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex' })
+  })
+
+  it('refuses a terminal tab, since the review could not be delivered back', () => {
+    const { deps, openReviewer } = setup()
+    const r = requestReview(deps, WT, 'term', 'please review')
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/only a Chat tab/) })
+    expect(openReviewer).not.toHaveBeenCalled()
+  })
+
+  it('refuses a reviewer asking for a review of the review', () => {
+    const { deps, openReviewer } = setup()
+    const r = requestReview(deps, WT, 'rev-of-author', 'please review')
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/you are the reviewer/) })
+    expect(openReviewer).not.toHaveBeenCalled()
+  })
+
+  it('refuses a caller that is not in this worktree', () => {
+    const { deps } = setup()
+    expect(requestReview(deps, WT, 'nope', 'x')).toEqual({
+      ok: false,
+      error: 'caller tab is not in this worktree'
+    })
+  })
+})
+
+describe('reviewRequester', () => {
+  it('resolves the link, and ignores it once the requester is gone', () => {
+    const { store } = setup()
+    const state = store.getSnapshot().state
+    expect(reviewRequester(state, WT, 'rev-of-author')).toBe('author')
+    expect(reviewRequester(state, WT, 'author')).toBeNull()
+    expect(reviewRequester(state, WT, null)).toBeNull()
+    const closed: AppState = {
+      ...state,
+      terminals: {
+        ...state.terminals,
+        panes: {
+          [WT]: {
+            type: 'leaf',
+            id: 'p',
+            tabs: [{ id: 'rev-of-author', type: 'json-claude', label: 'Reviewer', reviewOf: 'author' }],
+            activeTabId: 'rev-of-author'
+          }
+        }
+      }
+    }
+    expect(reviewRequester(closed, WT, 'rev-of-author')).toBeNull()
+  })
+
+  it('sends a requested review back to the requester, not the most recent tab', () => {
+    const { store, deps, deliver } = setup([
+      comment('mine', { author: { kind: 'agent', tabId: 'rev-of-author', label: 'Reviewer' } })
+    ])
+    const result = submitReview(
+      deps,
+      WT,
+      { kind: 'agent', tabId: 'rev-of-author', label: 'Reviewer' },
+      { verdict: 'approve', summary: 'lgtm', autoSend: true }
+    )
+    if ('error' in result) throw new Error(result.error)
+    expect(deliver.mock.calls[0][1]).toBe('author')
+    expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0]).toMatchObject({
+      state: 'sent',
+      targetTabId: 'author'
     })
   })
 })

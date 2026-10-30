@@ -94,6 +94,7 @@ export type JsonClaudeAutomationSource =
   | 'worktree-kickoff'
   | 'worktree-autoname'
   | 'review'
+  | 'review-request'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
@@ -101,7 +102,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
   'worktree-message',
   'worktree-kickoff',
   'worktree-autoname',
-  'review'
+  'review',
+  'review-request'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -110,6 +112,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
  *  and agents treat it as authoritative — including the parts the parent
  *  guessed at. Naming the author is what buys back the license to push back. */
 const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> = {
+  'review-request':
+    'You are the reviewer for this worktree, opened by the agent that did the work. Review the branch as a careful colleague would: read the diff, leave each concrete issue as an inline comment with `add_review_comment`, and keep the comments specific — what is wrong, why it matters, what to do instead. Call `list_review_comments` first so you do not repeat a point. Do not change the code; you are reviewing, not fixing. When you are done, call `submit_review` once with a verdict and a summary — that is what sends your review back to the requester, and nothing reaches them until you do.',
   review:
     'Address this review. The id in [brackets] after each comment works with the ness-control MCP tools: call `reply_to_comment` to answer a comment or push back on it, and `resolve_comment` once you have fixed it, so the reviewer and the user can see where each one stands in the Review tab. A comment you disagree with deserves a reply rather than a silent change. If you do not have those tools, just address the feedback.',
   'worktree-kickoff':

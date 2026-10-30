@@ -921,6 +921,16 @@ describe('settingsReducer', () => {
     ).toBe(auto)
   })
 
+  it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {
+    expect(initialSettings.autoReviewOnGreenCi).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/autoReviewOnGreenCiChanged',
+      payload: true
+    })
+    expect(on.autoReviewOnGreenCi).toBe(true)
+    expect(apply(on, { type: 'settings/autoReviewOnGreenCiChanged', payload: true })).toBe(on)
+  })
+
   it('preventSleepUntilChanged arms and clears the timer deadline', () => {
     expect(initialSettings.preventSleepUntil).toBeNull()
     const armed = apply(initialSettings, {

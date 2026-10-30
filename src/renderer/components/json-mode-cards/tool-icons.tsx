@@ -49,6 +49,7 @@ import {
   SquarePlus,
   SquareTerminal,
   SquareX,
+  UserSearch,
   Terminal,
   Wrench,
   Zap
@@ -167,6 +168,7 @@ export const ReviewCommentIcon: ToolIcon = ({ className }) => (
 export const ReplyIcon: ToolIcon = ({ className }) => <MessageSquareReply className={className} />
 export const ResolveIcon: ToolIcon = ({ className }) => <CircleCheck className={className} />
 export const SubmitReviewIcon: ToolIcon = ({ className }) => <ClipboardCheck className={className} />
+export const ReviewRequestIcon: ToolIcon = ({ className }) => <UserSearch className={className} />
 
 // Brand icons — Simple Icons via react-icons. Brand-canonical colors
 // where they read in both light and dark themes; currentColor (text

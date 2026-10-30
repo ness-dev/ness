@@ -281,6 +281,7 @@ export function buildInitialAppState(
         ? (config.preventSleepMode as PreventSleepMode)
         : 'off',
       agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
+      autoReviewOnGreenCi: config.autoReviewOnGreenCi === true,
       // The temporary "+1h" timer never survives a relaunch — always seed null.
       preventSleepUntil: null,
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),

@@ -579,6 +579,74 @@ export class PanesFSM {
     return true
   }
 
+  /** Find this worktree's reviewer Chat tab for `requesterTabId`, if one
+   *  is already open. */
+  findReviewerTab(wtPath: string, requesterTabId: string): TerminalTab | null {
+    const tree = this.getTree(wtPath)
+    if (!tree) return null
+    for (const leaf of getLeaves(tree)) {
+      for (const tab of leaf.tabs) {
+        if (tab.type === 'json-claude' && tab.reviewOf === requesterTabId) return tab
+      }
+    }
+    return null
+  }
+
+  /** Open a reviewer Chat tab for `requesterTabId` and focus the Review
+   *  tab beside it, then deliver the request as its first turn. A second
+   *  request from the same tab reuses the reviewer that is already open,
+   *  so an author asking for a re-review keeps one conversation with the
+   *  same reviewer rather than accumulating tabs.
+   *
+   *  The reviewer is a Chat tab whatever the requester is: a submitted
+   *  review is delivered by Ness, and only Chat tabs can receive it. */
+  openReviewerTab(
+    wtPath: string,
+    requesterTabId: string,
+    prompt: string,
+    opts?: { agentKind?: AgentKind; label?: string }
+  ): { tabId: string; reused: boolean } {
+    const existing = this.findReviewerTab(wtPath, requesterTabId)
+    if (existing) {
+      // Asleep or dead, startJsonClaudeWithPrompt revives it; awake, it
+      // just takes the turn.
+      this.focusTab(wtPath, existing.id)
+      this.openReviewTab(wtPath)
+      this.opts.startJsonClaudeWithPrompt?.(existing.id, wtPath, prompt)
+      return { tabId: existing.id, reused: true }
+    }
+    const sessionId = crypto.randomUUID()
+    const agentKind = opts?.agentKind ?? this.opts.getDefaultAgentKind?.() ?? 'claude'
+    const tab: TerminalTab = {
+      id: sessionId,
+      type: 'json-claude',
+      label: opts?.label ?? 'Reviewer',
+      sessionId,
+      mode: 'awake',
+      reviewOf: requesterTabId,
+      ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {})
+    }
+    this.addTab(wtPath, tab)
+    this.openReviewTab(wtPath)
+    // Put focus back on the reviewer: openReviewTab activates the Review
+    // tab in the same pane, and the user wants to watch the review happen.
+    this.focusTab(wtPath, sessionId)
+    this.opts.startJsonClaudeWithPrompt?.(sessionId, wtPath, prompt)
+    return { tabId: sessionId, reused: false }
+  }
+
+  /** Make `tabId` the active tab of whichever pane holds it. */
+  private focusTab(wtPath: string, tabId: string): void {
+    const tree = this.getTree(wtPath)
+    if (!tree) return
+    const leaf = findLeafByTabId(tree, tabId)
+    if (!leaf || leaf.activeTabId === tabId) return
+    this.commit(
+      wtPath,
+      mapLeaves(tree, (l) => (l.id === leaf.id ? { ...l, activeTabId: tabId } : l))
+    )
+  }
+
   /** Activate the existing review tab for this worktree, or create one if
    *  none exists. Only one review tab can live per worktree at a time —
    *  every entry point in the renderer funnels through here. */

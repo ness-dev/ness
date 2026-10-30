@@ -159,6 +159,15 @@ export interface ReviewQueries {
     callerTabId: string,
     input: { verdict: ReviewVerdict; summary: string; targetTabId?: string }
   ) => SubmitReviewResult
+  /** Open a reviewer Chat tab for the caller and hand it the request. */
+  request: (
+    worktreePath: string,
+    callerTabId: string,
+    context: string
+  ) => { ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }
+  /** Whether agent-submitted reviews are delivered immediately or held as
+   *  a draft, so the requester can be told which to expect. */
+  autoSends: () => boolean
 }
 
 /** Scope derived from the caller's terminal id on every request. The
@@ -1018,6 +1027,18 @@ async function handleRequest(
       const result = deps.reviews.setResolved(wt, commentId, resolved)
       if ('error' in result) return sendJson(res, 404, { error: result.error })
       return sendJson(res, 200, { comment: toAgentComment(result.comment, terminalId) })
+    }
+
+    if (req.method === 'POST' && path === '/reviews/request') {
+      const context = typeof body.context === 'string' ? body.context.trim() : ''
+      if (!context) return sendJson(res, 400, { error: 'context required' })
+      const result = deps.reviews.request(wt, terminalId, context)
+      if (!result.ok) return sendJson(res, 409, { error: result.error })
+      return sendJson(res, 200, {
+        reviewerTabId: result.reviewerTabId,
+        reused: result.reused,
+        autoSends: deps.reviews.autoSends()
+      })
     }
 
     if (req.method === 'POST' && path === '/reviews/submit') {

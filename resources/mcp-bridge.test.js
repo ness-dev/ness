@@ -475,6 +475,7 @@ describe('mcp-bridge review tools', () => {
       'reply_to_comment',
       'resolve_comment',
       'submit_review',
+      'request_review',
       'list_tabs'
     ]) {
       expect(names).toContain(n)
@@ -552,6 +553,34 @@ describe('mcp-bridge review tools', () => {
       summary: 's',
       tab: 'term'
     })
+  })
+
+  it('request_review opens a reviewer and says what happens next', async () => {
+    const responses = [
+      { reviewerTabId: 'rev-1', reused: false, autoSends: true },
+      { reviewerTabId: 'rev-1', reused: true, autoSends: false }
+    ]
+    await start((req, body, res) => json(res, 200, responses.shift()))
+    const first = await callTool('request_review', { context: 'added div' })
+    expect(first.result.isError).toBeFalsy()
+    expect(first.result.content[0].text).toMatch(/Opened a reviewer Chat tab \(tab rev-1\)/)
+    expect(first.result.content[0].text).toMatch(/delivered to you as a message/)
+    expect(stub.captured.find((c) => c.url === '/reviews/request').body).toEqual({
+      context: 'added div'
+    })
+    const second = await callTool('request_review', { context: 'round two' })
+    expect(second.result.content[0].text).toMatch(/Asked the existing reviewer/)
+    expect(second.result.content[0].text).toMatch(/waits in the Review tab/)
+  })
+
+  it('request_review requires context and surfaces a refusal', async () => {
+    await start((req, body, res) => json(res, 409, { error: 'only a Chat tab can request a review' }))
+    const missing = await callTool('request_review', {})
+    expect(missing.result.isError).toBe(true)
+    expect(stub.captured.find((c) => c.url === '/reviews/request')).toBeUndefined()
+    const refused = await callTool('request_review', { context: 'x' })
+    expect(refused.result.isError).toBe(true)
+    expect(refused.result.content[0].text).toMatch(/only a Chat tab/)
   })
 
   it('submit_review rejects an unknown verdict locally', async () => {

@@ -391,6 +391,7 @@ export interface Config {
   preventSleepMode?: PreventSleepMode
   /** Absent ⇒ 'draft'. */
   agentReviewDelivery?: 'auto'
+  autoReviewOnGreenCi?: boolean
 }
 
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'

@@ -69,6 +69,7 @@ import {
   ReplyIcon,
   ResolveIcon,
   ReviewCommentIcon,
+  ReviewRequestIcon,
   SubmitReviewIcon,
   SalesforceIcon,
   ScreenshotIcon,
@@ -423,7 +424,8 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   add_review_comment: { icon: ReviewCommentIcon, one: 'review comment', many: 'review comments' },
   reply_to_comment: { icon: ReplyIcon, one: 'reply', many: 'replies' },
   resolve_comment: { icon: ResolveIcon, one: 'resolve', many: 'resolves' },
-  submit_review: { icon: SubmitReviewIcon, one: 'review', many: 'reviews' }
+  submit_review: { icon: SubmitReviewIcon, one: 'review', many: 'reviews' },
+  request_review: { icon: ReviewRequestIcon, one: 'review request', many: 'review requests' }
 }
 
 /** Resolve a tool name to its action, or null when we have no

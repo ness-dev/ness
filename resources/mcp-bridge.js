@@ -377,6 +377,22 @@ const TOOLS = [
     }
   },
   {
+    name: 'request_review',
+    description:
+      "Ask for a code review of the work you have just finished on this branch. Ness opens a second Chat tab in this worktree whose only job is to review your work, shows the Review tab next to it, and hands it your `context`. The reviewer reads the diff, leaves inline comments, and calls submit_review — which comes back to YOU as a message, because Ness remembers that you are the one who asked.\n\nCall this when a piece of work is complete and you would otherwise hand it to the user: changes are made and verified, and you want them checked before they go further. Say so in your reply, then end your turn — you will be woken when the review arrives, so do not poll or wait. Calling it again later asks the same reviewer for another look, carrying the earlier conversation; use that after you have addressed the first round.\n\nThis is not the way to ask the USER a question — it starts another agent. If you simply want a human to look, say so in your reply instead.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: {
+          type: 'string',
+          description:
+            'What you did and what you want checked, written for a reviewer who has none of your context: the goal, the approach, anything you are unsure about, and how you verified it. Name the areas worth the closest look. Do not paste the diff — the reviewer reads it from the Review tab.'
+        }
+      },
+      required: ['context']
+    }
+  },
+  {
     name: 'list_review_comments',
     description:
       "List the comments in this worktree's Review tab — the code review that the user and reviewer agents leave on this branch's diff. Each entry has id, file, line, side ('new' = the branch's version of the line, 'old' = a line the branch removed), status, author ('User' or the agent tab's name; `mine: true` marks your own), body and replies. Status is 'open', 'resolved', or 'outdated' (the line it was on is gone from HEAD). Lines are re-anchored against HEAD before listing, so they match the code as committed now.\n\nAs the author of the branch, call this to see what feedback is still open. As a reviewer, call it before commenting so you don't repeat a point that's already been made. Scoped to your own worktree.",
@@ -446,7 +462,7 @@ const TOOLS = [
   {
     name: 'submit_review',
     description:
-      "Finish a review of this worktree's branch: a verdict plus a summary, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nThe review goes to the author's Chat tab — by default the most recently active Chat tab in this worktree other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
+      "Finish a review of this worktree's branch: a verdict plus a summary, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nIf you were opened by `request_review`, the review goes back to the tab that asked for it — you do not need to work out who that is. Otherwise it goes to the most recently active Chat tab other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1024,6 +1040,23 @@ async function handleToolCall(name, args) {
         : ''
     const r = await callControl('GET', '/tabs' + q)
     return JSON.stringify(r, null, 2)
+  }
+  if (name === 'request_review') {
+    if (!args || typeof args.context !== 'string' || !args.context.trim()) {
+      throw new Error('context is required')
+    }
+    const r = await callControl('POST', '/reviews/request', { context: args.context })
+    const who = r.reused ? 'Asked the existing reviewer' : 'Opened a reviewer Chat tab'
+    return (
+      who +
+      ' (tab ' +
+      r.reviewerTabId +
+      ') for another look at this branch. ' +
+      (r.autoSends
+        ? 'Its review will be delivered to you as a message when it submits.'
+        : 'Its review waits in the Review tab for the user to send, so it may be a while — the user may also edit or drop comments first.') +
+      ' End your turn now; you will be woken when it arrives.'
+    )
   }
   if (name === 'list_review_comments') {
     const q = new URLSearchParams()

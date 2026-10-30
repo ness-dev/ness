@@ -489,6 +489,9 @@ export interface SettingsState {
   preventSleepMode: PreventSleepMode
   /** Default 'draft'. See AgentReviewDelivery. */
   agentReviewDelivery: AgentReviewDelivery
+  /** Open a reviewer Chat tab automatically when a worktree's PR checks
+   *  go green. Off by default — it spawns an agent on its own. */
+  autoReviewOnGreenCi: boolean
   /** Epoch-ms deadline for the temporary "keep awake for the next hour"
    *  overlay, or null when no timer is running. Shared world state (a
    *  second client sees the countdown) but deliberately NOT persisted to
@@ -583,6 +586,7 @@ export type SettingsEvent =
   | { type: 'settings/showAssignedPRsChanged'; payload: boolean }
   | { type: 'settings/preventSleepModeChanged'; payload: PreventSleepMode }
   | { type: 'settings/agentReviewDeliveryChanged'; payload: AgentReviewDelivery }
+  | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
@@ -662,6 +666,7 @@ export const initialSettings: SettingsState = {
   showAssignedPRs: false,
   preventSleepMode: 'off',
   agentReviewDelivery: 'draft',
+  autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
   bottomIconOrder: [...BOTTOM_ICON_KEYS]
@@ -995,6 +1000,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/autoReviewOnGreenCiChanged':
+      return state.autoReviewOnGreenCi === event.payload
+        ? state
+        : { ...state, autoReviewOnGreenCi: event.payload }
     case 'settings/agentReviewDeliveryChanged':
       return state.agentReviewDelivery === event.payload
         ? state

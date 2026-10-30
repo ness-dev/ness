@@ -8,7 +8,7 @@ import type {
   ReviewSubmission,
   ReviewVerdict
 } from '../shared/state/reviews'
-import { getLeaves } from '../shared/state/terminals'
+import { getLeaves, type AgentKind, type TerminalTab } from '../shared/state/terminals'
 import { tabLabel, type ChatTabInfo } from '../shared/agent-tabs'
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
@@ -19,6 +19,14 @@ export interface ReviewServiceDeps {
   store: Store
   listChatTabs: (worktreePath: string) => ChatTabInfo[]
   deliver: (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
+  /** Open (or reuse) the reviewer Chat tab for a requester and hand it the
+   *  request as its first turn. */
+  openReviewer: (
+    worktreePath: string,
+    requesterTabId: string,
+    prompt: string,
+    opts?: { agentKind?: AgentKind; label?: string }
+  ) => { tabId: string; reused: boolean }
 }
 
 export type ReviewSendResult =
@@ -58,6 +66,29 @@ export function findReviewComment(
     }
   }
   return { error: `no review comment with id "${q}" in this worktree` }
+}
+
+function findTab(state: AppState, worktreePath: string, tabId: string): TerminalTab | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    const tab = leaf.tabs.find((t) => t.id === tabId)
+    if (tab) return tab
+  }
+  return null
+}
+
+/** The tab that asked this reviewer for a review, when it is still open.
+ *  An explicit link beats any heuristic, so this is checked first. */
+export function reviewRequester(
+  state: AppState,
+  worktreePath: string,
+  reviewerTabId: string | null
+): string | null {
+  if (!reviewerTabId) return null
+  const requesterId = findTab(state, worktreePath, reviewerTabId)?.reviewOf
+  if (!requesterId) return null
+  return findTab(state, worktreePath, requesterId) ? requesterId : null
 }
 
 /** The tab a review goes to: the most recently active Chat tab that
@@ -154,6 +185,7 @@ export function sendReviewSubmission(
   const target =
     targetTabId ??
     submission.targetTabId ??
+    reviewRequester(state, worktreePath, reviewerTabId) ??
     pickReviewTarget(deps.listChatTabs(worktreePath), reviewerTabId)
 
   const record = (result: ReviewSendResult): ReviewSendResult => {
@@ -184,6 +216,77 @@ export function sendReviewSubmission(
     return record({ ok: false, error: describeTabDeliveryFailure(result.reason), tabId: target })
   }
   return record({ ok: true, tabId: result.tabId, woke: result.woke })
+}
+
+/** Prompt handed to a reviewer tab as its first turn. The guidance
+ *  footer wrapAutomatedMessage appends tells it how to use the tools and
+ *  that submit_review is what sends the review back. */
+export function buildReviewRequest(
+  requesterLabel: string,
+  context: string,
+  opts?: { reRequest?: boolean }
+): string {
+  const body = [
+    opts?.reRequest
+      ? `${requesterLabel} has pushed changes and is asking for another look at this branch.`
+      : `${requesterLabel} has finished a piece of work on this branch and is asking you to review it.`,
+    '',
+    context.trim()
+  ].join('\n')
+  return wrapAutomatedMessage('review-request', body, { from: requesterLabel })
+}
+
+export type RequestReviewResult =
+  | { ok: true; reviewerTabId: string; reused: boolean }
+  | { ok: false; error: string }
+
+/** Open a reviewer for `requesterTabId` and hand it the request. The
+ *  reviewer's submitted review comes back to the requester, because
+ *  openReviewer records the link on the new tab. */
+export function requestReview(
+  deps: ReviewServiceDeps,
+  worktreePath: string,
+  requesterTabId: string,
+  context: string
+): RequestReviewResult {
+  const state = deps.store.getSnapshot().state
+  const requester = findTab(state, worktreePath, requesterTabId)
+  if (!requester) return { ok: false, error: 'caller tab is not in this worktree' }
+  if (requester.type !== 'json-claude') {
+    return {
+      ok: false,
+      error:
+        'only a Chat tab can request a review — a submitted review is delivered back to the requester, and Ness can only deliver into Chat tabs. Ask the user to switch this tab to Chat mode, or to open the Review tab and review the branch themselves.'
+    }
+  }
+  if (requester.reviewOf) {
+    return {
+      ok: false,
+      error:
+        'you are the reviewer for this branch — submit your review with submit_review rather than requesting another one.'
+    }
+  }
+  const reRequest = hasReviewer(state, worktreePath, requesterTabId)
+  const opened = deps.openReviewer(
+    worktreePath,
+    requesterTabId,
+    buildReviewRequest(tabLabel(requester), context, { reRequest }),
+    { agentKind: requester.agentKind }
+  )
+  return { ok: true, reviewerTabId: opened.tabId, reused: opened.reused }
+}
+
+/** Whether a reviewer tab for this requester is already open — the
+ *  request then reads as "another look", not a first review. */
+function hasReviewer(state: AppState, worktreePath: string, requesterTabId: string): boolean {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return false
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type === 'json-claude' && tab.reviewOf === requesterTabId) return true
+    }
+  }
+  return false
 }
 
 export interface SubmitReviewInput {
@@ -224,7 +327,13 @@ export function submitReview(
   const commentIds = (state.reviews.byPath[worktreePath]?.comments ?? [])
     .filter((c) => c.status === 'open' && sameAuthor(c.author))
     .map((c) => c.id)
-  const targetTabId = input.targetTabId ?? pickReviewTarget(tabs, reviewerTabId) ?? undefined
+  // An explicit `tab` wins, then the tab that requested this review, then
+  // the most recent other Chat tab.
+  const targetTabId =
+    input.targetTabId ??
+    reviewRequester(state, worktreePath, reviewerTabId) ??
+    pickReviewTarget(tabs, reviewerTabId) ??
+    undefined
   const submission: ReviewSubmission = {
     id: randomUUID(),
     author,

@@ -96,6 +96,12 @@ const reviews = {
   setResolved: vi.fn<ControlServerDeps['reviews']['setResolved']>((_wt, _id, resolved) => ({
     comment: reviewComment({ status: resolved ? 'resolved' : 'open' })
   })),
+  request: vi.fn<ControlServerDeps['reviews']['request']>((_wt, tabId, context) =>
+    context.includes('fail')
+      ? { ok: false, error: 'only a Chat tab can request a review' }
+      : { ok: true, reviewerTabId: 'reviewer-tab', reused: false }
+  ),
+  autoSends: vi.fn(() => true),
   submit: vi.fn<ControlServerDeps['reviews']['submit']>((_wt, tabId, input) => ({
     submission: {
       id: 'sub-1',
@@ -843,6 +849,21 @@ describe('control-server /reviews endpoints', () => {
     expect(resolved.json.comment).toMatchObject({ status: 'resolved' })
     const reopened = await call('POST', '/reviews/resolve', { commentId: 'c1', resolved: false })
     expect(reopened.json.comment).toMatchObject({ status: 'open' })
+  })
+
+  it('requests a review as the calling tab and reports what happens next', async () => {
+    const r = await call('POST', '/reviews/request', { context: 'added div, please check' })
+    expect(r.status).toBe(200)
+    expect(reviews.request).toHaveBeenLastCalledWith(
+      CALLER_WORKTREE,
+      CALLER_TERMINAL,
+      'added div, please check'
+    )
+    expect(r.json).toEqual({ reviewerTabId: 'reviewer-tab', reused: false, autoSends: true })
+    expect((await call('POST', '/reviews/request', { context: '  ' })).status).toBe(400)
+    const refused = await call('POST', '/reviews/request', { context: 'fail please' })
+    expect(refused.status).toBe(409)
+    expect(refused.json.error).toMatch(/only a Chat tab/)
   })
 
   it('submits a review and reports where it is going', async () => {

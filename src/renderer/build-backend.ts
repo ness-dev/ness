@@ -332,6 +332,8 @@ export function buildBackend(
     // reviewer, so every client of a workspace wants the same value.
     setAgentReviewDelivery: (value: AgentReviewDelivery) =>
       req('config:setAgentReviewDelivery', value),
+    setAutoReviewOnGreenCi: (enabled: boolean) =>
+      req('config:setAutoReviewOnGreenCi', enabled),
     setPreventSleepUntil: (value: number | null) =>
       reqConfig('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),

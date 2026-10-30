@@ -35,6 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
+import { checkReviewerTool } from '../shared/review-readonly'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -84,6 +85,10 @@ export interface ApprovalBridgeDeps {
    *  Appended to the reviewer's policy prompt as project-specific
    *  guidance. Empty string when unset. */
   getAutoApproveSteerInstructions: () => string
+  /** True when this session is a reviewer tab, which may read the branch
+   *  but not change it. Checked before every other path, including the
+   *  user's own allowlist. */
+  isReadOnlySession?: (sessionId: string) => boolean
 }
 
 export class ApprovalBridge {
@@ -403,6 +408,20 @@ export class ApprovalBridge {
     //      repo — unlike Claude's per-worktree settings.local.json, which
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
+    // Reviewer sessions are decided first: a global "Always allow Edit"
+    // grant must not let a reviewer edit the branch it is reviewing.
+    if (this.deps?.isReadOnlySession?.(basePayload.sessionId)) {
+      const verdict = checkReviewerTool(basePayload.toolName, basePayload.input)
+      if (!verdict.allowed) {
+        log(
+          'approval-bridge',
+          `reviewer-denied session=${basePayload.sessionId} tool=${basePayload.toolName}`
+        )
+        respond({ behavior: 'deny', message: verdict.reason })
+        return
+      }
+    }
+
     const rootState = this.store.getSnapshot().state
     if (!isQuestion) {
       const matched = findMatchingRule(
