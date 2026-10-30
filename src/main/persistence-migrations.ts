@@ -37,6 +37,10 @@ export interface PersistedTab {
   model?: string
   /** User-defined label override. Empty/undefined falls back to `label`. */
   customLabel?: string
+  /** Set only when an agent named the tab. A `customLabel` without this
+   *  is user-set and locks agents out — which is also what every label
+   *  written before this field existed restores as. */
+  customLabelSource?: 'agent'
 }
 
 export interface PersistedPane {

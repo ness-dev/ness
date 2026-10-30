@@ -3360,7 +3360,7 @@ function registerIpcHandlers(): void {
   transport.onRequest(
     'panes:renameTab',
     (_ctx, wtPath: string, tabId: string, label: string) => {
-      panesFSM.renameTab(wtPath, tabId, label)
+      panesFSM.renameTab(wtPath, tabId, label, 'user')
       return true
     }
   )
@@ -5247,6 +5247,8 @@ async function runBoot(): Promise<void> {
     clearAlias: (worktreePath) => {
       store.dispatch({ type: 'aliases/cleared', payload: { path: worktreePath } })
     },
+    renameTab: (worktreePath, tabId, label, source) =>
+      panesFSM.renameTab(worktreePath, tabId, label, source),
     renameBranch: async (worktreePath, newBranch) => {
       const result = await renameWorktreeBranch(worktreePath, newBranch)
       // The gitdir HEAD watcher would catch this on its own, but the tool

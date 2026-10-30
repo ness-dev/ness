@@ -13,6 +13,8 @@ import {
   hasAnyTabs,
   isClaudeBackedTab,
   mapLeaves,
+  normalizeTabLabel,
+  TAB_LABEL_MAX_LEN,
   replaceNode,
   removeLeaf,
   type TerminalTab
@@ -668,6 +670,45 @@ describe('terminalsReducer', () => {
     expect(getLeaves(back.panes['/wt/a'])[0].tabs[0].sessionId).toBe('thread-2')
   })
 
+  it('tabTypeChanged carries the tab name and its provenance across the swap', () => {
+    const tree: PaneNode = {
+      type: 'leaf',
+      id: 'p1',
+      tabs: [
+        { id: 'agent-1', type: 'agent', label: 'Claude', customLabel: 'Mine', sessionId: 's1' },
+        {
+          id: 'agent-2',
+          type: 'agent',
+          label: 'Claude',
+          customLabel: 'Agent Pick',
+          customLabelSource: 'agent',
+          sessionId: 's2'
+        }
+      ],
+      activeTabId: 'agent-1'
+    }
+    const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
+    // A user-set name must stay user-set — otherwise a conversion would
+    // silently hand naming rights back to the agent.
+    const userNamed = getLeaves(
+      apply(start, {
+        type: 'terminals/tabTypeChanged',
+        payload: { worktreePath: '/wt/a', tabId: 'agent-1', newId: 'chat-1', newType: 'json-claude', newLabel: 'Chat' }
+      }).panes['/wt/a']
+    )[0].tabs[0]
+    expect(userNamed.customLabel).toBe('Mine')
+    expect('customLabelSource' in userNamed).toBe(false)
+
+    const agentNamed = getLeaves(
+      apply(start, {
+        type: 'terminals/tabTypeChanged',
+        payload: { worktreePath: '/wt/a', tabId: 'agent-2', newId: 'chat-2', newType: 'json-claude', newLabel: 'Chat' }
+      }).panes['/wt/a']
+    )[0].tabs[1]
+    expect(agentNamed.customLabel).toBe('Agent Pick')
+    expect(agentNamed.customLabelSource).toBe('agent')
+  })
+
   it('tabProviderSessionIdChanged sets the id and is a no-op when unchanged', () => {
     const tree: PaneNode = {
       type: 'leaf',
@@ -861,7 +902,7 @@ describe('terminalsReducer', () => {
     const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
     const next = apply(start, {
       type: 'terminals/tabRenamed',
-      payload: { worktreePath: '/wt/a', tabId: 't1', label: 'Build' }
+      payload: { worktreePath: '/wt/a', tabId: 't1', label: 'Build', source: 'user' }
     })
     const tabs = getLeaves(next.panes['/wt/a'])[0].tabs
     expect(tabs[0].customLabel).toBe('Build')
@@ -878,7 +919,7 @@ describe('terminalsReducer', () => {
     const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
     const next = apply(start, {
       type: 'terminals/tabRenamed',
-      payload: { worktreePath: '/wt/a', tabId: 't1', label: '  Build  ' }
+      payload: { worktreePath: '/wt/a', tabId: 't1', label: '  Build  ', source: 'user' }
     })
     expect(getLeaves(next.panes['/wt/a'])[0].tabs[0].customLabel).toBe('Build')
   })
@@ -893,7 +934,7 @@ describe('terminalsReducer', () => {
     const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
     const next = apply(start, {
       type: 'terminals/tabRenamed',
-      payload: { worktreePath: '/wt/a', tabId: 't1', label: '   ' }
+      payload: { worktreePath: '/wt/a', tabId: 't1', label: '   ', source: 'user' }
     })
     const tab = getLeaves(next.panes['/wt/a'])[0].tabs[0]
     expect('customLabel' in tab).toBe(false)
@@ -908,13 +949,13 @@ describe('terminalsReducer', () => {
     }
     const start: TerminalsState = { ...initialTerminals, panes: { '/wt/a': tree } }
     expect(
-      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/missing', tabId: 't1', label: 'X' } })
+      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/missing', tabId: 't1', label: 'X', source: 'user' } })
     ).toBe(start)
     expect(
-      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 'missing', label: 'X' } })
+      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 'missing', label: 'X', source: 'user' } })
     ).toBe(start)
     expect(
-      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 't1', label: 'Build' } })
+      apply(start, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 't1', label: 'Build', source: 'user' } })
     ).toBe(start)
     // Clear-on-already-clear: empty label against a tab without customLabel.
     const noLabel: TerminalsState = {
@@ -922,8 +963,84 @@ describe('terminalsReducer', () => {
       panes: { '/wt/a': { type: 'leaf', id: 'p1', tabs: [{ id: 't1', type: 'shell', label: 'Shell' }], activeTabId: 't1' } }
     }
     expect(
-      apply(noLabel, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 't1', label: '' } })
+      apply(noLabel, { type: 'terminals/tabRenamed', payload: { worktreePath: '/wt/a', tabId: 't1', label: '', source: 'user' } })
     ).toBe(noLabel)
+  })
+
+  describe('tabRenamed provenance', () => {
+    const treeWith = (tab: Partial<TerminalTab>): TerminalsState => ({
+      ...initialTerminals,
+      panes: {
+        '/wt/a': {
+          type: 'leaf',
+          id: 'p1',
+          tabs: [{ id: 't1', type: 'json-claude', label: 'Chat', ...tab }],
+          activeTabId: 't1'
+        }
+      }
+    })
+    const tabOf = (s: TerminalsState): TerminalTab => getLeaves(s.panes['/wt/a'])[0].tabs[0]
+    const rename = (
+      start: TerminalsState,
+      label: string,
+      source: 'user' | 'agent'
+    ): TerminalsState =>
+      apply(start, {
+        type: 'terminals/tabRenamed',
+        payload: { worktreePath: '/wt/a', tabId: 't1', label, source }
+      })
+
+    it('an agent can name a tab that has no custom label, and marks it agent-set', () => {
+      const tab = tabOf(rename(treeWith({}), 'Flaky Test Hunt', 'agent'))
+      expect(tab.customLabel).toBe('Flaky Test Hunt')
+      expect(tab.customLabelSource).toBe('agent')
+    })
+
+    it('an agent can overwrite its own earlier name', () => {
+      const start = treeWith({ customLabel: 'First Guess', customLabelSource: 'agent' })
+      const tab = tabOf(rename(start, 'Better Name', 'agent'))
+      expect(tab.customLabel).toBe('Better Name')
+      expect(tab.customLabelSource).toBe('agent')
+    })
+
+    it('an agent re-setting the identical name is a no-op', () => {
+      const start = treeWith({ customLabel: 'Same', customLabelSource: 'agent' })
+      expect(rename(start, 'Same', 'agent')).toBe(start)
+    })
+
+    it('an agent is refused when the user named the tab', () => {
+      // No customLabelSource marker is what identifies a user-set name —
+      // which is also how every label persisted before the field existed
+      // restores, so old labels are locked by default.
+      const start = treeWith({ customLabel: 'Mine' })
+      expect(rename(start, 'Agent Pick', 'agent')).toBe(start)
+      expect(rename(start, '', 'agent')).toBe(start)
+    })
+
+    it('the user overwrites an agent-set name and drops the marker', () => {
+      const start = treeWith({ customLabel: 'Agent Pick', customLabelSource: 'agent' })
+      const tab = tabOf(rename(start, 'Mine', 'user'))
+      expect(tab.customLabel).toBe('Mine')
+      expect('customLabelSource' in tab).toBe(false)
+    })
+
+    it('the user locking in the name the agent already chose drops the marker', () => {
+      const start = treeWith({ customLabel: 'Agreed', customLabelSource: 'agent' })
+      const tab = tabOf(rename(start, 'Agreed', 'user'))
+      expect(tab.customLabel).toBe('Agreed')
+      expect('customLabelSource' in tab).toBe(false)
+    })
+
+    it('a user reset clears both fields, re-opening agent naming', () => {
+      const start = treeWith({ customLabel: 'Mine' })
+      const reset = rename(start, '', 'user')
+      const tab = tabOf(reset)
+      expect('customLabel' in tab).toBe(false)
+      expect('customLabelSource' in tab).toBe(false)
+      const renamed = tabOf(rename(reset, 'Agent Pick', 'agent'))
+      expect(renamed.customLabel).toBe('Agent Pick')
+      expect(renamed.customLabelSource).toBe('agent')
+    })
   })
 
   it('tabModelChanged sets tab.model on a json-claude tab', () => {
@@ -1191,5 +1308,20 @@ describe('isClaudeBackedTab', () => {
   it('rejects null and undefined', () => {
     expect(isClaudeBackedTab(null)).toBe(false)
     expect(isClaudeBackedTab(undefined)).toBe(false)
+  })
+})
+
+describe('normalizeTabLabel', () => {
+  it('trims and returns null for empty-after-trim', () => {
+    expect(normalizeTabLabel('  Flaky Test Hunt  ')).toBe('Flaky Test Hunt')
+    expect(normalizeTabLabel('')).toBeNull()
+    expect(normalizeTabLabel('   ')).toBeNull()
+  })
+
+  it('clamps to TAB_LABEL_MAX_LEN without leaving trailing whitespace', () => {
+    expect(normalizeTabLabel('N'.repeat(80))).toHaveLength(TAB_LABEL_MAX_LEN)
+    // The slice can land mid-space; the stored value must still be tidy.
+    const spaced = normalizeTabLabel('a'.repeat(TAB_LABEL_MAX_LEN - 1) + '   tail')
+    expect(spaced).toBe('a'.repeat(TAB_LABEL_MAX_LEN - 1))
   })
 })

@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { randomBytes, randomUUID } from 'crypto'
-import type { AgentKind } from '../shared/state/terminals'
+import { normalizeTabLabel, type AgentKind } from '../shared/state/terminals'
 import { addWorktree, listWorktrees, defaultWorktreeDir, WorktreeInfo } from './worktree'
 import { normalizeAlias } from '../shared/state/aliases'
 import { isValidBranchName, sanitizeBranchInput } from '../shared/branch-name'
@@ -184,6 +184,15 @@ export interface ControlServerDeps {
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
   clearAlias: (worktreePath: string) => void
+  /** Rename one tab in the pane tree. Returns false when the rename was
+   *  refused — for `source: 'agent'`, that means the user had already
+   *  named the tab themselves. */
+  renameTab: (
+    worktreePath: string,
+    tabId: string,
+    label: string,
+    source: 'user' | 'agent'
+  ) => boolean
   /** Rename the branch a worktree has checked out, then resync the worktree
    *  list so the sidebar picks the new name up. The directory keeps its
    *  original name — see `renameWorktreeBranch`. */
@@ -545,6 +554,35 @@ async function handleRequest(
       alias: stored ?? '',
       cleared: stored === null,
       clamped
+    })
+  }
+
+  // set_tab_name — an agent naming its OWN tab. Deliberately takes no
+  // tabId or worktreePath: the caller's scope IS the target, so there's
+  // no way to rename someone else's tab. A name the user typed wins
+  // permanently, which the reducer enforces and this reports back.
+  if (req.method === 'POST' && path === '/tab-name') {
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, {
+        error: 'caller terminal is not associated with a worktree'
+      })
+    }
+    const body = await readJson(req)
+    const submitted = typeof body.name === 'string' ? body.name : ''
+    const stored = normalizeTabLabel(submitted)
+    if (!stored) {
+      return sendJson(res, 400, { error: 'name required' })
+    }
+    const applied = deps.renameTab(scope.worktreePath, scope.terminalId, stored, 'agent')
+    return sendJson(res, 200, {
+      name: stored,
+      applied,
+      clamped: applied && submitted.trim() !== stored,
+      ...(applied ? {} : { reason: 'user-set' })
     })
   }
 

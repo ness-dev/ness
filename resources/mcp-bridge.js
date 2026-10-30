@@ -320,6 +320,22 @@ const TOOLS = [
     }
   },
   {
+    name: 'set_tab_name',
+    description:
+      "Rename your own tab in Ness. The name replaces the auto-derived label wherever this tab is shown (tab strip, pane header, command palette). Cosmetic only — it touches nothing in git and is not the worktree alias.\n\nThere are no parameters for which tab: you can only name the one you are running in, resolved from the caller. Keep the name a few words at most, Title Case with spaces (\"Agent Tab Rename\", \"Flaky Test Hunt\") — a tab strip is narrow, and a kebab-case slug just repeats the branch name. Names are trimmed and clamped to 32 characters.\n\nSet it once you actually know what the session is about, and re-set it only when the focus genuinely changes. Do not re-send the same name or churn it every turn.\n\nIf the user has renamed this tab by hand, their name is final: the call is refused and `applied` comes back false. Don't retry — ask them to rename it if you think it's wrong.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'The tab name to display. Trimmed and clamped to 32 characters. Must be non-empty — there is no agent-side reset.'
+        }
+      },
+      required: ['name']
+    }
+  },
+  {
     name: 'send_message',
     description:
       "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are; the sender name cannot be set by you.",
@@ -842,6 +858,23 @@ async function handleToolCall(name, args) {
       worktreePath: args && args.worktreePath
     })
     return 'Cleared alias for ' + r.worktreePath
+  }
+  if (name === 'set_tab_name') {
+    if (!args || typeof args.name !== 'string' || !args.name.trim()) {
+      throw new Error('name is required')
+    }
+    const r = await callControl('POST', '/tab-name', { name: args.name })
+    if (!r.applied) {
+      return (
+        'Tab name NOT changed: the user named this tab themselves, and a user-set name is ' +
+        'final. Do not call set_tab_name again for this tab — ask the user to rename it if ' +
+        'you think it should change.'
+      )
+    }
+    const clampNote = r.clamped
+      ? ' (input was normalized: whitespace trimmed and/or clamped to 32 chars)'
+      : ''
+    return 'Renamed this tab to "' + r.name + '"' + clampNote
   }
   if (name === 'send_message') {
     if (!args || typeof args.worktree !== 'string' || !args.worktree.trim()) {

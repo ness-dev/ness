@@ -412,6 +412,7 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   rename_worktree: { icon: RenameIcon, one: 'rename', many: 'renames' },
   set_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
   clear_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
+  set_tab_name: { icon: RenameIcon, one: 'rename', many: 'renames' },
   send_message: { icon: MessageIcon, one: 'message', many: 'messages' }
 }
 
