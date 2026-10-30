@@ -156,4 +156,4 @@ For larger review comments then the standard comments & PR discussion process sh
 
 If you're stuck or unsure about how to approach something, please open a [discussion](https://github.com/ness-dev/ness/discussions) or just put a question in an issue. We'd rather answer questions early than have a contributor build something in a direction that doesn't quite fit.
 
-Thanks again for being here.
+Thanks again for being here — we're glad you stopped by.
