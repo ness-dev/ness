@@ -1,15 +1,9 @@
 import type { Store } from './store'
-import type { StateEvent } from '../shared/state'
 import type { PRStatus } from '../shared/state/prs'
 import { pickAuthorTab } from './review-service'
+import { PrStatusWatcher } from './pr-status-watcher'
 import { log } from './debug'
 
-/** Identity of a green build: the commit it went green on. Statuses
- *  cached by an older build carry no headSha, in which case the PR number
- *  still collapses repeated polls into one review. */
-function shaKeyFor(status: PRStatus): string {
-  return status.headSha || `pr-${status.number}`
-}
 
 export interface ReviewSpawnerDeps {
   /** Whether auto-review on green CI is on for this worktree. */
@@ -36,107 +30,53 @@ export function buildCiGreenContext(pr: PRStatus): string {
     .join('\n')
 }
 
-/** Opens a reviewer Chat tab when a worktree's PR checks go green.
- *
- *  Modelled on CiNotifier, and deliberately the same shape: subscribe to
- *  `prs/*`, key decisions on the head commit so a flapping or re-polled
- *  status reviews once, and stay quiet about whatever was already green
- *  the first time we looked (otherwise every green PR in the workspace
- *  would spawn a reviewer at launch).
+/** Opens a reviewer Chat tab for a worktree's author tab when its PR
+ *  checks go green — the automatic counterpart to request_review. The
+ *  once-per-head-commit dedup lives in PrStatusWatcher, which this
+ *  configures; see there for why it works that way.
  *
  *  Which tab is treated as the author: the most recently active Chat tab
  *  that is not itself a reviewer. The review comes back to that tab
- *  because requestReview records the link.
- *
- *  Spawning a tab starts a subprocess, so delivery hops off the store
- *  fan-out first. */
+ *  because requestReview records the link. */
 export class ReviewSpawner {
-  private seen = new Set<string>()
-  private handledSha = new Map<string, string>()
-  private unsubscribe: (() => void) | null = null
+  private watcher: PrStatusWatcher
 
   constructor(
     private store: Store,
     private deps: ReviewSpawnerDeps
-  ) {}
+  ) {
+    this.watcher = new PrStatusWatcher(store, {
+      name: 'review-spawner',
+      on: 'success',
+      // A merged or closed PR is finished; reviewing it now helps nobody.
+      requireOpen: true,
+      isEnabled: (path) => this.deps.isEnabled(path),
+      act: (path, status, shaKey) => this.openReviewer(path, status, shaKey)
+    })
+  }
 
   start(): void {
-    if (this.unsubscribe) return
-    const byPath = this.store.getSnapshot().state.prs.byPath
-    for (const [path, status] of Object.entries(byPath)) {
-      if (!status) continue
-      this.seen.add(path)
-      if (status.checksOverall === 'success') this.handledSha.set(path, shaKeyFor(status))
-    }
-    this.unsubscribe = this.store.subscribe((event) => this.onEvent(event))
+    this.watcher.start()
   }
 
   stop(): void {
-    this.unsubscribe?.()
-    this.unsubscribe = null
+    this.watcher.stop()
   }
 
-  private onEvent(event: StateEvent): void {
-    if (event.type === 'prs/statusChanged') {
-      this.consider(event.payload.path, event.payload.status)
-      return
-    }
-    if (event.type === 'prs/bulkStatusChanged') {
-      // Inherent sweep: the event replaces prs.byPath wholesale, and PR
-      // polls are minutes apart. The per-path caches keep it cheap.
-      for (const path of Object.keys(event.payload)) {
-        this.consider(path, event.payload[path])
-      }
-      for (const path of this.seen) {
-        if (!(path in event.payload)) {
-          this.seen.delete(path)
-          this.handledSha.delete(path)
-        }
-      }
-    }
-  }
-
-  private consider(path: string, status: PRStatus | null): void {
-    if (!status) {
-      this.seen.delete(path)
-      this.handledSha.delete(path)
-      return
-    }
-    const firstObservation = !this.seen.has(path)
-    this.seen.add(path)
-    if (status.checksOverall !== 'success') return
-    // A merged or closed PR is finished; reviewing it now helps nobody.
-    if (status.state !== 'open') return
-
-    const shaKey = shaKeyFor(status)
-    if (this.handledSha.get(path) === shaKey) return
-    // Claim the commit before any other check, so there is exactly one
-    // decision per head commit even if a poll lands mid-spawn.
-    this.handledSha.set(path, shaKey)
-
-    if (firstObservation) {
-      log('review-spawner', `skip ${path} @ ${shaKey}: already green at first poll`)
-      return
-    }
-    if (!this.deps.isEnabled(path)) {
-      log('review-spawner', `skip ${path} @ ${shaKey}: auto-review off for this worktree`)
-      return
-    }
-    const author = pickAuthorTab(this.store.getSnapshot().state, path)
+  /** False releases the commit claim so a later poll retries — by then
+   *  the user may have opened the Chat tab this needs. */
+  private openReviewer(worktreePath: string, status: PRStatus, shaKey: string): boolean {
+    const author = pickAuthorTab(this.store.getSnapshot().state, worktreePath)
     if (!author) {
-      log('review-spawner', `skip ${path} @ ${shaKey}: no Chat tab to review for`)
-      this.handledSha.delete(path)
-      return
+      log('review-spawner', `skip ${worktreePath} @ ${shaKey}: no Chat tab to review for`)
+      return false
     }
-    const context = buildCiGreenContext(status)
-    setImmediate(() => {
-      const result = this.deps.requestReview(path, author, context)
-      if (!result.ok) {
-        log('review-spawner', `skip ${path} @ ${shaKey}: ${result.error}`)
-        this.handledSha.delete(path)
-        return
-      }
-      log('review-spawner', `opened reviewer for ${path} @ ${shaKey}`)
-    })
+    const result = this.deps.requestReview(worktreePath, author, buildCiGreenContext(status))
+    if (!result.ok) {
+      log('review-spawner', `skip ${worktreePath} @ ${shaKey}: ${result.error}`)
+      return false
+    }
+    log('review-spawner', `opened reviewer for ${worktreePath} @ ${shaKey}`)
+    return true
   }
 }

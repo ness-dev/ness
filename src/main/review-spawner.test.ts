@@ -63,6 +63,10 @@ function setup(
   return { store, spawner, requestReview, green }
 }
 
+// The once-per-head-commit dedup these rely on is PrStatusWatcher's, and
+// is tested there. What is left here is what ReviewSpawner itself decides:
+// which tab is the author, what the reviewer is told, and when a commit is
+// released for a retry.
 describe('ReviewSpawner', () => {
   it('opens a reviewer for the author tab when CI goes green', async () => {
     const { spawner, requestReview, green } = setup()
@@ -74,41 +78,6 @@ describe('ReviewSpawner', () => {
     const [path, tabId, context] = requestReview.mock.calls[0]
     expect([path, tabId]).toEqual([WT, 'author'])
     expect(context).toMatch(/CI has gone green on PR #7/)
-  })
-
-  it('reviews a given commit once, however often it is polled', async () => {
-    const { spawner, requestReview, green } = setup()
-    spawner.start()
-    await green({ ...pr(), checksOverall: 'pending' })
-    await green()
-    await green()
-    expect(requestReview).toHaveBeenCalledTimes(1)
-    // A new commit that also goes green is a new review.
-    await green({ ...pr(), headSha: 'sha-2' })
-    expect(requestReview).toHaveBeenCalledTimes(2)
-  })
-
-  it('stays quiet about a PR that was already green at the first poll', async () => {
-    const { spawner, requestReview, green } = setup()
-    spawner.start()
-    await green()
-    expect(requestReview).not.toHaveBeenCalled()
-  })
-
-  it('does nothing when the setting is off', async () => {
-    const { spawner, requestReview, green } = setup({ enabled: false })
-    spawner.start()
-    await green({ ...pr(), checksOverall: 'pending' })
-    await green()
-    expect(requestReview).not.toHaveBeenCalled()
-  })
-
-  it('ignores a merged or closed PR', async () => {
-    const { spawner, requestReview, green } = setup()
-    spawner.start()
-    await green({ ...pr(), checksOverall: 'pending' })
-    await green({ ...pr(), state: 'merged' })
-    expect(requestReview).not.toHaveBeenCalled()
   })
 
   it('skips a reviewer tab and picks the most recently active author', async () => {
@@ -149,14 +118,4 @@ describe('ReviewSpawner', () => {
     expect(requestReview).toHaveBeenCalledTimes(2)
   })
 
-  it('forgets a worktree whose PR is gone', async () => {
-    const { spawner, requestReview, green } = setup()
-    spawner.start()
-    await green({ ...pr(), checksOverall: 'pending' })
-    await green()
-    await green(null)
-    await green()
-    // First observation again after the PR vanished — stays quiet.
-    expect(requestReview).toHaveBeenCalledTimes(1)
-  })
 })
