@@ -108,3 +108,74 @@ describe('PtyManager.getHistory — persisted scrollback across an app restart',
     expect(mgr.getHistory(id)).toBe('')
   })
 })
+
+describe('PtyManager PTY ceiling', () => {
+  // `pty:create` is an unbounded client-driven signal, so the server has to
+  // defend itself: a client that mounts N terminals will ask for N spawns
+  // as fast as it can send them. Without a ceiling a single misbehaving
+  // client can OOM the host — which is exactly how a remote test box was
+  // lost. These assert the ceiling holds AND that it can't lock out a
+  // reconnecting client from terminals that are already running.
+  const CWD = tmpdir()
+
+  function makeManager(): InstanceType<typeof PtyManager> {
+    const mgr = new PtyManager()
+    mgr.setSendSignal(() => {})
+    return mgr
+  }
+
+  beforeEach(() => {
+    delete process.env.HARNESS_MAX_PTYS
+  })
+
+  it('refuses spawns past the limit instead of letting the host die', () => {
+    process.env.HARNESS_MAX_PTYS = '3'
+    const mgr = makeManager()
+    for (let i = 0; i < 3; i++) mgr.create(`t${i}`, CWD, '/bin/sh', [], undefined, true)
+    expect(mgr.getActivePtyCount()).toBe(3)
+
+    mgr.create('one-too-many', CWD, '/bin/sh', [], undefined, true)
+    expect(mgr.hasTerminal('one-too-many')).toBe(false)
+    expect(mgr.getActivePtyCount()).toBe(3)
+  })
+
+  it('tells the client why, in the terminal it asked for', () => {
+    process.env.HARNESS_MAX_PTYS = '1'
+    const mgr = new PtyManager()
+    const sent: { channel: string; id: string; data: string }[] = []
+    mgr.setSendSignal((channel, ...args) => {
+      sent.push({ channel, id: args[0] as string, data: args[1] as string })
+    })
+    mgr.create('first', CWD, '/bin/sh', [], undefined, true)
+    sent.length = 0
+
+    mgr.create('refused', CWD, '/bin/sh', [], undefined, true)
+    const notice = sent.find((s) => s.channel === 'terminal:data' && s.id === 'refused')
+    // A silent refusal would look identical to a hung terminal.
+    expect(notice).toBeDefined()
+    expect(notice!.data).toContain('limit 1')
+    expect(notice!.data).toContain('HARNESS_MAX_PTYS')
+  })
+
+  it('still lets a client re-attach to a live terminal at the limit', () => {
+    // The limit must not strand a reconnecting client: re-attaching costs
+    // no new subprocess, so it is checked after the already-exists path.
+    process.env.HARNESS_MAX_PTYS = '2'
+    const mgr = makeManager()
+    mgr.create('a', CWD, '/bin/sh', [], undefined, true)
+    mgr.create('b', CWD, '/bin/sh', [], undefined, true)
+    expect(mgr.getActivePtyCount()).toBe(2)
+
+    mgr.create('a', CWD, '/bin/sh', [], undefined, true)
+    expect(mgr.hasTerminal('a')).toBe(true)
+    expect(mgr.getActivePtyCount()).toBe(2)
+  })
+
+  it('falls back to the default when the override is nonsense', () => {
+    process.env.HARNESS_MAX_PTYS = 'not-a-number'
+    const mgr = makeManager()
+    // Must not resolve to 0 and refuse everything.
+    mgr.create('t', CWD, '/bin/sh', [], undefined, true)
+    expect(mgr.hasTerminal('t')).toBe(true)
+  })
+})
