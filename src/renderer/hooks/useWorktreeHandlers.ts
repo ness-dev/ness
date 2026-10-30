@@ -10,11 +10,18 @@ interface UseWorktreeHandlersArgs {
    *  every BackendScope, so per-worktree calls must be routed explicitly.
    *  See backend-routing.ts. */
   pathBackendId: Record<string, string>
-  /** Which backend owns each repo root. Creating a worktree targets a
-   *  repo, and a repo lives on exactly one machine — so the repo the user
-   *  picked already decides where the worktree is created. That's why
-   *  there's no separate backend picker: it would be a second way to say
-   *  the same thing, and a way to say it inconsistently. */
+  /** Which backend hosts each repo root.
+   *
+   *  NOT a safe routing key in general: a repo can be checked out on
+   *  several machines, which is the entire point of a merged sidebar. This
+   *  map is last-writer-wins, so when the SAME absolute path exists on two
+   *  backends, creation silently targets whichever was iterated last.
+   *
+   *  It is correct for the case where a repo path exists on exactly one
+   *  backend — differing paths across machines produce distinct keys —
+   *  which covers today's sections, since those are still keyed by path.
+   *  Merging sections across backends makes this ambiguous by design and
+   *  needs a real repo identity plus an explicit creation target. */
   repoBackendId: Record<string, string>
   /** Which backend each pending-creation entry lives on. Creation can now
    *  land on a remote, so retry/dismiss have to follow the entry rather
