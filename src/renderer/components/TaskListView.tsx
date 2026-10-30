@@ -201,11 +201,14 @@ function TaskRow({
       <span className="w-4 flex items-center justify-center shrink-0">
         <StatusGlyph row={row} />
       </span>
+      {/* Title first and repo last, unlike the sidebar: a leading repo
+          label is variable-width, so it ragged-edges every title in the
+          list and there's nothing left to scan down. */}
+      <span className="truncate">{taskTitle(row)}</span>
+      <div className="flex-1" />
       {repoLabel && (
         <span className={`text-xs shrink-0 ${repoNameColor(repoLabel)}`}>{repoLabel}</span>
       )}
-      <span className="truncate">{taskTitle(row)}</span>
-      <div className="flex-1" />
       {prStatus && (
         <span className="shrink-0" title={prIconTitle(prStatus)}>
           <GitPullRequest className={`icon-xs ${iconColor}`} />
