@@ -7,7 +7,7 @@ vi.mock('./review-comments', async (orig) => ({
 
 import { Store } from './store'
 import { initialState, type AppState } from '../shared/state'
-import type { PaneNode } from '../shared/state/terminals'
+import type { PaneLeaf, PaneNode } from '../shared/state/terminals'
 import type { ReviewComment } from '../shared/state/reviews'
 import { listChatTabs, type ChatTabInfo } from '../shared/agent-tabs'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
@@ -15,6 +15,7 @@ import {
   agentAuthor,
   findReviewComment,
   listReviewComments,
+  pickAuthorTab,
   pickReviewTarget,
   replyToReviewComment,
   requestReview,
@@ -138,6 +139,66 @@ describe('pickReviewTarget', () => {
     })
     expect(pickReviewTarget([tab('rev', 50), tab('b', 40), tab('a', 0)], 'rev')).toBe('b')
     expect(pickReviewTarget([tab('rev', 50)], 'rev')).toBeNull()
+  })
+})
+
+describe('pickAuthorTab', () => {
+  it('skips reviewer tabs and terminal tabs', () => {
+    const { store } = setup()
+    // 'reviewer' and 'term' are terminal tabs, 'rev-of-author' is a
+    // reviewer; 'author' is the only plain Chat tab before 'chat2'.
+    expect(pickAuthorTab(store.getSnapshot().state, WT)).toBe('author')
+  })
+
+  it('prefers the most recently active tab', () => {
+    const { store } = setup()
+    const state = store.getSnapshot().state
+    const withEntries: AppState = {
+      ...state,
+      jsonClaude: {
+        ...state.jsonClaude,
+        sessions: {
+          author: { entries: [{ entryId: 'e', kind: 'user', timestamp: 10 }] },
+          chat2: { entries: [{ entryId: 'e', kind: 'user', timestamp: 50 }] }
+        } as unknown as AppState['jsonClaude']['sessions']
+      }
+    }
+    expect(pickAuthorTab(withEntries, WT)).toBe('chat2')
+  })
+
+  it("breaks a tie on the pane's focused tab, then pane order", () => {
+    const { store } = setup()
+    const state = store.getSnapshot().state
+    // No transcripts, so every tab ties at 0. 'chat2' is focused.
+    const focused: AppState = {
+      ...state,
+      terminals: {
+        ...state.terminals,
+        panes: { [WT]: { ...(state.terminals.panes[WT] as PaneLeaf), activeTabId: 'chat2' } }
+      }
+    }
+    expect(pickAuthorTab(focused, WT)).toBe('chat2')
+  })
+
+  it('returns null when the worktree has no eligible Chat tab', () => {
+    const { store } = setup()
+    const state = store.getSnapshot().state
+    expect(pickAuthorTab(state, '/nope')).toBeNull()
+    const reviewersOnly: AppState = {
+      ...state,
+      terminals: {
+        ...state.terminals,
+        panes: {
+          [WT]: {
+            type: 'leaf',
+            id: 'p',
+            tabs: [{ id: 'rev', type: 'json-claude', label: 'Reviewer', reviewOf: 'gone' }],
+            activeTabId: 'rev'
+          }
+        }
+      }
+    }
+    expect(pickAuthorTab(reviewersOnly, WT)).toBeNull()
   })
 })
 

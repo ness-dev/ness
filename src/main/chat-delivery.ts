@@ -1,6 +1,7 @@
 import type { AppState } from '../shared/state'
-import { getLeaves, type TerminalTab } from '../shared/state/terminals'
+import { getLeaves } from '../shared/state/terminals'
 import { worktreeHandle } from '../shared/state/worktrees'
+import { findTabInWorktree } from '../shared/agent-tabs'
 
 export interface ChatDeliveryDeps {
   /** Injects a user turn into a running json-mode chat session. */
@@ -122,15 +123,6 @@ export type TabDeliveryResult =
   | { ok: true; tabId: string; woke: boolean }
   | { ok: false; reason: TabDeliveryFailure }
 
-function findTab(state: AppState, worktreePath: string, tabId: string): TerminalTab | null {
-  const tree = state.terminals.panes[worktreePath]
-  if (!tree) return null
-  for (const leaf of getLeaves(tree)) {
-    const tab = leaf.tabs.find((t) => t.id === tabId)
-    if (tab) return tab
-  }
-  return null
-}
 
 /** Deliver a message into one specific Chat tab, waking or restarting
  *  it as needed. A json-claude tab's id is its session id. Terminal agent
@@ -150,7 +142,7 @@ export function deliverToTab(
     deps.send(tabId, message)
     return { ok: true, tabId, woke: false }
   }
-  const tab = findTab(state, worktreePath, tabId)
+  const tab = findTabInWorktree(state, worktreePath, tabId)
   if (!tab) return { ok: false, reason: 'no-tab' }
   if (tab.type === 'agent') return { ok: false, reason: 'terminal-unsupported' }
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }

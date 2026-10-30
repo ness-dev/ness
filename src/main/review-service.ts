@@ -8,9 +8,15 @@ import type {
   ReviewSubmission,
   ReviewVerdict
 } from '../shared/state/reviews'
-import { getLeaves, type AgentKind, type TerminalTab } from '../shared/state/terminals'
+import type { AgentKind } from '../shared/state/terminals'
 import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '../shared/agent-registry'
-import { tabLabel, type ChatTabInfo } from '../shared/agent-tabs'
+import {
+  findReviewerTab,
+  findTabInWorktree,
+  listChatTabs,
+  tabLabel,
+  type ChatTabInfo
+} from '../shared/agent-tabs'
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { describeTabDeliveryFailure, type TabDeliveryResult } from './chat-delivery'
@@ -40,14 +46,8 @@ export type ReviewSendResult =
 /** Author record for a comment, reply or review written from `tabId`.
  *  The label is the tab's name as the user sees it in the tab strip. */
 export function agentAuthor(state: AppState, worktreePath: string, tabId: string): ReviewAuthor {
-  const tree = state.terminals.panes[worktreePath]
-  if (tree) {
-    for (const leaf of getLeaves(tree)) {
-      const tab = leaf.tabs.find((t) => t.id === tabId)
-      if (tab) return { kind: 'agent', tabId, label: tabLabel(tab) }
-    }
-  }
-  return { kind: 'agent', tabId }
+  const tab = findTabInWorktree(state, worktreePath, tabId)
+  return tab ? { kind: 'agent', tabId, label: tabLabel(tab) } : { kind: 'agent', tabId }
 }
 
 const MIN_ID_PREFIX = 6
@@ -72,15 +72,6 @@ export function findReviewComment(
   return { error: `no review comment with id "${q}" in this worktree` }
 }
 
-function findTab(state: AppState, worktreePath: string, tabId: string): TerminalTab | null {
-  const tree = state.terminals.panes[worktreePath]
-  if (!tree) return null
-  for (const leaf of getLeaves(tree)) {
-    const tab = leaf.tabs.find((t) => t.id === tabId)
-    if (tab) return tab
-  }
-  return null
-}
 
 /** The tab that asked this reviewer for a review, when it is still open.
  *  An explicit link beats any heuristic, so this is checked first. */
@@ -90,9 +81,9 @@ export function reviewRequester(
   reviewerTabId: string | null
 ): string | null {
   if (!reviewerTabId) return null
-  const requesterId = findTab(state, worktreePath, reviewerTabId)?.reviewOf
+  const requesterId = findTabInWorktree(state, worktreePath, reviewerTabId)?.reviewOf
   if (!requesterId) return null
-  return findTab(state, worktreePath, requesterId) ? requesterId : null
+  return findTabInWorktree(state, worktreePath, requesterId) ? requesterId : null
 }
 
 /** The tab a review goes to: the most recently active Chat tab that
@@ -227,22 +218,7 @@ export function sendReviewSubmission(
  *  finished review has to be delivered back to it. Shared by the CI-green
  *  spawner and the "Request AI review" button so both pick the same tab. */
 export function pickAuthorTab(state: AppState, worktreePath: string): string | null {
-  const tree = state.terminals.panes[worktreePath]
-  if (!tree) return null
-  let best: string | null = null
-  let bestTs = -1
-  for (const leaf of getLeaves(tree)) {
-    for (const tab of leaf.tabs) {
-      if (tab.type !== 'json-claude' || tab.reviewOf) continue
-      const entries = state.jsonClaude.sessions[tab.id]?.entries
-      const ts = entries?.[entries.length - 1]?.timestamp ?? 0
-      if (ts > bestTs) {
-        best = tab.id
-        bestTs = ts
-      }
-    }
-  }
-  return best
+  return listChatTabs(state, worktreePath).find((t) => !t.reviewOf)?.id ?? null
 }
 
 /** Context for a review the user asked for from the PR panel. The
@@ -312,7 +288,7 @@ export function requestReview(
   context: string
 ): RequestReviewResult {
   const state = deps.store.getSnapshot().state
-  const requester = findTab(state, worktreePath, requesterTabId)
+  const requester = findTabInWorktree(state, worktreePath, requesterTabId)
   if (!requester) return { ok: false, error: 'caller tab is not in this worktree' }
   if (requester.type !== 'json-claude') {
     return {
@@ -328,7 +304,9 @@ export function requestReview(
         'you are the reviewer for this branch — submit your review with submit_review rather than requesting another one.'
     }
   }
-  const reRequest = hasReviewer(state, worktreePath, requesterTabId)
+  // A reviewer already open for this requester makes the request read as
+  // "another look", not a first review.
+  const reRequest = !!findReviewerTab(state, worktreePath, requesterTabId)
   const defaults = deps.reviewDefaults()
   // 'inherit' leaves agentKind undefined, so the reviewer runs the same
   // agent as the tab that asked.
@@ -340,19 +318,6 @@ export function requestReview(
     { agentKind, model: modelForAgent(agentKind, defaults.model) }
   )
   return { ok: true, reviewerTabId: opened.tabId, reused: opened.reused }
-}
-
-/** Whether a reviewer tab for this requester is already open — the
- *  request then reads as "another look", not a first review. */
-function hasReviewer(state: AppState, worktreePath: string, requesterTabId: string): boolean {
-  const tree = state.terminals.panes[worktreePath]
-  if (!tree) return false
-  for (const leaf of getLeaves(tree)) {
-    for (const tab of leaf.tabs) {
-      if (tab.type === 'json-claude' && tab.reviewOf === requesterTabId) return true
-    }
-  }
-  return false
 }
 
 export interface SubmitReviewInput {

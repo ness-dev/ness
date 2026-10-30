@@ -18,6 +18,7 @@ import {
 import type { PersistedPaneNode } from './persistence'
 import { persistedTabFields } from './pane-persistence'
 import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
+import { findReviewerTab } from '../shared/agent-tabs'
 import { log } from './debug'
 
 interface PanesFSMOptions {
@@ -582,14 +583,7 @@ export class PanesFSM {
   /** Find this worktree's reviewer Chat tab for `requesterTabId`, if one
    *  is already open. */
   findReviewerTab(wtPath: string, requesterTabId: string): TerminalTab | null {
-    const tree = this.getTree(wtPath)
-    if (!tree) return null
-    for (const leaf of getLeaves(tree)) {
-      for (const tab of leaf.tabs) {
-        if (tab.type === 'json-claude' && tab.reviewOf === requesterTabId) return tab
-      }
-    }
-    return null
+    return findReviewerTab(this.store.getSnapshot().state, wtPath, requesterTabId)
   }
 
   /** Open a reviewer Chat tab for `requesterTabId` and focus the Review
