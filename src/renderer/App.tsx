@@ -39,6 +39,7 @@ import { InterfaceToggle } from './components/InterfaceToggle'
 import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
 import { CommandCenter } from './components/CommandCenter'
+import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
 import { HotkeyCheatsheet } from './components/HotkeyCheatsheet'
 import { NewProjectScreen } from './components/NewProjectScreen'
@@ -302,6 +303,7 @@ function DesktopApp(): JSX.Element {
   const [showActivity, setShowActivity] = useState(false)
   const [showCleanup, setShowCleanup] = useState(false)
   const [showCommandCenter, setShowCommandCenter] = useState(false)
+  const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [commandPaletteMode, setCommandPaletteMode] = useState<'root' | 'files'>('root')
   const [showPerfMonitor, setShowPerfMonitor] = useState(false)
@@ -770,6 +772,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
         setShowActivity(false)
         setShowCleanup(false)
         setShowCommandCenter(false)
+        setShowTaskList(false)
       })
     },
     [switchWorktree]
@@ -910,6 +913,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setSingleScreenMode,
     setShowNewWorktree,
     setShowCommandCenter,
+    setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
     setShowPerfMonitor,
@@ -1003,6 +1007,23 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const myWeekOverlay = showMyWeek ? (
     <div className="fixed inset-0 z-50 flex">
       <WeeklyWrappedScreen onClose={() => setShowMyWeek(false)} />
+    </div>
+  ) : null
+
+  const taskListOverlay = showTaskList ? (
+    <div className="fixed inset-0 z-50 flex">
+      <TaskListView
+        model={worktreeListModel}
+        activeWorktreeId={activeWorktreeId}
+        activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
+        unifiedRepos={unifiedRepos}
+        repoCount={repoRoots.length}
+        onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
+        onClose={() => setShowTaskList(false)}
+        onSelect={handleSidebarSelectWorktree}
+        onSelectTab={handleSidebarSelectTab}
+        onToggleGroup={toggleGroup}
+      />
     </div>
   ) : null
 
@@ -1380,6 +1401,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       </div>
       {settingsOverlay}
       {myWeekOverlay}
+      {taskListOverlay}
       {repoPickerOverlay}
       {repoAddPromptOverlay}
       </HotkeysProvider>
@@ -1604,6 +1626,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenActivity={() => setShowActivity(true)}
             onOpenCleanup={() => setShowCleanup(true)}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1632,6 +1655,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(true)
             }}
             onOpenCleanup={() => setShowCleanup(true)}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1759,23 +1783,21 @@ const setQuestStep = useCallback((next: QuestStep) => {
         )}
         {showCommandCenter && (
           <CommandCenter
-            worktrees={worktrees}
-            worktreeStatuses={worktreeStatuses}
-            worktreePendingTools={worktreePendingTools}
-            prStatuses={prStatuses}
-            mergedPaths={mergedPaths}
+            model={worktreeListModel}
             lastActive={lastActive}
             tailLines={tailLines}
             terminalTabs={terminalTabs}
+            unifiedRepos={unifiedRepos}
+            onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
             onClose={() => setShowCommandCenter(false)}
             onSelect={(path) => {
               setShowCommandCenter(false)
+              setShowTaskList(false)
               setShowNewWorktree(false)
               setShowActivity(false)
               setShowCleanup(false)
               setActiveWorktreeId(path)
             }}
-            isGroupCollapsed={isGroupCollapsed}
             onToggleGroup={toggleGroup}
           />
         )}
@@ -1888,6 +1910,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     </div>
     {settingsOverlay}
     {myWeekOverlay}
+    {taskListOverlay}
     {repoPickerOverlay}
     {repoAddPromptOverlay}
     {showPerfMonitor && <PerfMonitorHUD onClose={() => setShowPerfMonitor(false)} />}

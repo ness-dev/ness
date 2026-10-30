@@ -1,4 +1,4 @@
-import { Trash2, Layers, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, ListTodo, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { WorktreeListModel } from '../worktree-list-model'
@@ -35,6 +35,7 @@ interface SidebarProps {
   onOpenHotkeyCheatsheet: () => void
   onOpenActivity: () => void
   onOpenCleanup: () => void
+  onOpenTaskList: () => void
   onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenMyWeek: () => void
@@ -73,6 +74,7 @@ export function Sidebar({
   onOpenHotkeyCheatsheet,
   onOpenActivity,
   onOpenCleanup,
+  onOpenTaskList,
   onOpenCommandCenter,
   onOpenNewProject,
   onOpenMyWeek,
@@ -101,6 +103,15 @@ export function Sidebar({
         </Tooltip>
         <span className="text-xs font-medium text-dim">WORKTREES</span>
         <div className="ml-auto flex items-center gap-1">
+          <Tooltip label="Task list" action="toggleTaskList" side="bottom">
+            <button
+              onClick={onOpenTaskList}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
+              aria-label="Task list"
+            >
+              <ListTodo className="icon-xs" />
+            </button>
+          </Tooltip>
           <Tooltip label="Clean up old worktrees" side="bottom">
             <button
               onClick={onOpenCleanup}
