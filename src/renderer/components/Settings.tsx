@@ -1065,9 +1065,25 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
 
   const [reviewPromptDraft, setReviewPromptDraft] = useState<string>(reviewPrompt)
   useEffect(() => { setReviewPromptDraft(reviewPrompt) }, [reviewPrompt])
-  const [reviewModelDraft, setReviewModelDraft] = useState<string>(reviewModel)
-  useEffect(() => { setReviewModelDraft(reviewModel) }, [reviewModel])
   const [reviewPromptSaveResult, setReviewPromptSaveResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  // The reviewer's model list follows its agent. 'inherit' can resolve to
+  // either agent at spawn time, so both are offered, grouped, and the
+  // hint says the pin has to match whoever ends up reviewing.
+  const reviewModelGroups = useMemo(
+    () =>
+      reviewAgent === 'codex'
+        ? [{ label: 'Codex', models: CODEX_MODELS }]
+        : reviewAgent === 'cursor'
+          ? [{ label: 'Cursor', models: CURSOR_MODELS }]
+          : reviewAgent === 'claude'
+            ? [{ label: 'Claude', models: CLAUDE_MODELS }]
+            : [
+                { label: 'Claude', models: CLAUDE_MODELS },
+                { label: 'Codex', models: CODEX_MODELS }
+              ],
+    [reviewAgent]
+  )
 
   const handleSaveReviewPrompt = useCallback(async () => {
     await backend.setReviewPrompt(reviewPromptDraft)
@@ -4131,8 +4147,10 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 <div className="mt-4">
                   <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
                   <p className="text-xs text-dim mb-2">
-                    Which agent reviews. Pick a different one — or a stronger model below — to get a
-                    second opinion rather than the same brain twice.
+                    Which agent and model review. Pick a different one — or a stronger model — to
+                    get a second opinion rather than the same brain twice. With &quot;same as the
+                    requester&quot; the agent isn&apos;t known until the review starts; a model
+                    that agent doesn&apos;t know is ignored in favour of its own default.
                   </p>
                   <div className="flex gap-2">
                     <select
@@ -4144,13 +4162,22 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       <option value="claude">Claude</option>
                       <option value="codex">Codex</option>
                     </select>
-                    <input
-                      type="text"
-                      value={reviewModelDraft}
-                      onChange={(e) => setReviewModelDraft(e.target.value)}
-                      onBlur={() => { void backend.setReviewModel(reviewModelDraft) }}
-                      placeholder="Model (optional, e.g. opus)"
-                      className="flex-1 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg" />
+                    <select
+                      value={reviewModel}
+                      onChange={(e) => { void backend.setReviewModel(e.target.value) }}
+                      className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="">(Default — the agent&apos;s own model)</option>
+                      {reviewModelGroups.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.models.map((m) => (
+                            <option key={`${group.label}-${m.id}`} value={m.id}>
+                              {m.displayName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
                   </div>
                 </div>
 

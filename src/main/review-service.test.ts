@@ -353,12 +353,30 @@ describe('requestReview', () => {
 
   it('uses the configured reviewer agent and model instead of inheriting', () => {
     const { deps, openReviewer, reviewDefaults } = setup()
-    reviewDefaults.mockReturnValue({ agentKind: 'codex', model: 'opus', prompt: 'be thorough' })
+    reviewDefaults.mockReturnValue({ agentKind: 'codex', model: 'gpt-5-codex', prompt: 'be thorough' })
     requestReview(deps, WT, 'author', 'please review')
-    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex', model: 'opus' })
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex', model: 'gpt-5-codex' })
     expect(parseAutomatedMessage(openReviewer.mock.calls[0][2] as unknown as string)?.body).toContain(
       'be thorough'
     )
+  })
+
+  it("drops a model pin the reviewer's agent wouldn't understand", () => {
+    const { deps, openReviewer, reviewDefaults } = setup()
+    // An opus pin left behind after switching the reviewer to Codex, or
+    // typed into config.json by hand: passing it through would fail at
+    // spawn, so the agent's own default wins.
+    reviewDefaults.mockReturnValue({ agentKind: 'codex', model: 'opus', prompt: 'p' })
+    requestReview(deps, WT, 'author', 'please review')
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'codex', model: undefined })
+  })
+
+  it('keeps a model pin that matches the inherited agent', () => {
+    const { deps, openReviewer, reviewDefaults } = setup()
+    reviewDefaults.mockReturnValue({ model: 'opus', prompt: 'p' })
+    // 'author' is a Claude chat tab, and opus is a Claude model.
+    requestReview(deps, WT, 'author', 'please review')
+    expect(openReviewer.mock.calls[0][3]).toEqual({ agentKind: 'claude', model: 'opus' })
   })
 
   it('reads as another look when that tab already has a reviewer', () => {

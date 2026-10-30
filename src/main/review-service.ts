@@ -9,6 +9,7 @@ import type {
   ReviewVerdict
 } from '../shared/state/reviews'
 import { getLeaves, type AgentKind, type TerminalTab } from '../shared/state/terminals'
+import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '../shared/agent-registry'
 import { tabLabel, type ChatTabInfo } from '../shared/agent-tabs'
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
@@ -221,6 +222,18 @@ export function sendReviewSubmission(
   return record({ ok: true, tabId: result.tabId, woke: result.woke })
 }
 
+/** The configured review model, unless it belongs to a different agent —
+ *  a Codex model pinned while the reviewer resolves to Claude would be
+ *  passed to --model verbatim and fail at spawn. Dropping it falls back
+ *  to that agent's own default, which always works. The pin can go stale
+ *  from switching the reviewer agent or editing config.json by hand. */
+function modelForAgent(agentKind: AgentKind, model: string | undefined): string | undefined {
+  if (!model) return undefined
+  const known =
+    agentKind === 'codex' ? CODEX_MODELS : agentKind === 'cursor' ? CURSOR_MODELS : CLAUDE_MODELS
+  return known.some((m) => m.id === model) ? model : undefined
+}
+
 /** Prompt handed to a reviewer tab as its first turn. The guidance
  *  footer wrapAutomatedMessage appends tells it how to use the tools and
  *  that submit_review is what sends the review back. */
@@ -275,13 +288,14 @@ export function requestReview(
   }
   const reRequest = hasReviewer(state, worktreePath, requesterTabId)
   const defaults = deps.reviewDefaults()
+  // 'inherit' leaves agentKind undefined, so the reviewer runs the same
+  // agent as the tab that asked.
+  const agentKind = defaults.agentKind ?? requester.agentKind ?? 'claude'
   const opened = deps.openReviewer(
     worktreePath,
     requesterTabId,
     buildReviewRequest(tabLabel(requester), context, defaults.prompt, { reRequest }),
-    // 'inherit' leaves agentKind undefined here, so the reviewer runs the
-    // same agent as the tab that asked.
-    { agentKind: defaults.agentKind ?? requester.agentKind, model: defaults.model }
+    { agentKind, model: modelForAgent(agentKind, defaults.model) }
   )
   return { ok: true, reviewerTabId: opened.tabId, reused: opened.reused }
 }
