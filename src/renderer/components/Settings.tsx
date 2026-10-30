@@ -4063,8 +4063,9 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   <code className="bg-panel px-1 rounded text-xs">request_review</code>, which opens a
                   second Chat tab to review the branch and shows the Review tab beside it. The
                   reviewer leaves inline comments, then submits — and Ness delivers the review back
-                  to whichever tab asked for it. A reviewer tab can read the branch but is blocked
-                  from editing it. Choose what happens when a review is submitted.
+                  to whichever tab asked for it. Reviewer tabs start in plan mode and are told not
+                  to change the branch they are reviewing. Choose what happens when a review is
+                  submitted.
                 </p>
                 <fieldset className="grid grid-cols-2 gap-2">
                   {([

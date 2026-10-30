@@ -451,10 +451,7 @@ const approvalBridge = new ApprovalBridge(store, {
   isAutoApproveEnabled: () =>
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
-    store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
-  // A reviewer tab may read the branch but not change it. Keyed on the
-  // tab's reviewOf link, so it survives a reload with the tab.
-  isReadOnlySession: (sessionId) => !!findJsonClaudeTab(sessionId)?.reviewOf
+    store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
 })
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
@@ -1106,6 +1103,11 @@ function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
  *  (kickoff + wake), so all paths produce the same dispatch + seed +
  *  create order. Idempotent — every provider's create() short-circuits
  *  if the instance is already running. */
+/** Permission mode a reviewer Chat tab starts in. 'plan' is the tightest
+ *  mode that still lets it read the branch and call the review tools;
+ *  the rest of "don't edit this branch" is said in the request prompt. */
+const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
+
 function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
   if (chatRouter.hasSession(sessionId)) return
   const tab = findJsonClaudeTab(sessionId)
@@ -1125,8 +1127,14 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
       sessionId,
       worktreePath,
       ...(tab.agentKind ? { agentKind: tab.agentKind } : {}),
-      defaultPermissionMode:
-        store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
+      // A reviewer reads the branch and comments on it; it has no reason
+      // to edit, and acceptEdits (the usual default) would let it change
+      // the author's working tree without anyone seeing. Read off the
+      // tab's reviewOf link rather than remembered per session, so a
+      // reviewer that is reloaded or woken comes back in the same mode.
+      defaultPermissionMode: tab.reviewOf
+        ? REVIEWER_PERMISSION_MODE
+        : store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
     }
   })
   chatRouter.seedFromTranscript(sessionId, worktreePath)
