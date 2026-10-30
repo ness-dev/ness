@@ -43,11 +43,12 @@ import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
-import type {
-  SidebarDetailPrefsByMode,
-  PreventSleepMode,
-  HiddenBottomIcons,
-  BottomIconKey
+import {
+  CLIENT_OWNED_CONFIG_CHANNELS,
+  type SidebarDetailPrefsByMode,
+  type PreventSleepMode,
+  type HiddenBottomIcons,
+  type BottomIconKey
 } from '../shared/state/settings'
 
 export type { ElectronOnlyHelpers }
@@ -82,6 +83,19 @@ export function buildBackend(
     name: string,
     handler: ClientSignalHandler
   ): (() => void) => getLocalTransport().onSignal(name, handler)
+
+  // Settings. Appearance, hotkeys and local-window behavior belong to
+  // the client, not to whichever workspace it happens to be looking at
+  // — so those channels answer from the client's own backend while the
+  // rest (operational config a remote's main acts on) stay active-routed.
+  // The split is declared once in CLIENT_OWNED_CONFIG_CHANNELS, next to
+  // the matching CLIENT_OWNED_SETTING_KEYS that `useSettings` overlays.
+  // In the web client both accessors return the same transport, so this
+  // is a no-op there.
+  const reqConfig = (name: string, ...args: unknown[]): Promise<unknown> =>
+    CLIENT_OWNED_CONFIG_CHANNELS.has(name)
+      ? getLocalTransport().request(name, ...args)
+      : getActiveTransport().request(name, ...args)
 
   // Stub used when an Electron-only helper is called in the web
   // client (where `electronHelpers` is null). Logged once per call
@@ -254,90 +268,90 @@ export function buildBackend(
 
     getWeeklyStats: () => req('stats:getWeekly'),
 
-    setHotkeyOverrides: (hotkeys: Record<string, string>) => req('config:setHotkeys', hotkeys),
-    resetHotkeyOverrides: () => req('config:resetHotkeys'),
-    setClaudeCommand: (command: string) => req('config:setClaudeCommand', command),
-    getDefaultClaudeCommand: () => req('config:getDefaultClaudeCommand'),
+    setHotkeyOverrides: (hotkeys: Record<string, string>) => reqConfig('config:setHotkeys', hotkeys),
+    resetHotkeyOverrides: () => reqConfig('config:resetHotkeys'),
+    setClaudeCommand: (command: string) => reqConfig('config:setClaudeCommand', command),
+    getDefaultClaudeCommand: () => reqConfig('config:getDefaultClaudeCommand'),
     setWorktreeScripts: (scripts: { setup?: string; teardown?: string }) =>
-      req('config:setWorktreeScripts', scripts),
+      reqConfig('config:setWorktreeScripts', scripts),
     setRepoConfig: (repoRoot: string, next: Record<string, unknown>) =>
       req('repoConfig:set', repoRoot, next),
     migrateRepoConfigFilename: (repoRoot: string) =>
       req('repoConfig:migrateFilename', repoRoot),
-    setClaudeEnvVars: (vars: Record<string, string>) => req('config:setClaudeEnvVars', vars),
-    setDefaultAgent: (agent: string) => req('config:setDefaultAgent', agent),
-    setCodexCommand: (command: string) => req('config:setCodexCommand', command),
-    setCursorCommand: (command: string) => req('config:setCursorCommand', command),
-    setClaudeModel: (model: string | null) => req('config:setClaudeModel', model),
-    setCodexModel: (model: string | null) => req('config:setCodexModel', model),
-    setCursorModel: (model: string | null) => req('config:setCursorModel', model),
-    setCodexEnvVars: (vars: Record<string, string>) => req('config:setCodexEnvVars', vars),
-    setCursorEnvVars: (vars: Record<string, string>) => req('config:setCursorEnvVars', vars),
-    setHarnessMcpEnabled: (enabled: boolean) => req('config:setHarnessMcpEnabled', enabled),
+    setClaudeEnvVars: (vars: Record<string, string>) => reqConfig('config:setClaudeEnvVars', vars),
+    setDefaultAgent: (agent: string) => reqConfig('config:setDefaultAgent', agent),
+    setCodexCommand: (command: string) => reqConfig('config:setCodexCommand', command),
+    setCursorCommand: (command: string) => reqConfig('config:setCursorCommand', command),
+    setClaudeModel: (model: string | null) => reqConfig('config:setClaudeModel', model),
+    setCodexModel: (model: string | null) => reqConfig('config:setCodexModel', model),
+    setCursorModel: (model: string | null) => reqConfig('config:setCursorModel', model),
+    setCodexEnvVars: (vars: Record<string, string>) => reqConfig('config:setCodexEnvVars', vars),
+    setCursorEnvVars: (vars: Record<string, string>) => reqConfig('config:setCursorEnvVars', vars),
+    setHarnessMcpEnabled: (enabled: boolean) => reqConfig('config:setHarnessMcpEnabled', enabled),
     setAutoApprovePermissions: (enabled: boolean) =>
-      req('config:setAutoApprovePermissions', enabled),
+      reqConfig('config:setAutoApprovePermissions', enabled),
     setAutoApproveSteerInstructions: (text: string) =>
-      req('config:setAutoApproveSteerInstructions', text),
-    setClaudeTuiFullscreen: (enabled: boolean) => req('config:setClaudeTuiFullscreen', enabled),
-    setWsTransportEnabled: (enabled: boolean) => req('config:setWsTransportEnabled', enabled),
-    setWsTransportPort: (port: number) => req('config:setWsTransportPort', port),
-    setWsTransportHost: (host: string) => req('config:setWsTransportHost', host),
-    getWsTransportInfo: () => req('config:getWsTransportInfo'),
-    rotateWsToken: () => req('config:rotateWsToken'),
+      reqConfig('config:setAutoApproveSteerInstructions', text),
+    setClaudeTuiFullscreen: (enabled: boolean) => reqConfig('config:setClaudeTuiFullscreen', enabled),
+    setWsTransportEnabled: (enabled: boolean) => reqConfig('config:setWsTransportEnabled', enabled),
+    setWsTransportPort: (port: number) => reqConfig('config:setWsTransportPort', port),
+    setWsTransportHost: (host: string) => reqConfig('config:setWsTransportHost', host),
+    getWsTransportInfo: () => reqConfig('config:getWsTransportInfo'),
+    rotateWsToken: () => reqConfig('config:rotateWsToken'),
     getLanAddresses: () => req('net:getLanAddresses'),
-    setBrowserToolsEnabled: (enabled: boolean) => req('config:setBrowserToolsEnabled', enabled),
-    setBrowserToolsMode: (mode: 'view' | 'full') => req('config:setBrowserToolsMode', mode),
+    setBrowserToolsEnabled: (enabled: boolean) => reqConfig('config:setBrowserToolsEnabled', enabled),
+    setBrowserToolsMode: (mode: 'view' | 'full') => reqConfig('config:setBrowserToolsMode', mode),
     setConversationForkEnabled: (enabled: boolean) =>
-      req('config:setConversationForkEnabled', enabled),
+      reqConfig('config:setConversationForkEnabled', enabled),
     setWorktreeMessagingEnabled: (enabled: boolean) =>
-      req('config:setWorktreeMessagingEnabled', enabled),
+      reqConfig('config:setWorktreeMessagingEnabled', enabled),
     setAgentTabNamingEnabled: (enabled: boolean) =>
-      req('config:setAgentTabNamingEnabled', enabled),
+      reqConfig('config:setAgentTabNamingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>
-      req('config:setDefaultClaudeTabType', value),
+      reqConfig('config:setDefaultClaudeTabType', value),
     setChatPromotionDismissed: (value: boolean) =>
-      req('config:setChatPromotionDismissed', value),
+      reqConfig('config:setChatPromotionDismissed', value),
     setJsonModeChatDensity: (value: 'compact' | 'comfy') =>
-      req('config:setJsonModeChatDensity', value),
+      reqConfig('config:setJsonModeChatDensity', value),
     setUiScale: (value: 'x-small' | 'small' | 'medium' | 'large' | 'x-large') =>
-      req('config:setUiScale', value),
-    setNessieColor: (value: string) => req('config:setNessieColor', value),
+      reqConfig('config:setUiScale', value),
+    setNessieColor: (value: string) => reqConfig('config:setNessieColor', value),
     setJsonModeSendOnEnter: (enabled: boolean) =>
-      req('config:setJsonModeSendOnEnter', enabled),
+      reqConfig('config:setJsonModeSendOnEnter', enabled),
     setAutoScrollToBottom: (enabled: boolean) =>
-      req('config:setAutoScrollToBottom', enabled),
+      reqConfig('config:setAutoScrollToBottom', enabled),
     setJsonModeDefaultPermissionMode: (value: JsonClaudePermissionMode) =>
-      req('config:setJsonModeDefaultPermissionMode', value),
+      reqConfig('config:setJsonModeDefaultPermissionMode', value),
     setJsonModeTranscriptWindow: (value: number) =>
-      req('config:setJsonModeTranscriptWindow', value),
-    setAutoSleepMinutes: (value: number) => req('config:setAutoSleepMinutes', value),
+      reqConfig('config:setJsonModeTranscriptWindow', value),
+    setAutoSleepMinutes: (value: number) => reqConfig('config:setAutoSleepMinutes', value),
     setPreventSleepMode: (value: PreventSleepMode) =>
-      req('config:setPreventSleepMode', value),
+      reqConfig('config:setPreventSleepMode', value),
     setPreventSleepUntil: (value: number | null) =>
-      req('config:setPreventSleepUntil', value),
-    setAutoUpdateEnabled: (enabled: boolean) => req('config:setAutoUpdateEnabled', enabled),
-    setWarnBeforeQuitting: (enabled: boolean) => req('config:setWarnBeforeQuitting', enabled),
-    setOpenPrInBrowserTab: (enabled: boolean) => req('config:setOpenPrInBrowserTab', enabled),
+      reqConfig('config:setPreventSleepUntil', value),
+    setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),
+    setWarnBeforeQuitting: (enabled: boolean) => reqConfig('config:setWarnBeforeQuitting', enabled),
+    setOpenPrInBrowserTab: (enabled: boolean) => reqConfig('config:setOpenPrInBrowserTab', enabled),
     setTerminalPlainClickOpensInApp: (enabled: boolean) =>
-      req('config:setTerminalPlainClickOpensInApp', enabled),
+      reqConfig('config:setTerminalPlainClickOpensInApp', enabled),
     setExpandedDiagnosticLoggingEnabled: (enabled: boolean) =>
-      req('config:setExpandedDiagnosticLoggingEnabled', enabled),
-    setShowAssignedPRs: (enabled: boolean) => req('config:setShowAssignedPRs', enabled),
+      reqConfig('config:setExpandedDiagnosticLoggingEnabled', enabled),
+    setShowAssignedPRs: (enabled: boolean) => reqConfig('config:setShowAssignedPRs', enabled),
     refreshAssignedPRs: () => req('prs:refreshAssigned'),
     grantPermission: (rule: { toolName: string; ruleContent?: string }, grantedFrom?: string) =>
       req('permissions:grant', rule, grantedFrom),
     revokePermission: (id: string) => req('permissions:revoke', id),
     clearPermissions: () => req('permissions:clear'),
     setNewWorktreeAdvancedOpen: (open: boolean) =>
-      req('config:setNewWorktreeAdvancedOpen', open),
+      reqConfig('config:setNewWorktreeAdvancedOpen', open),
     setStarterTasksDismissed: (dismissed: boolean) =>
-      req('config:setStarterTasksDismissed', dismissed),
+      reqConfig('config:setStarterTasksDismissed', dismissed),
     setHarnessSystemPromptEnabled: (enabled: boolean) =>
-      req('config:setHarnessSystemPromptEnabled', enabled),
-    setHarnessSystemPrompt: (prompt: string) => req('config:setHarnessSystemPrompt', prompt),
+      reqConfig('config:setHarnessSystemPromptEnabled', enabled),
+    setHarnessSystemPrompt: (prompt: string) => reqConfig('config:setHarnessSystemPrompt', prompt),
     setHarnessSystemPromptMain: (prompt: string) =>
-      req('config:setHarnessSystemPromptMain', prompt),
-    setPrReviewPrompt: (prompt: string) => req('config:setPrReviewPrompt', prompt),
+      reqConfig('config:setHarnessSystemPromptMain', prompt),
+    setPrReviewPrompt: (prompt: string) => reqConfig('config:setPrReviewPrompt', prompt),
     prepareMcpForTerminal: (terminalId: string) =>
       req('mcp:prepareForTerminal', terminalId),
     onWorktreesExternalCreate: (
@@ -346,23 +360,23 @@ export function buildBackend(
       onActiveSignal('worktrees:externalCreate', (payload) => {
         callback(payload as { repoRoot: string; worktree: unknown; initialPrompt?: string })
       }),
-    setNameClaudeSessions: (enabled: boolean) => req('config:setNameClaudeSessions', enabled),
-    setThemeMode: (mode: 'light' | 'dark' | 'system') => req('config:setThemeMode', mode),
-    setThemeLight: (theme: string) => req('config:setThemeLight', theme),
-    setThemeDark: (theme: string) => req('config:setThemeDark', theme),
+    setNameClaudeSessions: (enabled: boolean) => reqConfig('config:setNameClaudeSessions', enabled),
+    setThemeMode: (mode: 'light' | 'dark' | 'system') => reqConfig('config:setThemeMode', mode),
+    setThemeLight: (theme: string) => reqConfig('config:setThemeLight', theme),
+    setThemeDark: (theme: string) => reqConfig('config:setThemeDark', theme),
     setLastEffectiveAppBg: (hex: string) => sig('config:setLastEffectiveAppBg', hex),
-    reloadCustomThemes: () => req('config:reloadCustomThemes'),
+    reloadCustomThemes: () => reqConfig('config:reloadCustomThemes'),
     openThemesFolder: () => reqLocal('config:openThemesFolder'),
     setCostsInterest: (expanded: boolean) => req('costs:setInterest', expanded),
     setContextWindowInterest: (expanded: boolean) =>
       req('contextWindow:setInterest', expanded),
     getAllSessionCosts: (sinceMs?: number) => req('costs:getAllSessions', sinceMs),
     getClaudeAuthStatus: () => req('claude:getAuthStatus'),
-    getAvailableThemes: () => req('config:getAvailableThemes'),
+    getAvailableThemes: () => reqConfig('config:getAvailableThemes'),
     setTerminalFontFamily: (fontFamily: string) =>
-      req('config:setTerminalFontFamily', fontFamily),
-    getDefaultTerminalFontFamily: () => req('config:getDefaultTerminalFontFamily'),
-    setTerminalFontSize: (fontSize: number) => req('config:setTerminalFontSize', fontSize),
+      reqConfig('config:setTerminalFontFamily', fontFamily),
+    getDefaultTerminalFontFamily: () => reqConfig('config:getDefaultTerminalFontFamily'),
+    setTerminalFontSize: (fontSize: number) => reqConfig('config:setTerminalFontSize', fontSize),
 
     panesAddTab: (wtPath: string, tab: unknown, paneId?: string) =>
       req('panes:addTab', wtPath, tab, paneId),
@@ -424,37 +438,37 @@ export function buildBackend(
       }
     ) => req('agent:buildSpawnArgs', agentKind, opts),
 
-    setOnboardingQuest: (quest: string) => req('config:setOnboardingQuest', quest),
-    setWorktreeBase: (mode: 'remote' | 'local') => req('config:setWorktreeBase', mode),
+    setOnboardingQuest: (quest: string) => reqConfig('config:setOnboardingQuest', quest),
+    setWorktreeBase: (mode: 'remote' | 'local') => reqConfig('config:setWorktreeBase', mode),
     setMergeStrategy: (strategy: 'squash' | 'merge-commit' | 'fast-forward') =>
-      req('config:setMergeStrategy', strategy),
+      reqConfig('config:setMergeStrategy', strategy),
     setSidebarDensity: (density: 'compact' | 'comfy') =>
-      req('config:setSidebarDensity', density),
+      reqConfig('config:setSidebarDensity', density),
     setSidebarTabsExpansion: (mode: 'never' | 'selected' | 'all') =>
-      req('config:setSidebarTabsExpansion', mode),
+      reqConfig('config:setSidebarTabsExpansion', mode),
     setSidebarDetails: (prefs: SidebarDetailPrefsByMode) =>
-      req('config:setSidebarDetails', prefs),
+      reqConfig('config:setSidebarDetails', prefs),
     setHiddenBottomIcons: (hidden: HiddenBottomIcons) =>
-      req('config:setHiddenBottomIcons', hidden),
+      reqConfig('config:setHiddenBottomIcons', hidden),
     setBottomIconOrder: (order: BottomIconKey[]) =>
-      req('config:setBottomIconOrder', order),
+      reqConfig('config:setBottomIconOrder', order),
 
-    setEditor: (editorId: string) => req('config:setEditor', editorId),
+    setEditor: (editorId: string) => reqConfig('config:setEditor', editorId),
     setRepoEditor: (repoRoot: string, editorId: string | null) =>
-      req('config:setRepoEditor', repoRoot, editorId),
+      reqConfig('config:setRepoEditor', repoRoot, editorId),
     setWorktreeEditor: (worktreePath: string, editorId: string | null) =>
-      req('config:setWorktreeEditor', worktreePath, editorId),
-    getAvailableEditors: () => req('config:getAvailableEditors'),
+      reqConfig('config:setWorktreeEditor', worktreePath, editorId),
+    getAvailableEditors: () => reqConfig('config:getAvailableEditors'),
 
     snooze: (path: string, wakeAt: number) => req('snooze:snooze', path, wakeAt),
     pinWorktree: (path: string) => req('pinned:pin', path),
     unpinWorktree: (path: string) => req('pinned:unpin', path),
     unsnooze: (path: string) => req('snooze:unsnooze', path),
-    setSnoozeDefaultDays: (days: number) => req('config:setSnoozeDefaultDays', days),
+    setSnoozeDefaultDays: (days: number) => reqConfig('config:setSnoozeDefaultDays', days),
     setCiNotifyOverride: (path: string, enabled: boolean | null) =>
       req('ciNotify:setOverride', path, enabled),
     setNotifyChatOnCiFailure: (enabled: boolean) =>
-      req('config:setNotifyChatOnCiFailure', enabled),
+      reqConfig('config:setNotifyChatOnCiFailure', enabled),
     requestMergeConflictFix: (worktreePath: string) =>
       req('prs:requestConflictFix', worktreePath),
     setAlias: (path: string, alias: string) => req('aliases:set', path, alias),
