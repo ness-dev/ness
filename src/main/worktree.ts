@@ -1155,9 +1155,12 @@ interface DiffSide {
   exists: boolean
   binary: boolean
   tooLarge: boolean
+  /** Bytes actually read, including sides blanked as binary/too large —
+   *  feeds `outputBytes` in the `[git-op]` line. */
+  bytesRead: number
 }
 
-const MISSING_SIDE: DiffSide = { content: '', exists: false, binary: false, tooLarge: false }
+const MISSING_SIDE: DiffSide = { content: '', exists: false, binary: false, tooLarge: false, bytesRead: 0 }
 
 /** Same heuristic as git and readWorktreeFile: a NUL in the first 8KB.
  *  NUL survives utf8 decoding as U+0000, so the string can be sniffed. */
@@ -1180,29 +1183,29 @@ function combineDiffSides(original: DiffSide, modified: DiffSide, error?: string
   }
 }
 
-/** Sizes the blob before reading it so a large binary (a committed video,
- *  say) is never pulled through `git show` just to be thrown away. */
+/** One `git show` capped at MAX_DIFF_SIDE_BYTES: Node kills git once the
+ *  cap is hit, so a committed video costs at most 2MB of reading and no
+ *  extra size-probe exec on the common small-file path. */
 async function readDiffSideAtRef(
   worktreePath: string,
   ref: string,
   filePath: string
 ): Promise<DiffSide> {
-  let size: number
   try {
-    const { stdout } = await execGitRead(['cat-file', '-s', `${ref}:${filePath}`], {
-      cwd: worktreePath
+    const { stdout } = await execGitRead(['show', `${ref}:${filePath}`], {
+      cwd: worktreePath,
+      maxBuffer: MAX_DIFF_SIDE_BYTES
     })
-    size = Number(stdout.trim())
-  } catch {
+    if (looksBinary(stdout)) {
+      return { content: '', exists: true, binary: true, tooLarge: false, bytesRead: stdout.length }
+    }
+    return { content: stdout, exists: true, binary: false, tooLarge: false, bytesRead: stdout.length }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      return { content: '', exists: true, binary: false, tooLarge: true, bytesRead: MAX_DIFF_SIDE_BYTES }
+    }
     return MISSING_SIDE
   }
-  if (size > MAX_DIFF_SIDE_BYTES) {
-    return { content: '', exists: true, binary: false, tooLarge: true }
-  }
-  const content = await getFileAtRef(worktreePath, ref, filePath)
-  if (content == null) return MISSING_SIDE
-  if (looksBinary(content)) return { content: '', exists: true, binary: true, tooLarge: false }
-  return { content, exists: true, binary: false, tooLarge: false }
 }
 
 async function getFileAtRef(
@@ -1289,7 +1292,7 @@ export async function getFileDiffSides(
   }
 
   const track = (side: DiffSide): DiffSide => {
-    outputBytes += side.content.length
+    outputBytes += side.bytesRead
     return side
   }
 
@@ -1314,14 +1317,18 @@ export async function getFileDiffSides(
   if (!original.exists) original = await timed(() => readDiffSideAtRef(worktreePath, 'HEAD', filePath))
   track(original)
   const read = await timed(() => readWorktreeFile(worktreePath, filePath))
-  if (read.content) outputBytes += read.content.length
+  const bytesRead = Math.min(read.size, MAX_FILE_READ_BYTES)
+  outputBytes += bytesRead
+  // A working-tree deletion surfaces as ENOENT; that's the diff, not an error.
+  const deleted = original.exists && read.error?.startsWith('ENOENT')
   const modified: DiffSide = {
     content: read.content ?? '',
     exists: read.content != null || read.binary,
     binary: read.binary,
-    tooLarge: read.size > MAX_DIFF_SIDE_BYTES
+    tooLarge: read.size > MAX_DIFF_SIDE_BYTES,
+    bytesRead
   }
-  return finish(combineDiffSides(original, modified, read.error))
+  return finish(combineDiffSides(original, modified, deleted ? undefined : read.error))
 }
 
 export type MergeStrategy = 'squash' | 'merge-commit' | 'fast-forward'

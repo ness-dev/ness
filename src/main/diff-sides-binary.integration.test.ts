@@ -63,7 +63,8 @@ describe('diff sides for binary and oversized files (real git)', () => {
     fs.rmSync(join(repo, 'demo.mp4'))
 
     const sides = await getFileDiffSides(repo, 'demo.mp4', false)
-    expect(sides).toMatchObject({ binary: true, original: '', modified: '', originalExists: true })
+    expect(sides).toMatchObject({ binary: true, original: '', modified: '', originalExists: true, modifiedExists: false })
+    expect(sides.error).toBeUndefined()
   })
 
   it('flags an oversized text file without shipping its contents', async () => {
@@ -77,6 +78,15 @@ describe('diff sides for binary and oversized files (real git)', () => {
     fs.appendFileSync(join(repo, 'big.txt'), 'more\n')
     const working = await getFileDiffSides(repo, 'big.txt', false)
     expect(working).toMatchObject({ tooLarge: true, original: '', modified: '' })
+  })
+
+  it('treats a text file deleted in the working tree as a deletion, not an error', async () => {
+    const repo = makeRepo()
+    fs.rmSync(join(repo, 'seed.txt'))
+
+    const sides = await getFileDiffSides(repo, 'seed.txt', false)
+    expect(sides).toMatchObject({ original: 'seed\n', modified: '', originalExists: true, modifiedExists: false })
+    expect(sides.error).toBeUndefined()
   })
 
   it('still returns both text sides for an ordinary edit', async () => {
