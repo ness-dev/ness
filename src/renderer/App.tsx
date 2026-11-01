@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { LOCAL_BACKEND_ID, useAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -87,9 +87,16 @@ const SIDEBAR_MAX_PX = 400
 export default function App(): JSX.Element {
   const { isMobile } = useViewport()
   const active = useActiveTheme()
-  // Narrow selector, not useSettings() — App re-rendering re-renders the whole
-  // tree beneath it, so it must not subscribe to the entire settings slice.
-  const nessieColor = useAppState((s) => s.settings.nessieColor)
+  // Narrow selector, not useSettings() — App re-rendering re-renders the
+  // whole tree beneath it (DesktopApp is not memoized), so it must not
+  // subscribe to the entire settings slice. useActiveTheme above narrows
+  // for the same reason; before it did, it subscribed to the whole slice
+  // and this selector saved nothing.
+  //
+  // Local rather than active: nessieColor is client-owned (see
+  // CLIENT_OWNED_SETTING_KEYS), so it must not change when the user
+  // switches to a remote backend.
+  const nessieColor = useLocalAppState((s) => s.settings.nessieColor)
   useEffect(() => {
     applyTheme(active, nessieColor)
     getBackend().setLastEffectiveAppBg(effectiveAppBg(active))

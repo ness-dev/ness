@@ -695,6 +695,144 @@ function patchOverrides(
   return { ...map, [key]: editorId }
 }
 
+/** Settings that belong to the CLIENT looking at a workspace, not to the
+ *  workspace itself. With multi-backend, every slice hook reads the
+ *  *active* backend's store — so before this list existed, switching to a
+ *  remote backend re-themed and re-scaled the whole window to whatever
+ *  that machine had saved. The remote should never have had its own
+ *  appearance in the first place.
+ *
+ *  The membership test is "who consumes it in main": a field whose only
+ *  main-side reader is `desktop-shell.ts` is about the local Electron
+ *  window (quit confirmation, the auto-updater), and a field with no
+ *  main-side reader at all is pure renderer presentation. Both are
+ *  client-owned. Anything a backend module acts on — `claude-launch`,
+ *  `auto-sleep-monitor`, `pr-poller`, `ci-notifier`, `wake-lock-controller`
+ *  — stays workspace-owned, because the box doing the work is the one
+ *  that has to obey it.
+ *
+ *  Deliberately NOT in this list, despite looking like preferences:
+ *    - `claudeCommand` / `worktreeScripts` / `*EnvVars` / `worktreeBase` /
+ *      `editor` and friends — operational config the remote's own main
+ *      acts on. Reading these locally while the remote kept using its
+ *      own values would trade a visible bug for a silent one. Making
+ *      these client-authoritative needs a push-down to each backend,
+ *      which is a separate change.
+ *    - `hasGithubToken` / `githubAuthSource` / `viewerLogin` /
+ *      `harnessStarred` — not preferences at all, but facts derived from
+ *      whichever token that backend resolved.
+ *    - `wsTransport*` — that backend's own listener config. Overwriting
+ *      it from the client could tear down the connection in use.
+ *    - `dismissedAnnouncementIds` / `announcementsMuted` — entangled
+ *      with the per-backend `announcements` slice they filter; moving
+ *      one without the other just relocates the inconsistency. */
+export const CLIENT_OWNED_SETTING_KEYS = [
+  'themeMode',
+  'themeLight',
+  'themeDark',
+  'customThemes',
+  'hotkeys',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'sidebarDensity',
+  'sidebarDetails',
+  'sidebarTabsExpansion',
+  'starterTasksDismissed',
+  'newWorktreeAdvancedOpen',
+  'autoUpdateEnabled',
+  'warnBeforeQuitting',
+  'openPrInBrowserTab',
+  'terminalPlainClickOpensInApp',
+  'defaultClaudeTabType',
+  'chatPromotionDismissed',
+  'jsonModeChatDensity',
+  'uiScale',
+  'nessieColor',
+  'jsonModeSendOnEnter',
+  'autoScrollToBottom',
+  'jsonModeDefaultPermissionMode',
+  'jsonModeTranscriptWindow',
+  'snoozeDefaultDays',
+  'hiddenBottomIcons',
+  'bottomIconOrder'
+] as const satisfies readonly (keyof SettingsState)[]
+
+/** The `config:*` transport channels that mutate (or probe for) a
+ *  client-owned setting, and therefore have to be answered by the
+ *  client's own backend rather than the active one.
+ *
+ *  This mirrors `CLIENT_OWNED_SETTING_KEYS` and has to stay in step with
+ *  it: reading a field locally while its setter still goes to the active
+ *  backend gives you a control that visibly does nothing. They're
+ *  adjacent here so a new setting is one edit in one file.
+ *
+ *  Includes three channels with no corresponding state field, because
+ *  they act on the client's machine rather than the workspace:
+ *  `openThemesFolder` (reveals a directory in the local file manager),
+ *  `getAvailableThemes` / `getDefaultTerminalFontFamily` (probe what the
+ *  local install can actually render), and `setLastEffectiveAppBg`
+ *  (persisted purely to suppress the local window's startup flash). */
+export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
+  'config:setThemeMode',
+  'config:setThemeLight',
+  'config:setThemeDark',
+  'config:reloadCustomThemes',
+  'config:getAvailableThemes',
+  'config:openThemesFolder',
+  'config:setHotkeys',
+  'config:resetHotkeys',
+  'config:setTerminalFontFamily',
+  'config:getDefaultTerminalFontFamily',
+  'config:setTerminalFontSize',
+  'config:setSidebarDensity',
+  'config:setSidebarDetails',
+  'config:setSidebarTabsExpansion',
+  'config:setStarterTasksDismissed',
+  'config:setNewWorktreeAdvancedOpen',
+  'config:setAutoUpdateEnabled',
+  'config:setWarnBeforeQuitting',
+  'config:setOpenPrInBrowserTab',
+  'config:setTerminalPlainClickOpensInApp',
+  'config:setDefaultClaudeTabType',
+  'config:setChatPromotionDismissed',
+  'config:setJsonModeChatDensity',
+  'config:setUiScale',
+  'config:setNessieColor',
+  'config:setJsonModeSendOnEnter',
+  'config:setAutoScrollToBottom',
+  'config:setJsonModeDefaultPermissionMode',
+  'config:setJsonModeTranscriptWindow',
+  'config:setSnoozeDefaultDays',
+  'config:setHiddenBottomIcons',
+  'config:setBottomIconOrder',
+  'config:setLastEffectiveAppBg'
+])
+
+/** Overlay the client's own values for every `CLIENT_OWNED_SETTING_KEYS`
+ *  field onto a backend's settings, so the UI renders with the local
+ *  window's appearance regardless of which backend is active.
+ *
+ *  Returns `backend` unchanged when the two are the same object (the
+ *  single-backend case, and the web client where local *is* the only
+ *  backend) so callers can rely on reference identity. Otherwise the
+ *  result is a fresh object and the caller is responsible for memoizing
+ *  it — `useSyncExternalStore` will spin if `getSnapshot` allocates on
+ *  every read. See `useSettings` in src/renderer/store.ts. */
+export function mergeClientOwnedSettings(
+  client: SettingsState,
+  backend: SettingsState
+): SettingsState {
+  if (client === backend) return backend
+  const merged = { ...backend }
+  for (const key of CLIENT_OWNED_SETTING_KEYS) {
+    // Per-key assignment through a mapped write keeps the union of field
+    // types intact; a generic Object.assign over the subset would widen
+    // every value to `unknown`.
+    ;(merged as Record<string, unknown>)[key] = client[key]
+  }
+  return merged
+}
+
 export function settingsReducer(state: SettingsState, event: SettingsEvent): SettingsState {
   switch (event.type) {
     case 'settings/themeModeChanged':
