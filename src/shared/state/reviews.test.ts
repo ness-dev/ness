@@ -3,6 +3,7 @@ import {
   initialReviews,
   reviewsReducer,
   type ReviewComment,
+  type ReviewRequest,
   type ReviewSubmission,
   type ReviewsState
 } from './reviews'
@@ -93,6 +94,26 @@ describe('reviewsReducer', () => {
       payload: { worktreePath: WT, id: 'missing', status: 'open' }
     })
     expect(s3).toBe(s1)
+  })
+
+  it('reviews/commentStatusChanged records who resolved it and clears that on reopen', () => {
+    const by = { kind: 'agent' as const, tabId: 'author', label: 'Author' }
+    const s1 = reviewsReducer(seeded(comment('a')), {
+      type: 'reviews/commentStatusChanged',
+      payload: { worktreePath: WT, id: 'a', status: 'resolved', by, at: 42 }
+    })
+    expect(s1.byPath[WT].comments[0]).toMatchObject({ resolvedBy: by, resolvedAt: 42 })
+    const s2 = reviewsReducer(s1, {
+      type: 'reviews/commentStatusChanged',
+      payload: { worktreePath: WT, id: 'a', status: 'open' }
+    })
+    expect(s2.byPath[WT].comments[0].resolvedBy).toBeUndefined()
+    expect(s2.byPath[WT].comments[0].resolvedAt).toBeUndefined()
+    const s3 = reviewsReducer(s1, {
+      type: 'reviews/commentStatusChanged',
+      payload: { worktreePath: WT, id: 'a', status: 'outdated', by, at: 50 }
+    })
+    expect(s3.byPath[WT].comments[0].resolvedBy).toBeUndefined()
   })
 
   it('reviews/replyAdded appends a reply with its own author', () => {
@@ -265,5 +286,35 @@ describe('reviewsReducer', () => {
     expect(
       reviewsReducer(s2, { type: 'reviews/submissionDeleted', payload: { worktreePath: WT, id: 's2' } })
     ).toBe(s2)
+  })
+
+  it('reviews/requestRecorded appends, ignores duplicates, and keeps the entry alive alone', () => {
+    const request: ReviewRequest = {
+      id: 'r1',
+      requester: { kind: 'agent', tabId: 'author', label: 'Author' },
+      reviewer: { kind: 'agent', tabId: 'reviewer', label: 'Reviewer' },
+      context: 'please look',
+      source: 'agent',
+      reused: false,
+      createdAt: 1
+    }
+    const s1 = reviewsReducer(initialReviews, {
+      type: 'reviews/requestRecorded',
+      payload: { worktreePath: WT, request }
+    })
+    expect(s1.byPath[WT]).toEqual({ comments: [], requests: [request] })
+    expect(
+      reviewsReducer(s1, { type: 'reviews/requestRecorded', payload: { worktreePath: WT, request } })
+    ).toBe(s1)
+    const s2 = reviewsReducer(s1, {
+      type: 'reviews/submissionAdded',
+      payload: { worktreePath: WT, submission: submission('s1') }
+    })
+    expect(s2.byPath[WT].requests).toBe(s1.byPath[WT].requests)
+    const s3 = reviewsReducer(s2, {
+      type: 'reviews/submissionDeleted',
+      payload: { worktreePath: WT, id: 's1' }
+    })
+    expect(s3.byPath[WT]).toEqual({ comments: [], requests: [request] })
   })
 })

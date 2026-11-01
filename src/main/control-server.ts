@@ -151,6 +151,7 @@ export interface ReviewQueries {
   ) => { comment: ReviewComment } | { error: string }
   setResolved: (
     worktreePath: string,
+    callerTabId: string,
     commentId: string,
     resolved: boolean
   ) => { comment: ReviewComment } | { error: string }
@@ -158,7 +159,7 @@ export interface ReviewQueries {
     worktreePath: string,
     callerTabId: string,
     input: { verdict: ReviewVerdict; summary: string; targetTabId?: string }
-  ) => SubmitReviewResult
+  ) => SubmitReviewResult | Promise<SubmitReviewResult>
   /** Open a reviewer Chat tab for the caller and hand it the request. */
   request: (
     worktreePath: string,
@@ -1021,7 +1022,7 @@ async function handleRequest(
       const commentId = typeof body.commentId === 'string' ? body.commentId : ''
       if (!commentId) return sendJson(res, 400, { error: 'commentId required' })
       const resolved = body.resolved !== false
-      const result = deps.reviews.setResolved(wt, commentId, resolved)
+      const result = deps.reviews.setResolved(wt, terminalId, commentId, resolved)
       if ('error' in result) return sendJson(res, 404, { error: result.error })
       return sendJson(res, 200, { comment: toAgentComment(result.comment, terminalId) })
     }
@@ -1046,7 +1047,7 @@ async function handleRequest(
       }
       const summary = typeof body.summary === 'string' ? body.summary : ''
       const tab = typeof body.tab === 'string' && body.tab.trim() ? body.tab.trim() : undefined
-      const result = deps.reviews.submit(wt, terminalId, { verdict, summary, targetTabId: tab })
+      const result = await deps.reviews.submit(wt, terminalId, { verdict, summary, targetTabId: tab })
       if ('error' in result) return sendJson(res, 400, { error: result.error })
       const { submission, delivery } = result
       return sendJson(res, 200, {

@@ -5,6 +5,8 @@ import type {
   ReviewAuthor,
   ReviewComment,
   ReviewCommentStatus,
+  ReviewRequest,
+  ReviewRequestSource,
   ReviewSubmission,
   ReviewVerdict
 } from '../shared/state/reviews'
@@ -20,7 +22,7 @@ import {
 import { formatReviewSubmission } from '../shared/review-format'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { describeTabDeliveryFailure, type TabDeliveryResult } from './chat-delivery'
-import { addReviewReply, refreshReviewAnchors } from './review-comments'
+import { addReviewReply, refreshReviewAnchors, setReviewCommentStatus } from './review-comments'
 
 export interface ReviewServiceDeps {
   store: Store
@@ -122,7 +124,8 @@ export function setReviewCommentResolved(
   store: Store,
   worktreePath: string,
   idOrPrefix: string,
-  resolved: boolean
+  resolved: boolean,
+  by?: ReviewAuthor
 ): { comment: ReviewComment } | { error: string } {
   const comments = store.getSnapshot().state.reviews.byPath[worktreePath]?.comments ?? []
   const found = findReviewComment(comments, idOrPrefix)
@@ -130,11 +133,11 @@ export function setReviewCommentResolved(
   // Reopening goes back to 'open'; the next anchor refresh re-outdates it
   // if its line is gone.
   const status: ReviewCommentStatus = resolved ? 'resolved' : 'open'
-  store.dispatch({
-    type: 'reviews/commentStatusChanged',
-    payload: { worktreePath, id: found.id, status }
-  })
-  return { comment: { ...found, status } }
+  setReviewCommentStatus(store, worktreePath, found.id, status, by)
+  const updated = store
+    .getSnapshot()
+    .state.reviews.byPath[worktreePath]?.comments.find((c) => c.id === found.id)
+  return { comment: updated ?? { ...found, status } }
 }
 
 export function replyToReviewComment(
@@ -285,7 +288,8 @@ export function requestReview(
   deps: ReviewServiceDeps,
   worktreePath: string,
   requesterTabId: string,
-  context: string
+  context: string,
+  source: ReviewRequestSource = 'agent'
 ): RequestReviewResult {
   const state = deps.store.getSnapshot().state
   const requester = findTabInWorktree(state, worktreePath, requesterTabId)
@@ -317,6 +321,17 @@ export function requestReview(
     buildReviewRequest(tabLabel(requester), context, defaults.prompt, { reRequest }),
     { agentKind, model: modelForAgent(agentKind, defaults.model) }
   )
+  const after = deps.store.getSnapshot().state
+  const request: ReviewRequest = {
+    id: randomUUID(),
+    requester: agentAuthor(after, worktreePath, requesterTabId),
+    reviewer: agentAuthor(after, worktreePath, opened.tabId),
+    context: context.trim(),
+    source,
+    reused: opened.reused,
+    createdAt: Date.now()
+  }
+  deps.store.dispatch({ type: 'reviews/requestRecorded', payload: { worktreePath, request } })
   return { ok: true, reviewerTabId: opened.tabId, reused: opened.reused }
 }
 
@@ -332,6 +347,9 @@ export interface SubmitReviewInput {
    *  noticed the draft and pressed Send. The setting is there to vet
    *  reviews nobody asked for. */
   holdAsDraft: boolean
+  /** HEAD at submit time, resolved by the caller (git is async; this
+   *  function stays synchronous so the submit-then-send order holds). */
+  headSha?: string
 }
 
 export type SubmitReviewResult =
@@ -375,7 +393,8 @@ export function submitReview(
     commentIds,
     createdAt: Date.now(),
     state: 'draft',
-    ...(targetTabId ? { targetTabId } : {})
+    ...(targetTabId ? { targetTabId } : {}),
+    ...(input.headSha ? { headSha: input.headSha } : {})
   }
   deps.store.dispatch({ type: 'reviews/submissionAdded', payload: { worktreePath, submission } })
   if (input.holdAsDraft && !requester) return { submission, delivery: null }
