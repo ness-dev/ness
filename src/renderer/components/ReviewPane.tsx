@@ -325,12 +325,12 @@ export function ReviewPane({
       {/* Top controls bar */}
       <div className="shrink-0 border-b border-border bg-panel">
         <div className="h-10 flex items-center gap-3 px-3">
-          <div className="flex items-center rounded border border-border p-0.5 text-xs">
+          <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5 text-xs">
             {(['diff', 'reviews'] as const).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-1 rounded cursor-pointer transition-colors ${
                   view === v ? 'bg-panel-raised text-fg-bright' : 'text-faint hover:text-fg'
                 }`}
               >

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   Bot,
   CheckCheck,
@@ -31,6 +31,7 @@ import {
   type TimelineThread
 } from '../review-timeline'
 import { SubmissionCard, useTabLabels } from './ReviewSubmissions'
+import { ExpandableMarkdown, ReviewMarkdown } from './ReviewMarkdown'
 
 const STATUS_CLASS: Record<ReviewCommentStatus, string> = {
   open: 'text-info',
@@ -64,7 +65,7 @@ function Actor({ author, ctx }: { author: ReviewAuthor; ctx: ActorContext }): JS
       ? 'You'
       : (ctx.tabLabels.get(author.tabId) ?? author.label ?? 'Agent')
   return (
-    <span className={`inline-flex items-center gap-1 font-medium ${ROLE_CLASS[role]}`}>
+    <span className={`inline-flex items-center gap-1.5 font-medium ${ROLE_CLASS[role]}`}>
       <Icon className="icon-xs shrink-0" />
       {name}
     </span>
@@ -85,31 +86,13 @@ function CommentRef({
   return (
     <button
       onClick={() => onJump(comment)}
-      className="inline-flex items-center gap-1 min-w-0 font-mono text-fg hover:text-fg-bright hover:underline cursor-pointer"
+      className="inline-flex items-center gap-1.5 min-w-0 font-mono text-fg hover:text-fg-bright hover:underline cursor-pointer"
     >
       <span className="text-faint">[{shortCommentId(comment.id)}]</span>
       <span className="truncate">
         {comment.filePath}:{comment.line}
       </span>
     </button>
-  )
-}
-
-function ExpandableText({ text, lines = 3 }: { text: string; lines?: number }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const long = text.split('\n').length > lines || text.length > lines * 120
-  return (
-    <div className="text-fg whitespace-pre-wrap">
-      <div className={open || !long ? '' : 'line-clamp-3'}>{text}</div>
-      {long && (
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="mt-0.5 text-faint hover:text-fg cursor-pointer"
-        >
-          {open ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </div>
   )
 }
 
@@ -123,9 +106,14 @@ function CommentThread({
   onJump: (c: ReviewComment) => void
 }): JSX.Element {
   const { comment, replies } = thread
+  const jump = (): void => {
+    // Selecting text in a code block shouldn't yank the view to the diff.
+    if (window.getSelection()?.toString()) return
+    onJump(comment)
+  }
   return (
-    <div className="rounded border border-border/60 bg-surface/40">
-      <div className="flex items-center gap-2 px-2 py-1 border-b border-border/40">
+    <div className="rounded-md border border-border/60 bg-surface/40">
+      <div className="flex items-center gap-2.5 px-3 py-2 border-b border-border/40">
         <CommentRef comment={comment} onJump={onJump} />
         {comment.side === 'old' && <span className="text-faint">(removed line)</span>}
         <span className={`shrink-0 ${STATUS_CLASS[comment.status]}`}>{comment.status}</span>
@@ -133,30 +121,39 @@ function CommentThread({
         <Actor author={comment.author} ctx={ctx} />
         <Time at={comment.createdAt} />
       </div>
-      <button
-        onClick={() => onJump(comment)}
-        className="block w-full text-left px-2 py-1.5 text-fg whitespace-pre-wrap cursor-pointer hover:bg-panel/60"
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={jump}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onJump(comment)
+          }
+        }}
+        className="px-3 py-2.5 cursor-pointer hover:bg-panel/60"
       >
-        {comment.body}
-      </button>
+        <ReviewMarkdown text={comment.body} />
+      </div>
       {replies.length > 0 && (
-        <div className="px-2 pb-1.5 flex flex-col gap-1.5">
+        <div className="px-3 pt-1 pb-3 flex flex-col gap-3">
           {replies.map((r) => (
-            <div key={r.id} className="flex gap-1.5">
+            <div key={r.id} className="flex gap-2">
               <CornerDownRight className="icon-xs shrink-0 mt-0.5 text-faint" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5 mb-1">
                   <Actor author={r.author} ctx={ctx} />
                   <Time at={r.createdAt} />
                 </div>
-                <div className="text-fg whitespace-pre-wrap">{r.body}</div>
+                <ReviewMarkdown text={r.body} />
               </div>
             </div>
           ))}
         </div>
       )}
       {thread.resolved && (
-        <div className="flex items-center gap-1.5 px-2 pb-1.5 text-faint">
+        <div className="flex items-center gap-2 px-3 py-2 border-t border-border/40 text-faint">
           <CheckCheck className="icon-xs shrink-0 text-success" />
           <span>{comment.resolvedBy ? 'Resolved by' : 'Resolved'}</span>
           {comment.resolvedBy && <Actor author={comment.resolvedBy} ctx={ctx} />}
@@ -170,8 +167,8 @@ function CommentThread({
 function RequestEntry({ request, ctx }: { request: ReviewRequest; ctx: ActorContext }): JSX.Element {
   const asked = request.reused ? 'asked for another look from' : 'requested review from'
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {request.source === 'ci-green' ? (
           <>
             <Zap className="icon-xs text-success" />
@@ -199,8 +196,8 @@ function RequestEntry({ request, ctx }: { request: ReviewRequest; ctx: ActorCont
         <Time at={request.createdAt} />
       </div>
       {request.context && request.source === 'agent' && (
-        <div className="ml-5 pl-2 border-l-2 border-border">
-          <ExpandableText text={request.context} />
+        <div className="ml-5 pl-3 py-0.5 border-l-2 border-border">
+          <ExpandableMarkdown text={request.context} />
         </div>
       )}
     </div>
@@ -236,7 +233,7 @@ function Entry({
       return <CommentThread thread={entry.thread} ctx={ctx} onJump={onJump} />
     case 'reply':
       return (
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <MessageSquare className="icon-xs shrink-0 text-faint" />
           <Actor author={entry.reply.author} ctx={ctx} />
           <span className="shrink-0 text-faint">replied on</span>
@@ -247,7 +244,7 @@ function Entry({
       )
     case 'resolved':
       return (
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <CheckCheck className="icon-xs shrink-0 text-success" />
           {entry.by ? <Actor author={entry.by} ctx={ctx} /> : <span className="text-fg">Someone</span>}
           <span className="shrink-0 text-faint">resolved</span>
@@ -258,7 +255,7 @@ function Entry({
       )
     case 'commit':
       return (
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <GitCommitHorizontal className="icon-xs shrink-0 text-faint" />
           <span className="shrink-0 font-mono text-warning">{entry.commit.shortHash}</span>
           <span className="truncate min-w-0 flex-1 text-fg">{entry.commit.subject}</span>
@@ -288,10 +285,10 @@ function ReviewEntry({
       worktreePath={worktreePath}
       submission={submission}
       tabLabels={ctx.tabLabels}
-      className="rounded border border-border bg-panel px-3 py-2"
+      className="rounded-md border border-border bg-panel px-4 py-3"
       fullSummary
     >
-      <div className="mt-1 flex items-center gap-2 text-faint">
+      <div className="mt-2 flex items-center gap-3 text-faint">
         <Time at={submission.createdAt} />
         {submission.headSha && (
           <span>
@@ -300,7 +297,7 @@ function ReviewEntry({
         )}
       </div>
       {(threads.length > 0 || missing > 0) && (
-        <div className="mt-2 flex flex-col gap-1.5">
+        <div className="mt-3 flex flex-col gap-3">
           {threads.map((t) => (
             <CommentThread key={t.comment.id} thread={t} ctx={ctx} onJump={onJump} />
           ))}
@@ -370,10 +367,10 @@ export function ReviewTimeline({
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 py-3 flex flex-col gap-4 text-xs">
+      <div className="max-w-4xl mx-auto px-6 py-5 flex flex-col gap-8 text-xs">
         {rounds.map((round) => (
           <section key={round.index}>
-            <div className="flex items-center gap-2 mb-2 text-faint">
+            <div className="flex items-center gap-2 mb-3 text-faint">
               {round.index === 0 ? (
                 <span>Before the first review</span>
               ) : (
@@ -384,7 +381,7 @@ export function ReviewTimeline({
               )}
               <div className="flex-1 h-px bg-border/60" />
             </div>
-            <div className="flex flex-col gap-2 pl-3 border-l border-border/60">
+            <div className="flex flex-col gap-4 pl-4 border-l border-border/60">
               {round.entries.map((e) => (
                 <Entry
                   key={entryKey(e)}
