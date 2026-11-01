@@ -62,6 +62,10 @@ export interface TerminalTab {
   commitHash?: string
   /** For agent tabs: UUID passed to the agent CLI so the tab resumes its own session. */
   sessionId?: string
+  /** For a reviewer Chat tab opened by `request_review`: the tab that
+   *  asked for the review. Its submitted review is delivered back there,
+   *  so routing doesn't fall back to guessing the most recent tab. */
+  reviewOf?: string
   /** For json-claude tabs whose agent assigns its own conversation ids
    *  (Codex threads): that id. The tab id and sessionId stay Ness's. */
   providerSessionId?: string

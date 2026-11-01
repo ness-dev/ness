@@ -119,7 +119,8 @@ function setup(
   const notifier = new CiNotifier(store, {
     send,
     hasSession: (id) => live.has(id),
-    wake
+    wake,
+    respawn: () => {}
   })
   notifier.start()
   return { store, send, wake, notifier }
@@ -159,7 +160,7 @@ describe('CiNotifier transitions', () => {
       prs: { ...state.prs, byPath: { [A]: pr({ checksOverall: 'failure' }) } }
     })
     const send = vi.fn()
-    new CiNotifier(store, { send, hasSession: () => true, wake: () => {} }).start()
+    new CiNotifier(store, { send, hasSession: () => true, wake: () => {}, respawn: () => {} }).start()
     await bulk(store, { [A]: pr({ checksOverall: 'failure' }) })
     expect(send).not.toHaveBeenCalled()
   })
@@ -442,7 +443,7 @@ describe('CiNotifier waking a slept tab', () => {
     )
     const send = vi.fn()
     const wake = vi.fn()
-    new CiNotifier(store, { send, hasSession: () => false, wake }).start()
+    new CiNotifier(store, { send, hasSession: () => false, wake, respawn: () => {} }).start()
     await bulk(store, { [A]: pr({ checksOverall: 'pending' }) })
     await bulk(store, { [A]: pr({ checksOverall: 'failure' }) })
     expect(wake).toHaveBeenCalledWith(A, 't1')

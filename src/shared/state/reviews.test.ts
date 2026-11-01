@@ -3,6 +3,7 @@ import {
   initialReviews,
   reviewsReducer,
   type ReviewComment,
+  type ReviewSubmission,
   type ReviewsState
 } from './reviews'
 
@@ -20,6 +21,20 @@ function comment(id: string, over: Partial<ReviewComment> = {}): ReviewComment {
     status: 'open',
     body: 'hi',
     createdAt: 1,
+    ...over
+  }
+}
+
+function submission(id: string, over: Partial<ReviewSubmission> = {}): ReviewSubmission {
+  return {
+    id,
+    author: { kind: 'agent', tabId: 'reviewer', label: 'Reviewer' },
+    verdict: 'changes-requested',
+    summary: 'needs work',
+    commentIds: ['a'],
+    createdAt: 2,
+    state: 'draft',
+    targetTabId: 'author',
     ...over
   }
 }
@@ -136,5 +151,119 @@ describe('reviewsReducer', () => {
     expect(
       reviewsReducer(s1, { type: 'reviews/worktreeRemoved', payload: { worktreePath: WT } })
     ).toBe(s1)
+  })
+
+  it('reviews/commentEdited replaces the body and keeps identity on a no-op', () => {
+    const s = seeded(comment('a'), comment('b'))
+    const s1 = reviewsReducer(s, {
+      type: 'reviews/commentEdited',
+      payload: { worktreePath: WT, id: 'a', body: 'reworded' }
+    })
+    expect(s1.byPath[WT].comments[0].body).toBe('reworded')
+    expect(s1.byPath[WT].comments[1]).toBe(s.byPath[WT].comments[1])
+    expect(
+      reviewsReducer(s1, {
+        type: 'reviews/commentEdited',
+        payload: { worktreePath: WT, id: 'a', body: 'reworded' }
+      })
+    ).toBe(s1)
+    expect(
+      reviewsReducer(s1, {
+        type: 'reviews/commentEdited',
+        payload: { worktreePath: WT, id: 'zzz', body: 'x' }
+      })
+    ).toBe(s1)
+  })
+
+  it('reviews/submissionAdded appends, ignores duplicates, and creates an entry without comments', () => {
+    const s1 = reviewsReducer(initialReviews, {
+      type: 'reviews/submissionAdded',
+      payload: { worktreePath: WT, submission: submission('s1') }
+    })
+    expect(s1.byPath[WT]).toEqual({ comments: [], submissions: [submission('s1')] })
+    expect(
+      reviewsReducer(s1, {
+        type: 'reviews/submissionAdded',
+        payload: { worktreePath: WT, submission: submission('s1') }
+      })
+    ).toBe(s1)
+  })
+
+  it('keeps a worktree entry alive while it still has submissions', () => {
+    const s = {
+      byPath: { [WT]: { comments: [comment('a')], submissions: [submission('s1')] } }
+    }
+    const s1 = reviewsReducer(s, {
+      type: 'reviews/commentDeleted',
+      payload: { worktreePath: WT, id: 'a' }
+    })
+    expect(s1.byPath[WT].comments).toEqual([])
+    expect(s1.byPath[WT].submissions).toBe(s.byPath[WT].submissions)
+  })
+
+  it('reviews/submissionEdited changes summary and verdict only when they differ', () => {
+    const s = {
+      byPath: { [WT]: { comments: [comment('a')], submissions: [submission('s1'), submission('s2')] } }
+    }
+    const s1 = reviewsReducer(s, {
+      type: 'reviews/submissionEdited',
+      payload: { worktreePath: WT, id: 's1', summary: 'tidy', verdict: 'approve' }
+    })
+    expect(s1.byPath[WT].submissions![0]).toMatchObject({ summary: 'tidy', verdict: 'approve' })
+    expect(s1.byPath[WT].submissions![1]).toBe(s.byPath[WT].submissions[1])
+    expect(s1.byPath[WT].comments).toBe(s.byPath[WT].comments)
+    expect(
+      reviewsReducer(s1, {
+        type: 'reviews/submissionEdited',
+        payload: { worktreePath: WT, id: 's1', summary: 'tidy', verdict: 'approve' }
+      })
+    ).toBe(s1)
+  })
+
+  it('reviews/submissionDelivered records success and failure', () => {
+    const s = { byPath: { [WT]: { comments: [], submissions: [submission('s1')] } } }
+    const failed = reviewsReducer(s, {
+      type: 'reviews/submissionDelivered',
+      payload: { worktreePath: WT, id: 's1', state: 'failed', targetTabId: null, at: 5, error: 'nope' }
+    })
+    expect(failed.byPath[WT].submissions![0]).toMatchObject({
+      state: 'failed',
+      error: 'nope',
+      targetTabId: 'author'
+    })
+    const sent = reviewsReducer(failed, {
+      type: 'reviews/submissionDelivered',
+      payload: { worktreePath: WT, id: 's1', state: 'sent', targetTabId: 'other', at: 9 }
+    })
+    expect(sent.byPath[WT].submissions![0]).toMatchObject({
+      state: 'sent',
+      sentAt: 9,
+      targetTabId: 'other'
+    })
+    expect(sent.byPath[WT].submissions![0].error).toBeUndefined()
+    expect(
+      reviewsReducer(sent, {
+        type: 'reviews/submissionDelivered',
+        payload: { worktreePath: WT, id: 'missing', state: 'sent', targetTabId: null, at: 1 }
+      })
+    ).toBe(sent)
+  })
+
+  it('reviews/submissionDeleted removes one and drops an emptied worktree', () => {
+    const s = { byPath: { [WT]: { comments: [], submissions: [submission('s1'), submission('s2')] } } }
+    const s1 = reviewsReducer(s, {
+      type: 'reviews/submissionDeleted',
+      payload: { worktreePath: WT, id: 's1' }
+    })
+    expect(s1.byPath[WT].submissions!.map((x) => x.id)).toEqual(['s2'])
+    expect(s1.byPath[WT].submissions![0]).toBe(s.byPath[WT].submissions[1])
+    const s2 = reviewsReducer(s1, {
+      type: 'reviews/submissionDeleted',
+      payload: { worktreePath: WT, id: 's2' }
+    })
+    expect(s2.byPath).toEqual({})
+    expect(
+      reviewsReducer(s2, { type: 'reviews/submissionDeleted', payload: { worktreePath: WT, id: 's2' } })
+    ).toBe(s2)
   })
 })

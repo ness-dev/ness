@@ -307,7 +307,7 @@ export function useTabHandlers({
   )
 
   const handleSendToAgent = useCallback(
-    (worktreePath: string, text: string) => {
+    (worktreePath: string, text: string, targetTabId?: string) => {
       const tree = panes[worktreePath]
       const leaves = tree ? getLeaves(tree) : []
       // Both 'agent' (xterm) and 'json-claude' tabs accept dispatched
@@ -317,7 +317,18 @@ export function useTabHandlers({
         t.type === 'agent' || t.type === 'json-claude'
       let targetPaneId: string | undefined
       let targetTab: { id: string; type?: string } | undefined
-      for (const leaf of leaves) {
+      if (targetTabId) {
+        for (const leaf of leaves) {
+          const t = leaf.tabs.find((x) => x.id === targetTabId)
+          if (t && isSendable(t)) {
+            targetPaneId = leaf.id
+            targetTab = t
+            break
+          }
+        }
+        if (!targetTab) return
+      }
+      for (const leaf of targetTabId ? [] : leaves) {
         const active = leaf.tabs.find((t) => t.id === leaf.activeTabId)
         if (active && isSendable(active)) {
           targetPaneId = leaf.id

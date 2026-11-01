@@ -6,6 +6,7 @@ import {
   mergeClientOwnedSettings,
   NESSIE_COLORS,
   initialSettings,
+  DEFAULT_REVIEW_PROMPT,
   nessieColorById,
   settingsReducer,
   type SettingsEvent,
@@ -907,6 +908,43 @@ describe('settingsReducer', () => {
     expect(always.preventSleepMode).toBe('always')
     const off = apply(always, { type: 'settings/preventSleepModeChanged', payload: 'off' })
     expect(off.preventSleepMode).toBe('off')
+  })
+
+  it('agentReviewDeliveryChanged switches modes and keeps identity on a no-op', () => {
+    expect(initialSettings.agentReviewDelivery).toBe('draft')
+    const auto = apply(initialSettings, {
+      type: 'settings/agentReviewDeliveryChanged',
+      payload: 'auto'
+    })
+    expect(auto.agentReviewDelivery).toBe('auto')
+    expect(
+      apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
+    ).toBe(auto)
+  })
+
+  it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {
+    expect(initialSettings.autoReviewOnGreenCi).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/autoReviewOnGreenCiChanged',
+      payload: true
+    })
+    expect(on.autoReviewOnGreenCi).toBe(true)
+    expect(apply(on, { type: 'settings/autoReviewOnGreenCiChanged', payload: true })).toBe(on)
+  })
+
+  it('review agent, model and prompt round-trip and keep identity on a no-op', () => {
+    expect(initialSettings.reviewAgent).toBe('inherit')
+    expect(initialSettings.reviewModel).toBe('')
+    expect(initialSettings.reviewPrompt).toBe(DEFAULT_REVIEW_PROMPT)
+    const agent = apply(initialSettings, { type: 'settings/reviewAgentChanged', payload: 'codex' })
+    expect(agent.reviewAgent).toBe('codex')
+    expect(apply(agent, { type: 'settings/reviewAgentChanged', payload: 'codex' })).toBe(agent)
+    const model = apply(agent, { type: 'settings/reviewModelChanged', payload: 'opus' })
+    expect(model.reviewModel).toBe('opus')
+    expect(apply(model, { type: 'settings/reviewModelChanged', payload: 'opus' })).toBe(model)
+    const prompt = apply(model, { type: 'settings/reviewPromptChanged', payload: 'be harsh' })
+    expect(prompt.reviewPrompt).toBe('be harsh')
+    expect(apply(prompt, { type: 'settings/reviewPromptChanged', payload: 'be harsh' })).toBe(prompt)
   })
 
   it('preventSleepUntilChanged arms and clears the timer deadline', () => {

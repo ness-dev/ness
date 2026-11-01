@@ -19,7 +19,8 @@ export function persistedTabFields(t: PersistedTab | TerminalTab): PersistedTab 
     cwd: t.cwd,
     model: t.model,
     ...(t.customLabel ? { customLabel: t.customLabel } : {}),
-    ...(t.customLabel && t.customLabelSource ? { customLabelSource: t.customLabelSource } : {})
+    ...(t.customLabel && t.customLabelSource ? { customLabelSource: t.customLabelSource } : {}),
+    ...(t.reviewOf ? { reviewOf: t.reviewOf } : {})
   }
 }
 

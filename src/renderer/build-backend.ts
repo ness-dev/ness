@@ -38,7 +38,7 @@ import type {
   LocalTransportHandle,
   StateEventListener
 } from '../shared/transport/transport'
-import type { ElectronAPI, AgentKind, ReviewCommentStatus } from './types'
+import type { ElectronAPI, AgentKind, ReviewCommentStatus, ReviewVerdict } from './types'
 import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
@@ -47,6 +47,8 @@ import {
   CLIENT_OWNED_CONFIG_CHANNELS,
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
+  type AgentReviewDelivery,
+  type ReviewAgentChoice,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -327,6 +329,15 @@ export function buildBackend(
     setAutoSleepMinutes: (value: number) => reqConfig('config:setAutoSleepMinutes', value),
     setPreventSleepMode: (value: PreventSleepMode) =>
       reqConfig('config:setPreventSleepMode', value),
+    // Backend-owned, not client-owned: these decide how main spawns a
+    // reviewer, so every client of a workspace wants the same value.
+    setAgentReviewDelivery: (value: AgentReviewDelivery) =>
+      req('config:setAgentReviewDelivery', value),
+    setAutoReviewOnGreenCi: (enabled: boolean) =>
+      req('config:setAutoReviewOnGreenCi', enabled),
+    setReviewAgent: (value: ReviewAgentChoice) => req('config:setReviewAgent', value),
+    setReviewModel: (value: string) => req('config:setReviewModel', value),
+    setReviewPrompt: (prompt: string) => req('config:setReviewPrompt', prompt),
     setPreventSleepUntil: (value: number | null) =>
       reqConfig('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),
@@ -489,6 +500,20 @@ export function buildBackend(
       req('reviews:addReply', worktreePath, commentId, body),
     refreshReviewAnchors: (worktreePath: string, filePath?: string) =>
       req('reviews:refreshAnchors', worktreePath, filePath),
+    editReviewComment: (worktreePath: string, id: string, body: string) =>
+      req('reviews:editComment', worktreePath, id, body),
+    listReviewTargets: (worktreePath: string) => req('reviews:listChatTabs', worktreePath),
+    requestAiReview: (worktreePath: string) => req('reviews:requestForWorktree', worktreePath),
+    editReviewSubmission: (
+      worktreePath: string,
+      id: string,
+      summary: string,
+      verdict: ReviewVerdict
+    ) => req('reviews:editSubmission', worktreePath, id, summary, verdict),
+    deleteReviewSubmission: (worktreePath: string, id: string) =>
+      req('reviews:deleteSubmission', worktreePath, id),
+    sendReviewSubmission: (worktreePath: string, id: string, targetTabId?: string) =>
+      req('reviews:sendSubmission', worktreePath, id, targetTabId),
 
     openInEditor: (worktreePath: string, filePath?: string) =>
       req('editor:open', worktreePath, filePath),
