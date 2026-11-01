@@ -34,8 +34,11 @@ export function ScaledMock({ state, fill = false }: { state: MockHarnessState; f
   const layoutH = fill ? (box?.h ?? MOCK_H) / scale : layoutW * (MOCK_H / MOCK_W)
 
   return (
+    // Decorative: every label in the mock is a non-interactive span, and a
+    // screen reader reading a fake app as page content is noise.
     <div
       ref={hostRef}
+      aria-hidden="true"
       className={fill ? 'absolute inset-0' : 'relative overflow-hidden'}
       style={fill ? undefined : { height: layoutH * scale }}
     >

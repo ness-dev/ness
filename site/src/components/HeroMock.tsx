@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import type { MockHarnessState, MockStatus } from './MockHarness'
 import { BASE_WORKTREES } from './mock-data'
@@ -41,17 +41,37 @@ function stateFor(beat: Beat): MockHarnessState {
 
 export function HeroMock() {
   const reduced = useReducedMotion()
+  const sectionRef = useRef<HTMLElement>(null)
+  const [visible, setVisible] = useState(false)
   const [beat, setBeat] = useState(0)
 
+  // Only run while on screen — the video this replaced was paused off-screen
+  // for free — and restart the story from the top each time it comes back.
   useEffect(() => {
-    if (reduced) return
+    const el = sectionRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([entry]) => {
+      setVisible(entry.isIntersecting)
+      if (!entry.isIntersecting) setBeat(0)
+    })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (reduced || !visible) return
     const t = setTimeout(() => setBeat((b) => (b + 1) % BEATS.length), BEATS[beat].ms)
     return () => clearTimeout(t)
-  }, [beat, reduced])
+  }, [beat, reduced, visible])
 
   return (
-    <section className="max-w-6xl mx-auto px-6 pb-24">
-      <ScaledMock state={stateFor(BEATS[reduced ? 0 : beat])} />
+    <section ref={sectionRef} className="max-w-6xl mx-auto px-6 pb-24">
+      <div
+        role="img"
+        aria-label="The Ness app: a sidebar of agent worktrees, one of them asking for approval, next to a Claude chat and the worktree's pull request, commits and changed files"
+      >
+        <ScaledMock state={stateFor(BEATS[reduced ? 0 : beat])} />
+      </div>
     </section>
   )
 }
