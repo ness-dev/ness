@@ -169,7 +169,13 @@ export interface WorktreesState {
   /** Normalized `origin` URL per repo root (see shared/git-remote.ts), or
    *  null for repos with no usable origin. Fleet view uses it to decide
    *  that checkouts on different hosts are the same repo. Resolved
-   *  asynchronously after repoRoots change, so it can briefly lag them. */
+   *  asynchronously after repoRoots change, so it can briefly lag them —
+   *  a root with no entry yet is "unresolved", distinct from null.
+   *
+   *  Re-read only at boot and when the repo list changes (add/remove). A
+   *  `git remote set-url` on a running Ness isn't noticed until one of
+   *  those; acceptable, since a repo's origin changing mid-session is
+   *  rare and self-corrects on the next repo operation or restart. */
   repoRemotes: Record<string, string | null>
   pending: PendingWorktree[]
   /** In-flight deletions, keyed by worktree path. Lives in the store so

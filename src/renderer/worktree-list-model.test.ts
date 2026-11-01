@@ -427,11 +427,12 @@ describe('pinned rows', () => {
   })
 })
 
-describe('cross-host section merging (folder-name fallback, no remotes)', () => {
+describe('cross-host section merging (folder-name fallback, resolved with no origin)', () => {
   // Fleet view shows the same repo open on several hosts as ONE section.
   // Identity is repoKeyFor: the normalized origin URL when a root has one,
-  // folder name otherwise. These cases supply no remotes, so they exercise
-  // the fallback. The merge is gated on backend ownership: it must never
+  // folder name when a root has RESOLVED to no origin (null). These cases
+  // pass explicit nulls to exercise the fallback; a missing entry means
+  // "not resolved yet" and never merges — see the last test. The merge is gated on backend ownership: it must never
   // fire for two same-named checkouts on one host, and never fire at all
   // when the caller supplies no ownership info (single-backend callers
   // keep historical behavior).
@@ -443,6 +444,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: [localRoot, remoteRoot],
         repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
         worktrees: [
           wt({ path: '/w/local-main', repoRoot: localRoot }),
           wt({ path: '/w/remote-main', repoRoot: remoteRoot })
@@ -468,6 +470,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: [remoteRoot, localRoot],
         repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
         worktrees: [wt({ path: '/w/a', repoRoot: remoteRoot })]
       })
     )
@@ -481,6 +484,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: ['/a/api', '/b/api'],
         repoBackendId: { '/a/api': 'local', '/b/api': 'local' },
+        repoRemotes: { '/a/api': null, '/b/api': null },
         worktrees: []
       })
     )
@@ -503,6 +507,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: ['/x/Ness', '/y/ness'],
         repoBackendId: { '/x/Ness': 'local', '/y/ness': 'beta' },
+        repoRemotes: { '/x/Ness': null, '/y/ness': null },
         worktrees: []
       })
     )
@@ -516,6 +521,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: [localRoot, remoteRoot],
         repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
         worktrees: [wt({ path: '/w/a', repoRoot: localRoot })],
         collapsedRepos: { 'repo:folder:ness': true }
       })
@@ -529,6 +535,7 @@ describe('cross-host section merging (folder-name fallback, no remotes)', () => 
       input({
         repoRoots: [localRoot, remoteRoot],
         repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
         worktrees: [],
         pendingWorktrees: [
           { id: 'p1', repoRoot: localRoot, branchName: 'x', status: 'creating' },
@@ -605,5 +612,52 @@ describe('cross-host section merging by remote URL', () => {
       })
     )
     expect(model.sections).toHaveLength(2)
+  })
+})
+
+describe('cross-host section merging with unresolved remotes', () => {
+  it('never merges a root whose remote has not resolved yet', () => {
+    // No entry at all (undefined) — the window between repoRoots landing
+    // and the async origin lookup finishing, or an older harness-server
+    // that never sends repoRemotes. Same folder name on two hosts, but
+    // merging on a guess would bounce sections (and collapse state) on
+    // first paint and silently join unrelated repos. Not merging is the
+    // safe direction; null (resolved, no origin) is what opts into the
+    // folder fallback.
+    const localRoot = '/Users/mike/dev/ness'
+    const remoteRoot = '/home/mike/code/ness'
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: {},
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.scope)).toEqual([localRoot, remoteRoot])
+  })
+
+  it('merges once both sides resolve to null, but not while one is pending', () => {
+    const a = '/l/ness'
+    const b = '/r/ness'
+    const pendingOne = buildWorktreeListModel(
+      input({
+        repoRoots: [a, b],
+        repoBackendId: { [a]: 'local', [b]: 'beta' },
+        repoRemotes: { [a]: null },
+        worktrees: []
+      })
+    )
+    expect(pendingOne.sections).toHaveLength(2)
+    const bothResolved = buildWorktreeListModel(
+      input({
+        repoRoots: [a, b],
+        repoBackendId: { [a]: 'local', [b]: 'beta' },
+        repoRemotes: { [a]: null, [b]: null },
+        worktrees: []
+      })
+    )
+    expect(bothResolved.sections).toHaveLength(1)
   })
 })

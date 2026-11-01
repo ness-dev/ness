@@ -175,6 +175,10 @@ export class WorktreesFSM {
     return true
   }
 
+  /** Bumped on every refreshRepoRemotes call; a call only publishes if it
+   *  is still the newest when its git subprocesses finish. */
+  private remotesGen = 0
+
   dispatchRepos(roots: string[]): void {
     this.store.dispatch({ type: 'worktrees/reposChanged', payload: roots })
     void this.refreshRepoRemotes(roots)
@@ -190,9 +194,17 @@ export class WorktreesFSM {
    *  construction so remotes exist from the first paint, not only after
    *  the first repo add/remove. */
   async refreshRepoRemotes(roots: string[]): Promise<void> {
+    // Boot and an early repo add — or two quick add/remove clicks — can
+    // overlap, and each awaits N git subprocesses before replacing the
+    // whole map. Without this, whichever finishes LAST wins, so a stale
+    // roots list could drop a just-added repo's remote (it then falls
+    // back to a folder key and won't merge) or resurrect a removed root,
+    // until the next repo change happened to fix it.
+    const gen = ++this.remotesGen
     const pairs = await Promise.all(
       roots.map(async (root) => [root, normalizeRemoteUrl(await getOriginRemoteUrl(root))] as const)
     )
+    if (gen !== this.remotesGen) return
     const next: Record<string, string | null> = {}
     for (const [root, remote] of pairs) next[root] = remote
     const current = this.store.getSnapshot().state.worktrees.repoRemotes

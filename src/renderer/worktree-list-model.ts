@@ -391,13 +391,22 @@ export function repoLabelFor(repoRoot: string): string {
  *  anything sharing a generic name, and a wrong merge can detach the
  *  wrong repo, which is the worse error.
  *
- *  Fallback: folder name, case-normalized, only when a root has no usable
- *  origin. The two namespaces are prefixed so a remote-less `api` can't
- *  accidentally match a remote-bearing one.
+ *  Three states, deliberately distinct:
+ *    - a string: resolved, has an origin → `remote:` key.
+ *    - null: resolved, no usable origin → `folder:` fallback, so two
+ *      origin-less checkouts can still pair up by name.
+ *    - undefined: NOT resolved → a key unique to this root, so it merges
+ *      with nothing. Remotes resolve asynchronously after the repo list,
+ *      and an older harness-server never sends them at all; treating
+ *      either as "no origin" would briefly (or permanently) merge
+ *      unrelated same-named repos and bounce sections — and collapse
+ *      state — around on first paint. Not merging is the safe direction.
  *
- *  Refinements (manual pin/split, extra remotes) belong HERE and nowhere
- *  else. */
-export function repoKeyFor(repoRoot: string, remote?: string | null): string {
+ *  Namespaces are prefixed so a remote-less `api` can't accidentally
+ *  match a remote-bearing one. Refinements (manual pin/split, extra
+ *  remotes) belong HERE and nowhere else. */
+export function repoKeyFor(repoRoot: string, remote: string | null | undefined): string {
+  if (remote === undefined) return `path:${repoRoot}`
   if (remote) return `remote:${remote}`
   return `folder:${(repoRoot.split('/').pop() || repoRoot).toLowerCase()}`
 }
