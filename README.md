@@ -139,6 +139,8 @@ Once `harness-server` is running on a remote machine, you can drive it from your
 
 Once added, the chip appears at the bottom of the sidebar. Click to switch — `Cmd+Shift+1..9` jumps directly to the Nth backend (Local is always 1). Each backend has its own worktrees, terminals, browser tabs, and settings; switching changes which backend's UI is rendered, and inactive backends keep streaming so notifications still work. The connections list is encrypted (tokens in `secrets.enc`) and persists across restarts.
 
+If you're developing remote/multi-backend features rather than using them, `npm run remote:up` runs a server built from your working tree in a container, so you don't need a real remote box — see [Testing a remote backend in Docker](CONTRIBUTING.md#testing-a-remote-backend-in-docker).
+
 ## Uninstallation
 
 1. **Remove the Claude Code hooks** (do this while Ness is still running). Open Settings → **Agent** → **Status hooks** and click **Remove hooks**. This strips Ness's entries from `~/.claude/settings.json` and leaves any user-authored hooks intact.
