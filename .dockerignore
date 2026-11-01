@@ -1,0 +1,24 @@
+# Build context for docker/Dockerfile. Everything `npm run build:headless`
+# needs stays in; host-platform build output and native modules stay out —
+# node_modules especially, since the host's is compiled for darwin and the
+# image rebuilds node-pty against the container's Node ABI.
+#
+# docker/entrypoint.sh is deliberately NOT excluded — it ships in the image.
+docker/compose.yaml
+docker/compose.host-claude.yaml
+node_modules
+out
+dist
+dist-headless
+release
+.headless-data
+.git
+.github
+site
+plans
+release-notes
+resources
+build
+*.log
+.env
+.DS_Store

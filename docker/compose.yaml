@@ -1,0 +1,57 @@
+# A Ness remote backend (`harness-server`) in a container.
+#
+#   npm run remote:up          build, start, print the connect URL
+#   npm run remote:logs        follow the server log
+#   npm run remote:shell       a shell inside it (claude /login lives here)
+#   npm run remote:down        stop it
+#   npm run remote:reset       stop it and discard auth + workspace
+#
+# See CONTRIBUTING.md § "Testing a remote backend in Docker".
+name: ness-remote
+
+services:
+  ness-remote:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ness-remote:dev
+    container_name: ness-remote
+    # PID 1 reaps the agent/pty subprocesses this server spawns.
+    init: true
+    # Loopback-only on purpose. The token below is fixed and well-known,
+    # so this must not be reachable off the host.
+    ports:
+      - '127.0.0.1:${NESS_REMOTE_PORT:-37291}:37291'
+    environment:
+      # A fixed token keeps the connect URL stable across rebuilds, so it
+      # can be bookmarked, scripted, or handed to an agent. Dev-only — set
+      # NESS_REMOTE_TOKEN to override.
+      HARNESS_AUTH_TOKEN: '${NESS_REMOTE_TOKEN:-ness-dev-token}'
+      NESS_REMOTE_PORT: '37291'
+      # Passed through when set on the host, so an agent can bring the
+      # remote up non-interactively instead of running `claude /login`.
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'
+      OPENAI_API_KEY: '${OPENAI_API_KEY:-}'
+      # PR status / check runs. The image has no `gh` for github-auth to
+      # fall back to, so this is the only way to exercise those paths.
+      GITHUB_TOKEN: '${GITHUB_TOKEN:-}'
+      # Clone a real repo for the server to manage instead of the seeded
+      # sample one, e.g. NESS_CLONE_URL=https://github.com/ness-dev/ness.git
+      NESS_CLONE_URL: '${NESS_CLONE_URL:-}'
+      TERM: xterm-256color
+    volumes:
+      # Config + the pane layout the server persists.
+      - ness-data:/data
+      # Repos and the worktrees created against them.
+      - ness-workspace:/workspace
+      # The whole home dir, so `claude /login` is a one-time cost and
+      # survives rebuilds. Covers ~/.claude, ~/.claude.json and ~/.codex
+      # without this file having to track where each tool keeps its state.
+      - ness-home:/root
+    # Agents and ptys need a moment to be torn down cleanly.
+    stop_grace_period: 15s
+
+volumes:
+  ness-data:
+  ness-workspace:
+  ness-home:
