@@ -49,6 +49,9 @@ export interface MockWorktree {
   age: string
   /** The worktree's Chat tab. Absent renders the chat's empty state. */
   chat?: MockTranscript
+  /** What the right column's Commits and Changed Files panels list. Absent
+   * renders their empty states. */
+  changes?: MockChanges
   pr?: {
     number: number
     title: string
@@ -57,6 +60,25 @@ export interface MockWorktree {
     deletions: number
     milestone?: string
   }
+}
+
+export interface MockCommit {
+  sha: string
+  msg: string
+  pushed: boolean
+}
+
+export interface MockChangedFile {
+  path: string
+  kind: 'A' | 'M'
+  add: number
+  del: number
+}
+
+export interface MockChanges {
+  commits: MockCommit[]
+  uncommitted: MockChangedFile[]
+  committed: MockChangedFile[]
 }
 
 export type HighlightedElement =
@@ -565,8 +587,11 @@ function MockRightColumn({ state }: { state: MockHarnessState }) {
           >
             <RightColumnToolbar />
             <PullRequestPanel pr={active.pr} />
-            <CommitsPanel />
-            <ChangedFilesPanel />
+            <CommitsPanel commits={active.changes?.commits ?? []} />
+            <ChangedFilesPanel
+              uncommitted={active.changes?.uncommitted ?? []}
+              committed={active.changes?.committed ?? []}
+            />
             <RightPanelSection title="All Files" collapsed actions={<ListTree size={12} />} />
             <RightPanelSection title="Cost" collapsed />
           </motion.div>
@@ -680,7 +705,13 @@ function RightPanelSection({
 }
 
 function PullRequestPanel({ pr }: { pr?: MockWorktree['pr'] }) {
-  if (!pr) return null
+  if (!pr) {
+    return (
+      <RightPanelSection title="Pull Request" actions={<RefreshCw size={12} />}>
+        <div className="px-3 py-2 text-xs text-faint">No PR for this branch</div>
+      </RightPanelSection>
+    )
+  }
   return (
     <RightPanelSection
       title="Pull Request"
@@ -734,26 +765,21 @@ function PullRequestPanel({ pr }: { pr?: MockWorktree['pr'] }) {
   )
 }
 
-const COMMITS = [
-  { sha: 'a1b2c3d', msg: 'Fix typo in welcome copy', pushed: false },
-  { sha: 'b2c3d4e', msg: 'Add onboarding slide deck', pushed: true },
-  { sha: 'c3d4e5f', msg: 'Wire up onboarding router', pushed: true }
-]
-
-function CommitsPanel() {
+function CommitsPanel({ commits }: { commits: MockCommit[] }) {
   return (
     <RightPanelSection
       title="Commits"
       maxHeight="max-h-56"
       actions={
         <>
-          <span className="text-xs text-faint">{COMMITS.length}</span>
+          {commits.length > 0 && <span className="text-xs text-faint">{commits.length}</span>}
           <RefreshCw size={12} />
         </>
       }
     >
       <div className="flex-1 overflow-y-auto min-h-0 text-xs py-1.5">
-        {COMMITS.map((c, i) => (
+        {commits.length === 0 && <div className="px-4 py-2 text-faint">No commits ahead of base</div>}
+        {commits.map((c, i) => (
           <div
             key={c.sha}
             className="group relative flex items-center gap-2.5 pl-4 pr-3 py-1.5 hover:bg-panel-raised"
@@ -761,7 +787,7 @@ function CommitsPanel() {
             <div className="relative shrink-0 w-3 self-stretch flex justify-center">
               <div
                 className="absolute left-1/2 -translate-x-1/2 w-px bg-border-strong"
-                style={{ top: i === 0 ? '50%' : 0, bottom: i === COMMITS.length - 1 ? '50%' : 0 }}
+                style={{ top: i === 0 ? '50%' : 0, bottom: i === commits.length - 1 ? '50%' : 0 }}
               />
               <div
                 className={`relative z-10 self-center w-2 h-2 rounded-full ring-2 ring-panel ${
@@ -783,44 +809,53 @@ function CommitsPanel() {
   )
 }
 
-const UNCOMMITTED_FILES = [{ path: 'src/welcome.tsx', kind: 'M', add: 12, del: 3 }]
-
-const COMMITTED_FILES = [
-  { path: 'src/welcome.tsx', kind: 'A', add: 142, del: 0 },
-  { path: 'src/auth/signup.ts', kind: 'M', add: 56, del: 12 },
-  { path: 'src/router.ts', kind: 'M', add: 4, del: 2 },
-  { path: 'src/onboarding/steps.ts', kind: 'A', add: 88, del: 0 },
-  { path: 'tests/onboarding.spec.ts', kind: 'A', add: 62, del: 0 }
-]
-
-function ChangedFilesPanel() {
+function ChangedFilesPanel({
+  uncommitted,
+  committed
+}: {
+  uncommitted: MockChangedFile[]
+  committed: MockChangedFile[]
+}) {
   return (
     <RightPanelSection
       title="Changed Files"
       grow
       actions={
         <>
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-accent text-app text-xs">
-            <ClipboardCheck size={12} />
-            Review
-          </span>
+          {committed.length > 0 && (
+            <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-accent text-app text-xs">
+              <ClipboardCheck size={12} />
+              Review
+            </span>
+          )}
           <RefreshCw size={12} />
         </>
       }
     >
       <div className="flex-1 overflow-y-auto min-h-0 text-xs">
         <SectionBar label="Uncommitted" />
-        {UNCOMMITTED_FILES.map((f) => (
+        {uncommitted.length === 0 && <div className="px-3 py-2 text-faint italic">No changes</div>}
+        {uncommitted.map((f) => (
           <ChangedFileRow key={`u-${f.path}`} file={f} />
         ))}
         <SectionBar label="Committed" className="mt-1" />
-        {COMMITTED_FILES.map((f) => (
+        {committed.length === 0 && (
+          <div className="px-3 py-2 text-faint italic">No commits on this branch yet</div>
+        )}
+        {committed.map((f) => (
           <ChangedFileRow key={`c-${f.path}`} file={f} />
         ))}
       </div>
-      <div className="px-3 py-1.5 border-t border-border text-xs text-faint shrink-0">
-        {UNCOMMITTED_FILES.length} uncommitted · {COMMITTED_FILES.length} committed
-      </div>
+      {uncommitted.length + committed.length > 0 && (
+        <div className="px-3 py-1.5 border-t border-border text-xs text-faint shrink-0">
+          {[
+            uncommitted.length > 0 && `${uncommitted.length} uncommitted`,
+            committed.length > 0 && `${committed.length} committed`
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </div>
+      )}
     </RightPanelSection>
   )
 }
@@ -836,11 +871,7 @@ function SectionBar({ label, className = '' }: { label: string; className?: stri
   )
 }
 
-function ChangedFileRow({
-  file
-}: {
-  file: { path: string; kind: string; add: number; del: number }
-}) {
+function ChangedFileRow({ file }: { file: MockChangedFile }) {
   const lastSlash = file.path.lastIndexOf('/')
   const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : ''
   const name = file.path.slice(lastSlash + 1)
