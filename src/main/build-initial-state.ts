@@ -171,15 +171,18 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
           typeof c.anchor.snippet === 'string'
       )
       .map((c: ReviewComment) => {
-        const ok =
-          c.status === 'resolved' &&
-          (c.resolvedBy === undefined || isReviewAuthor(c.resolvedBy)) &&
-          (c.resolvedAt === undefined || typeof c.resolvedAt === 'number')
-        if (ok || (c.resolvedBy === undefined && c.resolvedAt === undefined)) return c
-        const { resolvedBy: _by, resolvedAt: _at, ...rest } = c
-        void _by
-        void _at
-        return rest
+        const resolved = c.status === 'resolved'
+        const keepBy = resolved && isReviewAuthor(c.resolvedBy)
+        const keepAt = resolved && typeof c.resolvedAt === 'number'
+        if (keepBy === (c.resolvedBy !== undefined) && keepAt === (c.resolvedAt !== undefined)) {
+          return c
+        }
+        const { resolvedBy, resolvedAt, ...rest } = c
+        return {
+          ...rest,
+          ...(keepBy ? { resolvedBy } : {}),
+          ...(keepAt ? { resolvedAt } : {})
+        }
       })
     if (valid.length === 0 && submissions.length === 0 && requests.length === 0) continue
     const review: WorktreeReview = { comments: valid }

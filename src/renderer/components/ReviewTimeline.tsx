@@ -27,7 +27,8 @@ import {
   buildReviewTimeline,
   reviewerTabIds,
   type ActorRole,
-  type TimelineEntry
+  type TimelineEntry,
+  type TimelineThread
 } from '../review-timeline'
 import { SubmissionCard, useTabLabels } from './ReviewSubmissions'
 
@@ -113,14 +114,15 @@ function ExpandableText({ text, lines = 3 }: { text: string; lines?: number }): 
 }
 
 function CommentThread({
-  comment,
+  thread,
   ctx,
   onJump
 }: {
-  comment: ReviewComment
+  thread: TimelineThread
   ctx: ActorContext
   onJump: (c: ReviewComment) => void
 }): JSX.Element {
+  const { comment, replies } = thread
   return (
     <div className="rounded border border-border/60 bg-surface/40">
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border/40">
@@ -137,9 +139,9 @@ function CommentThread({
       >
         {comment.body}
       </button>
-      {(comment.replies?.length ?? 0) > 0 && (
+      {replies.length > 0 && (
         <div className="px-2 pb-1.5 flex flex-col gap-1.5">
-          {comment.replies!.map((r) => (
+          {replies.map((r) => (
             <div key={r.id} className="flex gap-1.5">
               <CornerDownRight className="icon-xs shrink-0 mt-0.5 text-faint" />
               <div className="min-w-0 flex-1">
@@ -153,10 +155,11 @@ function CommentThread({
           ))}
         </div>
       )}
-      {comment.status === 'resolved' && comment.resolvedBy && (
+      {thread.resolved && (
         <div className="flex items-center gap-1.5 px-2 pb-1.5 text-faint">
           <CheckCheck className="icon-xs shrink-0 text-success" />
-          Resolved by <Actor author={comment.resolvedBy} ctx={ctx} />
+          <span>{comment.resolvedBy ? 'Resolved by' : 'Resolved'}</span>
+          {comment.resolvedBy && <Actor author={comment.resolvedBy} ctx={ctx} />}
           {comment.resolvedAt !== undefined && <Time at={comment.resolvedAt} />}
         </div>
       )}
@@ -222,7 +225,7 @@ function Entry({
       return (
         <ReviewEntry
           submission={entry.submission}
-          comments={entry.comments}
+          threads={entry.threads}
           missing={entry.missing}
           worktreePath={worktreePath}
           ctx={ctx}
@@ -230,7 +233,7 @@ function Entry({
         />
       )
     case 'comment':
-      return <CommentThread comment={entry.comment} ctx={ctx} onJump={onJump} />
+      return <CommentThread thread={entry.thread} ctx={ctx} onJump={onJump} />
     case 'reply':
       return (
         <div className="flex items-center gap-1.5 min-w-0">
@@ -267,14 +270,14 @@ function Entry({
 
 function ReviewEntry({
   submission,
-  comments,
+  threads,
   missing,
   worktreePath,
   ctx,
   onJump
 }: {
   submission: ReviewSubmission
-  comments: ReviewComment[]
+  threads: TimelineThread[]
   missing: number
   worktreePath: string
   ctx: ActorContext
@@ -296,10 +299,10 @@ function ReviewEntry({
           </span>
         )}
       </div>
-      {(comments.length > 0 || missing > 0) && (
+      {(threads.length > 0 || missing > 0) && (
         <div className="mt-2 flex flex-col gap-1.5">
-          {comments.map((c) => (
-            <CommentThread key={c.id} comment={c} ctx={ctx} onJump={onJump} />
+          {threads.map((t) => (
+            <CommentThread key={t.comment.id} thread={t} ctx={ctx} onJump={onJump} />
           ))}
           {missing > 0 && (
             <div className="text-faint">
@@ -406,7 +409,7 @@ function entryKey(e: TimelineEntry): string {
     case 'review':
       return `s:${e.submission.id}`
     case 'comment':
-      return `c:${e.comment.id}`
+      return `c:${e.thread.comment.id}`
     case 'reply':
       return `r:${e.reply.id}`
     case 'resolved':

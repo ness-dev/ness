@@ -14,17 +14,26 @@ export interface TimelineCommit {
   timestamp: number
 }
 
+/** A comment as shown where it was written. Replies and the resolution
+ *  that happened in the same round are folded in; later ones get their
+ *  own entries in the round they happened in, so each shows once. */
+export interface TimelineThread {
+  comment: ReviewComment
+  replies: ReviewReply[]
+  resolved: boolean
+}
+
 export type TimelineEntry =
   | { kind: 'request'; at: number; request: ReviewRequest }
   | {
       kind: 'review'
       at: number
       submission: ReviewSubmission
-      comments: ReviewComment[]
+      threads: TimelineThread[]
       /** commentIds whose comment has since been deleted. */
       missing: number
     }
-  | { kind: 'comment'; at: number; comment: ReviewComment }
+  | { kind: 'comment'; at: number; thread: TimelineThread }
   | { kind: 'reply'; at: number; comment: ReviewComment; reply: ReviewReply }
   | { kind: 'resolved'; at: number; comment: ReviewComment; by?: ReviewAuthor }
   | { kind: 'commit'; at: number; commit: TimelineCommit }
@@ -83,21 +92,28 @@ export function buildReviewTimeline(input: {
   const entries: TimelineEntry[] = []
 
   for (const r of requests) entries.push({ kind: 'request', at: r.createdAt, request: r })
+  const threadOf = (comment: ReviewComment): TimelineThread => ({
+    comment,
+    replies: [],
+    resolved: false
+  })
   for (const s of submissions) {
-    const nested: ReviewComment[] = []
+    const threads: TimelineThread[] = []
     let missing = 0
     for (const id of s.commentIds) {
       const c = byId.get(id)
       if (!c) missing++
       else if (!inSubmission.has(id)) {
         inSubmission.add(id)
-        nested.push(c)
+        threads.push(threadOf(c))
       }
     }
-    entries.push({ kind: 'review', at: s.createdAt, submission: s, comments: nested, missing })
+    entries.push({ kind: 'review', at: s.createdAt, submission: s, threads, missing })
   }
   for (const c of comments) {
-    if (!inSubmission.has(c.id)) entries.push({ kind: 'comment', at: c.createdAt, comment: c })
+    if (!inSubmission.has(c.id)) {
+      entries.push({ kind: 'comment', at: c.createdAt, thread: threadOf(c) })
+    }
     for (const reply of c.replies ?? []) {
       entries.push({ kind: 'reply', at: reply.createdAt, comment: c, reply })
     }
@@ -114,7 +130,10 @@ export function buildReviewTimeline(input: {
   let current: TimelineRound = { index: 0, entries: [] }
   // Whether the open round is a request still waiting for its review.
   let awaitingReview = false
+  // Threads placed in the round being built, by comment id.
+  let placed = new Map<string, TimelineThread>()
   const open = (): void => {
+    placed = new Map()
     if (current.entries.length > 0) rounds.push(current)
     current = { index: (rounds.at(-1)?.index ?? 0) + 1, entries: [] }
   }
@@ -125,6 +144,16 @@ export function buildReviewTimeline(input: {
     } else if (e.kind === 'review') {
       if (!awaitingReview) open()
       awaitingReview = false
+      for (const t of e.threads) placed.set(t.comment.id, t)
+    } else if (e.kind === 'comment') {
+      placed.set(e.thread.comment.id, e.thread)
+    } else if (e.kind === 'reply' || e.kind === 'resolved') {
+      const thread = placed.get(e.comment.id)
+      if (thread) {
+        if (e.kind === 'reply') thread.replies.push(e.reply)
+        else thread.resolved = true
+        continue
+      }
     }
     current.entries.push(e)
   }

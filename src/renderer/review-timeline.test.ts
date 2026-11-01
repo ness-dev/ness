@@ -75,11 +75,57 @@ describe('buildReviewTimeline', () => {
     })
     expect(rounds.map((r) => r.index)).toEqual([0, 1, 2])
     expect(kinds(rounds[0])).toEqual(['commit'])
-    expect(kinds(rounds[1])).toEqual(['request', 'review', 'reply', 'resolved', 'commit'])
+    expect(kinds(rounds[1])).toEqual(['request', 'review', 'commit'])
     expect(kinds(rounds[2])).toEqual(['request', 'review', 'comment'])
     const review = rounds[1].entries[1]
-    expect(review.kind === 'review' && review.comments.map((c) => c.id)).toEqual(['c1'])
+    expect(review.kind === 'review' && review.threads.map((t) => t.comment.id)).toEqual(['c1'])
     expect(review.kind === 'review' && review.missing).toBe(1)
+  })
+
+  it('folds same-round replies into the thread and lists later ones in their own round', () => {
+    const early = { id: 'p1', author: impl, body: 'fixed', createdAt: 3000 }
+    const late = { id: 'p2', author: rev, body: 'thanks', createdAt: 6000 }
+    const rounds = buildReviewTimeline({
+      requests: [request('r1', 1000), request('r2', 5000)],
+      submissions: [submission('s1', 2000, ['c1'])],
+      comments: [
+        comment('c1', 1500, {
+          replies: [early, late],
+          status: 'resolved',
+          resolvedBy: rev,
+          resolvedAt: 6100
+        })
+      ],
+      commits: []
+    })
+    const review = rounds[0].entries[1]
+    expect(review.kind === 'review' && review.threads[0]).toMatchObject({
+      replies: [early],
+      resolved: false
+    })
+    expect(rounds[1].entries.map((e) => [e.kind, e.kind === 'reply' ? e.reply.id : null])).toEqual([
+      ['request', null],
+      ['reply', 'p2'],
+      ['resolved', null]
+    ])
+  })
+
+  it('folds a reply and resolution into a standalone comment in the same round', () => {
+    const rounds = buildReviewTimeline({
+      requests: [],
+      submissions: [],
+      comments: [
+        comment('c', 1, {
+          replies: [{ id: 'p', author: impl, body: 'ok', createdAt: 2 }],
+          status: 'resolved',
+          resolvedAt: 3
+        })
+      ],
+      commits: []
+    })
+    expect(kinds(rounds[0])).toEqual(['comment'])
+    const e = rounds[0].entries[0]
+    expect(e.kind === 'comment' && e.thread).toMatchObject({ replies: [{ id: 'p' }], resolved: true })
   })
 
   it('opens a round for an unrequested review and for a second review of one request', () => {

@@ -91,7 +91,8 @@ describe('buildInitialAppState', () => {
           '/wt': {
             comments: [
               { id: 'c1', filePath: 'a.ts', line: 1, anchor, status: 'resolved', resolvedBy: author, resolvedAt: 5 },
-              { id: 'c2', filePath: 'a.ts', line: 1, anchor, status: 'open', resolvedBy: author, resolvedAt: 5 }
+              { id: 'c2', filePath: 'a.ts', line: 1, anchor, status: 'open', resolvedBy: author, resolvedAt: 5 },
+              { id: 'c3', filePath: 'a.ts', line: 1, anchor, status: 'resolved', resolvedBy: { kind: 'robot' }, resolvedAt: 6 }
             ],
             submissions: [
               { id: 's1', summary: '', commentIds: [], state: 'sent', verdict: 'approve', headSha: 7 }
@@ -108,6 +109,9 @@ describe('buildInitialAppState', () => {
     const wt = result.reviews.byPath['/wt']
     expect(wt.comments[0]).toMatchObject({ resolvedBy: author, resolvedAt: 5 })
     expect(wt.comments[1]).not.toHaveProperty('resolvedBy')
+    expect(wt.comments[1]).not.toHaveProperty('resolvedAt')
+    expect(wt.comments[2]).not.toHaveProperty('resolvedBy')
+    expect(wt.comments[2].resolvedAt).toBe(6)
     expect(wt.submissions?.[0]).not.toHaveProperty('headSha')
     expect(wt.requests?.map((r) => r.id)).toEqual(['r1'])
   })
