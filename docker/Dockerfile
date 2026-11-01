@@ -56,9 +56,12 @@ RUN npm run build:headless
 # drift out of sync.
 ENV PATH="/app/node_modules/.bin:${PATH}"
 
-# Fail the build rather than the first terminal tab. Both of these have
-# already been broken once by an install-script flag.
-RUN claude --version && codex --version
+# Fail the build rather than the first agent session. The CLIs were once
+# broken by an install-script flag; the MCP scripts by a .dockerignore
+# entry, which left Chat tabs pointing --permission-prompt-tool at nothing.
+RUN claude --version && codex --version \
+    && test -f dist-headless/mcp/permission-prompt-mcp.js \
+    && test -f dist-headless/mcp/mcp-bridge.js
 
 # Config + the persisted auth token live here; the sample workspace and
 # its worktrees live in /workspace. Both are volumes in compose.yaml so

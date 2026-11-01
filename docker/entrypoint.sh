@@ -19,7 +19,8 @@ git config --global --get user.name >/dev/null 2>&1 \
   || git config --global user.name "Ness Remote"
 # The repos live on a volume owned by a different uid than whatever git
 # decides it is; without this every git call fails "dubious ownership".
-git config --global --add safe.directory '*' 2>/dev/null || true
+git config --global --get-all safe.directory 2>/dev/null | grep -qx '\*' \
+  || git config --global --add safe.directory '*'
 
 # --- a repo for the server to manage -----------------------------------
 # Without at least one repo root the UI comes up empty and you can't
@@ -84,7 +85,7 @@ if (!roots.includes(repo)) {
 # 0.0.0.0 so the published port reaches it. The server's own banner
 # prints the container-internal IP, which is not reachable from the host,
 # so print the URL that actually works first.
-echo "[entrypoint] connect from the host: http://127.0.0.1:${PORT}/?token=${HARNESS_AUTH_TOKEN:-}"
+echo "[entrypoint] connect from the host: http://127.0.0.1:${NESS_HOST_PORT:-$PORT}/?token=${HARNESS_AUTH_TOKEN:-}"
 
 if [ "$#" -gt 0 ]; then
   exec node /app/dist-headless/main/index.js "$@"

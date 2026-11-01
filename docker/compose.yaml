@@ -27,7 +27,10 @@ services:
       # can be bookmarked, scripted, or handed to an agent. Dev-only — set
       # NESS_REMOTE_TOKEN to override.
       HARNESS_AUTH_TOKEN: '${NESS_REMOTE_TOKEN:-ness-dev-token}'
+      # The port the server binds inside the container is fixed; only the
+      # host side of the mapping moves, and the banner needs that one.
       NESS_REMOTE_PORT: '37291'
+      NESS_HOST_PORT: '${NESS_REMOTE_PORT:-37291}'
       # Passed through when set on the host, so an agent can bring the
       # remote up non-interactively instead of running `claude /login`.
       ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'

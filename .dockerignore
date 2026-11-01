@@ -4,6 +4,8 @@
 # image rebuilds node-pty against the container's Node ABI.
 #
 # docker/entrypoint.sh is deliberately NOT excluded — it ships in the image.
+# So is resources/: it holds permission-prompt-mcp.js and mcp-bridge.js,
+# without which Chat-tab approvals and ness-control tools silently vanish.
 docker/compose.yaml
 docker/compose.host-claude.yaml
 node_modules
@@ -17,7 +19,6 @@ release
 site
 plans
 release-notes
-resources
 build
 *.log
 .env

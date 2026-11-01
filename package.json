@@ -17,7 +17,7 @@
     "log:perf:clear": "rm -f ~/Library/Application\\ Support/harness/perf.log ~/Library/Application\\ Support/harness/perf.log.1",
     "build": "electron-vite build && vite build --config vite.web.config.ts",
     "build:web": "vite build --config vite.web.config.ts",
-    "build:headless": "vite build --config vite.headless.config.ts && vite build --config vite.headless-web.config.ts",
+    "build:headless": "vite build --config vite.headless.config.ts && vite build --config vite.headless-web.config.ts && mkdir -p dist-headless/mcp && cp resources/permission-prompt-mcp.js resources/mcp-bridge.js dist-headless/mcp/",
     "dev:headless": "npm run build:headless && HARNESS_DATA_DIR=./.headless-data HARNESS_WS_HOST=${HARNESS_WS_HOST:-127.0.0.1} node dist-headless/main/index.js",
     "pack:headless": "node scripts/pack-headless.mjs",
     "pack:headless:all": "echo 'Cross-platform packaging happens in CI. Run pack:headless to build for the current host.'",
