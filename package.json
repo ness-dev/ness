@@ -107,7 +107,7 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "Ness connects to Ness servers on your local network."
+        "NSLocalNetworkUsageDescription": "Ness connects to Ness servers and dev servers on your local network."
       }
     },
     "dmg": {
