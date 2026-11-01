@@ -1,9 +1,10 @@
 import { memo, useMemo } from 'react'
-import { FileText, GitCompare, Globe, ListChecks, Loader2, SquareTerminal } from 'lucide-react'
+import { FileText, GitCompare, Globe, Loader2, SquareTerminal } from 'lucide-react'
 import { getLeaves, type TerminalTab } from '../../shared/state/terminals'
 import { useShellActivity, useTerminalStatus, useWorktreePanes } from '../store'
 import { STATUS_LABELS } from '../worktree-row-style'
 import { AgentIcon } from './AgentIcon'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 
 interface WorktreeTabRowsProps {
   worktreePath: string
@@ -32,6 +33,7 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
       {entries.map(({ paneId, tab }) => (
         <TabRow
           key={tab.id}
+          worktreePath={worktreePath}
           tab={tab}
           isActive={tab.id === activeTabId}
           onClick={() => onSelectTab(worktreePath, paneId, tab.id)}
@@ -42,10 +44,12 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
 })
 
 function TabRow({
+  worktreePath,
   tab,
   isActive,
   onClick
 }: {
+  worktreePath: string
   tab: TerminalTab
   isActive: boolean
   onClick: () => void
@@ -58,14 +62,14 @@ function TabRow({
         isActive ? 'bg-surface-hover/60 text-fg-bright' : 'text-muted hover:bg-surface-hover/40 hover:text-fg'
       }`}
     >
-      <TabKindIcon tab={tab} />
+      <TabKindIcon tab={tab} worktreePath={worktreePath} />
       <TabStatus tab={tab} />
       <span className={`truncate ${asleep ? 'italic text-dim' : ''}`}>{tab.customLabel ?? tab.label}</span>
     </div>
   )
 }
 
-function TabKindIcon({ tab }: { tab: TerminalTab }): JSX.Element {
+function TabKindIcon({ tab, worktreePath }: { tab: TerminalTab; worktreePath: string }): JSX.Element {
   const cls = 'icon-xs shrink-0'
   switch (tab.type) {
     case 'agent':
@@ -80,7 +84,7 @@ function TabKindIcon({ tab }: { tab: TerminalTab }): JSX.Element {
     case 'file':
       return <FileText className={cls} />
     case 'review':
-      return <ListChecks className={cls} />
+      return <ReviewStatusIcon worktreePath={worktreePath} className={cls} />
   }
 }
 

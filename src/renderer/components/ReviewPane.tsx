@@ -9,6 +9,7 @@ import { useBackend } from '../backend'
 import { useReviewComments, useReviewRequests, useReviewSubmissions } from '../store'
 import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
 import { ReviewTimeline } from './ReviewTimeline'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 import { formatReviewComments } from '../../shared/review-format'
 import { setReviewProgress, clearReviewProgress } from '../review-progress'
 
@@ -329,10 +330,13 @@ export function ReviewPane({
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-colors ${
                   view === v ? 'bg-panel-raised text-fg-bright' : 'text-faint hover:text-fg'
                 }`}
               >
+                {v === 'reviews' && (
+                  <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
+                )}
                 {v === 'diff' ? 'Diff' : `Reviews${submissions.length ? ` (${submissions.length})` : ''}`}
               </button>
             ))}

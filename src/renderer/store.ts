@@ -24,7 +24,7 @@
 // per-backend store applies it, and any component reading via the
 // active backend's hooks re-renders.
 
-import { useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import {
   initialState,
   mergeWireSnapshot,
@@ -43,6 +43,7 @@ import {
   type ReviewRequest,
   type ReviewSubmission
 } from '../shared/state/reviews'
+import { latestAgentReviewStatus, type ReviewStatus } from '../shared/review-status'
 import {
   mergeClientOwnedSettings,
   type SettingsState
@@ -921,6 +922,18 @@ export function useReviewRequests(worktreePath: string | null): ReviewRequest[] 
       ? s.reviews.byPath[worktreePath]?.requests ?? EMPTY_REVIEW_REQUESTS
       : EMPTY_REVIEW_REQUESTS
   )
+}
+
+/** Where the worktree's agent review stands, for the Review tab's icon.
+ *  Each field is selected as a primitive so a review event that doesn't
+ *  change the status doesn't re-render the sidebar. */
+export function useLatestAgentReviewStatus(worktreePath: string): ReviewStatus {
+  const pick = <K extends keyof ReviewStatus>(key: K) =>
+    (s: AppState): ReviewStatus[K] => latestAgentReviewStatus(s.reviews.byPath[worktreePath])[key]
+  const kind = useAppState(pick('kind'))
+  const unsent = useAppState(pick('unsent'))
+  const reviewerTabId = useAppState(pick('reviewerTabId'))
+  return useMemo(() => ({ kind, unsent, reviewerTabId }), [kind, unsent, reviewerTabId])
 }
 
 /** Per-bootstrap progress for the AddBackendModal SSH tab. Returns null
