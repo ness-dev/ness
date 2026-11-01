@@ -471,6 +471,7 @@ export function ReviewPane({
             onSelectFile={setSelectedFile}
             onToggleReviewed={handleToggleReviewed}
             onToggleDir={handleToggleDir}
+            active={view === 'diff'}
           />
         </div>
 
