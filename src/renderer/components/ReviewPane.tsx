@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Send, Clipboard, Check, MessageSquare, GitCommitHorizontal, ArrowUp, ChevronDown } from 'lucide-react'
-import type { ChangedFile, BranchCommit, ReviewCommentStatus } from '../types'
+import { Send, Clipboard, Check, MessageSquare, GitCommitHorizontal, ArrowUp, ChevronDown, X } from 'lucide-react'
+import type { ChangedFile, BranchCommit, ReviewComment, ReviewCommentStatus } from '../types'
 import { ReviewFileTree } from './ReviewFileTree'
 import { ReviewDiffPane } from './ReviewDiffPane'
 import { ResizeHandle } from './ResizeHandle'
 import { Tooltip } from './Tooltip'
 import { useBackend } from '../backend'
-import { useReviewComments, useReviewSubmissions } from '../store'
+import { useReviewComments, useReviewRequests, useReviewSubmissions } from '../store'
 import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
+import { ReviewTimeline } from './ReviewTimeline'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 import { formatReviewComments } from '../../shared/review-format'
 import { setReviewProgress, clearReviewProgress } from '../review-progress'
 
@@ -35,6 +37,16 @@ export function ReviewPane({
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set())
   const comments = useReviewComments(worktreePath)
   const submissions = useReviewSubmissions(worktreePath)
+  const requests = useReviewRequests(worktreePath)
+  const [view, setView] = useState<'diff' | 'reviews'>('diff')
+  // Comment the diff should scroll to, set by clicking one in the
+  // Reviews view. The nonce re-triggers a jump to the same comment.
+  const [focusComment, setFocusComment] = useState<{ id: string; nonce: number } | null>(null)
+  // File of a jump that had to widen the selection to whole-branch,
+  // checked once that file list arrives.
+  const pendingJumpRef = useRef<string | null>(null)
+  // Set when a jumped-to comment's file isn't in the branch diff at all.
+  const [jumpMiss, setJumpMiss] = useState<string | null>(null)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   const [fileTreeWidth, setFileTreeWidth] = useState<number>(240)
   // Hoisted above ReviewDiffPane so the choice persists as the reviewer
@@ -46,7 +58,7 @@ export function ReviewPane({
   const isWholeBranch = !fromCommit && !toCommit
   const isSingleCommit = !!fromCommit && fromCommit === toCommit
 
-  useEffect(() => {
+  const loadCommits = useCallback((): (() => void) => {
     let cancelled = false
     backend
       .getBranchCommits(worktreePath)
@@ -61,6 +73,16 @@ export function ReviewPane({
     }
   }, [worktreePath, backend])
 
+  useEffect(() => loadCommits(), [loadCommits])
+
+  // Refetch on opening Reviews so the timeline shows commits that landed
+  // while the pane was open.
+  const showingReviews = view === 'reviews'
+  useEffect(() => {
+    if (showingReviews) return loadCommits()
+    return undefined
+  }, [showingReviews, loadCommits])
+
   // Refetch the file list whenever the commit selection changes.
   useEffect(() => {
     let cancelled = false
@@ -72,6 +94,11 @@ export function ReviewPane({
     promise
       .then((result) => {
         if (cancelled) return
+        const pending = pendingJumpRef.current
+        if (pending && isWholeBranch) {
+          pendingJumpRef.current = null
+          if (!result.some((f) => f.path === pending)) setJumpMiss(pending)
+        }
         setFiles(result)
         setSelectedFile((prev) => {
           if (prev && result.some((f) => f.path === prev)) return prev
@@ -272,6 +299,24 @@ export function ReviewPane({
     [commits, selectionIndices, backend, worktreePath, tabId]
   )
 
+  const handleJumpToComment = useCallback(
+    (c: ReviewComment) => {
+      setJumpMiss(null)
+      if (!filesInView.has(c.filePath)) {
+        if (isWholeBranch) {
+          setJumpMiss(c.filePath)
+          return
+        }
+        pendingJumpRef.current = c.filePath
+        void backend.panesSetReviewSelection(worktreePath, tabId, undefined, undefined)
+      }
+      setSelectedFile(c.filePath)
+      setFocusComment((prev) => ({ id: c.id, nonce: (prev?.nonce ?? 0) + 1 }))
+      setView('diff')
+    },
+    [filesInView, isWholeBranch, backend, worktreePath, tabId]
+  )
+
   const allReviewed = files.length > 0 && reviewedFiles.size === files.length
   const progress = files.length > 0 ? reviewedFiles.size / files.length : 0
 
@@ -280,6 +325,25 @@ export function ReviewPane({
       {/* Top controls bar */}
       <div className="shrink-0 border-b border-border bg-panel">
         <div className="h-10 flex items-center gap-3 px-3">
+          <div className="flex items-center rounded border border-border p-0.5 text-xs">
+            {(['diff', 'reviews'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                  view === v ? 'bg-panel-raised text-fg-bright' : 'text-faint hover:text-fg'
+                }`}
+              >
+                {v === 'reviews' && (
+                  <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
+                )}
+                {v === 'diff' ? 'Diff' : `Reviews${submissions.length ? ` (${submissions.length})` : ''}`}
+              </button>
+            ))}
+          </div>
+
+          {view === 'diff' && (
+          <>
           <CommitSelector
             commits={commits}
             isWholeBranch={isWholeBranch}
@@ -294,11 +358,13 @@ export function ReviewPane({
             {totalAdditions > 0 && <span className="text-success">+{totalAdditions}</span>}
             {totalDeletions > 0 && <span className="text-danger">−{totalDeletions}</span>}
           </div>
+          </>
+          )}
 
           <div className="flex-1" />
 
           <div className="flex items-center gap-1.5 text-xs">
-            {allReviewed ? (
+            {view !== 'diff' ? null : allReviewed ? (
               <span className="flex items-center gap-1 text-success font-medium">
                 <Check strokeWidth={2.5} className="icon-xs" />
                 All reviewed
@@ -351,6 +417,7 @@ export function ReviewPane({
           </div>
         </div>
 
+        {view === 'diff' && (
         <div className="h-[2px] bg-border/50 relative">
           <div
             className={`h-full transition-all duration-300 ease-out ${
@@ -359,8 +426,38 @@ export function ReviewPane({
             style={{ width: `${progress * 100}%` }}
           />
         </div>
+        )}
       </div>
 
+      {jumpMiss && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-panel text-xs text-warning">
+          <span className="truncate min-w-0 flex-1">
+            <span className="font-mono">{jumpMiss}</span> is no longer in this branch&apos;s diff,
+            so the comment can&apos;t be shown there.
+          </span>
+          <button
+            onClick={() => setJumpMiss(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-faint hover:text-fg cursor-pointer"
+          >
+            <X className="icon-xs" />
+          </button>
+        </div>
+      )}
+
+      {view === 'reviews' && (
+        <ReviewTimeline
+          worktreePath={worktreePath}
+          requests={requests}
+          submissions={submissions}
+          comments={comments}
+          commits={commits}
+          onJumpToComment={handleJumpToComment}
+        />
+      )}
+      {/* Hidden rather than unmounted while Reviews is showing, so the
+          diff editor keeps its scroll, open composer and loaded file. */}
+      <div className={`flex-1 min-h-0 flex-col ${view === 'diff' ? 'flex' : 'hidden'}`}>
       <ReviewSubmissionsPanel worktreePath={worktreePath} submissions={submissions} />
 
       <div className="flex flex-1 min-h-0">
@@ -378,6 +475,7 @@ export function ReviewPane({
             onSelectFile={setSelectedFile}
             onToggleReviewed={handleToggleReviewed}
             onToggleDir={handleToggleDir}
+            active={view === 'diff'}
           />
         </div>
 
@@ -406,8 +504,10 @@ export function ReviewPane({
             onEditComment={handleEditComment}
             wordWrap={wordWrap}
             onWordWrapChange={setWordWrap}
+            focusComment={focusComment}
           />
         </div>
+      </div>
       </div>
     </div>
   )

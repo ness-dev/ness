@@ -93,7 +93,7 @@ const reviews = {
         }
       : { error: 'no review comment' }
   ),
-  setResolved: vi.fn<ControlServerDeps['reviews']['setResolved']>((_wt, _id, resolved) => ({
+  setResolved: vi.fn<ControlServerDeps['reviews']['setResolved']>((_wt, _caller, _id, resolved) => ({
     comment: reviewComment({ status: resolved ? 'resolved' : 'open' })
   })),
   request: vi.fn<ControlServerDeps['reviews']['request']>((_wt, tabId, context) =>

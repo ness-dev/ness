@@ -20,6 +20,9 @@ interface ReviewFileTreeProps {
   onSelectFile: (path: string) => void
   onToggleReviewed: (path: string) => void
   onToggleDir: (dir: string) => void
+  /** Whether the tree's keyboard shortcuts are live. False while the
+   *  tree is mounted but hidden behind another view. */
+  active: boolean
 }
 
 const STATUS_LABEL: Record<ChangedFile['status'], string> = {
@@ -148,7 +151,8 @@ export function ReviewFileTree({
   collapsedDirs,
   onSelectFile,
   onToggleReviewed,
-  onToggleDir
+  onToggleDir,
+  active
 }: ReviewFileTreeProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState('')
@@ -210,6 +214,7 @@ export function ReviewFileTree({
   )
 
   useEffect(() => {
+    if (!active) return
     const handler = (e: KeyboardEvent): void => {
       if (isEditableTarget(e.target as HTMLElement | null)) {
         return
@@ -248,7 +253,7 @@ export function ReviewFileTree({
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigateFile, navigateUnreviewed, selectedFile, navigableFiles, reviewedFiles, onSelectFile, onToggleReviewed])
+  }, [active, navigateFile, navigateUnreviewed, selectedFile, navigableFiles, reviewedFiles, onSelectFile, onToggleReviewed])
 
   return (
     <div ref={containerRef} className="flex flex-col h-full text-xs select-none">

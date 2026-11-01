@@ -23,6 +23,7 @@ import {
 } from '../store'
 import { useBackend } from '../backend'
 import { useReviewProgress } from '../review-progress'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 
 /** Chip shown in the tab bar when other clients are attached to the
  *  active terminal. Click-through is intentional — taking/releasing
@@ -116,6 +117,7 @@ const TAB_STATUS_DOT: Record<PtyStatus, string> = {
 
 interface SortableTabProps {
   tab: TerminalTab
+  worktreePath: string
   isActive: boolean
   showClose: boolean
   onSelect: () => void
@@ -168,7 +170,7 @@ function TabProgressBar({ terminalId }: { terminalId: string }): JSX.Element | n
   )
 }
 
-function SortableTab({ tab, isActive, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
+function SortableTab({ tab, worktreePath, isActive, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
   // Read per-tab rather than taking the whole statuses/shellActivity maps as
   // props: a single terminal's status change used to allocate a new map and
   // re-render every mounted worktree's subtree. Same pattern as
@@ -312,7 +314,9 @@ function SortableTab({ tab, isActive, showClose, onSelect, onClose, onConvertTab
         ) : (
           <span className="w-1.5 h-1.5 rounded-full bg-faint" />
         )
-      ) : tab.type !== 'diff' && tab.type !== 'file' && tab.type !== 'review' ? (
+      ) : tab.type === 'review' ? (
+        <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
+      ) : tab.type !== 'diff' && tab.type !== 'file' ? (
         <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_DOT[status]}`} />
       ) : null}
       {editing ? (
@@ -685,6 +689,7 @@ export function TerminalPanel({
                 <SortableTab
                   key={tab.id}
                   tab={tab}
+                  worktreePath={worktreePath}
                   isActive={tab.id === pane.activeTabId}
                   showClose={pane.tabs.length > 1 || paneCount > 1}
                   onSelect={() => onSelectTab(tab.id)}

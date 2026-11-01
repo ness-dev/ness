@@ -65,7 +65,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
-import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
+import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
 import { resolveEditorId } from '../shared/editor-resolve'
@@ -1336,7 +1336,7 @@ const reviewServiceDeps: ReviewServiceDeps = {
 const reviewSpawner = new ReviewSpawner(store, {
   isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
   requestReview: (worktreePath, requesterTabId, context) =>
-    requestReview(reviewServiceDeps, worktreePath, requesterTabId, context)
+    requestReview(reviewServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
 })
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
@@ -5030,7 +5030,7 @@ function registerIpcHandlers(): void {
     (_ctx, worktreePath: string, id: string, status: ReviewCommentStatus) => {
       if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
       if (status !== 'open' && status !== 'resolved' && status !== 'outdated') return false
-      setReviewCommentStatus(store, worktreePath, id, status)
+      setReviewCommentStatus(store, worktreePath, id, status, { kind: 'human' })
       return true
     }
   )
@@ -5074,7 +5074,8 @@ function registerIpcHandlers(): void {
       reviewServiceDeps,
       worktreePath,
       author,
-      buildUserReviewContext(state.prs.byPath[worktreePath])
+      buildUserReviewContext(state.prs.byPath[worktreePath]),
+      'user'
     )
     log('review', `user requested review for ${worktreePath}: ${JSON.stringify(result)}`)
     return result
@@ -5502,20 +5503,29 @@ async function runBoot(): Promise<void> {
           agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
           body
         ),
-      setResolved: (worktreePath, commentId, resolved) =>
-        setReviewCommentResolved(store, worktreePath, commentId, resolved),
+      setResolved: (worktreePath, callerTabId, commentId, resolved) =>
+        setReviewCommentResolved(
+          store,
+          worktreePath,
+          commentId,
+          resolved,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId)
+        ),
       request: (worktreePath, callerTabId, context) =>
         requestReview(reviewServiceDeps, worktreePath, callerTabId, context),
-      submit: (worktreePath, callerTabId, input) =>
-        submitReview(
+      submit: async (worktreePath, callerTabId, input) => {
+        const headSha = (await resolveCommitSha(worktreePath, 'HEAD')) ?? undefined
+        return submitReview(
           reviewServiceDeps,
           worktreePath,
           agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
           {
             ...input,
+            headSha,
             holdAsDraft: store.getSnapshot().state.settings.agentReviewDelivery === 'draft'
           }
         )
+      }
     },
     browser: {
       listTabsForWorktree: (wtPath) => {

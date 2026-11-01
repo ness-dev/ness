@@ -80,4 +80,39 @@ describe('buildInitialAppState', () => {
     expect(result.settings.hasGithubToken).toBe(true)
     expect(result.worktrees.repoRoots).toEqual(['/a', '/b'])
   })
+
+  it('keeps review requests and history fields, dropping malformed ones', () => {
+    const author = { kind: 'agent', tabId: 't1', label: 'Chat' }
+    const anchor = { commitSha: 'a', line: 1, snippet: 'x' }
+    const result = buildInitialAppState(
+      {
+        ...emptyConfig,
+        reviews: {
+          '/wt': {
+            comments: [
+              { id: 'c1', filePath: 'a.ts', line: 1, anchor, status: 'resolved', resolvedBy: author, resolvedAt: 5 },
+              { id: 'c2', filePath: 'a.ts', line: 1, anchor, status: 'open', resolvedBy: author, resolvedAt: 5 },
+              { id: 'c3', filePath: 'a.ts', line: 1, anchor, status: 'resolved', resolvedBy: { kind: 'robot' }, resolvedAt: 6 }
+            ],
+            submissions: [
+              { id: 's1', summary: '', commentIds: [], state: 'sent', verdict: 'approve', headSha: 7 }
+            ],
+            requests: [
+              { id: 'r1', requester: author, reviewer: author, context: 'c', source: 'agent', reused: false, createdAt: 1 },
+              { id: 'r2', requester: { kind: 'robot' }, reviewer: author, context: 'c', source: 'agent', createdAt: 1 }
+            ]
+          }
+        }
+      } as unknown as Config,
+      { hasGithubToken: false }
+    )
+    const wt = result.reviews.byPath['/wt']
+    expect(wt.comments[0]).toMatchObject({ resolvedBy: author, resolvedAt: 5 })
+    expect(wt.comments[1]).not.toHaveProperty('resolvedBy')
+    expect(wt.comments[1]).not.toHaveProperty('resolvedAt')
+    expect(wt.comments[2]).not.toHaveProperty('resolvedBy')
+    expect(wt.comments[2].resolvedAt).toBe(6)
+    expect(wt.submissions?.[0]).not.toHaveProperty('headSha')
+    expect(wt.requests?.map((r) => r.id)).toEqual(['r1'])
+  })
 })

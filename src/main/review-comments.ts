@@ -108,9 +108,13 @@ export function setReviewCommentStatus(
   store: Store,
   worktreePath: string,
   id: string,
-  status: ReviewCommentStatus
+  status: ReviewCommentStatus,
+  by?: ReviewAuthor
 ): void {
-  store.dispatch({ type: 'reviews/commentStatusChanged', payload: { worktreePath, id, status } })
+  store.dispatch({
+    type: 'reviews/commentStatusChanged',
+    payload: { worktreePath, id, status, ...(by ? { by, at: Date.now() } : {}) }
+  })
 }
 
 /** Re-anchor this worktree's new-side comments against HEAD. Called on

@@ -12,6 +12,7 @@ import type {
   ReviewCommentStatus,
   ReviewSide,
   ReviewAuthor,
+  ReviewRequest,
   ReviewSubmission,
   ReviewVerdict
 } from '../shared/state/reviews'
@@ -20,6 +21,7 @@ export type {
   ReviewCommentStatus,
   ReviewSide,
   ReviewAuthor,
+  ReviewRequest,
   ReviewSubmission,
   ReviewVerdict
 }

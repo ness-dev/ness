@@ -230,6 +230,15 @@ describe('setReviewCommentResolved', () => {
     setReviewCommentResolved(store, WT, 'abcdef01', false)
     expect(store.getSnapshot().state.reviews.byPath[WT].comments[0].status).toBe('open')
   })
+
+  it('records who resolved it', () => {
+    const { store } = setup([comment('abcdef0123')])
+    const by = { kind: 'agent' as const, tabId: 'author', label: 'Chat' }
+    expect(setReviewCommentResolved(store, WT, 'abcdef01', true, by)).toMatchObject({
+      comment: { status: 'resolved', resolvedBy: by }
+    })
+    expect(store.getSnapshot().state.reviews.byPath[WT].comments[0].resolvedAt).toBeTypeOf('number')
+  })
 })
 
 describe('replyToReviewComment', () => {
@@ -410,6 +419,21 @@ describe('requestReview', () => {
     expect(parsed?.body).toContain('Codex Chat has finished a piece of work')
     expect(parsed?.body).toContain('Added div with a zero guard.')
     expect(parsed?.body).toContain('REVIEW INSTRUCTIONS')
+    expect(deps.store.getSnapshot().state.reviews.byPath[WT].requests).toMatchObject([
+      {
+        requester: { kind: 'agent', tabId: 'chat2', label: 'Codex Chat' },
+        reviewer: { kind: 'agent', tabId: 'new-reviewer' },
+        context: 'Added div with a zero guard.',
+        source: 'agent',
+        reused: false
+      }
+    ])
+  })
+
+  it('records the source of an automatic request', () => {
+    const { deps } = setup()
+    requestReview(deps, WT, 'author', 'CI is green', 'ci-green')
+    expect(deps.store.getSnapshot().state.reviews.byPath[WT].requests?.[0].source).toBe('ci-green')
   })
 
   it('uses the configured reviewer agent and model instead of inheriting', () => {

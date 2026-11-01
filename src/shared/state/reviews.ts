@@ -40,6 +40,10 @@ export interface ReviewComment {
   body: string
   createdAt: number
   replies?: ReviewReply[]
+  /** Who resolved it and when. Set only while `status` is 'resolved';
+   *  absent on comments resolved before this was recorded. */
+  resolvedBy?: ReviewAuthor
+  resolvedAt?: number
 }
 
 export type ReviewVerdict = 'approve' | 'changes-requested' | 'comment'
@@ -65,12 +69,34 @@ export interface ReviewSubmission {
   sentAt?: number
   /** Why the last delivery attempt failed. Cleared on success. */
   error?: string
+  /** HEAD when the review was submitted, so a round can be tied to the
+   *  commits it saw. Absent on older submissions. */
+  headSha?: string
+}
+
+export type ReviewRequestSource = 'agent' | 'ci-green' | 'user'
+
+/** One ask for a review: an agent's request_review, the CI-green
+ *  auto-spawn, or the user's "Request AI review". Recorded when the
+ *  reviewer is opened, so the history can show what started each round. */
+export interface ReviewRequest {
+  id: string
+  /** Tab the review is for; the finished review is delivered back to it. */
+  requester: ReviewAuthor
+  reviewer: ReviewAuthor
+  context: string
+  source: ReviewRequestSource
+  /** True when an already-open reviewer was asked for another look. */
+  reused: boolean
+  createdAt: number
 }
 
 export interface WorktreeReview {
   comments: ReviewComment[]
   /** Absent ⇒ none. Oldest first. */
   submissions?: ReviewSubmission[]
+  /** Absent ⇒ none. Oldest first. */
+  requests?: ReviewRequest[]
 }
 
 export interface ReviewsState {
@@ -90,7 +116,14 @@ export type ReviewsEvent =
   | { type: 'reviews/commentDeleted'; payload: { worktreePath: string; id: string } }
   | {
       type: 'reviews/commentStatusChanged'
-      payload: { worktreePath: string; id: string; status: ReviewCommentStatus }
+      payload: {
+        worktreePath: string
+        id: string
+        status: ReviewCommentStatus
+        /** Recorded on the comment when `status` is 'resolved'. */
+        by?: ReviewAuthor
+        at?: number
+      }
     }
   | {
       type: 'reviews/replyAdded'
@@ -124,6 +157,7 @@ export type ReviewsEvent =
       }
     }
   | { type: 'reviews/submissionDeleted'; payload: { worktreePath: string; id: string } }
+  | { type: 'reviews/requestRecorded'; payload: { worktreePath: string; request: ReviewRequest } }
   | { type: 'reviews/worktreeRemoved'; payload: { worktreePath: string } }
 
 export const initialReviews: ReviewsState = {
@@ -132,9 +166,11 @@ export const initialReviews: ReviewsState = {
 
 export const EMPTY_REVIEW_COMMENTS: ReviewComment[] = []
 export const EMPTY_REVIEW_SUBMISSIONS: ReviewSubmission[] = []
+export const EMPTY_REVIEW_REQUESTS: ReviewRequest[] = []
 
-/** Replace one worktree's comments and/or submissions. An entry with
- *  neither is dropped, so an absent key keeps meaning "nothing here". */
+/** Replace one worktree's comments, submissions and/or requests. An
+ *  entry with none of them is dropped, so an absent key keeps meaning
+ *  "nothing here". */
 function withEntry(
   state: ReviewsState,
   worktreePath: string,
@@ -143,11 +179,15 @@ function withEntry(
   const prev = state.byPath[worktreePath]
   const comments = patch.comments ?? prev?.comments ?? EMPTY_REVIEW_COMMENTS
   const submissions = 'submissions' in patch ? patch.submissions : prev?.submissions
+  const requests = 'requests' in patch ? patch.requests : prev?.requests
   const byPath = { ...state.byPath }
-  if (comments.length === 0 && !submissions?.length) {
+  if (comments.length === 0 && !submissions?.length && !requests?.length) {
     delete byPath[worktreePath]
   } else {
-    byPath[worktreePath] = submissions?.length ? { comments, submissions } : { comments }
+    const entry: WorktreeReview = { comments }
+    if (submissions?.length) entry.submissions = submissions
+    if (requests?.length) entry.requests = requests
+    byPath[worktreePath] = entry
   }
   return { ...state, byPath }
 }
@@ -216,10 +256,18 @@ export function reviewsReducer(state: ReviewsState, event: ReviewsEvent): Review
       ])
     }
     case 'reviews/commentStatusChanged': {
-      const { worktreePath, id, status } = event.payload
-      return patchComment(state, worktreePath, id, (c) =>
-        c.status === status ? c : { ...c, status }
-      )
+      const { worktreePath, id, status, by, at } = event.payload
+      return patchComment(state, worktreePath, id, (c) => {
+        if (c.status === status) return c
+        const next: ReviewComment = { ...c, status }
+        delete next.resolvedBy
+        delete next.resolvedAt
+        if (status === 'resolved') {
+          if (by) next.resolvedBy = by
+          if (at !== undefined) next.resolvedAt = at
+        }
+        return next
+      })
     }
     case 'reviews/replyAdded': {
       const { worktreePath, commentId, reply } = event.payload
@@ -285,6 +333,12 @@ export function reviewsReducer(state: ReviewsState, event: ReviewsEvent): Review
       return withEntry(state, worktreePath, {
         submissions: [...submissions.slice(0, i), ...submissions.slice(i + 1)]
       })
+    }
+    case 'reviews/requestRecorded': {
+      const { worktreePath, request } = event.payload
+      const existing = state.byPath[worktreePath]?.requests ?? EMPTY_REVIEW_REQUESTS
+      if (existing.some((r) => r.id === request.id)) return state
+      return withEntry(state, worktreePath, { requests: [...existing, request] })
     }
     case 'reviews/worktreeRemoved': {
       const { worktreePath } = event.payload
