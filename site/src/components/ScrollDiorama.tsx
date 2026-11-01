@@ -33,7 +33,6 @@ const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
         '`Welcome` reads the session before it has loaded, so it always renders the signed-out copy. Waiting on `status` fixes it.',
       edit: {
         path: 'src/welcome.tsx',
-        summary: '+2 −1',
         lines: [
           { kind: 'ctx', old: 12, next: 12, text: 'export function Welcome() {' },
           { kind: 'remove', old: 13, text: '  const { user } = useSession()' },
@@ -67,7 +66,6 @@ const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
         'The redirect runs in an effect, after first paint. Guarding the route in its `loader` means a signed-out user never renders `Dashboard` at all.',
       edit: {
         path: 'src/router.ts',
-        summary: '+1 −0',
         lines: [
           { kind: 'ctx', old: 21, next: 21, text: '  {' },
           { kind: 'ctx', old: 22, next: 22, text: "    path: '/dashboard'," },

@@ -24,7 +24,7 @@ export interface MockTodo {
 export interface MockTranscript {
   prompt: string
   explanation: string
-  edit: { path: string; summary: string; lines: MockDiffLine[] }
+  edit: { path: string; lines: MockDiffLine[] }
   /** While working: the todo list plus the turn still streaming in. */
   working: { todos: MockTodo[]; streaming: string }
   /** When the worktree needs approval: the Bash call it's blocked on. */
@@ -228,11 +228,17 @@ function ToolCard({
   )
 }
 
+function diffSummary(lines: MockDiffLine[]): string {
+  const added = lines.filter((l) => l.kind === 'add').length
+  const removed = lines.filter((l) => l.kind === 'remove').length
+  return `+${added} −${removed}`
+}
+
 function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
   return (
     <ToolCard
       name="Edit"
-      subtitle={`${edit.path.split('/').pop()} (${edit.summary})`}
+      subtitle={`${edit.path.split('/').pop()} (${diffSummary(edit.lines)})`}
       icon={FilePen}
       variant="warn"
     >
@@ -350,8 +356,8 @@ function Composer({ busy }: { busy: boolean }) {
           </div>
           <div className="flex items-center gap-2 px-2 pb-1.5 pt-0.5">
             <div className="flex items-center gap-1.5 text-xs text-muted">
-              <span className="w-1.5 h-1.5 rounded-full bg-success" />
-              <span>running</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${busy ? 'bg-success' : 'bg-faint'}`} />
+              <span>{busy ? 'running' : 'idle'}</span>
             </div>
             <span className="px-1.5 py-0.5 rounded border text-xs bg-success/15 text-success border-success/30">
               accept edits
