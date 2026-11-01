@@ -15,7 +15,7 @@ const VERDICT_CLASS: Record<ReviewVerdict, string> = {
 
 const VERDICTS: ReviewVerdict[] = ['approve', 'changes-requested', 'comment']
 
-function useTabLabels(worktreePath: string): Map<string, string> {
+export function useTabLabels(worktreePath: string): Map<string, string> {
   const tree = useWorktreePanes(worktreePath)
   return useMemo(() => {
     const out = new Map<string, string>()
@@ -155,14 +155,21 @@ export function AgentTabPicker({
   )
 }
 
-function SubmissionCard({
+export function SubmissionCard({
   worktreePath,
   submission,
-  tabLabels
+  tabLabels,
+  className = 'px-3 py-2 border-t border-border/50 first:border-t-0',
+  fullSummary,
+  children
 }: {
   worktreePath: string
   submission: ReviewSubmission
   tabLabels: Map<string, string>
+  className?: string
+  /** Show the whole summary instead of the first four lines. */
+  fullSummary?: boolean
+  children?: React.ReactNode
 }): JSX.Element {
   const backend = useBackend()
   const [editing, setEditing] = useState(false)
@@ -201,14 +208,14 @@ function SubmissionCard({
   const count = submission.commentIds.length
 
   return (
-    <div className="px-3 py-2 border-t border-border/50 first:border-t-0 text-xs">
+    <div className={`${className} text-xs`}>
       <div className="flex items-center gap-2">
         <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${VERDICT_CLASS[submission.verdict]}`}>
           {REVIEW_VERDICT_LABELS[submission.verdict]}
         </span>
         <span className="shrink-0 flex items-center gap-1 text-accent">
           {submission.author.kind === 'agent' && <Bot className="icon-xs" />}
-          {reviewAuthorLabel(submission.author)}
+          {(reviewerTabId && tabLabels.get(reviewerTabId)) || reviewAuthorLabel(submission.author)}
         </span>
         <span className="shrink-0 text-faint tabular-nums">
           {count} {count === 1 ? 'comment' : 'comments'}
@@ -311,9 +318,12 @@ function SubmissionCard({
         </div>
       ) : (
         submission.summary && (
-          <div className="mt-1 text-fg whitespace-pre-wrap line-clamp-4">{submission.summary}</div>
+          <div className={`mt-1 text-fg whitespace-pre-wrap ${fullSummary ? '' : 'line-clamp-4'}`}>
+            {submission.summary}
+          </div>
         )
       )}
+      {children}
     </div>
   )
 }

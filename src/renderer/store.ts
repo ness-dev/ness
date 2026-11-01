@@ -37,8 +37,10 @@ import type { PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import {
   EMPTY_REVIEW_COMMENTS,
+  EMPTY_REVIEW_REQUESTS,
   EMPTY_REVIEW_SUBMISSIONS,
   type ReviewComment,
+  type ReviewRequest,
   type ReviewSubmission
 } from '../shared/state/reviews'
 import {
@@ -910,6 +912,14 @@ export function useReviewSubmissions(worktreePath: string | null): ReviewSubmiss
     worktreePath
       ? s.reviews.byPath[worktreePath]?.submissions ?? EMPTY_REVIEW_SUBMISSIONS
       : EMPTY_REVIEW_SUBMISSIONS
+  )
+}
+
+export function useReviewRequests(worktreePath: string | null): ReviewRequest[] {
+  return useAppState((s) =>
+    worktreePath
+      ? s.reviews.byPath[worktreePath]?.requests ?? EMPTY_REVIEW_REQUESTS
+      : EMPTY_REVIEW_REQUESTS
   )
 }
 

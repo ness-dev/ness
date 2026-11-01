@@ -30,6 +30,8 @@ interface ReviewDiffPaneProps {
   onEditComment: (id: string, body: string) => void
   wordWrap: boolean
   onWordWrapChange: (next: boolean) => void
+  /** Scroll to this comment once it's on screen. A new nonce re-jumps. */
+  focusComment?: { id: string; nonce: number } | null
 }
 
 const STATUS_LABEL: Record<ChangedFile['status'], string> = {
@@ -376,7 +378,8 @@ export function ReviewDiffPane({
   onSetCommentStatus,
   onEditComment,
   wordWrap,
-  onWordWrapChange
+  onWordWrapChange,
+  focusComment
 }: ReviewDiffPaneProps): JSX.Element {
   const backend = useBackend()
   const settings = useSettings()
@@ -388,6 +391,10 @@ export function ReviewDiffPane({
   // the view-zone effect has to re-run against the new instance.
   const [editor, setEditor] = useState<monaco.editor.IStandaloneDiffEditor | null>(null)
   const viewZonesRef = useRef<ViewZoneEntry[]>([])
+  // File the current `sides` were loaded for. On a file switch the old
+  // sides linger for a render, and placing comments against them would
+  // send a jump to the wrong line.
+  const sidesPathRef = useRef<string | undefined>(undefined)
 
   // Working-tree diffs reflect the live file on disk; commit-range diffs
   // are immutable. Only the working-tree case is watched for refresh.
@@ -416,7 +423,9 @@ export function ReviewDiffPane({
             : backend.getFileDiffSides(worktreePath, filePathStr, !!fileStaged, mode)
       promise
         .then((result) => {
-          if (!cancelled) setSides(result)
+          if (cancelled) return
+          sidesPathRef.current = filePathStr
+          setSides(result)
         })
         .catch(() => {
           if (!cancelled) setSides(null)
@@ -461,6 +470,40 @@ export function ReviewDiffPane({
     }
     return { placed: placedOut, unplaced: unplacedOut }
   }, [sides, comments])
+
+  const focusedNonceRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!focusComment || focusedNonceRef.current === focusComment.nonce) return
+    if (loading || !sides || sidesPathRef.current !== filePathStr) return
+    if (unplaced.some((c) => c.id === focusComment.id)) {
+      focusedNonceRef.current = focusComment.nonce
+      setUnplacedOpen(true)
+      return
+    }
+    const hit = placed.find((p) => p.comment.id === focusComment.id)
+    if (!hit || !editor) return
+    const modifiedEd = editor.getModifiedEditor()
+    const nonce = focusComment.nonce
+    // Near the top, so the comment's zone below the line is in view.
+    const reveal = (): void =>
+      modifiedEd.revealLineNearTop(hit.line, monaco.editor.ScrollType.Immediate)
+    // Comment zones above the line resize to their rendered height after
+    // layout, pushing it down; follow them until they settle.
+    let sub: monaco.IDisposable | null = null
+    let settle: ReturnType<typeof setTimeout> | null = null
+    const raf = requestAnimationFrame(() => {
+      focusedNonceRef.current = nonce
+      modifiedEd.setPosition({ lineNumber: hit.line, column: 1 })
+      reveal()
+      sub = modifiedEd.onDidContentSizeChange(reveal)
+      settle = setTimeout(() => sub?.dispose(), 500)
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      if (settle) clearTimeout(settle)
+      sub?.dispose()
+    }
+  }, [focusComment, placed, unplaced, editor, loading, sides, filePathStr])
 
   useEffect(() => {
     if (!editor) return
