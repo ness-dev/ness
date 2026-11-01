@@ -6,6 +6,7 @@ import { useWorktreePanes } from '../store'
 import { getLeaves } from '../../shared/state/terminals'
 import { tabLabel } from '../../shared/agent-tabs'
 import { REVIEW_VERDICT_LABELS, reviewAuthorLabel } from '../../shared/review-format'
+import { ExpandableMarkdown, ReviewMarkdown } from './ReviewMarkdown'
 
 const VERDICT_CLASS: Record<ReviewVerdict, string> = {
   approve: 'bg-success/15 text-success',
@@ -209,11 +210,11 @@ export function SubmissionCard({
 
   return (
     <div className={`${className} text-xs`}>
-      <div className="flex items-center gap-2">
-        <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${VERDICT_CLASS[submission.verdict]}`}>
+      <div className="flex items-center gap-2.5">
+        <span className={`shrink-0 px-2 py-0.5 rounded font-medium ${VERDICT_CLASS[submission.verdict]}`}>
           {REVIEW_VERDICT_LABELS[submission.verdict]}
         </span>
-        <span className="shrink-0 flex items-center gap-1 text-accent">
+        <span className="shrink-0 flex items-center gap-1.5 text-accent">
           {submission.author.kind === 'agent' && <Bot className="icon-xs" />}
           {(reviewerTabId && tabLabels.get(reviewerTabId)) || reviewAuthorLabel(submission.author)}
         </span>
@@ -318,8 +319,12 @@ export function SubmissionCard({
         </div>
       ) : (
         submission.summary && (
-          <div className={`mt-1 text-fg whitespace-pre-wrap ${fullSummary ? '' : 'line-clamp-4'}`}>
-            {submission.summary}
+          <div className="mt-2">
+            {fullSummary ? (
+              <ReviewMarkdown text={submission.summary} />
+            ) : (
+              <ExpandableMarkdown text={submission.summary} lines={4} />
+            )}
           </div>
         )
       )}
