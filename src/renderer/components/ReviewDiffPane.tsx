@@ -461,7 +461,7 @@ export function ReviewDiffPane({
   const { placed, unplaced } = useMemo(() => {
     const placedOut: { line: number; comment: ReviewComment }[] = []
     const unplacedOut: ReviewComment[] = []
-    if (!sides || sides.modifiedBinary) return { placed: placedOut, unplaced: comments }
+    if (!sides || sides.binary || sides.tooLarge) return { placed: placedOut, unplaced: comments }
     const lines = splitLines(sides.modified)
     for (const c of comments) {
       const line = c.side === 'new' ? placeComment(lines, c) : null
@@ -715,7 +715,7 @@ export function ReviewDiffPane({
             Loading diff...
           </div>
         )}
-        {!loading && sides && (
+        {!loading && sides && !sides.binary && !sides.tooLarge && (
           <MonacoDiffEditor
             original={sides.original}
             modified={sides.modified}
@@ -735,9 +735,9 @@ export function ReviewDiffPane({
             {sides.error}
           </div>
         )}
-        {!loading && sides?.modifiedBinary && (
+        {!loading && (sides?.binary || sides?.tooLarge) && (
           <div className="absolute inset-0 flex items-center justify-center text-faint text-sm">
-            Binary file — cannot display diff
+            {sides.binary ? 'Binary file — cannot display diff' : 'File too large — cannot display diff'}
           </div>
         )}
       </div>
