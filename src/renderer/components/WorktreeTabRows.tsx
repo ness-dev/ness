@@ -69,9 +69,8 @@ function TabKindIcon({ tab }: { tab: TerminalTab }): JSX.Element {
   const cls = 'icon-xs shrink-0'
   switch (tab.type) {
     case 'agent':
-      return <AgentIcon kind={tab.agentKind ?? 'claude'} className={cls} />
     case 'json-claude':
-      return <AgentIcon kind="claude" className={cls} />
+      return <AgentIcon kind={tab.agentKind ?? 'claude'} className={cls} />
     case 'shell':
       return <SquareTerminal className={cls} />
     case 'browser':

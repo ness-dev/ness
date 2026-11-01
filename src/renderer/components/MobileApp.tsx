@@ -576,7 +576,7 @@ function TabIcon({ tab, shellActivity, status }: { tab: TerminalTab; shellActivi
   if (tab.type === 'json-claude') {
     return (
       <span className="inline-flex items-center gap-1">
-        <AgentIcon kind="claude" className="icon-xs" />
+        <AgentIcon kind={tab.agentKind ?? 'claude'} className="icon-xs" />
         <span className="w-1.5 h-1.5 rounded-full bg-accent" />
       </span>
     )
