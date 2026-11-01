@@ -33,7 +33,7 @@ import {
   type StateEvent,
   type WireSnapshotState
 } from '../shared/state'
-import type { PtyStatus } from '../shared/state/terminals'
+import { findLeafByTabId, type PtyStatus } from '../shared/state/terminals'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import {
   EMPTY_REVIEW_COMMENTS,
@@ -929,7 +929,13 @@ export function useReviewRequests(worktreePath: string | null): ReviewRequest[] 
  *  change the status doesn't re-render the sidebar. */
 export function useLatestAgentReviewStatus(worktreePath: string): ReviewStatus {
   const pick = <K extends keyof ReviewStatus>(key: K) =>
-    (s: AppState): ReviewStatus[K] => latestAgentReviewStatus(s.reviews.byPath[worktreePath])[key]
+    (s: AppState): ReviewStatus[K] => {
+      const tree = s.terminals.panes[worktreePath]
+      return latestAgentReviewStatus(
+        s.reviews.byPath[worktreePath],
+        (id) => !!tree && !!findLeafByTabId(tree, id)
+      )[key]
+    }
   const kind = useAppState(pick('kind'))
   const unsent = useAppState(pick('unsent'))
   const reviewerTabId = useAppState(pick('reviewerTabId'))

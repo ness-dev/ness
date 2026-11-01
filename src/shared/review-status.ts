@@ -14,9 +14,14 @@ const NONE: ReviewStatus = { kind: 'none', unsent: false, reviewerTabId: null }
 
 /** Where a worktree's agent review stands: whichever is newer of the last
  *  request and the last agent-submitted review. A request newer than every
- *  review means a round is in progress, so it supersedes the old verdict.
- *  The user's own reviews don't count. */
-export function latestAgentReviewStatus(review: WorktreeReview | undefined): ReviewStatus {
+ *  review means a round is in progress, so it supersedes the old verdict,
+ *  unless its reviewer tab has since been closed: that round will never
+ *  finish, so the previous verdict stands. The user's own reviews don't
+ *  count. */
+export function latestAgentReviewStatus(
+  review: WorktreeReview | undefined,
+  isTabOpen: (tabId: string) => boolean = () => true
+): ReviewStatus {
   if (!review) return NONE
   const request = review.requests?.at(-1)
   let submission = undefined
@@ -27,12 +32,13 @@ export function latestAgentReviewStatus(review: WorktreeReview | undefined): Rev
       break
     }
   }
-  if (request && (!submission || request.createdAt > submission.createdAt)) {
-    return {
-      kind: 'reviewing',
-      unsent: false,
-      reviewerTabId: request.reviewer.kind === 'agent' ? request.reviewer.tabId : null
-    }
+  const reviewerTabId = request?.reviewer.kind === 'agent' ? request.reviewer.tabId : null
+  if (
+    request &&
+    (!submission || request.createdAt > submission.createdAt) &&
+    (!reviewerTabId || isTabOpen(reviewerTabId))
+  ) {
+    return { kind: 'reviewing', unsent: false, reviewerTabId }
   }
   if (!submission) return NONE
   return { kind: submission.verdict, unsent: submission.state !== 'sent', reviewerTabId: null }

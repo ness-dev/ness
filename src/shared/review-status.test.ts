@@ -73,4 +73,16 @@ describe('latestAgentReviewStatus', () => {
       })
     ).toEqual({ kind: 'reviewing', unsent: false, reviewerTabId: 'rev' })
   })
+
+  it('falls back to the previous verdict when the reviewer tab was closed', () => {
+    const review = {
+      comments: [],
+      requests: [request(5)],
+      submissions: [submission(2, { verdict: 'changes-requested' as const })]
+    }
+    expect(latestAgentReviewStatus(review, () => false).kind).toBe('changes-requested')
+    expect(latestAgentReviewStatus({ comments: [], requests: [request(5)] }, () => false).kind).toBe(
+      'none'
+    )
+  })
 })

@@ -30,6 +30,9 @@ export function ReviewStatusIcon({
       if (reviewerStatus === 'processing') {
         icon = <Loader2 className={`${className} animate-spin text-accent`} />
         label = 'Agent review in progress'
+      } else if (reviewerStatus === 'needs-approval') {
+        icon = <ListChecks className={`${className} text-danger animate-pulse`} />
+        label = 'Agent review waiting for approval'
       } else {
         icon = <ListChecks className={`${className} text-accent opacity-60`} />
         label = 'Agent review requested, reviewer idle'
