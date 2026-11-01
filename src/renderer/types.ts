@@ -91,7 +91,8 @@ export interface FileDiffSides {
   modified: string
   originalExists: boolean
   modifiedExists: boolean
-  modifiedBinary: boolean
+  binary: boolean
+  tooLarge: boolean
   error?: string
 }
 
