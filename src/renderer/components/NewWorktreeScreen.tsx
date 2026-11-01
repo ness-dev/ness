@@ -53,6 +53,10 @@ interface NewWorktreeScreenProps {
    *  its folder name is ambiguous within repoRoots — picking the pill IS
    *  picking the host, so the suffix is the whole host-selection UI. */
   hostLabelByRoot?: Record<string, string>
+  /** Repo identity per root (repoKeyFor). Two roots with the same key are
+   *  the same repo on different hosts, which is when the host suffix is
+   *  needed to tell the pills apart. */
+  repoKeyByRoot?: Record<string, string>
   /** Repo to pre-select in the picker. Usually the repo of the currently active worktree. */
   defaultRepoRoot?: string
   /** When set, the modal opens on the "Open PR" tab with this PR
@@ -133,7 +137,7 @@ const STARTER_PROMPTS = [
 const KBD_CHIP = 'text-xs text-faint bg-bg px-1.5 py-0.5 rounded border border-border font-mono'
 const KBD_CHIP_ON_ACCENT = 'text-xs text-white bg-white/20 px-1.5 py-0.5 rounded border border-white/30 font-mono'
 
-export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, hostLabelByRoot, defaultRepoRoot, initialPRNumber, forkSource, initialBranch, initialPrompt }: NewWorktreeScreenProps): JSX.Element {
+export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, hostLabelByRoot, repoKeyByRoot, defaultRepoRoot, initialPRNumber, forkSource, initialBranch, initialPrompt }: NewWorktreeScreenProps): JSX.Element {
   const [mode, setMode] = useState<'fresh' | 'teleport' | 'pr'>(initialPRNumber ? 'pr' : 'fresh')
   const [selectedRepo, setSelectedRepo] = useState<string>(
     defaultRepoRoot && repoRoots.includes(defaultRepoRoot) ? defaultRepoRoot : repoRoots[0] || ''
@@ -533,9 +537,8 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, h
               <RepoIcon repoName={r.split('/').pop() || r} className="text-sm" />
               {r.split('/').pop() || r}
               {hostLabelByRoot?.[r] &&
-                repoRoots.filter(
-                  (o) => (o.split('/').pop() || o).toLowerCase() === (r.split('/').pop() || r).toLowerCase()
-                ).length > 1 && (
+                repoKeyByRoot &&
+                repoRoots.filter((o) => repoKeyByRoot[o] === repoKeyByRoot[r]).length > 1 && (
                   <span className="text-faint font-normal">· {hostLabelByRoot[r]}</span>
                 )}
             </button>

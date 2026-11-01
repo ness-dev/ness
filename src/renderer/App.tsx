@@ -30,6 +30,7 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
 import { BackendScope } from './backend-scope'
+import { repoKeyFor } from './worktree-list-model'
 import { useMergedWorktrees } from './hooks/useMergedWorktrees'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
@@ -142,6 +143,11 @@ function DesktopApp(): JSX.Element {
     }
     return out
   }, [mergedData.repoBackendId, mergedData.backendMeta])
+  const repoKeyByRoot = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const root of mergedData.repoRoots) out[root] = repoKeyFor(root, mergedData.repoRemotes[root])
+    return out
+  }, [mergedData.repoRoots, mergedData.repoRemotes])
   const originByPath = useMemo(() => {
     const out: Record<string, string> = {}
     for (const { backendId, backendLabel, worktree } of mergedData.worktrees) {
@@ -175,7 +181,20 @@ function DesktopApp(): JSX.Element {
   // same path — or a backend re-added — would mount eagerly on reappearance
   // without the user opening it: the fan-out this set exists to prevent.
   const fleetBackends = useAllBackendStates()
+  // `fleetBackends` is a new array on any backend event, status ticks
+  // included. The pruning only cares about worktree LISTS, so compare
+  // those by reference and bail before touching state when none moved.
+  const fleetListsRef = useRef<Map<string, unknown>>(new Map())
   useEffect(() => {
+    const prev = fleetListsRef.current
+    const next = new Map<string, unknown>()
+    let changed = prev.size !== fleetBackends.length
+    for (const b of fleetBackends) {
+      next.set(b.backendId, b.state.worktrees.list)
+      if (prev.get(b.backendId) !== b.state.worktrees.list) changed = true
+    }
+    fleetListsRef.current = next
+    if (!changed) return
     setOpenedWorktrees((prev) => {
       if (prev.size === 0) return prev
       const live = new Set<string>()
@@ -1904,6 +1923,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onCancel={() => setShowNewWorktree(false)}
             repoRoots={repoRoots}
             hostLabelByRoot={hostLabelByRoot}
+            repoKeyByRoot={repoKeyByRoot}
             defaultRepoRoot={newWorktreeRepo ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined)}
             initialPRNumber={newWorktreeInitialPRNumber}
             forkSource={newWorktreeForkSource}

@@ -76,6 +76,9 @@ export interface MergedWorktreeData {
    *  screen offers one pill per entry, and creation routes on the picked
    *  root. */
   repoBackendId: Record<string, string>
+  /** Normalized origin URL per repo root, merged across backends. The
+   *  cross-host repo identity for section merging. */
+  repoRemotes: Record<string, string | null>
   /** Display metadata per backend id, for labelling rows by origin. */
   backendMeta: Record<string, { label: string; kind: 'local' | 'remote' }>
   /** Which backend each pending-creation entry lives on, keyed by pending
@@ -142,6 +145,7 @@ export function mergeBackendStates(
     assignedPRsByRepo: {},
     pathBackendId: {},
     repoBackendId: {},
+    repoRemotes: {},
     backendMeta: {},
     pendingBackendId: {},
     panes: {}
@@ -165,6 +169,7 @@ export function mergeBackendStates(
     merged.backendMeta[backendId] = { label, kind }
     for (const root of state.worktrees.repoRoots) merged.repoBackendId[root] = backendId
     merged.repoRoots.push(...state.worktrees.repoRoots)
+    Object.assign(merged.repoRemotes, state.worktrees.repoRemotes)
     for (const pending of state.worktrees.pending) merged.pendingBackendId[pending.id] = backendId
     merged.pendingWorktrees.push(...state.worktrees.pending)
     merged.pendingDeletions.push(...(state.worktrees.pendingDeletions ?? []))

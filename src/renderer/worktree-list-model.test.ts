@@ -427,13 +427,14 @@ describe('pinned rows', () => {
   })
 })
 
-describe('cross-host section merging', () => {
+describe('cross-host section merging (folder-name fallback, no remotes)', () => {
   // Fleet view shows the same repo open on several hosts as ONE section.
-  // "Same repo" is repoKeyFor (folder name, case-normalized) — see that
-  // function for why it is deliberately not the git remote URL. The merge
-  // is gated on backend ownership: it must never fire for two same-named
-  // checkouts on one host, and never fire at all when the caller supplies
-  // no ownership info (single-backend callers keep historical behavior).
+  // Identity is repoKeyFor: the normalized origin URL when a root has one,
+  // folder name otherwise. These cases supply no remotes, so they exercise
+  // the fallback. The merge is gated on backend ownership: it must never
+  // fire for two same-named checkouts on one host, and never fire at all
+  // when the caller supplies no ownership info (single-backend callers
+  // keep historical behavior).
   const localRoot = '/Users/mike/dev/ness'
   const remoteRoot = '/home/mike/code/ness'
 
@@ -516,10 +517,10 @@ describe('cross-host section merging', () => {
         repoRoots: [localRoot, remoteRoot],
         repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
         worktrees: [wt({ path: '/w/a', repoRoot: localRoot })],
-        collapsedRepos: { 'repo:ness': true }
+        collapsedRepos: { 'repo:folder:ness': true }
       })
     )
-    expect(model.sections[0].scope).toBe('repo:ness')
+    expect(model.sections[0].scope).toBe('repo:folder:ness')
     expect(model.sections[0].collapsed).toBe(true)
   })
 
@@ -544,5 +545,65 @@ describe('cross-host section merging', () => {
     expect(section.pending.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
     const reviewing = section.groups.find((g) => g.key === 'reviewing')
     expect(reviewing?.phantomPRs.map((p) => p.number).sort()).toEqual([1, 2])
+  })
+})
+
+describe('cross-host section merging by remote URL', () => {
+  const owners = (a: string, b: string) => ({ [a]: 'local', [b]: 'beta' })
+
+  it('merges differently-named folders that share an origin', () => {
+    // The fork-vs-rename case folder matching could never handle:
+    // claude-harness locally, harness on the server, one upstream.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/claude-harness', '/r/harness'],
+        repoBackendId: owners('/l/claude-harness', '/r/harness'),
+        repoRemotes: {
+          '/l/claude-harness': 'github.com/ness-dev/ness',
+          '/r/harness': 'github.com/ness-dev/ness'
+        },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+    expect(model.sections[0].scope).toBe('repo:remote:github.com/ness-dev/ness')
+  })
+
+  it('keeps same-named folders with different origins apart', () => {
+    // Two unrelated `api` repos — the wrong-merge the folder key allowed.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/api', '/r/api'],
+        repoBackendId: owners('/l/api', '/r/api'),
+        repoRemotes: { '/l/api': 'github.com/acme/api', '/r/api': 'github.com/other/api' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+  })
+
+  it('keeps a fork and its upstream apart', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/ness', '/r/ness'],
+        repoBackendId: owners('/l/ness', '/r/ness'),
+        repoRemotes: { '/l/ness': 'github.com/you/ness', '/r/ness': 'github.com/ness-dev/ness' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+  })
+
+  it('does not merge a remote-bearing root with a remote-less one of the same name', () => {
+    // Different namespaces (remote: vs folder:) by construction.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/ness', '/r/ness'],
+        repoBackendId: owners('/l/ness', '/r/ness'),
+        repoRemotes: { '/l/ness': 'github.com/ness-dev/ness', '/r/ness': null },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
   })
 })

@@ -124,6 +124,10 @@ export interface WorktreeListModelInput {
    *  two local checkouts named `api` are different repos. Absent → no
    *  merging, exactly the historical behavior. */
   repoBackendId?: Record<string, string>
+  /** Normalized origin URL per repo root (null = no usable origin). The
+   *  cross-host identity: roots whose remotes match are one repo. Roots
+   *  with no remote fall back to folder name. */
+  repoRemotes?: Record<string, string | null>
   pendingWorktrees: PendingWorktree[]
   pendingDeletions: PendingDeletion[]
   /** Flattened tabs per worktree path (pane tree already walked). */
@@ -170,6 +174,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     worktrees,
     repoRoots,
     repoBackendId,
+    repoRemotes,
     pendingWorktrees,
     pendingDeletions,
     tabsByWorktree,
@@ -246,7 +251,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     // the user's repo order via first appearance.
     const keyGroups = new Map<string, string[]>()
     for (const root of map.keys()) {
-      const key = repoKeyFor(root)
+      const key = repoKeyFor(root, repoRemotes?.[root])
       const group = keyGroups.get(key)
       if (group) group.push(root)
       else keyGroups.set(key, [root])
@@ -375,20 +380,24 @@ export function repoLabelFor(repoRoot: string): string {
 }
 
 /** The identity used to decide that checkouts on different hosts are the
- *  same repo. Folder name, case-normalized.
+ *  same repo.
  *
- *  Deliberately NOT the git remote URL. The common cross-host layout is
- *  one machine cloned from the user's fork and another from upstream —
- *  one project, to the user — and those have DIFFERENT origins, so a
- *  URL key would refuse to merge exactly the case fleet view exists for.
- *  (A product decision, made knowingly.)
+ *  Primary: the normalized `origin` URL (shared/git-remote.ts), so
+ *  `git@github.com:org/repo.git` on one host and
+ *  `https://github.com/org/repo` on another are one repo, while two
+ *  unrelated repos that both happen to be called `api` are not. A fork and
+ *  its upstream have different owners and therefore stay separate — that
+ *  was the trade-off: folder-name matching merged them, but also merged
+ *  anything sharing a generic name, and a wrong merge can detach the
+ *  wrong repo, which is the worse error.
  *
- *  The cost is the inverse error: unrelated repos sharing a generic
- *  folder name (`api`, `web`) on two hosts merge wrongly. Mitigations:
- *  roots on the same host never merge, and remove-repo on a merged
- *  section lists every path it will detach before doing so. Refining the
- *  heuristic — remote repo-name corroboration, a manual pin/split —
- *  belongs HERE and nowhere else. */
-export function repoKeyFor(repoRoot: string): string {
-  return (repoRoot.split('/').pop() || repoRoot).toLowerCase()
+ *  Fallback: folder name, case-normalized, only when a root has no usable
+ *  origin. The two namespaces are prefixed so a remote-less `api` can't
+ *  accidentally match a remote-bearing one.
+ *
+ *  Refinements (manual pin/split, extra remotes) belong HERE and nowhere
+ *  else. */
+export function repoKeyFor(repoRoot: string, remote?: string | null): string {
+  if (remote) return `remote:${remote}`
+  return `folder:${(repoRoot.split('/').pop() || repoRoot).toLowerCase()}`
 }

@@ -166,6 +166,11 @@ export interface WorktreesState {
   /** Flat list of worktrees across every known repo. */
   list: Worktree[]
   repoRoots: string[]
+  /** Normalized `origin` URL per repo root (see shared/git-remote.ts), or
+   *  null for repos with no usable origin. Fleet view uses it to decide
+   *  that checkouts on different hosts are the same repo. Resolved
+   *  asynchronously after repoRoots change, so it can briefly lag them. */
+  repoRemotes: Record<string, string | null>
   pending: PendingWorktree[]
   /** In-flight deletions, keyed by worktree path. Lives in the store so
    * the UI can animate + stream teardown output and the FSM keeps running
@@ -176,6 +181,7 @@ export interface WorktreesState {
 export type WorktreesEvent =
   | { type: 'worktrees/listChanged'; payload: Worktree[] }
   | { type: 'worktrees/reposChanged'; payload: string[] }
+  | { type: 'worktrees/repoRemotesChanged'; payload: Record<string, string | null> }
   | { type: 'worktrees/pendingAdded'; payload: PendingWorktree }
   | {
       type: 'worktrees/pendingUpdated'
@@ -192,6 +198,7 @@ export type WorktreesEvent =
 export const initialWorktrees: WorktreesState = {
   list: [],
   repoRoots: [],
+  repoRemotes: {},
   pending: [],
   pendingDeletions: []
 }
@@ -205,6 +212,8 @@ export function worktreesReducer(
       return { ...state, list: event.payload }
     case 'worktrees/reposChanged':
       return { ...state, repoRoots: event.payload }
+    case 'worktrees/repoRemotesChanged':
+      return { ...state, repoRemotes: event.payload }
     case 'worktrees/pendingAdded':
       return { ...state, pending: [...state.pending, event.payload] }
     case 'worktrees/pendingUpdated': {

@@ -50,6 +50,7 @@ export function useWorktreeListModel(
         worktrees: merged.flatWorktrees,
         repoRoots: merged.repoRoots,
         repoBackendId: merged.repoBackendId,
+        repoRemotes: merged.repoRemotes,
         pendingWorktrees: merged.pendingWorktrees,
         pendingDeletions: merged.pendingDeletions,
         tabsByWorktree: merged.tabsByWorktree,

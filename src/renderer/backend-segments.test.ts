@@ -146,6 +146,7 @@ function listModelDeps(s: AppState): readonly unknown[] {
     s.worktrees.repoRoots,
     s.worktrees.pending,
     s.worktrees.pendingDeletions,
+    s.worktrees.repoRemotes,
     s.terminals.panes,
     s.terminals.statuses,
     s.terminals.pendingTools,

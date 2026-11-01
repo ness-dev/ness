@@ -2069,3 +2069,19 @@ export async function pruneWorktrees(repoRoot: string): Promise<void> {
   }
   await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot })
 }
+
+/** `origin`'s URL for a repo, or null when there is no origin remote (or
+ *  the path isn't a git repo). Read raw here; the caller normalizes it,
+ *  since the normalized form is what fleet view compares across hosts. */
+export async function getOriginRemoteUrl(repoRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
+      cwd: repoRoot,
+      env: readOnlyGitEnv()
+    })
+    const url = stdout.trim()
+    return url || null
+  } catch {
+    return null
+  }
+}

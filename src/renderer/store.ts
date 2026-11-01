@@ -480,6 +480,7 @@ const allBackendStatesSelector = new SegmentedSelector<
     source.state.worktrees.repoRoots,
     source.state.worktrees.pending,
     source.state.worktrees.pendingDeletions,
+    source.state.worktrees.repoRemotes,
     source.state.terminals.panes,
     source.state.terminals.statuses,
     source.state.terminals.pendingTools,
