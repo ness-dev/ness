@@ -18,6 +18,13 @@ import type {
   ReviewVerdict
 } from '../shared/state/reviews'
 import type { SubmitReviewResult } from './review-service'
+import type {
+  FinishTestRunResult,
+  ReportTestStepInput,
+  RequestTestRunResult
+} from './test-run-service'
+import type { TestRun, TestStep, TestStepStatus } from '../shared/state/reviews'
+import { shortStepId } from '../shared/test-run-format'
 import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
@@ -168,6 +175,24 @@ export interface ReviewQueries {
   ) => { ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }
 }
 
+/** Tester tools for the caller's own worktree. As with reviews, the
+ *  tester is always the calling tab. */
+export interface TestRunQueries {
+  request: (worktreePath: string, callerTabId: string, context: string) => RequestTestRunResult
+  reportStep: (
+    worktreePath: string,
+    callerTabId: string,
+    input: ReportTestStepInput
+  ) => { run: TestRun; step: TestStep } | { error: string }
+  finish: (
+    worktreePath: string,
+    callerTabId: string,
+    input: { status: 'passed' | 'failed' | 'inconclusive'; summary: string }
+  ) => Promise<FinishTestRunResult>
+}
+
+const TEST_STEP_STATUSES: TestStepStatus[] = ['running', 'passed', 'failed', 'skipped']
+
 /** Scope derived from the caller's terminal id on every request. The
  * source of truth — env vars injected into the MCP bridge can go stale
  * (teleport sessions, deleted worktrees), so each tool call re-resolves. */
@@ -229,6 +254,7 @@ export interface ControlServerDeps {
   shell: ShellQueries
   messaging: MessagingQueries
   reviews: ReviewQueries
+  tests: TestRunQueries
   /** Chat tabs of a worktree, most recently active first — the only tabs
    *  reviews and tab messages can be delivered to. */
   listChatTabs: (worktreePath: string) => ChatTabInfo[]
@@ -1062,6 +1088,77 @@ async function handleRequest(
 
     res.writeHead(404)
     res.end('review endpoint not found')
+    return
+  }
+
+  if (path.startsWith('/tests/')) {
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, { error: 'caller terminal is not associated with a worktree' })
+    }
+    const wt = scope.worktreePath
+    const body = req.method === 'POST' ? await readJson(req) : {}
+
+    if (req.method === 'POST' && path === '/tests/request') {
+      const context = typeof body.context === 'string' ? body.context.trim() : ''
+      if (!context) return sendJson(res, 400, { error: 'context required' })
+      const result = deps.tests.request(wt, terminalId, context)
+      if (!result.ok) return sendJson(res, 409, { error: result.error })
+      return sendJson(res, 200, {
+        testerTabId: result.testerTabId,
+        reused: result.reused,
+        runId: result.runId
+      })
+    }
+
+    if (req.method === 'POST' && path === '/tests/steps') {
+      const status = body.status as TestStepStatus
+      if (!TEST_STEP_STATUSES.includes(status)) {
+        return sendJson(res, 400, {
+          error: 'status must be "running", "passed", "failed", or "skipped"'
+        })
+      }
+      const screenshots = Array.isArray(body.screenshots)
+        ? body.screenshots.filter((p: unknown): p is string => typeof p === 'string')
+        : undefined
+      const result = deps.tests.reportStep(wt, terminalId, {
+        status,
+        stepId: typeof body.stepId === 'string' && body.stepId.trim() ? body.stepId : undefined,
+        title: typeof body.title === 'string' ? body.title : undefined,
+        detail: typeof body.detail === 'string' ? body.detail : undefined,
+        screenshots
+      })
+      if ('error' in result) return sendJson(res, 422, { error: result.error })
+      return sendJson(res, 200, {
+        stepId: result.step.id,
+        shortId: shortStepId(result.step.id),
+        title: result.step.title,
+        status: result.step.status,
+        stepCount: result.run.steps.length
+      })
+    }
+
+    if (req.method === 'POST' && path === '/tests/finish') {
+      const status = body.status
+      if (status !== 'passed' && status !== 'failed' && status !== 'inconclusive') {
+        return sendJson(res, 400, { error: 'status must be "passed", "failed", or "inconclusive"' })
+      }
+      const summary = typeof body.summary === 'string' ? body.summary : ''
+      const result = await deps.tests.finish(wt, terminalId, { status, summary })
+      if ('error' in result) return sendJson(res, 409, { error: result.error })
+      return sendJson(res, 200, {
+        runId: result.run.id,
+        status: result.run.status,
+        stepCount: result.run.steps.length,
+        delivery: result.delivery
+      })
+    }
+
+    res.writeHead(404)
+    res.end('test endpoint not found')
     return
   }
 

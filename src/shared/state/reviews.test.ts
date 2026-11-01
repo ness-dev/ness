@@ -5,7 +5,9 @@ import {
   type ReviewComment,
   type ReviewRequest,
   type ReviewSubmission,
-  type ReviewsState
+  type ReviewsState,
+  type TestRun,
+  type TestStep
 } from './reviews'
 
 const WT = '/wt'
@@ -316,5 +318,115 @@ describe('reviewsReducer', () => {
       payload: { worktreePath: WT, id: 's1' }
     })
     expect(s3.byPath[WT]).toEqual({ comments: [], requests: [request] })
+  })
+
+  describe('test runs', () => {
+    const run = (over: Partial<TestRun> = {}): TestRun => ({
+      id: 't1',
+      requester: { kind: 'agent', tabId: 'author' },
+      tester: { kind: 'agent', tabId: 'tester' },
+      context: 'try it',
+      source: 'agent',
+      reused: false,
+      status: 'running',
+      steps: [],
+      createdAt: 1,
+      ...over
+    })
+    const step = (id: string, over: Partial<TestStep> = {}): TestStep => ({
+      id,
+      title: `step ${id}`,
+      status: 'running',
+      startedAt: 1,
+      updatedAt: 1,
+      ...over
+    })
+    const started = reviewsReducer(initialReviews, {
+      type: 'reviews/testRunStarted',
+      payload: { worktreePath: WT, run: run() }
+    })
+
+    it('reviews/testRunStarted appends, ignores duplicates, and keeps the entry alive alone', () => {
+      expect(started.byPath[WT]).toEqual({ comments: [], testRuns: [run()] })
+      expect(
+        reviewsReducer(started, {
+          type: 'reviews/testRunStarted',
+          payload: { worktreePath: WT, run: run() }
+        })
+      ).toBe(started)
+    })
+
+    it('reviews/testStepReported adds a step, then replaces it by id', () => {
+      const s1 = reviewsReducer(started, {
+        type: 'reviews/testStepReported',
+        payload: { worktreePath: WT, runId: 't1', step: step('a') }
+      })
+      const s2 = reviewsReducer(s1, {
+        type: 'reviews/testStepReported',
+        payload: { worktreePath: WT, runId: 't1', step: step('b') }
+      })
+      const s3 = reviewsReducer(s2, {
+        type: 'reviews/testStepReported',
+        payload: { worktreePath: WT, runId: 't1', step: step('a', { status: 'passed', updatedAt: 5 }) }
+      })
+      const steps = s3.byPath[WT].testRuns![0].steps
+      expect(steps.map((x) => [x.id, x.status])).toEqual([
+        ['a', 'passed'],
+        ['b', 'running']
+      ])
+      expect(steps[1]).toBe(s2.byPath[WT].testRuns![0].steps[1])
+      expect(
+        reviewsReducer(s3, {
+          type: 'reviews/testStepReported',
+          payload: { worktreePath: WT, runId: 'nope', step: step('c') }
+        })
+      ).toBe(s3)
+    })
+
+    it('reviews/testRunFinished records the outcome and closes out running steps', () => {
+      const s1 = reviewsReducer(started, {
+        type: 'reviews/testStepReported',
+        payload: { worktreePath: WT, runId: 't1', step: step('a') }
+      })
+      const s2 = reviewsReducer(s1, {
+        type: 'reviews/testRunFinished',
+        payload: { worktreePath: WT, runId: 't1', status: 'failed', summary: 'broke', at: 9, headSha: 'abc' }
+      })
+      expect(s2.byPath[WT].testRuns![0]).toMatchObject({
+        status: 'failed',
+        summary: 'broke',
+        finishedAt: 9,
+        headSha: 'abc',
+        steps: [{ id: 'a', status: 'skipped', updatedAt: 9 }]
+      })
+    })
+
+    it('reviews/testRunDelivered records sent and failed deliveries', () => {
+      const sent = reviewsReducer(started, {
+        type: 'reviews/testRunDelivered',
+        payload: { worktreePath: WT, runId: 't1', state: 'sent', targetTabId: 'author', at: 3 }
+      })
+      expect(sent.byPath[WT].testRuns![0].delivery).toEqual({ state: 'sent', targetTabId: 'author', at: 3 })
+      const failed = reviewsReducer(sent, {
+        type: 'reviews/testRunDelivered',
+        payload: { worktreePath: WT, runId: 't1', state: 'failed', at: 4 }
+      })
+      expect(failed.byPath[WT].testRuns![0].delivery).toEqual({
+        state: 'failed',
+        at: 4,
+        error: 'Delivery failed'
+      })
+    })
+
+    it('reviews/testRunDeleted removes the run and drops an empty entry', () => {
+      const s1 = reviewsReducer(started, {
+        type: 'reviews/testRunDeleted',
+        payload: { worktreePath: WT, runId: 't1' }
+      })
+      expect(s1.byPath).toEqual({})
+      expect(
+        reviewsReducer(s1, { type: 'reviews/testRunDeleted', payload: { worktreePath: WT, runId: 't1' } })
+      ).toBe(s1)
+    })
   })
 })

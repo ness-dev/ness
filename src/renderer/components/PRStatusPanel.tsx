@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck, Bot } from 'lucide-react'
+import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck, Bot, FlaskConical } from 'lucide-react'
 import { useCiNotify, useRepoConfigs, useSettings } from '../store'
 import { isCiNotifyEnabled } from '../../shared/state/ci-notify'
 import { useBackend } from '../backend'
@@ -756,14 +756,25 @@ interface PRApproveAction {
   errorRow: JSX.Element | null
 }
 
-/** "Request AI review": opens a reviewer Chat tab for this worktree's
- *  author tab, the same path request_review and the CI-green spawner
- *  take. Shown whether or not the branch has a PR — the reviewer reads
- *  the branch diff, not GitHub. */
-function useAiReviewAction(worktree: Worktree | null | undefined): {
-  row: JSX.Element | null
-} {
-  const backend = useBackend()
+/** One "start a second agent on this branch" button: Request AI review
+ *  or Request AI test run. Both open a Chat tab for this worktree's
+ *  author tab, the same path the MCP tools and the CI-green spawners
+ *  take. */
+function useAgentRequestButton({
+  worktreePath,
+  request,
+  label,
+  doneLabel,
+  tooltip,
+  icon: Icon
+}: {
+  worktreePath: string | undefined
+  request: (worktreePath: string) => Promise<{ ok: true } | { ok: false; error: string }>
+  label: string
+  doneLabel: string
+  tooltip: string
+  icon: typeof Bot
+}): { button: JSX.Element; error: string | null } {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
@@ -772,14 +783,14 @@ function useAiReviewAction(worktree: Worktree | null | undefined): {
     setBusy(false)
     setError(null)
     setDone(false)
-  }, [worktree?.path])
+  }, [worktreePath])
 
-  const request = useCallback(async () => {
-    if (!worktree) return
+  const run = useCallback(async () => {
+    if (!worktreePath) return
     setBusy(true)
     setError(null)
     try {
-      const result = await backend.requestAiReview(worktree.path)
+      const result = await request(worktreePath)
       if (result.ok) setDone(true)
       else setError(result.error)
     } catch (err) {
@@ -787,29 +798,64 @@ function useAiReviewAction(worktree: Worktree | null | undefined): {
     } finally {
       setBusy(false)
     }
-  }, [worktree, backend])
+  }, [worktreePath, request])
+
+  const button = (
+    <Tooltip label={tooltip}>
+      <button
+        onClick={() => void run()}
+        disabled={busy || done}
+        className="w-full text-xs px-2 py-1.5 rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 bg-accent/20 hover:bg-accent/30 text-accent"
+      >
+        {busy ? (
+          <Loader2 className="icon-xs animate-spin" />
+        ) : done ? (
+          <Check className="icon-xs" />
+        ) : (
+          <Icon className="icon-xs" />
+        )}
+        {done ? doneLabel : label}
+      </button>
+    </Tooltip>
+  )
+  return { button, error }
+}
+
+/** "Request AI review" and "Request AI test run", side by side. Shown
+ *  whether or not the branch has a PR — both agents work from the
+ *  branch, not GitHub. */
+function useAiReviewAction(worktree: Worktree | null | undefined): {
+  row: JSX.Element | null
+} {
+  const backend = useBackend()
+  const review = useAgentRequestButton({
+    worktreePath: worktree?.path,
+    request: backend.requestAiReview,
+    label: 'Request AI review',
+    doneLabel: 'Reviewer opened',
+    tooltip: 'Open an agent that reviews this branch and sends its review to your Chat tab',
+    icon: Bot
+  })
+  const test = useAgentRequestButton({
+    worktreePath: worktree?.path,
+    request: backend.requestAiTestRun,
+    label: 'Request AI test run',
+    doneLabel: 'Tester opened',
+    tooltip:
+      'Open an agent that runs this branch — tests, dev server, browser — and posts each step to the Review tab',
+    icon: FlaskConical
+  })
 
   if (!worktree) return { row: null }
 
   const row = (
     <div className="px-3 pb-2 pt-1 space-y-1.5">
-      <Tooltip label="Open an agent that reviews this branch and sends its review to your Chat tab">
-        <button
-          onClick={() => void request()}
-          disabled={busy || done}
-          className="w-full text-xs px-2 py-1.5 rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 bg-accent/20 hover:bg-accent/30 text-accent"
-        >
-          {busy ? (
-            <Loader2 className="icon-xs animate-spin" />
-          ) : done ? (
-            <Check className="icon-xs" />
-          ) : (
-            <Bot className="icon-xs" />
-          )}
-          {done ? 'Reviewer opened' : 'Request AI review'}
-        </button>
-      </Tooltip>
-      {error && <div className="text-xs text-danger leading-snug">{error}</div>}
+      <div className="grid grid-cols-2 gap-1.5">
+        {review.button}
+        {test.button}
+      </div>
+      {review.error && <div className="text-xs text-danger leading-snug">{review.error}</div>}
+      {test.error && <div className="text-xs text-danger leading-snug">{test.error}</div>}
     </div>
   )
   return { row }

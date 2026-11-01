@@ -3,7 +3,8 @@ import { actorRole, buildReviewTimeline, reviewerTabIds } from './review-timelin
 import type {
   ReviewComment,
   ReviewRequest,
-  ReviewSubmission
+  ReviewSubmission,
+  TestRun
 } from '../shared/state/reviews'
 
 const impl = { kind: 'agent' as const, tabId: 'impl', label: 'Impl' }
@@ -43,7 +44,45 @@ function comment(id: string, at: number, over: Partial<ReviewComment> = {}): Rev
 
 const kinds = (r: { entries: { kind: string }[] }): string[] => r.entries.map((e) => e.kind)
 
+function testRun(id: string, at: number): TestRun {
+  return {
+    id,
+    requester: impl,
+    tester: { kind: 'agent', tabId: 'tst', label: 'Tester' },
+    context: '',
+    source: 'user',
+    reused: false,
+    status: 'running',
+    steps: [],
+    createdAt: at
+  }
+}
+
 describe('buildReviewTimeline', () => {
+  it('gives a test run its own round, but folds it into a pending requested review', () => {
+    const alone = buildReviewTimeline({
+      requests: [],
+      submissions: [],
+      comments: [],
+      commits: [],
+      testRuns: [testRun('t1', 1000)]
+    })
+    expect(alone.map((r) => [r.index, kinds(r)])).toEqual([[1, ['test']]])
+
+    const together = buildReviewTimeline({
+      requests: [request('r1', 1000), request('r2', 9000)],
+      submissions: [submission('s1', 3000)],
+      comments: [],
+      commits: [],
+      testRuns: [testRun('t1', 1500), testRun('t2', 5000)]
+    })
+    expect(together.map((r) => [r.index, kinds(r)])).toEqual([
+      [1, ['request', 'test', 'review']],
+      [2, ['test']],
+      [3, ['request']]
+    ])
+  })
+
   it('is empty without any review records, even with commits', () => {
     expect(
       buildReviewTimeline({

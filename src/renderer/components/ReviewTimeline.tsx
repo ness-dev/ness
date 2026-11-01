@@ -17,7 +17,8 @@ import type {
   ReviewComment,
   ReviewCommentStatus,
   ReviewRequest,
-  ReviewSubmission
+  ReviewSubmission,
+  TestRun
 } from '../types'
 import { useWorktreePanes } from '../store'
 import { getLeaves } from '../../shared/state/terminals'
@@ -32,6 +33,7 @@ import {
 } from '../review-timeline'
 import { SubmissionCard, useTabLabels } from './ReviewSubmissions'
 import { ExpandableMarkdown, ReviewMarkdown } from './ReviewMarkdown'
+import { TestRunCard } from './TestRunCard'
 
 const STATUS_CLASS: Record<ReviewCommentStatus, string> = {
   open: 'text-info',
@@ -192,6 +194,57 @@ function RequestEntry({ request, ctx }: { request: ReviewRequest; ctx: ActorCont
   )
 }
 
+function TestRunEntry({
+  run,
+  worktreePath,
+  ctx
+}: {
+  run: TestRun
+  worktreePath: string
+  ctx: ActorContext
+}): JSX.Element {
+  const asked = run.reused ? 'asked for another run from' : 'requested a test run from'
+  const header = (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        {run.source === 'ci-green' ? (
+          <>
+            <Zap className="icon-xs text-success" />
+            <span className="text-fg">CI went green; Ness {asked}</span>
+            <Actor author={run.tester} ctx={ctx} />
+            <span className="text-fg">for</span>
+            <Actor author={run.requester} ctx={ctx} />
+          </>
+        ) : run.source === 'user' ? (
+          <>
+            <Actor author={{ kind: 'human' }} ctx={ctx} />
+            <span className="text-fg">{asked}</span>
+            <Actor author={run.tester} ctx={ctx} />
+            <span className="text-fg">for</span>
+            <Actor author={run.requester} ctx={ctx} />
+          </>
+        ) : (
+          <>
+            <Actor author={run.requester} ctx={ctx} />
+            <span className="text-fg">{asked}</span>
+            <Actor author={run.tester} ctx={ctx} />
+          </>
+        )}
+        <div className="flex-1" />
+        <Time at={run.createdAt} />
+      </div>
+      {run.context && run.source === 'agent' && (
+        <div className="ml-5 pl-3 py-0.5 border-l-2 border-border">
+          <ExpandableMarkdown text={run.context} />
+        </div>
+      )}
+    </div>
+  )
+  return (
+    <TestRunCard worktreePath={worktreePath} run={run} header={header} tabLabels={ctx.tabLabels} />
+  )
+}
+
 function Entry({
   entry,
   worktreePath,
@@ -206,6 +259,8 @@ function Entry({
   switch (entry.kind) {
     case 'request':
       return <RequestEntry request={entry.request} ctx={ctx} />
+    case 'test':
+      return <TestRunEntry run={entry.run} worktreePath={worktreePath} ctx={ctx} />
     case 'review':
       return (
         <ReviewEntry
@@ -309,6 +364,7 @@ export function ReviewTimeline({
   submissions,
   comments,
   commits,
+  testRuns,
   onJumpToComment
 }: {
   worktreePath: string
@@ -316,45 +372,74 @@ export function ReviewTimeline({
   submissions: ReviewSubmission[]
   comments: ReviewComment[]
   commits: BranchCommit[]
+  testRuns: TestRun[]
   onJumpToComment: (c: ReviewComment) => void
 }): JSX.Element {
   const tabLabels = useTabLabels(worktreePath)
   const tree = useWorktreePanes(worktreePath)
+  // Testers count as reviewers here: both are the second agent on the
+  // branch, and the timeline only needs to tell them from the author.
   const linked = useMemo(() => {
-    if (!tree) return []
-    return getLeaves(tree).flatMap((l) => l.tabs.filter((t) => t.reviewOf).map((t) => t.id))
-  }, [tree])
+    const ids = testRuns.flatMap((r) => (r.tester.kind === 'agent' ? [r.tester.tabId] : []))
+    if (!tree) return ids
+    return [
+      ...ids,
+      ...getLeaves(tree).flatMap((l) =>
+        l.tabs.filter((t) => t.reviewOf || t.testOf).map((t) => t.id)
+      )
+    ]
+  }, [tree, testRuns])
   const ctx = useMemo<ActorContext>(
     () => ({ tabLabels, reviewers: reviewerTabIds(requests, submissions, linked) }),
     [tabLabels, requests, submissions, linked]
   )
   const rounds = useMemo(
-    () => buildReviewTimeline({ requests, submissions, comments, commits }),
-    [requests, submissions, comments, commits]
+    () => buildReviewTimeline({ requests, submissions, comments, commits, testRuns }),
+    [requests, submissions, comments, commits, testRuns]
   )
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const hasRounds = rounds.length > 0
+  // A live run grows from the bottom; follow it while it does, unless
+  // the user has scrolled up to read something.
+  const liveStepCount = useMemo(
+    () =>
+      testRuns.reduce((n, r) => (r.status === 'running' ? n + r.steps.length + 1 : n), 0),
+    [testRuns]
+  )
+  const pinnedRef = useRef(true)
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [hasRounds])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && pinnedRef.current && liveStepCount > 0) el.scrollTop = el.scrollHeight
+  }, [liveStepCount, testRuns])
 
   if (!hasRounds) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-faint text-sm">
         <History className="icon-xl" />
-        <div className="text-fg">No reviews on this branch yet</div>
+        <div className="text-fg">No reviews or test runs on this branch yet</div>
         <div className="text-xs max-w-sm text-center">
-          When an agent calls request_review, CI goes green with auto-review on, or you use
-          Request AI review, each round shows up here.
+          When an agent calls request_review or request_test_run, CI goes green with auto-review
+          or auto-test on, or you use Request AI review or Request AI test run, each round shows
+          up here.
         </div>
       </div>
     )
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      onScroll={(e) => {
+        const el = e.currentTarget
+        pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      }}
+      className="flex-1 min-h-0 overflow-y-auto"
+    >
       <div className="max-w-4xl mx-auto px-6 py-5 flex flex-col gap-8 text-xs">
         {rounds.map((round) => (
           <section key={round.index}>
@@ -401,5 +486,7 @@ function entryKey(e: TimelineEntry): string {
       return `x:${e.comment.id}`
     case 'commit':
       return `g:${e.commit.hash}`
+    case 'test':
+      return `t:${e.run.id}`
   }
 }

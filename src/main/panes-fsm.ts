@@ -18,7 +18,7 @@ import {
 import type { PersistedPaneNode } from './persistence'
 import { persistedTabFields } from './pane-persistence'
 import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
-import { findReviewerTab } from '../shared/agent-tabs'
+import { findHelperTab, type HelperRole } from '../shared/agent-tabs'
 import { log } from './debug'
 
 interface PanesFSMOptions {
@@ -580,12 +580,6 @@ export class PanesFSM {
     return true
   }
 
-  /** Find this worktree's reviewer Chat tab for `requesterTabId`, if one
-   *  is already open. */
-  findReviewerTab(wtPath: string, requesterTabId: string): TerminalTab | null {
-    return findReviewerTab(this.store.getSnapshot().state, wtPath, requesterTabId)
-  }
-
   /** Open a reviewer Chat tab for `requesterTabId` and focus the Review
    *  tab beside it, then deliver the request as its first turn. A second
    *  request from the same tab reuses the reviewer that is already open,
@@ -600,7 +594,29 @@ export class PanesFSM {
     prompt: string,
     opts?: { agentKind?: AgentKind; model?: string; label?: string }
   ): { tabId: string; reused: boolean } {
-    const existing = this.findReviewerTab(wtPath, requesterTabId)
+    return this.openHelperTab(wtPath, requesterTabId, prompt, 'reviewer', opts)
+  }
+
+  /** The tester counterpart to openReviewerTab: same reuse and focus
+   *  rules, linked through `testOf` so its results come back to the
+   *  requester. */
+  openTesterTab(
+    wtPath: string,
+    requesterTabId: string,
+    prompt: string,
+    opts?: { agentKind?: AgentKind; model?: string; label?: string }
+  ): { tabId: string; reused: boolean } {
+    return this.openHelperTab(wtPath, requesterTabId, prompt, 'tester', opts)
+  }
+
+  private openHelperTab(
+    wtPath: string,
+    requesterTabId: string,
+    prompt: string,
+    role: HelperRole,
+    opts?: { agentKind?: AgentKind; model?: string; label?: string }
+  ): { tabId: string; reused: boolean } {
+    const existing = findHelperTab(this.store.getSnapshot().state, wtPath, requesterTabId, role)
     if (existing) {
       // Asleep or dead, startJsonClaudeWithPrompt revives it; awake, it
       // just takes the turn.
@@ -614,17 +630,17 @@ export class PanesFSM {
     const tab: TerminalTab = {
       id: sessionId,
       type: 'json-claude',
-      label: opts?.label ?? 'Reviewer',
+      label: opts?.label ?? (role === 'reviewer' ? 'Reviewer' : 'Tester'),
       sessionId,
       mode: 'awake',
-      reviewOf: requesterTabId,
+      ...(role === 'reviewer' ? { reviewOf: requesterTabId } : { testOf: requesterTabId }),
       ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {}),
       ...(opts?.model?.trim() ? { model: opts.model.trim() } : {})
     }
     this.addTab(wtPath, tab)
     this.openReviewTab(wtPath)
-    // Put focus back on the reviewer: openReviewTab activates the Review
-    // tab in the same pane, and the user wants to watch the review happen.
+    // Put focus back on the new tab: openReviewTab activates the Review
+    // tab in the same pane, and the user wants to watch the work happen.
     this.focusTab(wtPath, sessionId)
     this.opts.startJsonClaudeWithPrompt?.(sessionId, wtPath, prompt)
     return { tabId: sessionId, reused: false }

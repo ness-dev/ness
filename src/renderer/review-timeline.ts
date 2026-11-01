@@ -3,7 +3,8 @@ import type {
   ReviewComment,
   ReviewReply,
   ReviewRequest,
-  ReviewSubmission
+  ReviewSubmission,
+  TestRun
 } from '../shared/state/reviews'
 
 export interface TimelineCommit {
@@ -37,6 +38,7 @@ export type TimelineEntry =
   | { kind: 'reply'; at: number; comment: ReviewComment; reply: ReviewReply }
   | { kind: 'resolved'; at: number; comment: ReviewComment; by?: ReviewAuthor }
   | { kind: 'commit'; at: number; commit: TimelineCommit }
+  | { kind: 'test'; at: number; run: TestRun }
 
 export interface TimelineRound {
   /** 1-based. 0 is activity before the first request or review. */
@@ -69,29 +71,42 @@ export function actorRole(author: ReviewAuthor, reviewers: Set<string>): ActorRo
 const KIND_ORDER: Record<TimelineEntry['kind'], number> = {
   commit: 0,
   request: 1,
+  test: 1,
   comment: 2,
   review: 3,
   reply: 4,
   resolved: 5
 }
 
-/** Merge a worktree's review records and branch commits into rounds. A
- *  round opens at each request, and at a review that no open request is
- *  waiting on; everything else falls into the round it happened in. */
+/** Merge a worktree's review records, test runs and branch commits into
+ *  rounds. A round opens at each request, at a review that no open
+ *  request is waiting on, and at a test run unless a requested review is
+ *  still pending — a review and a test started together are one round.
+ *  Everything else falls into the round it happened in. */
 export function buildReviewTimeline(input: {
   requests: ReviewRequest[]
   submissions: ReviewSubmission[]
   comments: ReviewComment[]
   commits: TimelineCommit[]
+  testRuns?: TestRun[]
 }): TimelineRound[] {
   const { requests, submissions, comments, commits } = input
-  if (requests.length === 0 && submissions.length === 0 && comments.length === 0) return []
+  const testRuns = input.testRuns ?? []
+  if (
+    requests.length === 0 &&
+    submissions.length === 0 &&
+    comments.length === 0 &&
+    testRuns.length === 0
+  ) {
+    return []
+  }
 
   const byId = new Map(comments.map((c) => [c.id, c]))
   const inSubmission = new Set<string>()
   const entries: TimelineEntry[] = []
 
   for (const r of requests) entries.push({ kind: 'request', at: r.createdAt, request: r })
+  for (const run of testRuns) entries.push({ kind: 'test', at: run.createdAt, run })
   const threadOf = (comment: ReviewComment): TimelineThread => ({
     comment,
     replies: [],
@@ -141,6 +156,8 @@ export function buildReviewTimeline(input: {
     if (e.kind === 'request') {
       open()
       awaitingReview = true
+    } else if (e.kind === 'test') {
+      if (!awaitingReview) open()
     } else if (e.kind === 'review') {
       if (!awaitingReview) open()
       awaitingReview = false

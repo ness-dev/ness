@@ -43,6 +43,8 @@ export interface PersistedTab {
   customLabelSource?: 'agent'
   /** For a reviewer Chat tab: the tab that requested the review. */
   reviewOf?: string
+  /** For a tester Chat tab: the tab that requested the test run. */
+  testOf?: string
 }
 
 export interface PersistedPane {

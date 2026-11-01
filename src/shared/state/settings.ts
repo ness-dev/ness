@@ -271,6 +271,20 @@ Look for: correctness bugs and unhandled edge cases, error handling, anything th
 
 Do not change any code — you share this checkout with the author.`
 
+/** What a tester is told to do. Like the review prompt, the requester's
+ *  context and the repo's own testing notes are added to it, and the tool
+ *  mechanics (report_test_step, finish_test_run) are appended by Ness. */
+export const DEFAULT_TEST_PROMPT = `Validate this branch the way a QA engineer would before it merges: prove the change works by running it, not by reading it.
+
+Start from the diff to work out what behaviour changed and what could break. Then plan a handful of checks that would catch a real regression, and run them:
+- The project's own checks first — its test suite, type checker, linter and build, whichever it has.
+- For anything user-facing, run the app: start its dev server in a shell tab, open it in a browser tab, and exercise the changed flows the way a user would. Take a screenshot of what you see at each step that matters.
+- Try the edge cases the diff suggests: empty input, errors, a narrow viewport, a second click.
+
+A failing check is a finding, not something to fix. Record what you ran, what you expected and what actually happened, then move on to the next check.
+
+Do not change any tracked files — you share this checkout with the author. Scratch files belong outside the repository. Stop any dev servers and shells you started before you finish.`
+
 /** Stable keys for each icon in the sidebar's bottom launcher strip. New
  *  entries can be added at the end; renaming an existing key would strand
  *  existing users' pinned/unpinned choices, so avoid it. The `settings` and
@@ -514,6 +528,11 @@ export interface SettingsState {
   /** Open a reviewer Chat tab automatically when a worktree's PR checks
    *  go green. Off by default — it spawns an agent on its own. */
   autoReviewOnGreenCi: boolean
+  /** Instructions handed to a tester. See DEFAULT_TEST_PROMPT. */
+  testPrompt: string
+  /** Open a tester Chat tab automatically when a worktree's PR checks go
+   *  green. Off by default, for the same reason as autoReviewOnGreenCi. */
+  autoTestOnGreenCi: boolean
   /** Epoch-ms deadline for the temporary "keep awake for the next hour"
    *  overlay, or null when no timer is running. Shared world state (a
    *  second client sees the countdown) but deliberately NOT persisted to
@@ -612,6 +631,8 @@ export type SettingsEvent =
   | { type: 'settings/reviewModelChanged'; payload: string }
   | { type: 'settings/reviewPromptChanged'; payload: string }
   | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
+  | { type: 'settings/testPromptChanged'; payload: string }
+  | { type: 'settings/autoTestOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
@@ -695,6 +716,8 @@ export const initialSettings: SettingsState = {
   reviewModel: '',
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
   autoReviewOnGreenCi: false,
+  testPrompt: DEFAULT_TEST_PROMPT,
+  autoTestOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
   bottomIconOrder: [...BOTTOM_ICON_KEYS]
@@ -1032,6 +1055,12 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return state.autoReviewOnGreenCi === event.payload
         ? state
         : { ...state, autoReviewOnGreenCi: event.payload }
+    case 'settings/testPromptChanged':
+      return state.testPrompt === event.payload ? state : { ...state, testPrompt: event.payload }
+    case 'settings/autoTestOnGreenCiChanged':
+      return state.autoTestOnGreenCi === event.payload
+        ? state
+        : { ...state, autoTestOnGreenCi: event.payload }
     case 'settings/reviewAgentChanged':
       return state.reviewAgent === event.payload ? state : { ...state, reviewAgent: event.payload }
     case 'settings/reviewModelChanged':

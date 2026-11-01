@@ -16,6 +16,10 @@ export interface ReviewSpawnerDeps {
     requesterTabId: string,
     context: string
   ) => { ok: true } | { ok: false; error: string }
+  /** Log tag, so the review and test spawners can be told apart. */
+  name?: string
+  /** What the spawned agent is told about why it was opened. */
+  buildContext?: (pr: PRStatus) => string
 }
 
 export function buildCiGreenContext(pr: PRStatus): string {
@@ -46,7 +50,7 @@ export class ReviewSpawner {
     private deps: ReviewSpawnerDeps
   ) {
     this.watcher = new PrStatusWatcher(store, {
-      name: 'review-spawner',
+      name: deps.name ?? 'review-spawner',
       on: 'success',
       // A merged or closed PR is finished; reviewing it now helps nobody.
       requireOpen: true,
@@ -66,17 +70,19 @@ export class ReviewSpawner {
   /** False releases the commit claim so a later poll retries — by then
    *  the user may have opened the Chat tab this needs. */
   private openReviewer(worktreePath: string, status: PRStatus, shaKey: string): boolean {
+    const tag = this.deps.name ?? 'review-spawner'
     const author = pickAuthorTab(this.store.getSnapshot().state, worktreePath)
     if (!author) {
-      log('review-spawner', `skip ${worktreePath} @ ${shaKey}: no Chat tab to review for`)
+      log(tag, `skip ${worktreePath} @ ${shaKey}: no Chat tab to open an agent for`)
       return false
     }
-    const result = this.deps.requestReview(worktreePath, author, buildCiGreenContext(status))
+    const context = (this.deps.buildContext ?? buildCiGreenContext)(status)
+    const result = this.deps.requestReview(worktreePath, author, context)
     if (!result.ok) {
-      log('review-spawner', `skip ${worktreePath} @ ${shaKey}: ${result.error}`)
+      log(tag, `skip ${worktreePath} @ ${shaKey}: ${result.error}`)
       return false
     }
-    log('review-spawner', `opened reviewer for ${worktreePath} @ ${shaKey}`)
+    log(tag, `opened agent for ${worktreePath} @ ${shaKey}`)
     return true
   }
 }

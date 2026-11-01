@@ -338,6 +338,8 @@ export function buildBackend(
     setReviewAgent: (value: ReviewAgentChoice) => req('config:setReviewAgent', value),
     setReviewModel: (value: string) => req('config:setReviewModel', value),
     setReviewPrompt: (prompt: string) => req('config:setReviewPrompt', prompt),
+    setTestPrompt: (prompt: string) => req('config:setTestPrompt', prompt),
+    setAutoTestOnGreenCi: (enabled: boolean) => req('config:setAutoTestOnGreenCi', enabled),
     setPreventSleepUntil: (value: number | null) =>
       reqConfig('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),
@@ -504,6 +506,10 @@ export function buildBackend(
       req('reviews:editComment', worktreePath, id, body),
     listReviewTargets: (worktreePath: string) => req('reviews:listChatTabs', worktreePath),
     requestAiReview: (worktreePath: string) => req('reviews:requestForWorktree', worktreePath),
+    requestAiTestRun: (worktreePath: string) => req('tests:requestForWorktree', worktreePath),
+    deleteTestRun: (worktreePath: string, runId: string) =>
+      req('tests:deleteRun', worktreePath, runId),
+    sendTestRun: (worktreePath: string, runId: string) => req('tests:sendRun', worktreePath, runId),
     editReviewSubmission: (
       worktreePath: string,
       id: string,

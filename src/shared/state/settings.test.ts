@@ -7,6 +7,7 @@ import {
   NESSIE_COLORS,
   initialSettings,
   DEFAULT_REVIEW_PROMPT,
+  DEFAULT_TEST_PROMPT,
   nessieColorById,
   settingsReducer,
   type SettingsEvent,
@@ -920,6 +921,20 @@ describe('settingsReducer', () => {
     expect(
       apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
     ).toBe(auto)
+  })
+
+  it('autoTestOnGreenCiChanged toggles and keeps identity on a no-op', () => {
+    expect(initialSettings.autoTestOnGreenCi).toBe(false)
+    const on = apply(initialSettings, { type: 'settings/autoTestOnGreenCiChanged', payload: true })
+    expect(on.autoTestOnGreenCi).toBe(true)
+    expect(apply(on, { type: 'settings/autoTestOnGreenCiChanged', payload: true })).toBe(on)
+  })
+
+  it('testPromptChanged replaces the prompt and keeps identity on a no-op', () => {
+    expect(initialSettings.testPrompt).toBe(DEFAULT_TEST_PROMPT)
+    const next = apply(initialSettings, { type: 'settings/testPromptChanged', payload: 'click everything' })
+    expect(next.testPrompt).toBe('click everything')
+    expect(apply(next, { type: 'settings/testPromptChanged', payload: 'click everything' })).toBe(next)
   })
 
   it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {

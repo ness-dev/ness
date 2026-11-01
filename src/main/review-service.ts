@@ -221,7 +221,7 @@ export function sendReviewSubmission(
  *  finished review has to be delivered back to it. Shared by the CI-green
  *  spawner and the "Request AI review" button so both pick the same tab. */
 export function pickAuthorTab(state: AppState, worktreePath: string): string | null {
-  return listChatTabs(state, worktreePath).find((t) => !t.reviewOf)?.id ?? null
+  return listChatTabs(state, worktreePath).find((t) => !t.reviewOf && !t.testOf)?.id ?? null
 }
 
 /** Context for a review the user asked for from the PR panel. The
@@ -248,7 +248,7 @@ export function buildUserReviewContext(pr?: {
  *  passed to --model verbatim and fail at spawn. Dropping it falls back
  *  to that agent's own default, which always works. The pin can go stale
  *  from switching the reviewer agent or editing config.json by hand. */
-function modelForAgent(agentKind: AgentKind, model: string | undefined): string | undefined {
+export function modelForAgent(agentKind: AgentKind, model: string | undefined): string | undefined {
   if (!model) return undefined
   const known =
     agentKind === 'codex' ? CODEX_MODELS : agentKind === 'cursor' ? CURSOR_MODELS : CLAUDE_MODELS
@@ -307,6 +307,9 @@ export function requestReview(
       error:
         'you are the reviewer for this branch — submit your review with submit_review rather than requesting another one.'
     }
+  }
+  if (requester.testOf) {
+    return { ok: false, error: 'a tester cannot request a review; report what you found with finish_test_run.' }
   }
   // A reviewer already open for this requester makes the request read as
   // "another look", not a first review.

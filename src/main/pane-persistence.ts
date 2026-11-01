@@ -20,7 +20,8 @@ export function persistedTabFields(t: PersistedTab | TerminalTab): PersistedTab 
     model: t.model,
     ...(t.customLabel ? { customLabel: t.customLabel } : {}),
     ...(t.customLabel && t.customLabelSource ? { customLabelSource: t.customLabelSource } : {}),
-    ...(t.reviewOf ? { reviewOf: t.reviewOf } : {})
+    ...(t.reviewOf ? { reviewOf: t.reviewOf } : {}),
+    ...(t.testOf ? { testOf: t.testOf } : {})
   }
 }
 

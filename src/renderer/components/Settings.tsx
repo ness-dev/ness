@@ -67,6 +67,7 @@ type SubSectionId =
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
   | 'experimental-agent-reviews'
+  | 'experimental-agent-testing'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
 
@@ -118,6 +119,7 @@ const SECTIONS: Section[] = [
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
     { id: 'experimental-agent-reviews', label: 'Agent reviews' },
+    { id: 'experimental-agent-testing', label: 'Agent testing' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
   ]}
@@ -251,6 +253,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
     'experimental-agent-reviews': null,
+    'experimental-agent-testing': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
   })
@@ -448,6 +451,8 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     reviewAgent,
     reviewModel,
     reviewPrompt,
+    testPrompt,
+    autoTestOnGreenCi,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -1095,6 +1100,22 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     await backend.setReviewPrompt('')
     setReviewPromptSaveResult({ ok: true, message: 'Reset to default' })
     setTimeout(() => setReviewPromptSaveResult(null), 2000)
+  }, [])
+
+  const [testPromptDraft, setTestPromptDraft] = useState<string>(testPrompt)
+  useEffect(() => { setTestPromptDraft(testPrompt) }, [testPrompt])
+  const [testPromptSaveResult, setTestPromptSaveResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const handleSaveTestPrompt = useCallback(async () => {
+    await backend.setTestPrompt(testPromptDraft)
+    setTestPromptSaveResult({ ok: true, message: 'Saved · the next test run uses this' })
+    setTimeout(() => setTestPromptSaveResult(null), 2000)
+  }, [testPromptDraft])
+
+  const handleResetTestPrompt = useCallback(async () => {
+    await backend.setTestPrompt('')
+    setTestPromptSaveResult({ ok: true, message: 'Reset to default' })
+    setTimeout(() => setTestPromptSaveResult(null), 2000)
   }, [])
 
   const handleSavePrReviewPrompt = useCallback(async () => {
@@ -4226,6 +4247,84 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
                     <div className="text-xs text-dim mt-0.5">
                       Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Agent testing sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['experimental-agent-testing'] = el }}
+                id="experimental-agent-testing"
+                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Agent testing</h3>
+                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
+                    Experimental
+                  </span>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  An agent can call
+                  <code className="bg-panel px-1 rounded text-xs">request_test_run</code>, or you can
+                  use Request AI test run in the Pull Request panel, to open a Tester Chat tab that
+                  validates the branch by running it: the project&apos;s checks, its dev server in a
+                  shell tab, and the changed flows in a browser tab. Each step posts to the
+                  Review tab&apos;s Reviews view as it happens, screenshots included, and the results
+                  go back to the tab that asked. Testers use the reviewer agent and model above.
+                  They start in the default permission mode, so each command you haven&apos;t
+                  already allowed asks first. Add a
+                  <code className="bg-panel px-1 rounded text-xs">testInstructions</code> string to a
+                  repo&apos;s <code className="bg-panel px-1 rounded text-xs">.ness.json</code> to tell
+                  testers how to start it.
+                </p>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Test prompt</label>
+                  <p className="text-xs text-dim mb-2">
+                    What a tester is told to do. The requester&apos;s description and the
+                    repo&apos;s testInstructions are added to it, and Ness appends how to report
+                    steps.
+                  </p>
+                  <textarea
+                    value={testPromptDraft}
+                    onChange={(e) => setTestPromptDraft(e.target.value)}
+                    rows={10}
+                    spellCheck={false}
+                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={handleSaveTestPrompt}
+                      disabled={testPromptDraft === testPrompt}
+                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleResetTestPrompt}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="icon-xs" />
+                      Reset to default
+                    </button>
+                    {testPromptSaveResult && (
+                      <span className={`text-xs flex items-center gap-1.5 ${testPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
+                        {testPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{testPromptSaveResult.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <label className="flex items-start gap-3 cursor-pointer mt-4">
+                  <input
+                    type="checkbox"
+                    checked={autoTestOnGreenCi}
+                    onChange={(e) => { void backend.setAutoTestOnGreenCi(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Test automatically when CI goes green</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Opens a tester for the worktree&apos;s Chat tab as soon as its PR checks pass. Off by default: it starts an agent that runs your code on its own, and every green commit costs a run.
                     </div>
                   </div>
                 </label>

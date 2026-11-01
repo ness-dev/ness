@@ -7,7 +7,7 @@ import {
 } from './control-server'
 import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
 import type { ChatTabInfo } from '../shared/agent-tabs'
-import type { ReviewComment } from '../shared/state/reviews'
+import type { ReviewComment, TestRun } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 
@@ -116,6 +116,44 @@ const reviews = {
   }))
 }
 
+function testRun(overrides: Partial<TestRun> = {}): TestRun {
+  return {
+    id: 'run-1',
+    requester: { kind: 'agent', tabId: 'author-tab' },
+    tester: { kind: 'agent', tabId: 'terminal-abc' },
+    context: '',
+    source: 'agent',
+    reused: false,
+    status: 'running',
+    steps: [],
+    createdAt: 0,
+    ...overrides
+  }
+}
+
+const tests = {
+  request: vi.fn<ControlServerDeps['tests']['request']>((_wt, _tabId, context) =>
+    context.includes('fail')
+      ? { ok: false, error: 'only a Chat tab can request a test run' }
+      : { ok: true, testerTabId: 'tester-tab', reused: false, runId: 'run-1' }
+  ),
+  reportStep: vi.fn<ControlServerDeps['tests']['reportStep']>((_wt, _tabId, input) => {
+    if (!input.stepId && !input.title) return { error: 'title is required for a new step' }
+    const step = {
+      id: input.stepId ?? 'step-123456789',
+      title: input.title ?? 'npm test',
+      status: input.status,
+      startedAt: 0,
+      updatedAt: 0
+    }
+    return { run: testRun({ steps: [step] }), step }
+  }),
+  finish: vi.fn<ControlServerDeps['tests']['finish']>(async (_wt, _tabId, input) => ({
+    run: testRun({ status: input.status, summary: input.summary }),
+    delivery: { ok: true, tabId: 'author-tab', woke: false }
+  }))
+}
+
 const CALLER_TERMINAL = 'terminal-abc'
 const CALLER_WORKTREE = '/repo/wt/callers-tree'
 const EXPLICIT_WORKTREE = '/repo/wt/other'
@@ -209,6 +247,7 @@ const deps: ControlServerDeps = {
     sendToTab: (path, tabId, message) => sendToTab(path, tabId, message)
   },
   reviews,
+  tests,
   listChatTabs: (path) => tabsByWorktree[path] ?? [],
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
 }
@@ -894,6 +933,51 @@ describe('control-server /reviews endpoints', () => {
       { terminalId: 'unknown-terminal' }
     )
     expect(r.status).toBe(404)
+  })
+})
+
+describe('control-server /tests endpoints', () => {
+  it('requests a test run as the calling tab', async () => {
+    const r = await call('POST', '/tests/request', { context: 'try the login page' })
+    expect(r.status).toBe(200)
+    expect(tests.request).toHaveBeenLastCalledWith(
+      CALLER_WORKTREE,
+      CALLER_TERMINAL,
+      'try the login page'
+    )
+    expect(r.json).toEqual({ testerTabId: 'tester-tab', reused: false, runId: 'run-1' })
+    expect((await call('POST', '/tests/request', { context: ' ' })).status).toBe(400)
+    expect((await call('POST', '/tests/request', { context: 'fail' })).status).toBe(409)
+  })
+
+  it('reports steps and validates their status', async () => {
+    const r = await call('POST', '/tests/steps', {
+      title: 'npm test',
+      status: 'running',
+      screenshots: ['/tmp/a.png', 7]
+    })
+    expect(r.status).toBe(200)
+    expect(tests.reportStep).toHaveBeenLastCalledWith(CALLER_WORKTREE, CALLER_TERMINAL, {
+      status: 'running',
+      stepId: undefined,
+      title: 'npm test',
+      detail: undefined,
+      screenshots: ['/tmp/a.png']
+    })
+    expect(r.json).toMatchObject({ stepId: 'step-123456789', shortId: 'step-123', status: 'running' })
+    expect((await call('POST', '/tests/steps', { status: 'done' })).status).toBe(400)
+    expect((await call('POST', '/tests/steps', { status: 'passed' })).status).toBe(422)
+  })
+
+  it('finishes a run and reports the delivery', async () => {
+    const r = await call('POST', '/tests/finish', { status: 'failed', summary: 'login broke' })
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({
+      runId: 'run-1',
+      status: 'failed',
+      delivery: { ok: true, tabId: 'author-tab' }
+    })
+    expect((await call('POST', '/tests/finish', { status: 'running' })).status).toBe(400)
   })
 })
 

@@ -14,7 +14,9 @@ import type {
   ReviewAuthor,
   ReviewRequest,
   ReviewSubmission,
-  ReviewVerdict
+  ReviewVerdict,
+  TestRun,
+  TestStep
 } from '../shared/state/reviews'
 export type {
   ReviewComment,
@@ -23,7 +25,9 @@ export type {
   ReviewAuthor,
   ReviewRequest,
   ReviewSubmission,
-  ReviewVerdict
+  ReviewVerdict,
+  TestRun,
+  TestStep
 }
 
 import type { ChatTabInfo } from '../shared/agent-tabs'
@@ -428,6 +432,8 @@ export interface ElectronAPI {
   setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
   setReviewModel(value: string): Promise<boolean>
   setReviewPrompt(prompt: string): Promise<boolean>
+  setTestPrompt(prompt: string): Promise<boolean>
+  setAutoTestOnGreenCi(enabled: boolean): Promise<boolean>
   setPreventSleepUntil(value: number | null): Promise<boolean>
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>
   setWarnBeforeQuitting(enabled: boolean): Promise<boolean>
@@ -532,6 +538,17 @@ export interface ElectronAPI {
   requestAiReview(
     worktreePath: string
   ): Promise<{ ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }>
+  /** Opens a tester for this worktree's author Chat tab. */
+  requestAiTestRun(
+    worktreePath: string
+  ): Promise<
+    { ok: true; testerTabId: string; reused: boolean; runId: string } | { ok: false; error: string }
+  >
+  deleteTestRun(worktreePath: string, runId: string): Promise<boolean>
+  sendTestRun(
+    worktreePath: string,
+    runId: string
+  ): Promise<{ ok: true; tabId: string; woke: boolean } | { ok: false; error: string; tabId?: string }>
   editReviewSubmission(
     worktreePath: string,
     id: string,

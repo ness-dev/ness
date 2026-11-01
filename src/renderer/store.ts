@@ -39,9 +39,11 @@ import {
   EMPTY_REVIEW_COMMENTS,
   EMPTY_REVIEW_REQUESTS,
   EMPTY_REVIEW_SUBMISSIONS,
+  EMPTY_TEST_RUNS,
   type ReviewComment,
   type ReviewRequest,
-  type ReviewSubmission
+  type ReviewSubmission,
+  type TestRun
 } from '../shared/state/reviews'
 import { latestAgentReviewStatus, type ReviewStatus } from '../shared/review-status'
 import {
@@ -1194,6 +1196,15 @@ export function useReviewRequests(worktreePath: string | null): ReviewRequest[] 
     worktreePath
       ? s.reviews.byPath[worktreePath]?.requests ?? EMPTY_REVIEW_REQUESTS
       : EMPTY_REVIEW_REQUESTS
+  )
+}
+
+/** Tester runs for one worktree, oldest first. */
+export function useTestRuns(worktreePath: string | null): TestRun[] {
+  return useAppState((s) =>
+    worktreePath
+      ? s.reviews.byPath[worktreePath]?.testRuns ?? EMPTY_TEST_RUNS
+      : EMPTY_TEST_RUNS
   )
 }
 

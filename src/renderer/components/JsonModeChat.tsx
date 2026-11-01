@@ -877,6 +877,27 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'review-request') {
+    return {
+      label: from ? `Review Request · from ${from}` : 'Review Request',
+      note: 'you were opened to review this branch',
+      brand: true
+    }
+  }
+  if (source === 'test-request') {
+    return {
+      label: from ? `Test Request · from ${from}` : 'Test Request',
+      note: 'you were opened to test this branch',
+      brand: true
+    }
+  }
+  if (source === 'test-results') {
+    return {
+      label: from ? `Test Results · from ${from}` : 'Test Results',
+      note: 'posted in the Review tab',
+      brand: true
+    }
+  }
   if (source === 'worktree-kickoff') {
     return {
       label: from ? `Task Brief · from ${from}` : 'Task Brief',

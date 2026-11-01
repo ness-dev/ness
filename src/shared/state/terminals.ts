@@ -66,6 +66,9 @@ export interface TerminalTab {
    *  asked for the review. Its submitted review is delivered back there,
    *  so routing doesn't fall back to guessing the most recent tab. */
   reviewOf?: string
+  /** For a tester Chat tab opened by `request_test_run`: the tab whose
+   *  work it validates. The finished results are delivered back there. */
+  testOf?: string
   /** For json-claude tabs whose agent assigns its own conversation ids
    *  (Codex threads): that id. The tab id and sessionId stay Ness's. */
   providerSessionId?: string

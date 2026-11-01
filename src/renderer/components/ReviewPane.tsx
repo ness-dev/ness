@@ -6,7 +6,7 @@ import { ReviewDiffPane } from './ReviewDiffPane'
 import { ResizeHandle } from './ResizeHandle'
 import { Tooltip } from './Tooltip'
 import { useBackend } from '../backend'
-import { useReviewComments, useReviewRequests, useReviewSubmissions } from '../store'
+import { useReviewComments, useReviewRequests, useReviewSubmissions, useTestRuns } from '../store'
 import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
 import { ReviewTimeline } from './ReviewTimeline'
 import { ReviewStatusIcon } from './ReviewStatusIcon'
@@ -38,7 +38,18 @@ export function ReviewPane({
   const comments = useReviewComments(worktreePath)
   const submissions = useReviewSubmissions(worktreePath)
   const requests = useReviewRequests(worktreePath)
+  const testRuns = useTestRuns(worktreePath)
   const [view, setView] = useState<'diff' | 'reviews'>('diff')
+  // A test run is only worth watching in the Reviews view, so switch to
+  // it when one starts while this pane is open. Not on mount: reopening
+  // the pane shouldn't override the view the user last picked.
+  const seenRunsRef = useRef({ worktreePath, count: testRuns.length })
+  useEffect(() => {
+    const seen = seenRunsRef.current
+    const grew = seen.worktreePath === worktreePath && testRuns.length > seen.count
+    seenRunsRef.current = { worktreePath, count: testRuns.length }
+    if (grew && testRuns.at(-1)?.status === 'running') setView('reviews')
+  }, [worktreePath, testRuns])
   // Comment the diff should scroll to, set by clicking one in the
   // Reviews view. The nonce re-triggers a jump to the same comment.
   const [focusComment, setFocusComment] = useState<{ id: string; nonce: number } | null>(null)
@@ -337,7 +348,9 @@ export function ReviewPane({
                 {v === 'reviews' && (
                   <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
                 )}
-                {v === 'diff' ? 'Diff' : `Reviews${submissions.length ? ` (${submissions.length})` : ''}`}
+                {v === 'diff'
+                  ? 'Diff'
+                  : `Reviews${submissions.length + testRuns.length ? ` (${submissions.length + testRuns.length})` : ''}`}
               </button>
             ))}
           </div>
@@ -452,6 +465,7 @@ export function ReviewPane({
           submissions={submissions}
           comments={comments}
           commits={commits}
+          testRuns={testRuns}
           onJumpToComment={handleJumpToComment}
         />
       )}

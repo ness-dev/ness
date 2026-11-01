@@ -142,6 +142,7 @@ import {
   type AgentReviewDelivery,
   type ReviewAgentChoice,
   DEFAULT_REVIEW_PROMPT,
+  DEFAULT_TEST_PROMPT,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -167,6 +168,15 @@ import {
 } from './chat-delivery'
 import { listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
+import {
+  buildCiGreenTestContext,
+  buildUserTestContext,
+  finishTestRun,
+  reportTestStep,
+  requestTestRun,
+  sendTestRunResults,
+  type TestRunServiceDeps
+} from './test-run-service'
 import {
   agentAuthor,
   buildUserReviewContext,
@@ -1111,6 +1121,11 @@ function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
  *  mode that still lets it read the branch and call the review tools;
  *  the rest of "don't edit this branch" is said in the request prompt. */
 const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
+/** A tester has to run things — test suites, dev servers — which plan
+ *  mode forbids, but it has no more business editing the branch than a
+ *  reviewer. 'default' lets it run, with each command it hasn't been
+ *  granted put to the user, and keeps edits behind a prompt too. */
+const TESTER_PERMISSION_MODE: JsonClaudePermissionMode = 'default'
 
 function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
   if (chatRouter.hasSession(sessionId)) return
@@ -1138,7 +1153,9 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): void {
       // reviewer that is reloaded or woken comes back in the same mode.
       defaultPermissionMode: tab.reviewOf
         ? REVIEWER_PERMISSION_MODE
-        : store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
+        : tab.testOf
+          ? TESTER_PERMISSION_MODE
+          : store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
     }
   })
   chatRouter.seedFromTranscript(sessionId, worktreePath)
@@ -1337,6 +1354,34 @@ const reviewSpawner = new ReviewSpawner(store, {
   isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
   requestReview: (worktreePath, requesterTabId, context) =>
     requestReview(reviewServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
+})
+
+const testRunServiceDeps: TestRunServiceDeps = {
+  store,
+  deliver: reviewServiceDeps.deliver,
+  openTester: (worktreePath, requesterTabId, prompt, opts) =>
+    panesFSM.openTesterTab(worktreePath, requesterTabId, prompt, opts),
+  // Testers run as whatever agent and model reviews are set to: one
+  // "second agent" choice rather than two that drift apart.
+  testDefaults: (worktreePath) => {
+    const state = store.getSnapshot().state
+    const s = state.settings
+    const repoRoot = state.worktrees.list.find((w) => w.path === worktreePath)?.repoRoot
+    return {
+      agentKind: s.reviewAgent === 'inherit' ? undefined : s.reviewAgent,
+      model: s.reviewModel || undefined,
+      prompt: s.testPrompt || DEFAULT_TEST_PROMPT,
+      repoInstructions: repoRoot ? loadRepoConfig(repoRoot).testInstructions : undefined
+    }
+  }
+}
+
+const testSpawner = new ReviewSpawner(store, {
+  name: 'test-spawner',
+  isEnabled: () => store.getSnapshot().state.settings.autoTestOnGreenCi === true,
+  buildContext: buildCiGreenTestContext,
+  requestReview: (worktreePath, requesterTabId, context) =>
+    requestTestRun(testRunServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
 })
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
@@ -4543,6 +4588,24 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setTestPrompt', (_ctx, prompt: string) => {
+    if (typeof prompt !== 'string') return false
+    const trimmed = prompt.trim()
+    if (trimmed && trimmed !== DEFAULT_TEST_PROMPT) config.testPrompt = trimmed
+    else delete config.testPrompt
+    saveConfig(config)
+    store.dispatch({ type: 'settings/testPromptChanged', payload: trimmed || DEFAULT_TEST_PROMPT })
+    return true
+  })
+
+  transport.onRequest('config:setAutoTestOnGreenCi', (_ctx, enabled: boolean) => {
+    if (enabled) config.autoTestOnGreenCi = true
+    else delete config.autoTestOnGreenCi
+    saveConfig(config)
+    store.dispatch({ type: 'settings/autoTestOnGreenCiChanged', payload: enabled === true })
+    return true
+  })
+
   transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
     if (enabled) config.autoReviewOnGreenCi = true
     else delete config.autoReviewOnGreenCi
@@ -5081,6 +5144,44 @@ function registerIpcHandlers(): void {
     return result
   })
 
+  // "Request AI test run" in the PR panel — the tester counterpart of
+  // reviews:requestForWorktree, aimed at the same author tab.
+  transport.onRequest('tests:requestForWorktree', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) {
+      return { ok: false, error: 'No worktree' }
+    }
+    const state = store.getSnapshot().state
+    const author = pickAuthorTab(state, worktreePath)
+    if (!author) {
+      return {
+        ok: false,
+        error: 'No Chat tab in this worktree to test for — open one and try again'
+      }
+    }
+    const result = requestTestRun(
+      testRunServiceDeps,
+      worktreePath,
+      author,
+      buildUserTestContext(state.prs.byPath[worktreePath]),
+      'user'
+    )
+    log('test-run', `user requested test run for ${worktreePath}: ${JSON.stringify(result)}`)
+    return result
+  })
+
+  transport.onRequest('tests:deleteRun', (_ctx, worktreePath: string, runId: string) => {
+    if (typeof worktreePath !== 'string' || typeof runId !== 'string') return false
+    store.dispatch({ type: 'reviews/testRunDeleted', payload: { worktreePath, runId } })
+    return true
+  })
+
+  transport.onRequest('tests:sendRun', (_ctx, worktreePath: string, runId: string) => {
+    if (typeof worktreePath !== 'string' || typeof runId !== 'string') {
+      return { ok: false, error: 'Invalid request' }
+    }
+    return sendTestRunResults(testRunServiceDeps, worktreePath, runId)
+  })
+
   transport.onRequest('reviews:listChatTabs', (_ctx, worktreePath: string) => {
     if (typeof worktreePath !== 'string' || !worktreePath) return []
     return listWorktreeChatTabs(worktreePath)
@@ -5318,6 +5419,7 @@ async function runBoot(): Promise<void> {
   ciNotifier.start()
 
   reviewSpawner.start()
+  testSpawner.start()
 
   autoSleepMonitor.start()
 
@@ -5525,6 +5627,16 @@ async function runBoot(): Promise<void> {
             holdAsDraft: store.getSnapshot().state.settings.agentReviewDelivery === 'draft'
           }
         )
+      }
+    },
+    tests: {
+      request: (worktreePath, callerTabId, context) =>
+        requestTestRun(testRunServiceDeps, worktreePath, callerTabId, context),
+      reportStep: (worktreePath, callerTabId, input) =>
+        reportTestStep(store, worktreePath, callerTabId, input),
+      finish: async (worktreePath, callerTabId, input) => {
+        const headSha = (await resolveCommitSha(worktreePath, 'HEAD')) ?? undefined
+        return finishTestRun(testRunServiceDeps, worktreePath, callerTabId, { ...input, headSha })
       }
     },
     browser: {

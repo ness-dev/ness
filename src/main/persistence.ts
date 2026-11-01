@@ -398,6 +398,9 @@ export interface Config {
   reviewModel?: string
   /** Absent ⇒ DEFAULT_REVIEW_PROMPT. */
   reviewPrompt?: string
+  /** Absent ⇒ DEFAULT_TEST_PROMPT. */
+  testPrompt?: string
+  autoTestOnGreenCi?: boolean
 }
 
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'

@@ -95,6 +95,8 @@ export type JsonClaudeAutomationSource =
   | 'worktree-autoname'
   | 'review'
   | 'review-request'
+  | 'test-request'
+  | 'test-results'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
@@ -103,7 +105,9 @@ const AUTOMATION_SOURCES: readonly string[] = [
   'worktree-kickoff',
   'worktree-autoname',
   'review',
-  'review-request'
+  'review-request',
+  'test-request',
+  'test-results'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -117,6 +121,12 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // sets of instructions would fight, and a custom prompt should win.
   'review-request':
     'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.',
+  // Same split as review-request: the user's `testPrompt` says what to
+  // validate, this says how to report it.
+  'test-request':
+    'How to report this test run: call `report_test_step` as you work, not at the end — once with status "running" when you start a check, then again with the same `step_id` and its outcome ("passed", "failed" or "skipped") and a `detail` saying what you ran and what came back. Attach screenshot paths from `screenshot_tab` to the step they belong to. Each call shows up in the user\'s Review tab straight away, so they can watch the run. When every check is done, call `finish_test_run` once with an overall result and a summary — that is what sends the results back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author: do not edit tracked files. Use the ness-control `create_shell` tool for long-running processes such as dev servers, so they keep streaming and the user can see them, and `kill_shell` them before you finish.',
+  'test-results':
+    'These are the results of a test run on your branch. A failed step is a reproduced problem: fix it if it is a real defect in your change, then call `request_test_run` again so the tester can confirm the fix. If a failure is down to the environment or the test itself rather than your change, say so instead of changing code to make it pass. If you do not have that tool, just address the results.',
   review:
     'Address this review. The id in [brackets] after each comment works with the ness-control MCP tools: call `reply_to_comment` to answer a comment or push back on it, and `resolve_comment` once you have fixed it, so the reviewer and the user can see where each one stands in the Review tab. A comment you disagree with deserves a reply rather than a silent change. If you do not have those tools, just address the feedback.',
   'worktree-kickoff':

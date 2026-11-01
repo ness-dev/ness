@@ -13,6 +13,8 @@ export interface ChatTabInfo {
   asleep: boolean
   /** Set when this tab is a reviewer: the tab that asked for the review. */
   reviewOf?: string
+  /** Set when this tab is a tester: the tab that asked for the test run. */
+  testOf?: string
 }
 
 /** The tab with this id *in this worktree*, or null.
@@ -35,20 +37,44 @@ export function findTabInWorktree(
   return null
 }
 
+export type HelperRole = 'reviewer' | 'tester'
+
+/** The Chat tab opened to review (or test) for `requesterTabId`, if one
+ *  is open. */
+export function findHelperTab(
+  state: AppState,
+  worktreePath: string,
+  requesterTabId: string,
+  role: HelperRole
+): TerminalTab | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type !== 'json-claude') continue
+      const link = role === 'reviewer' ? tab.reviewOf : tab.testOf
+      if (link === requesterTabId) return tab
+    }
+  }
+  return null
+}
+
 /** The reviewer Chat tab opened for `requesterTabId`, if one is open. */
 export function findReviewerTab(
   state: AppState,
   worktreePath: string,
   requesterTabId: string
 ): TerminalTab | null {
-  const tree = state.terminals.panes[worktreePath]
-  if (!tree) return null
-  for (const leaf of getLeaves(tree)) {
-    for (const tab of leaf.tabs) {
-      if (tab.type === 'json-claude' && tab.reviewOf === requesterTabId) return tab
-    }
-  }
-  return null
+  return findHelperTab(state, worktreePath, requesterTabId, 'reviewer')
+}
+
+/** The tester Chat tab opened for `requesterTabId`, if one is open. */
+export function findTesterTab(
+  state: AppState,
+  worktreePath: string,
+  requesterTabId: string
+): TerminalTab | null {
+  return findHelperTab(state, worktreePath, requesterTabId, 'tester')
 }
 
 export function tabLabel(tab: { label: string; customLabel?: string }): string {
@@ -75,6 +101,7 @@ export function listChatTabs(state: AppState, worktreePath: string): ChatTabInfo
         lastActiveAt: entries?.[entries.length - 1]?.timestamp ?? 0,
         asleep: tab.mode === 'asleep',
         ...(tab.reviewOf ? { reviewOf: tab.reviewOf } : {}),
+        ...(tab.testOf ? { testOf: tab.testOf } : {}),
         order: out.length
       })
     }

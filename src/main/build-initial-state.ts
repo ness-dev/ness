@@ -30,6 +30,9 @@ import {
   type ReviewRequest,
   type ReviewSubmission,
   type ReviewsState,
+  type TestRun,
+  type TestRunStatus,
+  type TestStepStatus,
   type WorktreeReview
 } from '../shared/state/reviews'
 import { ruleKey, type StoredPermissionRule } from '../shared/permission-match'
@@ -46,6 +49,7 @@ import {
   resolveBottomIconOrder,
   type PreventSleepMode,
   DEFAULT_REVIEW_PROMPT,
+  DEFAULT_TEST_PROMPT,
   type BottomIconKey
 } from '../shared/state/settings'
 import {
@@ -115,6 +119,47 @@ function isReviewAuthor(a: unknown): a is ReviewAuthor {
   return o.kind === 'human' || (o.kind === 'agent' && typeof o.tabId === 'string')
 }
 
+const TEST_STEP_STATUSES = new Set<TestStepStatus>(['running', 'passed', 'failed', 'skipped'])
+const TEST_RUN_STATUSES = new Set<TestRunStatus>(['running', 'passed', 'failed', 'inconclusive'])
+
+/** A run still marked running at boot can't be: its tester's process
+ *  died with the app. Closing it out stops the Review tab showing a
+ *  spinner that will never resolve. */
+function sanitizeTestRuns(raw: unknown): TestRun[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(
+      (r) =>
+        r &&
+        typeof r === 'object' &&
+        typeof r.id === 'string' &&
+        typeof r.context === 'string' &&
+        typeof r.createdAt === 'number' &&
+        isReviewAuthor(r.requester) &&
+        isReviewAuthor(r.tester) &&
+        TEST_RUN_STATUSES.has(r.status) &&
+        Array.isArray(r.steps)
+    )
+    .map((r: TestRun) => {
+      const steps = r.steps.filter(
+        (s) =>
+          s &&
+          typeof s === 'object' &&
+          typeof s.id === 'string' &&
+          typeof s.title === 'string' &&
+          TEST_STEP_STATUSES.has(s.status)
+      )
+      if (r.status !== 'running') return { ...r, steps }
+      return {
+        ...r,
+        status: 'inconclusive' as const,
+        summary: r.summary || 'Ness quit before the tester finished this run.',
+        finishedAt: r.finishedAt ?? r.createdAt,
+        steps: steps.map((s) => (s.status === 'running' ? { ...s, status: 'skipped' as const } : s))
+      }
+    })
+}
+
 /** `config.json` is user-editable; drop entries that would crash the
  *  Review viewer rather than fail the whole boot. Optional fields added
  *  later (resolvedBy, headSha) are stripped when malformed rather than
@@ -126,6 +171,7 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
     const comments = (entry as { comments?: unknown } | null)?.comments
     const rawSubmissions = (entry as { submissions?: unknown } | null)?.submissions
     const rawRequests = (entry as { requests?: unknown } | null)?.requests
+    const rawTestRuns = (entry as { testRuns?: unknown } | null)?.testRuns
     if (!Array.isArray(comments)) continue
     const submissions: ReviewSubmission[] = Array.isArray(rawSubmissions)
       ? rawSubmissions
@@ -184,10 +230,19 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
           ...(keepAt ? { resolvedAt } : {})
         }
       })
-    if (valid.length === 0 && submissions.length === 0 && requests.length === 0) continue
+    const testRuns = sanitizeTestRuns(rawTestRuns)
+    if (
+      valid.length === 0 &&
+      submissions.length === 0 &&
+      requests.length === 0 &&
+      testRuns.length === 0
+    ) {
+      continue
+    }
     const review: WorktreeReview = { comments: valid }
     if (submissions.length > 0) review.submissions = submissions
     if (requests.length > 0) review.requests = requests
+    if (testRuns.length > 0) review.testRuns = testRuns
     out[path] = review
   }
   return out
@@ -346,6 +401,8 @@ export function buildInitialAppState(
           : 'inherit',
       reviewModel: config.reviewModel || '',
       reviewPrompt: config.reviewPrompt || DEFAULT_REVIEW_PROMPT,
+      testPrompt: config.testPrompt || DEFAULT_TEST_PROMPT,
+      autoTestOnGreenCi: config.autoTestOnGreenCi === true,
       // The temporary "+1h" timer never survives a relaunch — always seed null.
       preventSleepUntil: null,
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),

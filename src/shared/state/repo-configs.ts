@@ -50,6 +50,10 @@ export interface RepoConfig {
   version?: number
   setupCommand?: string
   teardownCommand?: string
+  /** Notes for a tester agent: how to run this repo's checks and dev
+   *  server, test accounts, flows worth exercising. Handed to every test
+   *  run on the repo's worktrees. */
+  testInstructions?: string
   mergeStrategy?: 'squash' | 'merge-commit' | 'fast-forward'
   /** @deprecated use hiddenRightPanels.merge. Migrated on load. */
   hideMergePanel?: boolean

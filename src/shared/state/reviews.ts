@@ -91,12 +91,57 @@ export interface ReviewRequest {
   createdAt: number
 }
 
+export type TestStepStatus = 'running' | 'passed' | 'failed' | 'skipped'
+
+/** One thing a tester checked: "npm test", "log in on the dev server",
+ *  "settings page renders at 375px". Posted while it happens, then
+ *  updated with its outcome, so the Review tab shows a run in progress. */
+export interface TestStep {
+  id: string
+  title: string
+  status: TestStepStatus
+  /** What was run and what came back: the command, the output that
+   *  matters, what the page showed. Markdown. */
+  detail?: string
+  /** Absolute paths of screenshots on the machine running the tester. */
+  screenshots?: string[]
+  startedAt: number
+  updatedAt: number
+}
+
+export type TestRunStatus = 'running' | 'passed' | 'failed' | 'inconclusive'
+
+/** One validation pass over a branch by a tester agent: it runs the
+ *  tests, starts dev servers, drives the browser, and reports each step
+ *  as it goes. Started when the tester is opened; finished when it calls
+ *  finish_test_run, at which point the results go back to `requester`. */
+export interface TestRun {
+  id: string
+  requester: ReviewAuthor
+  tester: ReviewAuthor
+  context: string
+  source: ReviewRequestSource
+  /** True when an already-open tester was asked to run again. */
+  reused: boolean
+  status: TestRunStatus
+  steps: TestStep[]
+  createdAt: number
+  summary?: string
+  finishedAt?: number
+  /** HEAD when the run finished, so the result can be tied to a commit. */
+  headSha?: string
+  /** Delivery of the finished results to the requester. */
+  delivery?: { state: 'sent' | 'failed'; targetTabId?: string; at: number; error?: string }
+}
+
 export interface WorktreeReview {
   comments: ReviewComment[]
   /** Absent ⇒ none. Oldest first. */
   submissions?: ReviewSubmission[]
   /** Absent ⇒ none. Oldest first. */
   requests?: ReviewRequest[]
+  /** Absent ⇒ none. Oldest first. */
+  testRuns?: TestRun[]
 }
 
 export interface ReviewsState {
@@ -158,6 +203,35 @@ export type ReviewsEvent =
     }
   | { type: 'reviews/submissionDeleted'; payload: { worktreePath: string; id: string } }
   | { type: 'reviews/requestRecorded'; payload: { worktreePath: string; request: ReviewRequest } }
+  | { type: 'reviews/testRunStarted'; payload: { worktreePath: string; run: TestRun } }
+  | {
+      type: 'reviews/testStepReported'
+      /** Adds the step, or replaces the run's step with the same id. */
+      payload: { worktreePath: string; runId: string; step: TestStep }
+    }
+  | {
+      type: 'reviews/testRunFinished'
+      payload: {
+        worktreePath: string
+        runId: string
+        status: Exclude<TestRunStatus, 'running'>
+        summary: string
+        at: number
+        headSha?: string
+      }
+    }
+  | {
+      type: 'reviews/testRunDelivered'
+      payload: {
+        worktreePath: string
+        runId: string
+        state: 'sent' | 'failed'
+        targetTabId?: string
+        at: number
+        error?: string
+      }
+    }
+  | { type: 'reviews/testRunDeleted'; payload: { worktreePath: string; runId: string } }
   | { type: 'reviews/worktreeRemoved'; payload: { worktreePath: string } }
 
 export const initialReviews: ReviewsState = {
@@ -167,10 +241,11 @@ export const initialReviews: ReviewsState = {
 export const EMPTY_REVIEW_COMMENTS: ReviewComment[] = []
 export const EMPTY_REVIEW_SUBMISSIONS: ReviewSubmission[] = []
 export const EMPTY_REVIEW_REQUESTS: ReviewRequest[] = []
+export const EMPTY_TEST_RUNS: TestRun[] = []
 
-/** Replace one worktree's comments, submissions and/or requests. An
- *  entry with none of them is dropped, so an absent key keeps meaning
- *  "nothing here". */
+/** Replace one worktree's comments, submissions, requests and/or test
+ *  runs. An entry with none of them is dropped, so an absent key keeps
+ *  meaning "nothing here". */
 function withEntry(
   state: ReviewsState,
   worktreePath: string,
@@ -180,16 +255,40 @@ function withEntry(
   const comments = patch.comments ?? prev?.comments ?? EMPTY_REVIEW_COMMENTS
   const submissions = 'submissions' in patch ? patch.submissions : prev?.submissions
   const requests = 'requests' in patch ? patch.requests : prev?.requests
+  const testRuns = 'testRuns' in patch ? patch.testRuns : prev?.testRuns
   const byPath = { ...state.byPath }
-  if (comments.length === 0 && !submissions?.length && !requests?.length) {
+  if (
+    comments.length === 0 &&
+    !submissions?.length &&
+    !requests?.length &&
+    !testRuns?.length
+  ) {
     delete byPath[worktreePath]
   } else {
     const entry: WorktreeReview = { comments }
     if (submissions?.length) entry.submissions = submissions
     if (requests?.length) entry.requests = requests
+    if (testRuns?.length) entry.testRuns = testRuns
     byPath[worktreePath] = entry
   }
   return { ...state, byPath }
+}
+
+function patchTestRun(
+  state: ReviewsState,
+  worktreePath: string,
+  id: string,
+  patch: (r: TestRun) => TestRun
+): ReviewsState {
+  const runs = state.byPath[worktreePath]?.testRuns
+  if (!runs) return state
+  const i = runs.findIndex((r) => r.id === id)
+  if (i === -1) return state
+  const next = patch(runs[i])
+  if (next === runs[i]) return state
+  return withEntry(state, worktreePath, {
+    testRuns: [...runs.slice(0, i), next, ...runs.slice(i + 1)]
+  })
 }
 
 function withComments(
@@ -339,6 +438,57 @@ export function reviewsReducer(state: ReviewsState, event: ReviewsEvent): Review
       const existing = state.byPath[worktreePath]?.requests ?? EMPTY_REVIEW_REQUESTS
       if (existing.some((r) => r.id === request.id)) return state
       return withEntry(state, worktreePath, { requests: [...existing, request] })
+    }
+    case 'reviews/testRunStarted': {
+      const { worktreePath, run } = event.payload
+      const existing = state.byPath[worktreePath]?.testRuns ?? EMPTY_TEST_RUNS
+      if (existing.some((r) => r.id === run.id)) return state
+      return withEntry(state, worktreePath, { testRuns: [...existing, run] })
+    }
+    case 'reviews/testStepReported': {
+      const { worktreePath, runId, step } = event.payload
+      return patchTestRun(state, worktreePath, runId, (r) => {
+        const i = r.steps.findIndex((s) => s.id === step.id)
+        if (i === -1) return { ...r, steps: [...r.steps, step] }
+        return { ...r, steps: [...r.steps.slice(0, i), step, ...r.steps.slice(i + 1)] }
+      })
+    }
+    case 'reviews/testRunFinished': {
+      const { worktreePath, runId, status, summary, at, headSha } = event.payload
+      return patchTestRun(state, worktreePath, runId, (r) => {
+        // A step still marked running when the run ends was abandoned;
+        // leaving its spinner going would read as work still happening.
+        const steps = r.steps.some((s) => s.status === 'running')
+          ? r.steps.map((s) =>
+              s.status === 'running' ? { ...s, status: 'skipped' as const, updatedAt: at } : s
+            )
+          : r.steps
+        const next: TestRun = { ...r, status, summary, finishedAt: at, steps }
+        if (headSha) next.headSha = headSha
+        return next
+      })
+    }
+    case 'reviews/testRunDelivered': {
+      const { worktreePath, runId, state: delivered, targetTabId, at, error } = event.payload
+      return patchTestRun(state, worktreePath, runId, (r) => ({
+        ...r,
+        delivery: {
+          state: delivered,
+          at,
+          ...(targetTabId ? { targetTabId } : {}),
+          ...(delivered === 'failed' ? { error: error ?? 'Delivery failed' } : {})
+        }
+      }))
+    }
+    case 'reviews/testRunDeleted': {
+      const { worktreePath, runId } = event.payload
+      const runs = state.byPath[worktreePath]?.testRuns
+      if (!runs) return state
+      const i = runs.findIndex((r) => r.id === runId)
+      if (i === -1) return state
+      return withEntry(state, worktreePath, {
+        testRuns: [...runs.slice(0, i), ...runs.slice(i + 1)]
+      })
     }
     case 'reviews/worktreeRemoved': {
       const { worktreePath } = event.payload

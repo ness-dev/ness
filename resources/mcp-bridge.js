@@ -485,6 +485,68 @@ const TOOLS = [
     }
   },
   {
+    name: 'request_test_run',
+    description:
+      "Ask for your work on this branch to be tested by running it. Ness opens a Tester Chat tab in this worktree that runs the project's checks, starts dev servers, drives a browser through the flows you changed, and reports each step live in the Review tab. When it finishes, the results come back to YOU as a message.\n\nUse this alongside or instead of request_review when the change has behaviour worth proving — a UI flow, an API, a CLI — rather than just code to read. Say so in your reply, then end your turn; you will be woken when the results arrive, so do not poll or wait. Calling it again asks the same tester to run again, e.g. after you fixed what it found.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: {
+          type: 'string',
+          description:
+            'What you changed and how to exercise it, for a tester who has none of your context: the user-visible behaviour, how to start the app (commands, ports, env), which pages or commands to try, test accounts, and what you already verified yourself.'
+        }
+      },
+      required: ['context']
+    }
+  },
+  {
+    name: 'report_test_step',
+    description:
+      "Testers only: post one check of the current test run to the Review tab, where the user watches it live. Call it with status 'running' when you start a check (omit step_id; the result gives you one), then call it again with that step_id and the outcome. `detail` is what you ran and what came back — the command and the output that matters, or what the page showed — so a failure can be reproduced from it alone. Attach absolute screenshot paths (from screenshot_tab) in `screenshots`; they accumulate across updates of the same step.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        step_id: {
+          type: 'string',
+          description: 'Id of a step from an earlier report_test_step call, to update it. Omit to add a new step.'
+        },
+        title: {
+          type: 'string',
+          description: "Short name for the check, e.g. 'npm test' or 'Sign-up form rejects an empty email'. Required for a new step."
+        },
+        status: {
+          type: 'string',
+          enum: ['running', 'passed', 'failed', 'skipped'],
+          description: "'running' while it is in progress, then its outcome. 'skipped' for a check you could not run, with the reason in detail."
+        },
+        detail: { type: 'string', description: 'What was run and what happened. Markdown is fine.' },
+        screenshots: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Absolute paths of screenshots for this step.'
+        }
+      },
+      required: ['status']
+    }
+  },
+  {
+    name: 'finish_test_run',
+    description:
+      "Testers only: end the current test run with an overall result and a summary, and send the results to the tab that asked for it. Call it once, after your last report_test_step. 'passed': every check that matters passed. 'failed': at least one check found a real problem. 'inconclusive': you could not get far enough to tell (the app would not start, a dependency was missing) — say what blocked you.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['passed', 'failed', 'inconclusive'] },
+        summary: {
+          type: 'string',
+          description: 'What you tested, what broke and how to reproduce it, and anything you could not cover.'
+        }
+      },
+      required: ['status', 'summary']
+    }
+  },
+  {
     name: 'list_browser_tabs',
     description:
       'List the browser tabs currently open in the SAME worktree as the calling agent. Returns [{id, url, title}]. Use the returned ids with screenshot_tab, get_tab_dom, get_tab_url, and get_tab_console_logs.',
@@ -1054,6 +1116,55 @@ async function handleToolCall(name, args) {
       ') to look at this branch. Its review comes back to you as a message when it submits. ' +
       'End your turn now; you will be woken when it arrives.'
     )
+  }
+  if (name === 'request_test_run') {
+    if (!args || typeof args.context !== 'string' || !args.context.trim()) {
+      throw new Error('context is required')
+    }
+    const r = await callControl('POST', '/tests/request', { context: args.context })
+    const who = r.reused ? 'Asked the existing tester' : 'Opened a Tester Chat tab'
+    return (
+      who +
+      ' (tab ' +
+      r.testerTabId +
+      ') to test this branch. Its steps show up in the Review tab as it works, and the results come back to you as a message when it finishes. ' +
+      'End your turn now; you will be woken when they arrive.'
+    )
+  }
+  if (name === 'report_test_step') {
+    const statuses = ['running', 'passed', 'failed', 'skipped']
+    if (!args || !statuses.includes(args.status)) {
+      throw new Error('status must be "running", "passed", "failed", or "skipped"')
+    }
+    if (args.screenshots !== undefined && !Array.isArray(args.screenshots)) {
+      throw new Error('screenshots must be an array of absolute paths')
+    }
+    const r = await callControl('POST', '/tests/steps', {
+      stepId: typeof args.step_id === 'string' ? args.step_id : undefined,
+      title: typeof args.title === 'string' ? args.title : undefined,
+      status: args.status,
+      detail: typeof args.detail === 'string' ? args.detail : undefined,
+      screenshots: args.screenshots
+    })
+    return (
+      'Step ' + r.stepId + ' "' + r.title + '" is ' + r.status + '.' +
+      (r.status === 'running' ? ' Call report_test_step with step_id ' + r.stepId + ' once you have its outcome.' : '')
+    )
+  }
+  if (name === 'finish_test_run') {
+    const statuses = ['passed', 'failed', 'inconclusive']
+    if (!args || !statuses.includes(args.status)) {
+      throw new Error('status must be "passed", "failed", or "inconclusive"')
+    }
+    const r = await callControl('POST', '/tests/finish', {
+      status: args.status,
+      summary: typeof args.summary === 'string' ? args.summary : ''
+    })
+    const what = 'Test run finished (' + r.status + ', ' + r.stepCount + ' step' + (r.stepCount === 1 ? '' : 's') + ')'
+    if (r.delivery && r.delivery.ok) {
+      return what + ' and the results were delivered to tab ' + r.delivery.tabId + (r.delivery.woke ? ' (woke it)' : '') + '.'
+    }
+    return what + ', but delivering the results failed: ' + ((r.delivery && r.delivery.error) || 'unknown error') + '. They are still in the Review tab.'
   }
   if (name === 'list_review_comments') {
     const q = new URLSearchParams()
