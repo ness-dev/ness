@@ -49,6 +49,7 @@ export function useWorktreeListModel(
       buildWorktreeListModel({
         worktrees: merged.flatWorktrees,
         repoRoots: merged.repoRoots,
+        repoBackendId: merged.repoBackendId,
         pendingWorktrees: merged.pendingWorktrees,
         pendingDeletions: merged.pendingDeletions,
         tabsByWorktree: merged.tabsByWorktree,

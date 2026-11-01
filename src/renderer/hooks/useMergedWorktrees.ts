@@ -122,6 +122,19 @@ export function useMergedWorktrees(): MergedWorktreeData {
           worktree
         })
         merged.flatWorktrees.push(worktree)
+        if (
+          merged.pathBackendId[worktree.path] !== undefined &&
+          merged.pathBackendId[worktree.path] !== backendId
+        ) {
+          // The documented composite-identity gap, actually happening:
+          // identical absolute worktree paths on two hosts. Everything
+          // path-keyed (routing, panes, selection) is last-writer-wins
+          // from here, so say so loudly instead of failing quietly.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[fleet] worktree path exists on two backends — routing is unreliable for it: ${worktree.path} (${merged.pathBackendId[worktree.path]} vs ${backendId})`
+          )
+        }
         merged.pathBackendId[worktree.path] = backendId
       }
 

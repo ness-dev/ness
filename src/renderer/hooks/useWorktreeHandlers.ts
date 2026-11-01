@@ -3,6 +3,8 @@ import type { AddRepoResult, Worktree, PendingWorktree, PRStatus, TerminalTab, A
 import { markTerminalClosing } from '../components/XTerminal'
 import { useActiveBackend } from '../store'
 import { useGlobalBackend, useBackendForWorktree, useBackendForRepo } from '../backend-routing'
+import { getBackendFor } from '../backend'
+import type { SectionRepoRoot } from '../worktree-list-model'
 import { randomUUID } from '../uuid'
 
 interface UseWorktreeHandlersArgs {
@@ -178,16 +180,23 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   }, [repoRoots, setActiveWorktreeId])
 
   const handleRemoveRepo = useCallback(
-    async (root: string) => {
-      await backend.removeRepo(root)
+    async (roots: SectionRepoRoot[]) => {
+      // A merged section spans hosts, and removing "the repo" means
+      // removing it everywhere it appears — each root detached via its
+      // own backend. Detach only: nothing on any host's disk is touched.
+      // Partial failure just leaves that host's section behind, visibly.
+      await Promise.allSettled(
+        roots.map((entry) => getBackendFor(entry.backendId).removeRepo(entry.repoRoot))
+      )
       // Main dispatches reposChanged + listChanged. If our current focus is
       // about to disappear, switch to whatever's first in the remaining list.
+      const removed = new Set(roots.map((entry) => entry.repoRoot))
       if (activeWorktreeId) {
         const stillExists = worktrees.some(
-          (w) => w.path === activeWorktreeId && w.repoRoot !== root
+          (w) => w.path === activeWorktreeId && !removed.has(w.repoRoot)
         )
         if (!stillExists) {
-          const next = worktrees.find((w) => w.repoRoot !== root)
+          const next = worktrees.find((w) => !removed.has(w.repoRoot))
           setActiveWorktreeId(next?.path ?? null)
         }
       }

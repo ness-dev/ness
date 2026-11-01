@@ -6,6 +6,7 @@ import type { GroupKey } from '../../shared/worktree-sort'
 import type {
   WorktreeListModel,
   WorktreeRepoSectionModel,
+  SectionRepoRoot,
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
@@ -57,7 +58,7 @@ interface WorktreeListProps {
   onContinueWorktree?: (worktreePath: string, newBranchName: string) => Promise<void>
   onDeleteWorktree?: (path: string) => Promise<void>
   onPruneWorktrees?: (repoRoot: string) => Promise<void>
-  onRemoveRepo?: (repoRoot: string) => Promise<void>
+  onRemoveRepo?: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
 }
 
@@ -334,12 +335,12 @@ export function WorktreeList({
         </button>
       )}
       {model.sections.map((section) => (
-        <div key={section.repoRoot}>
+        <div key={section.scope}>
           {model.showRepoHeaders && (
             <RepoHeader
               section={section}
               variant={variant}
-              onToggle={() => onToggleRepo(section.repoRoot)}
+              onToggle={() => onToggleRepo(section.scope)}
               onRemove={onRemoveRepo}
             />
           )}
@@ -414,7 +415,7 @@ function RepoHeader({
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
-  onRemove?: (repoRoot: string) => Promise<void>
+  onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
 }): JSX.Element {
   return (
     <button
@@ -422,7 +423,7 @@ function RepoHeader({
       className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'
       }`}
-      title={section.repoRoot}
+      title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
       <Chevron collapsed={section.collapsed} />
       <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
@@ -439,10 +440,12 @@ function RepoHeader({
               e.stopPropagation()
               if (
                 window.confirm(
-                  `Remove ${section.repoName} from this window? Worktrees stay on disk.`
+                  section.repoRoots.length > 1
+                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window? Worktrees stay on disk everywhere.`
+                    : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
                 )
               ) {
-                void onRemove(section.repoRoot)
+                void onRemove(section.repoRoots)
               }
             }}
           >

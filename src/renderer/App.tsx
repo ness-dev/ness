@@ -132,6 +132,16 @@ function DesktopApp(): JSX.Element {
   // Local ones are deliberately absent — badging the common case is noise,
   // and the badge's job is to make "this acts on another machine" obvious
   // before you act, not to annotate everything.
+  // Host label per repo root for the new-worktree picker — in fleet view
+  // the same repo can be open on several hosts, and picking the pill is
+  // picking the host.
+  const hostLabelByRoot = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const [root, backendId] of Object.entries(mergedData.repoBackendId)) {
+      out[root] = mergedData.backendMeta[backendId]?.label ?? backendId
+    }
+    return out
+  }, [mergedData.repoBackendId, mergedData.backendMeta])
   const originByPath = useMemo(() => {
     const out: Record<string, string> = {}
     for (const { backendId, backendLabel, worktree } of mergedData.worktrees) {
@@ -1869,6 +1879,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onPRSubmit={handleSubmitNewPRWorktree}
             onCancel={() => setShowNewWorktree(false)}
             repoRoots={repoRoots}
+            hostLabelByRoot={hostLabelByRoot}
             defaultRepoRoot={newWorktreeRepo ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined)}
             initialPRNumber={newWorktreeInitialPRNumber}
             forkSource={newWorktreeForkSource}

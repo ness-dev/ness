@@ -426,3 +426,123 @@ describe('pinned rows', () => {
     expect(row.isPinned).toBe(true)
   })
 })
+
+describe('cross-host section merging', () => {
+  // Fleet view shows the same repo open on several hosts as ONE section.
+  // "Same repo" is repoKeyFor (folder name, case-normalized) — see that
+  // function for why it is deliberately not the git remote URL. The merge
+  // is gated on backend ownership: it must never fire for two same-named
+  // checkouts on one host, and never fire at all when the caller supplies
+  // no ownership info (single-backend callers keep historical behavior).
+  const localRoot = '/Users/mike/dev/ness'
+  const remoteRoot = '/home/mike/code/ness'
+
+  it('merges same-named repos hosted on different backends into one section', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        worktrees: [
+          wt({ path: '/w/local-main', repoRoot: localRoot }),
+          wt({ path: '/w/remote-main', repoRoot: remoteRoot })
+        ]
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+    const section = model.sections[0]
+    expect(section.repoName).toBe('ness')
+    expect(section.repoRoots).toEqual([
+      { backendId: 'local', repoRoot: localRoot },
+      { backendId: 'beta', repoRoot: remoteRoot }
+    ])
+    const paths = section.groups.flatMap((g) => g.rows.map((r) => r.path))
+    expect(paths).toContain('/w/local-main')
+    expect(paths).toContain('/w/remote-main')
+  })
+
+  it('prefers the local backend root as the section primary', () => {
+    // Remote listed FIRST: the primary must still be local's checkout,
+    // since it's the default for new-worktree and open-in-editor.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [remoteRoot, localRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        worktrees: [wt({ path: '/w/a', repoRoot: remoteRoot })]
+      })
+    )
+    expect(model.sections[0].repoRoot).toBe(localRoot)
+  })
+
+  it('never merges two same-named checkouts on the same host', () => {
+    // /a/api and /b/api on one machine are two different repos that
+    // happen to share a folder name.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/a/api', '/b/api'],
+        repoBackendId: { '/a/api': 'local', '/b/api': 'local' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.repoRoot)).toEqual(['/a/api', '/b/api'])
+  })
+
+  it('does not merge without backend ownership info', () => {
+    // Callers that predate multi-backend pass no repoBackendId; their
+    // behavior must be bit-identical to before the merge existed.
+    const model = buildWorktreeListModel(
+      input({ repoRoots: ['/a/api', '/b/api'], worktrees: [] })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.scope)).toEqual(['/a/api', '/b/api'])
+  })
+
+  it('matches repo keys case-insensitively', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/x/Ness', '/y/ness'],
+        repoBackendId: { '/x/Ness': 'local', '/y/ness': 'beta' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+  })
+
+  it('keys collapse state on the shared scope, not either root', () => {
+    // Collapsing a merged section must survive which host's root came
+    // first, so the scope is the repo key rather than a path.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        worktrees: [wt({ path: '/w/a', repoRoot: localRoot })],
+        collapsedRepos: { 'repo:ness': true }
+      })
+    )
+    expect(model.sections[0].scope).toBe('repo:ness')
+    expect(model.sections[0].collapsed).toBe(true)
+  })
+
+  it('pools pending creations and assigned PRs from every member root', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        worktrees: [],
+        pendingWorktrees: [
+          { id: 'p1', repoRoot: localRoot, branchName: 'x', status: 'creating' },
+          { id: 'p2', repoRoot: remoteRoot, branchName: 'y', status: 'creating' },
+          { id: 'p3', repoRoot: '/elsewhere/other', branchName: 'z', status: 'creating' }
+        ] as WorktreeListModelInput['pendingWorktrees'],
+        assignedPRsByRepo: {
+          [localRoot]: [assigned({ number: 1, repoRoot: localRoot })],
+          [remoteRoot]: [assigned({ number: 2, repoRoot: remoteRoot })]
+        }
+      })
+    )
+    const section = model.sections.find((s) => s.repoName === 'ness')!
+    expect(section.pending.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
+    const reviewing = section.groups.find((g) => g.key === 'reviewing')
+    expect(reviewing?.phantomPRs.map((p) => p.number).sort()).toEqual([1, 2])
+  })
+})

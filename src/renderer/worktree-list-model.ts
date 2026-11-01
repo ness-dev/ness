@@ -69,10 +69,29 @@ export interface WorktreeListGroupModel {
   collapsed: boolean
 }
 
-export interface WorktreeRepoSectionModel {
+/** One checkout contributing to a section. Sections usually have exactly
+ *  one; a section merged across hosts (same repo open on several backends
+ *  in fleet view) carries one entry per host. */
+export interface SectionRepoRoot {
+  /** null when the caller supplied no backend info (single-backend
+   *  callers, older tests) — treated as "unknown, don't merge". */
+  backendId: string | null
   repoRoot: string
-  /** Collapse-state scope key. Equal to repoRoot (including the unified
-   *  sentinel), so each repo remembers its own group collapse state. */
+}
+
+export interface WorktreeRepoSectionModel {
+  /** Primary checkout — the local backend's root when the section spans
+   *  hosts, else the only root. Kept as a plain string because most
+   *  consumers (new-worktree default, editor open) want one sensible
+   *  path, not the full list. */
+  repoRoot: string
+  /** Every checkout in this section. Length > 1 only for a section merged
+   *  across hosts; operations that act on "the repo" (remove) must act on
+   *  each entry via its own backend. */
+  repoRoots: SectionRepoRoot[]
+  /** Collapse-state scope key. The repoRoot for ordinary sections, the
+   *  shared repo key for merged ones — so a merged section keeps one
+   *  collapse state no matter which host's root came first. */
   scope: string
   repoName: string
   unified: boolean
@@ -99,6 +118,12 @@ export interface WorktreeListModel {
 export interface WorktreeListModelInput {
   worktrees: Worktree[]
   repoRoots: string[]
+  /** Which backend hosts each repo root. When present, roots on DIFFERENT
+   *  backends sharing a repo key merge into one section (fleet view's
+   *  "same repo, one section"). Roots on the same backend never merge —
+   *  two local checkouts named `api` are different repos. Absent → no
+   *  merging, exactly the historical behavior. */
+  repoBackendId?: Record<string, string>
   pendingWorktrees: PendingWorktree[]
   pendingDeletions: PendingDeletion[]
   /** Flattened tabs per worktree path (pane tree already walked). */
@@ -144,6 +169,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
   const {
     worktrees,
     repoRoots,
+    repoBackendId,
     pendingWorktrees,
     pendingDeletions,
     tabsByWorktree,
@@ -189,10 +215,19 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
   // Bucket worktrees by repo, preserving the user's repo order. Unified mode
   // short-circuits to one synthetic section holding every worktree (and every
   // repo's phantom PRs flattened together).
-  const buckets: { repoRoot: string; worktrees: Worktree[]; assignedPRs: AssignedPR[] }[] = []
+  interface Bucket {
+    repoRoot: string
+    repoRoots: SectionRepoRoot[]
+    scope: string
+    worktrees: Worktree[]
+    assignedPRs: AssignedPR[]
+  }
+  const buckets: Bucket[] = []
   if (unified) {
     buckets.push({
       repoRoot: UNIFIED_REPO_ROOT,
+      repoRoots: [],
+      scope: UNIFIED_REPO_ROOT,
       worktrees,
       assignedPRs: assignedPRsByRepo ? Object.values(assignedPRsByRepo).flat() : []
     })
@@ -203,8 +238,47 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       if (!map.has(wt.repoRoot)) map.set(wt.repoRoot, [])
       map.get(wt.repoRoot)!.push(wt)
     }
-    for (const [repoRoot, wts] of map) {
-      buckets.push({ repoRoot, worktrees: wts, assignedPRs: assignedPRsByRepo?.[repoRoot] ?? [] })
+    // Combine roots that are the same repo on different hosts. Merge rule:
+    // every root in a key-group must sit on a DISTINCT, KNOWN backend —
+    // one host holding two checkouts with the same folder name is two
+    // repos (and callers with no backend info get no merging at all, so
+    // single-backend behavior is untouched). The key-group walk preserves
+    // the user's repo order via first appearance.
+    const keyGroups = new Map<string, string[]>()
+    for (const root of map.keys()) {
+      const key = repoKeyFor(root)
+      const group = keyGroups.get(key)
+      if (group) group.push(root)
+      else keyGroups.set(key, [root])
+    }
+    for (const [key, roots] of keyGroups) {
+      const owners = roots.map((root) => repoBackendId?.[root] ?? null)
+      const allKnown = owners.every((o) => o !== null)
+      const allDistinct = new Set(owners).size === owners.length
+      if (roots.length > 1 && allKnown && allDistinct) {
+        // The local backend's checkout is the primary: it's the cheapest
+        // default for anything that needs "one path" (new-worktree
+        // preselect, open-in-editor on the header).
+        const localIdx = owners.indexOf('local')
+        const primary = localIdx >= 0 ? roots[localIdx] : roots[0]
+        buckets.push({
+          repoRoot: primary,
+          repoRoots: roots.map((root, i) => ({ backendId: owners[i], repoRoot: root })),
+          scope: `repo:${key}`,
+          worktrees: roots.flatMap((root) => map.get(root) ?? []),
+          assignedPRs: roots.flatMap((root) => assignedPRsByRepo?.[root] ?? [])
+        })
+      } else {
+        for (let i = 0; i < roots.length; i++) {
+          buckets.push({
+            repoRoot: roots[i],
+            repoRoots: [{ backendId: owners[i], repoRoot: roots[i] }],
+            scope: roots[i],
+            worktrees: map.get(roots[i]) ?? [],
+            assignedPRs: assignedPRsByRepo?.[roots[i]] ?? []
+          })
+        }
+      }
     }
   }
 
@@ -245,21 +319,23 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
         rows,
         phantomPRs,
         count: rows.length + phantomPRs.length,
-        collapsed: isGroupCollapsed(bucket.repoRoot, group.key)
+        collapsed: isGroupCollapsed(bucket.scope, group.key)
       }
     })
 
+    const memberRoots = new Set(bucket.repoRoots.map((r) => r.repoRoot))
     return {
       repoRoot: bucket.repoRoot,
-      scope: bucket.repoRoot,
+      repoRoots: bucket.repoRoots,
+      scope: bucket.scope,
       repoName: bucket.repoRoot === UNIFIED_REPO_ROOT ? 'All repos' : repoLabelFor(bucket.repoRoot),
       unified: bucket.repoRoot === UNIFIED_REPO_ROOT,
-      collapsed: collapsedRepos[bucket.repoRoot] === true,
+      collapsed: collapsedRepos[bucket.scope] === true,
       groups,
       pending:
         bucket.repoRoot === UNIFIED_REPO_ROOT
           ? pendingWorktrees
-          : pendingWorktrees.filter((p) => p.repoRoot === bucket.repoRoot),
+          : pendingWorktrees.filter((p) => memberRoots.has(p.repoRoot)),
       count: groups.reduce((n, g) => n + g.count, 0)
     }
   })
@@ -296,4 +372,14 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
 
 export function repoLabelFor(repoRoot: string): string {
   return repoRoot.split('/').pop() || repoRoot
+}
+
+/** The identity used to decide that checkouts on different hosts are the
+ *  same repo. Folder name, case-normalized — deliberately not the git
+ *  remote URL, because a fork and its upstream legitimately share an
+ *  origin while being different repos to the user. This is a heuristic;
+ *  refining it (remote-URL corroboration, a manual pin/split) should
+ *  happen HERE and nowhere else. */
+export function repoKeyFor(repoRoot: string): string {
+  return (repoRoot.split('/').pop() || repoRoot).toLowerCase()
 }
