@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStates, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -168,6 +168,30 @@ function DesktopApp(): JSX.Element {
   const [openedWorktrees, setOpenedWorktrees] = useState<ReadonlySet<string>>(
     () => new Set()
   )
+  // Forget worktrees that no longer exist anywhere in the fleet (deleted,
+  // or their backend removed). Pruned against ALL backends, not the
+  // view-filtered list, so flipping to single view doesn't forget which
+  // remote worktrees were open. Without this, a worktree recreated at the
+  // same path — or a backend re-added — would mount eagerly on reappearance
+  // without the user opening it: the fan-out this set exists to prevent.
+  const fleetBackends = useAllBackendStates()
+  useEffect(() => {
+    setOpenedWorktrees((prev) => {
+      if (prev.size === 0) return prev
+      const live = new Set<string>()
+      for (const b of fleetBackends) {
+        for (const w of b.state.worktrees.list) live.add(`${b.backendId}\u0000${w.path}`)
+      }
+      let next: Set<string> | null = null
+      for (const key of prev) {
+        if (!live.has(key)) {
+          next ??= new Set(prev)
+          next.delete(key)
+        }
+      }
+      return next ?? prev
+    })
+  }, [fleetBackends])
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.

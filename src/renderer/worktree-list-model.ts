@@ -375,11 +375,20 @@ export function repoLabelFor(repoRoot: string): string {
 }
 
 /** The identity used to decide that checkouts on different hosts are the
- *  same repo. Folder name, case-normalized — deliberately not the git
- *  remote URL, because a fork and its upstream legitimately share an
- *  origin while being different repos to the user. This is a heuristic;
- *  refining it (remote-URL corroboration, a manual pin/split) should
- *  happen HERE and nowhere else. */
+ *  same repo. Folder name, case-normalized.
+ *
+ *  Deliberately NOT the git remote URL. The common cross-host layout is
+ *  one machine cloned from the user's fork and another from upstream —
+ *  one project, to the user — and those have DIFFERENT origins, so a
+ *  URL key would refuse to merge exactly the case fleet view exists for.
+ *  (A product decision, made knowingly.)
+ *
+ *  The cost is the inverse error: unrelated repos sharing a generic
+ *  folder name (`api`, `web`) on two hosts merge wrongly. Mitigations:
+ *  roots on the same host never merge, and remove-repo on a merged
+ *  section lists every path it will detach before doing so. Refining the
+ *  heuristic — remote repo-name corroboration, a manual pin/split —
+ *  belongs HERE and nowhere else. */
 export function repoKeyFor(repoRoot: string): string {
   return (repoRoot.split('/').pop() || repoRoot).toLowerCase()
 }

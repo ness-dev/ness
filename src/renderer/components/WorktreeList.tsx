@@ -440,8 +440,13 @@ function RepoHeader({
               e.stopPropagation()
               if (
                 window.confirm(
+                  // A merged section's members are matched by folder name,
+                  // so the one way to catch a wrong merge before detaching
+                  // an unrelated repo is to show exactly what will go.
                   section.repoRoots.length > 1
-                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window? Worktrees stay on disk everywhere.`
+                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
+                        .map((r) => `• ${r.repoRoot}`)
+                        .join('\n')}\n\nWorktrees stay on disk everywhere.`
                     : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
                 )
               ) {
