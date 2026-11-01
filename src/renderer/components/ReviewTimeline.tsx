@@ -121,19 +121,7 @@ function CommentThread({
         <Actor author={comment.author} ctx={ctx} />
         <Time at={comment.createdAt} />
       </div>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={jump}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onJump(comment)
-          }
-        }}
-        className="px-3 py-2.5 cursor-pointer hover:bg-panel/60"
-      >
+      <div onClick={jump} className="px-3 py-2.5 cursor-pointer hover:bg-panel/60">
         <ReviewMarkdown text={comment.body} />
       </div>
       {replies.length > 0 && (

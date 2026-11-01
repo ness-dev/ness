@@ -12,20 +12,23 @@ const REHYPE_PLUGINS = [rehypeHighlightShared]
 
 // Rows that hold markdown are themselves clickable (jump to the diff), so
 // a link click must not also bubble up to the row. target=_blank goes
-// through setWindowOpenHandler, which opens http(s) in the OS browser.
+// through setWindowOpenHandler, which opens http(s)/mailto in the OS
+// browser and silently drops anything else — so relative file links
+// render as text rather than as links that do nothing.
 const COMPONENTS: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-      {children}
-    </a>
-  ),
-  // A review isn't worth a network fetch on render; show the link instead.
-  img: ({ src, alt }) =>
-    typeof src === 'string' && src ? (
-      <a href={src} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-        {alt || src}
+  a: ({ href, children }) =>
+    href && /^(https?:|mailto:)/i.test(href) ? (
+      <a href={href} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+        {children}
       </a>
-    ) : null
+    ) : (
+      <span className="text-fg-bright">{children}</span>
+    ),
+  // A review isn't worth a network fetch on render. Inert text, so a
+  // linked image (a CI badge) still clicks through to its outer link.
+  img: ({ src, alt }) => (
+    <span className="text-faint">[image: {alt || (typeof src === 'string' ? src : '')}]</span>
+  )
 }
 
 export const ReviewMarkdown = memo(function ReviewMarkdown({
