@@ -14,28 +14,33 @@ const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
   {
     id: '1',
     branch: 'feat/onboarding',
-    path: 'harness/feat-onboarding',
-    pr: { checks: 'success', additions: 142, deletions: 58 }
+    path: 'ness/feat-onboarding',
+    age: '2d',
+    pr: { number: 142, checks: 'success', additions: 142, deletions: 58, milestone: 'v1.4' }
   },
   {
     id: '2',
     branch: 'fix/login-flash',
-    path: 'harness/fix-login-flash'
+    path: 'ness/fix-login-flash',
+    age: '6h'
   },
   {
     id: '3',
     branch: 'refactor/auth',
-    path: 'harness/refactor-auth'
+    path: 'ness/refactor-auth',
+    age: '3h'
   },
   {
     id: '4',
     branch: 'chore/deps-bump',
-    path: 'harness/chore-deps-bump'
+    path: 'ness/chore-deps-bump',
+    age: '1d'
   },
   {
     id: '5',
     branch: 'docs/api-reference',
-    path: 'harness/docs-api-reference'
+    path: 'ness/docs-api-reference',
+    age: '<1h'
   }
 ]
 
@@ -154,13 +159,47 @@ function StackedDiorama() {
               </p>
             )}
             {!s.bonus && <div className="mb-6" />}
-            <div className="h-[360px] rounded-xl overflow-hidden">
-              <MockHarness state={mockState} />
-            </div>
+            <ScaledMock state={mockState} />
           </div>
         )
       })}
     </section>
+  )
+}
+
+const MOCK_W = 1000
+const MOCK_H = 620
+
+/** The mock is desktop chrome — a sidebar, a pane and a right column. Laying
+ * it out at phone width leaves a 100px sliver of terminal, so render it at
+ * its natural size and scale the whole window down to fit instead. */
+function ScaledMock({ state }: { state: MockHarnessState }) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(0.35)
+
+  useEffect(() => {
+    const el = hostRef.current
+    if (!el) return
+    const measure = () => setScale(el.clientWidth / MOCK_W)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div ref={hostRef} style={{ height: MOCK_H * scale }} className="overflow-hidden">
+      <div
+        style={{
+          width: MOCK_W,
+          height: MOCK_H,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left'
+        }}
+      >
+        <MockHarness state={state} />
+      </div>
+    </div>
   )
 }
 
