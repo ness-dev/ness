@@ -35,7 +35,7 @@ import {
   ListChecks,
   Map as MapIcon
 } from 'lucide-react'
-import { MockChat } from './MockChat'
+import { MockChat, type MockTranscript } from './MockChat'
 import { NessMark } from './NessMark'
 
 export type MockStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval' | 'merged'
@@ -47,8 +47,11 @@ export interface MockWorktree {
   status: MockStatus
   /** Rendered in the row's detail cluster, same as the app's worktree age. */
   age: string
+  /** The worktree's Chat tab. Absent renders the chat's empty state. */
+  chat?: MockTranscript
   pr?: {
     number: number
+    title: string
     checks: 'success' | 'failure' | 'pending' | 'none'
     additions: number
     deletions: number
@@ -68,6 +71,8 @@ export type PanelMode = 'terminal' | 'new-worktree-flow'
 
 export interface MockHarnessState {
   activeWorktreeId: string
+  /** Must be non-empty: an unknown `activeWorktreeId` (e.g. 'new' while the
+   * New worktree screen is up) falls back to the first entry. */
   worktrees: MockWorktree[]
   highlightedElement: HighlightedElement
   highlightedWorktreeId?: string
@@ -176,6 +181,10 @@ export function MockHarness({ state }: { state: MockHarnessState }) {
       </div>
     </div>
   )
+}
+
+function activeWorktree(state: MockHarnessState): MockWorktree {
+  return state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.worktrees[0]
 }
 
 function TrafficLights() {
@@ -462,13 +471,13 @@ function BottomIconStrip() {
 /* ------------------------------------------------------------------ */
 
 function MockTabBar({ state }: { state: MockHarnessState }) {
-  const active = state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.worktrees[0]
+  const active = activeWorktree(state)
   return (
     <div className="flex-1 min-w-0 flex items-center border-b border-border bg-panel h-full">
       <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs whitespace-nowrap">
         <span className={`font-medium ${REPO_NAME_COLOR}`}>{REPO_NAME}</span>
         <span className="text-faint">/</span>
-        <span className="text-fg-bright font-medium">{active?.branch}</span>
+        <span className="text-fg-bright font-medium">{active.branch}</span>
       </div>
 
       <div className="shrink-0 flex items-center h-full pl-2 text-faint">
@@ -490,7 +499,7 @@ function MockTabBar({ state }: { state: MockHarnessState }) {
 
       <div className="flex items-center h-full overflow-hidden flex-1 min-w-0">
         <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-muted text-fg-bright">
-          <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_COLORS[active?.status ?? 'processing']}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_COLORS[active.status]}`} />
           <span>Chat</span>
         </div>
         <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-transparent border-l border-l-border text-dim">
@@ -507,7 +516,7 @@ function MockTabBar({ state }: { state: MockHarnessState }) {
 }
 
 function MockTerminalPanel({ state }: { state: MockHarnessState }) {
-  const active = state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.worktrees[0]
+  const active = activeWorktree(state)
   const terminalGlow = state.highlightedElement === 'terminal'
 
   return (
@@ -520,7 +529,7 @@ function MockTerminalPanel({ state }: { state: MockHarnessState }) {
       transition={{ type: 'spring', stiffness: 200, damping: 30 }}
       className="flex-1 min-w-0 flex flex-col bg-app relative"
     >
-      <MockChat variant={active.status === 'needs-approval' ? 'needs-approval' : 'streaming'} />
+      <MockChat key={active.id} transcript={active.chat} needsApproval={active.status === 'needs-approval'} />
     </motion.div>
   )
 }
@@ -532,7 +541,7 @@ function MockTerminalPanel({ state }: { state: MockHarnessState }) {
 function MockRightColumn({ state }: { state: MockHarnessState }) {
   const open = !!state.rightPanelOpen
   const railGlow = state.highlightedElement === 'right-column-button'
-  const active = state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.worktrees[0]
+  const active = activeWorktree(state)
 
   return (
     <motion.div
@@ -690,14 +699,16 @@ function PullRequestPanel({ pr }: { pr?: MockWorktree['pr'] }) {
           <span className="px-1.5 py-0.5 rounded border text-xs font-medium shrink-0 border-success/40 text-success">
             #{pr.number}
           </span>
-          <span className="flex-1 text-xs text-fg truncate">Onboarding flow ready for review</span>
+          <span className="flex-1 text-xs text-fg truncate">{pr.title}</span>
         </div>
 
         <div className="flex items-center gap-1.5 text-xs">
           <span className="w-4 h-4 rounded-full bg-indigo-400/60 border border-panel shrink-0" />
-          <span className="shrink-0 px-1.5 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent">
-            v1.4
-          </span>
+          {pr.milestone && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent">
+              {pr.milestone}
+            </span>
+          )}
           <span className="font-mono truncate shrink-0 text-dim">main</span>
           <span className="font-mono ml-auto shrink-0">
             <span className="text-success">+{pr.additions}</span>

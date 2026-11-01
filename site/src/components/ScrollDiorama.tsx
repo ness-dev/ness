@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useLayoutEffect } from 'react'
 import { motion, useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion'
 import {
   MockHarness,
@@ -16,13 +16,79 @@ const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
     branch: 'feat/onboarding',
     path: 'ness/feat-onboarding',
     age: '2d',
-    pr: { number: 142, checks: 'success', additions: 142, deletions: 58, milestone: 'v1.4' }
+    pr: {
+      number: 142,
+      title: 'Onboarding flow ready for review',
+      checks: 'success',
+      additions: 142,
+      deletions: 58,
+      milestone: 'v1.4'
+    },
+    // Matches the right column: the edit lands in the uncommitted
+    // src/welcome.tsx shown under Changed Files.
+    chat: {
+      prompt:
+        'The welcome screen still says "Sign up" right after login. Show their name and a Continue button instead.',
+      explanation:
+        '`Welcome` reads the session before it has loaded, so it always renders the signed-out copy. Waiting on `status` fixes it.',
+      edit: {
+        path: 'src/welcome.tsx',
+        summary: '+2 −1',
+        lines: [
+          { kind: 'ctx', old: 12, next: 12, text: 'export function Welcome() {' },
+          { kind: 'remove', old: 13, text: '  const { user } = useSession()' },
+          { kind: 'add', next: 13, text: '  const { user, status } = useSession()' },
+          { kind: 'add', next: 14, text: "  if (status === 'loading') return <Spinner />" },
+          { kind: 'ctx', old: 14, next: 15, text: '  if (!user) return <SignUpCta />' }
+        ]
+      },
+      working: {
+        todos: [
+          { status: 'completed', text: 'Find why the signed-out copy shows' },
+          { status: 'in_progress', text: 'Wait for the session before rendering' },
+          { status: 'pending', text: 'Test the loading state' }
+        ],
+        streaming: 'Adding a test for the loading state'
+      },
+      approval: {
+        command: 'npx vitest run src/welcome.test.tsx',
+        description: 'Run the welcome screen tests'
+      }
+    }
   },
   {
     id: '2',
     branch: 'fix/login-flash',
     path: 'ness/fix-login-flash',
-    age: '6h'
+    age: '6h',
+    chat: {
+      prompt: 'Logging out flashes the dashboard for a frame before the redirect. Fix it.',
+      explanation:
+        'The redirect runs in an effect, after first paint. Guarding the route in its `loader` means a signed-out user never renders `Dashboard` at all.',
+      edit: {
+        path: 'src/router.ts',
+        summary: '+1 −0',
+        lines: [
+          { kind: 'ctx', old: 21, next: 21, text: '  {' },
+          { kind: 'ctx', old: 22, next: 22, text: "    path: '/dashboard'," },
+          { kind: 'add', next: 23, text: '    loader: requireSession,' },
+          { kind: 'ctx', old: 23, next: 24, text: '    element: <Dashboard />' },
+          { kind: 'ctx', old: 24, next: 25, text: '  },' }
+        ]
+      },
+      working: {
+        todos: [
+          { status: 'completed', text: 'Find where the redirect happens' },
+          { status: 'in_progress', text: 'Move the guard into the loader' },
+          { status: 'pending', text: 'Check it in the e2e suite' }
+        ],
+        streaming: 'Running the logout e2e test'
+      },
+      approval: {
+        command: 'npx playwright test e2e/logout.spec.ts',
+        description: 'Confirm the dashboard no longer flashes after logout'
+      }
+    }
   },
   {
     id: '3',
@@ -113,10 +179,8 @@ export function ScrollDiorama() {
               <CopyStack activeSection={phase.section} />
             </div>
 
-            <div className="relative h-[68vh] translate-x-[8%]">
-              <div className="absolute inset-0">
-                <MockHarness state={mockState} />
-              </div>
+            <div className="relative h-[68vh] xl:translate-x-[8%]">
+              <ScaledMock state={mockState} fill />
             </div>
           </div>
 
@@ -170,31 +234,49 @@ function StackedDiorama() {
 const MOCK_W = 1000
 const MOCK_H = 620
 
-/** The mock is desktop chrome — a sidebar, a pane and a right column. Laying
- * it out at phone width leaves a 100px sliver of terminal, so render it at
- * its natural size and scale the whole window down to fit instead. */
-function ScaledMock({ state }: { state: MockHarnessState }) {
+/** The mock is desktop chrome — sidebar, pane and right column add up to
+ * 480px before the chat gets any — so laying it out in a narrow box leaves
+ * a sliver of chat. Never lay it out narrower than MOCK_W; when the box is
+ * narrower than that, scale the whole window down to fit instead.
+ *
+ * `fill` sizes to the parent box (the pinned desktop column). Without it the
+ * mock keeps MOCK_W × MOCK_H proportions and takes its height from the
+ * width (the mobile stack). */
+function ScaledMock({ state, fill = false }: { state: MockHarnessState; fill?: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(0.35)
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null)
 
-  useEffect(() => {
+  // Layout effect so the first paint already has the right scale rather
+  // than jumping from a guess.
+  useLayoutEffect(() => {
     const el = hostRef.current
     if (!el) return
-    const measure = () => setScale(el.clientWidth / MOCK_W)
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight })
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     measure()
     return () => ro.disconnect()
   }, [])
 
+  const hostW = box?.w ?? MOCK_W
+  const layoutW = Math.max(hostW, MOCK_W)
+  const scale = hostW / layoutW
+  const layoutH = fill ? (box?.h ?? MOCK_H) / scale : MOCK_H
+
   return (
-    <div ref={hostRef} style={{ height: MOCK_H * scale }} className="overflow-hidden">
+    <div
+      ref={hostRef}
+      className={fill ? 'absolute inset-0' : 'relative overflow-hidden'}
+      style={fill ? undefined : { height: MOCK_H * scale }}
+    >
       <div
+        className="absolute top-0 left-0"
         style={{
-          width: MOCK_W,
-          height: MOCK_H,
+          width: layoutW,
+          height: layoutH,
           transform: `scale(${scale})`,
-          transformOrigin: 'top left'
+          transformOrigin: 'top left',
+          visibility: box ? undefined : 'hidden'
         }}
       >
         <MockHarness state={state} />

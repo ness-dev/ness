@@ -1,73 +1,116 @@
 import type { ComponentType, ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Brain, FilePen, FileText, ListChecks, Search, Square, Terminal } from 'lucide-react'
+import { Brain, FilePen, FileText, ListChecks, Search, Sparkles, Square, Terminal } from 'lucide-react'
 
 /** A replica of Ness's Chat mode (`JsonModeChat`) for the marketing
  * diorama — the transcript of user bubbles, assistant markdown, collapsible
  * tool cards and the approval card, plus the composer underneath. Styling
  * reads the same `--chat-*` density tokens the real chat does. */
 
-type ChatVariant = 'streaming' | 'needs-approval'
+export interface MockDiffLine {
+  kind: 'ctx' | 'add' | 'remove'
+  old?: number
+  next?: number
+  text: string
+}
 
-export function MockChat({ variant }: { variant: ChatVariant }) {
-  const needsApproval = variant === 'needs-approval'
+export interface MockTodo {
+  status: 'completed' | 'in_progress' | 'pending'
+  text: string
+}
+
+/** One worktree's conversation. Assistant text marks inline code with
+ * backticks, the way the real chat's markdown would. */
+export interface MockTranscript {
+  prompt: string
+  explanation: string
+  edit: { path: string; summary: string; lines: MockDiffLine[] }
+  /** While working: the todo list plus the turn still streaming in. */
+  working: { todos: MockTodo[]; streaming: string }
+  /** When the worktree needs approval: the Bash call it's blocked on. */
+  approval: { command: string; description: string }
+}
+
+export function MockChat({
+  transcript,
+  needsApproval
+}: {
+  transcript?: MockTranscript
+  needsApproval: boolean
+}) {
   return (
     <div className="absolute inset-0 flex flex-col bg-app text-fg" data-chat-density="compact">
       <div className="relative flex-1 min-h-0 flex flex-col">
-        <div className="flex-1 overflow-hidden flex flex-col justify-end">
-          <div className="px-4 py-3 space-y-3">
-            <UserBubble>
-              Add a presence indicator to the sidebar showing which teammates are viewing the same
-              doc.
-            </UserBubble>
+        {transcript ? (
+          <div className="flex-1 overflow-hidden flex flex-col justify-end">
+            <div className="px-4 py-3 space-y-3">
+              <UserBubble>{transcript.prompt}</UserBubble>
 
-            <ToolGroup
-              label="1 thought · 3 tool calls"
-              chips={[
-                { icon: FileText, label: 'Read' },
-                { icon: Search, label: 'Grep' },
-                { icon: FileText, label: 'Read' }
-              ]}
-            />
+              <ToolGroup
+                label="1 thought · 3 tool calls"
+                chips={[
+                  { icon: FileText, label: 'Read' },
+                  { icon: Search, label: 'Grep' },
+                  { icon: FileText, label: 'Read' }
+                ]}
+              />
 
-            <AssistantText>
-              <code>SubtitleDetail</code> already owns line two, so the avatars belong there rather
-              than on a row of their own.
-            </AssistantText>
+              <AssistantText text={transcript.explanation} />
 
-            <EditCard />
+              <EditCard edit={transcript.edit} />
 
-            <AnimatePresence mode="wait" initial={false}>
-              {needsApproval ? (
-                <motion.div
-                  key="approval"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 6 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <ApprovalCard />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="todos"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.25 }}
-                  className="space-y-3"
-                >
-                  <TodoCard />
-                  <AssistantText partial>Wiring the presence slice now</AssistantText>
-                </motion.div>
-              )}
-            </AnimatePresence>
+              <AnimatePresence mode="wait" initial={false}>
+                {needsApproval ? (
+                  <motion.div
+                    key="approval"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <ApprovalCard {...transcript.approval} />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="todos"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="space-y-3"
+                  >
+                    <TodoCard todos={transcript.working.todos} />
+                    <AssistantText text={transcript.working.streaming} partial />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
+        ) : (
+          <EmptyState />
+        )}
       </div>
       {/* A pending approval pauses the turn but doesn't end it, so the
           session is still "running" and still interruptible. */}
-      <Composer busy />
+      <Composer busy={!!transcript} />
+    </div>
+  )
+}
+
+/** The real chat's empty state, for a worktree with no conversation yet. */
+function EmptyState() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
+      <div className="relative mb-6">
+        <div className="absolute inset-0 rounded-full blur-2xl opacity-30 brand-gradient-bg" />
+        <div className="relative w-16 h-16 rounded-full brand-gradient-bg flex items-center justify-center shadow-lg">
+          <Sparkles className="w-[1.625rem] h-[1.625rem] text-white" />
+        </div>
+      </div>
+      <h2 className="text-lg font-semibold brand-gradient-text">
+        What are we going to build today?
+      </h2>
+      <p className="mt-2 text-xs text-muted">Send a message to get started.</p>
     </div>
   )
 }
@@ -93,11 +136,11 @@ function UserBubble({ children }: { children: ReactNode }) {
   )
 }
 
-function AssistantText({ children, partial }: { children: ReactNode; partial?: boolean }) {
+function AssistantText({ text, partial }: { text: string; partial?: boolean }) {
   return (
     <div className="markdown leading-relaxed" style={{ fontSize: 'var(--chat-body-text)' }}>
       <p>
-        {children}
+        {text.split('`').map((part, i) => (i % 2 === 1 ? <code key={i}>{part}</code> : part))}
         {partial && <span className="json-claude-cursor" />}
       </p>
     </div>
@@ -185,27 +228,17 @@ function ToolCard({
   )
 }
 
-const DIFF_LINES: { kind: 'ctx' | 'add' | 'remove'; old?: number; next?: number; text: string }[] = [
-  { kind: 'ctx', old: 54, next: 54, text: "    items.push({ key: 'age', node: <Age /> })" },
-  { kind: 'ctx', old: 55, next: 55, text: '  }' },
-  { kind: 'add', next: 56, text: '  if (prefs.presence && viewers.length > 0) {' },
-  { kind: 'add', next: 57, text: "    items.push({ key: 'presence', node: <Viewers /> })" },
-  { kind: 'add', next: 58, text: '  }' }
-]
-
-function EditCard() {
+function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
   return (
     <ToolCard
       name="Edit"
-      subtitle="WorktreeSubtitleDetail.tsx (+3 −0)"
+      subtitle={`${edit.path.split('/').pop()} (${edit.summary})`}
       icon={FilePen}
       variant="warn"
     >
-      <div className="px-2 py-1 text-xs text-muted truncate font-mono">
-        src/renderer/components/WorktreeSubtitleDetail.tsx
-      </div>
+      <div className="px-2 py-1 text-xs text-muted truncate font-mono">{edit.path}</div>
       <div className="text-xs font-mono bg-app/40">
-        {DIFF_LINES.map((ln, i) => {
+        {edit.lines.map((ln, i) => {
           const bg =
             ln.kind === 'add' ? 'bg-success/10' : ln.kind === 'remove' ? 'bg-danger/10' : ''
           const fg =
@@ -233,17 +266,11 @@ function EditCard() {
   )
 }
 
-const TODOS: { status: 'completed' | 'in_progress' | 'pending'; text: string }[] = [
-  { status: 'completed', text: 'Read how the sidebar row renders' },
-  { status: 'in_progress', text: 'Add the presence avatars' },
-  { status: 'pending', text: 'Wire the presence slice' }
-]
-
-function TodoCard() {
+function TodoCard({ todos }: { todos: MockTodo[] }) {
   return (
-    <ToolCard name="TodoWrite" subtitle="3 items" icon={ListChecks}>
+    <ToolCard name="TodoWrite" subtitle={`${todos.length} items`} icon={ListChecks}>
       <ul className="px-3 py-2 text-xs space-y-1">
-        {TODOS.map((t) => (
+        {todos.map((t) => (
           <li key={t.text} className="flex items-baseline gap-2">
             <span
               className={
@@ -268,7 +295,7 @@ function TodoCard() {
 
 const BTN = 'px-2 py-1 text-xs rounded transition-colors'
 
-function ApprovalCard() {
+function ApprovalCard({ command, description }: MockTranscript['approval']) {
   return (
     <div className="rounded-md border border-danger/40 bg-danger/5 my-2 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-danger/30 bg-danger/10">
@@ -277,17 +304,15 @@ function ApprovalCard() {
             Needs approval
           </span>
           <Terminal className="shrink-0 w-3.5 h-3.5" />
-          <span className="text-xs font-mono text-fg-bright truncate">
-            npx prisma migrate deploy
-          </span>
+          <span className="text-xs font-mono text-fg-bright truncate">{command}</span>
         </div>
       </div>
       <div className="space-y-2 pb-2">
         <div className="px-3 pt-2 space-y-2">
           <pre className="text-xs font-mono bg-app/40 rounded p-2 overflow-x-auto whitespace-pre-wrap">
-            npx prisma migrate deploy
+            {command}
           </pre>
-          <div className="text-xs text-muted italic">Apply the presence table migration</div>
+          <div className="text-xs text-muted italic">{description}</div>
         </div>
         <div className="px-3">
           <div className="flex items-center gap-1.5 flex-wrap">
