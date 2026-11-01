@@ -14,6 +14,38 @@ import type { PtyStatus } from '../shared/state/terminals'
 
 export type { PtyStatus }
 
+/** Hard ceiling on concurrently live PTYs.
+ *
+ *  `pty:create` is a client-driven fire-and-forget signal with no bound on
+ *  it: a client that mounts N terminals asks this process to spawn N
+ *  subprocesses as fast as it can send. For agent tabs each of those is a
+ *  full `claude`, so a client bug — or a client talking to a server with a
+ *  large worktree fleet — can exhaust the host's memory before anyone
+ *  notices. That happened: a renderer change made every backend's
+ *  worktrees mount at once, and the remote it was connected to went to
+ *  swap and stopped accepting SSH while still looking healthy to Tailscale.
+ *
+ *  The ceiling turns that from "the host dies" into "the client is told
+ *  no", which is recoverable. It is deliberately generous — it exists to
+ *  stop a runaway, not to ration normal use — and overridable for anyone
+ *  legitimately running a bigger fleet, since refusing a spawn someone
+ *  actually wanted is its own kind of breakage.
+ *
+ *  Attaches don't count: `create()` returns early for an id that already
+ *  has a PTY, before this check. */
+const DEFAULT_MAX_PTYS = 100
+
+function resolveMaxPtys(): number {
+  const raw = process.env.HARNESS_MAX_PTYS
+  if (!raw) return DEFAULT_MAX_PTYS
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    log('pty', `ignoring invalid HARNESS_MAX_PTYS=${raw}, using ${DEFAULT_MAX_PTYS}`)
+    return DEFAULT_MAX_PTYS
+  }
+  return Math.floor(parsed)
+}
+
 interface PtyInstance {
   pty: pty.IPty
   status: PtyStatus
@@ -140,6 +172,23 @@ export class PtyManager {
       // history it already loaded via getTerminalHistory replays the
       // scrollback up to the join point.
       log('pty', `create id=${id} no-op — PTY already exists, treating as attach`)
+      return
+    }
+
+    // Checked after the attach case above, so reconnecting clients can
+    // always rejoin terminals that are already running even at the limit.
+    const maxPtys = resolveMaxPtys()
+    if (this.ptys.size >= maxPtys) {
+      log('pty', `spawn refused id=${id} — at PTY limit ${maxPtys}`)
+      const msg =
+        `\r\n\x1b[31mCan't launch terminal — this Ness backend is already running ` +
+        `${this.ptys.size} terminals (limit ${maxPtys}).\x1b[0m\r\n` +
+        `\x1b[33mClose some tabs, or raise the limit with HARNESS_MAX_PTYS.\x1b[0m\r\n`
+      this.sendSignal?.('terminal:data', id, msg)
+      this.store?.dispatch({
+        type: 'terminals/statusChanged',
+        payload: { id, status: 'idle', pendingTool: null }
+      })
       return
     }
 

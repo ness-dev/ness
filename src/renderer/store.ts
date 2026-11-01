@@ -55,6 +55,8 @@ import {
 } from '../shared/editor-resolve'
 import { WebSocketClientTransport } from '../shared/transport/transport-websocket'
 import { initBackend, getBackend } from './backend'
+import { useBackendScope, type BackendScopeId } from './backend-scope'
+import { SegmentedSelector, type BackendSegment } from './backend-segments'
 
 /** Stable id for the in-process Electron backend. Mirrors the value in
  *  src/main/persistence.ts; duplicated here because main isn't
@@ -88,8 +90,16 @@ class ClientStore {
     for (const l of this.listeners) l()
   }
 
+  /** Notifies subscribers like a state event would. The id changes on
+   *  every WS reconnect, and `useClientId` reads it through
+   *  `useSyncExternalStore` — without the notify, a controller check
+   *  would keep comparing against the stale id until some unrelated
+   *  session event happened to re-render it. Reconnects are rare, so the
+   *  fan-out is free. */
   setClientId(id: string): void {
+    if (this.clientIdValue === id) return
     this.clientIdValue = id
+    for (const l of this.listeners) l()
   }
 
   getClientId(): string | null {
@@ -355,6 +365,196 @@ function subscribeActive(cb: () => void): () => void {
   }
 }
 
+/** Minimal shape `createScopedSubscribe` needs from a registry. Keeps the
+ *  factory testable with a stub instead of a live `BackendsRegistry`. */
+export interface ScopedSubscribeRegistry {
+  getStore(id: string): { subscribe(cb: () => void): () => void } | undefined
+  subscribeList(cb: () => void): () => void
+}
+
+/** Builds the per-backend-id `subscribe` functions that scoped hooks hand
+ *  to `useSyncExternalStore`.
+ *
+ *  Memoized per id, and that's the whole reason this exists:
+ *  `useSyncExternalStore` re-subscribes whenever the `subscribe` argument
+ *  changes identity, so a fresh closure per render would detach and
+ *  reattach a store listener on every commit. The unscoped path gets this
+ *  for free by using one module-level `subscribeActive`; scoped callers
+ *  need one stable function per backend instead.
+ *
+ *  Each subscription also tracks registry membership, mirroring how
+ *  `subscribeActive` swaps on active-id changes. A subtree can mount
+ *  before its backend finishes connecting (hydration is async and
+ *  deliberately non-blocking), and without the swap that subtree would
+ *  hold a no-op unsubscribe forever and never render its data. */
+export function createScopedSubscribe(
+  reg: ScopedSubscribeRegistry
+): (backendId: string) => (cb: () => void) => () => void {
+  const byId = new Map<string, (cb: () => void) => () => void>()
+  return (backendId: string) => {
+    const existing = byId.get(backendId)
+    if (existing) return existing
+    const subscribe = (cb: () => void): (() => void) => {
+      let storeUnsub = reg.getStore(backendId)?.subscribe(cb) ?? noop
+      const listUnsub = reg.subscribeList(() => {
+        storeUnsub()
+        const next = reg.getStore(backendId)
+        storeUnsub = next ? next.subscribe(cb) : noop
+        // Tell the consumer to re-read: the store it was reading either
+        // just appeared or just went away.
+        cb()
+      })
+      return () => {
+        storeUnsub()
+        listUnsub()
+      }
+    }
+    byId.set(backendId, subscribe)
+    return subscribe
+  }
+}
+
+function noop(): void {
+  /* no store to detach from */
+}
+
+const subscribeForBackend = createScopedSubscribe(registry)
+
+/** A specific backend's mirror, or `initialState` if it isn't registered
+ *  (yet). Returning initial rather than throwing keeps a subtree that
+ *  mounted ahead of its backend's connect rendering empty instead of
+ *  crashing — the subscribe above re-fires once the store lands. */
+function getStateFor(backendId: string): AppState {
+  return registry.getStore(backendId)?.getState() ?? initialState
+}
+
+/** Fires on an event in ANY registered backend's store, or on the
+ *  registry's membership changing. Module-level so its identity is stable
+ *  for `useSyncExternalStore`.
+ *
+ *  Re-subscribes wholesale on a membership change rather than diffing:
+ *  backends are added and removed a handful of times per session, so the
+ *  simple version costs nothing and can't leak a listener for a store
+ *  that went away. */
+function subscribeAllBackends(cb: () => void): () => void {
+  let storeUnsubs: (() => void)[] = []
+  const attach = (): void => {
+    storeUnsubs = registry
+      .getAllIds()
+      .map((id) => registry.getStore(id)?.subscribe(cb))
+      .filter((u): u is () => void => typeof u === 'function')
+  }
+  attach()
+  const listUnsub = registry.subscribeList(() => {
+    for (const u of storeUnsubs) u()
+    attach()
+    cb()
+  })
+  return () => {
+    for (const u of storeUnsubs) u()
+    listUnsub()
+  }
+}
+
+/** One backend's state, paired with the connection metadata a merged view
+ *  needs to label and route it. */
+export interface BackendStateEntry {
+  backendId: string
+  label: string
+  kind: 'local' | 'remote'
+  state: AppState
+}
+
+/** Projects every registered backend into a `BackendStateEntry`, reusing
+ *  entries whose state and connection metadata are unchanged.
+ *
+ *  Reference stability is mandatory, not an optimization: this feeds
+ *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
+ *  read — and it is read on every store event from every backend. */
+const allBackendStatesSelector = new SegmentedSelector<
+  { state: AppState; connection: BackendConnection | undefined },
+  BackendStateEntry
+>(
+  // Keyed on the SLICES the merged sidebar reads, never on `source.state`.
+  // The store does `this.state = rootReducer(this.state, event)`, so the
+  // AppState object is replaced on every event — keying on it means every
+  // backend's segment is rebuilt dozens of times a second while an agent
+  // streams, and `useMergedWorktrees` re-walks every worktree's pane tree
+  // each time. With ~80 worktrees across backends that is a beachball.
+  //
+  // (backend-segments.ts documents exactly this trap. I wrote that comment
+  // and then keyed on the state object anyway — hence this one.)
+  //
+  // Must stay in step with what `useMergedWorktrees` actually reads: a
+  // slice consumed there but missing here is a stale sidebar.
+  (source) => [
+    source.connection,
+    source.state.worktrees.list,
+    source.state.worktrees.repoRoots,
+    source.state.worktrees.pending,
+    source.state.worktrees.pendingDeletions,
+    source.state.worktrees.repoRemotes,
+    source.state.terminals.panes,
+    source.state.terminals.statuses,
+    source.state.terminals.pendingTools,
+    source.state.terminals.shellActivity,
+    source.state.prs.byPath,
+    source.state.prs.mergedByPath,
+    source.state.snooze.byPath,
+    source.state.pinned.byPath,
+    source.state.aliases.byPath,
+    source.state.assignedPRs.byRepo
+  ],
+  (source, backendId) => ({
+    backendId,
+    label: source.connection?.label ?? backendId,
+    kind: source.connection?.kind ?? 'remote',
+    state: source.state
+  })
+)
+
+/** Unwraps the selector's segments to bare entries. The extra memo is
+ *  load-bearing: `.map()` allocates, so without it `getSnapshot` would
+ *  return a fresh array on every read even when every segment was reused,
+ *  and `useSyncExternalStore` would re-render forever. */
+let backendStatesCache: {
+  segments: readonly BackendSegment<BackendStateEntry>[]
+  values: readonly BackendStateEntry[]
+} | null = null
+
+const getAllBackendStatesSnapshot = (): readonly BackendStateEntry[] => {
+  const segments = allBackendStatesSelector.select(
+    registry.getAllIds().map((id) => ({
+      id,
+      state: {
+        state: getStateFor(id),
+        connection: registry.getConnection(id)
+      }
+    }))
+  )
+  if (backendStatesCache && backendStatesCache.segments === segments) {
+    return backendStatesCache.values
+  }
+  const values = segments.map((segment) => segment.value)
+  backendStatesCache = { segments, values }
+  return values
+}
+
+/** Every registered backend's state at once, for views that span all of
+ *  them rather than following the active one — principally the merged
+ *  worktree sidebar. */
+export function useAllBackendStates(): readonly BackendStateEntry[] {
+  return useSyncExternalStore(
+    subscribeAllBackends,
+    getAllBackendStatesSnapshot,
+    getAllBackendStatesServerSnapshot
+  )
+}
+
+const EMPTY_BACKEND_STATES: readonly BackendStateEntry[] = []
+const getAllBackendStatesServerSnapshot = (): readonly BackendStateEntry[] =>
+  EMPTY_BACKEND_STATES
+
 /** Server-assigned identity for this renderer wrt the active backend.
  *  Per-backend — when active flips, this value can change. Components
  *  using `useSyncExternalStore` (via the slice hooks below) re-render
@@ -377,8 +577,50 @@ export function getClientId(): string | null {
 export function subscribeActiveTransportReconnect(
   cb: (clientId: string) => void
 ): () => void {
-  return registry.subscribeReconnect((backendId, clientId) => {
-    if (backendId !== registry.getActiveId()) return
+  return subscribeTransportReconnectFor(null, cb)
+}
+
+/** This renderer's server-assigned client id on ONE backend — the one a
+ *  worktree's subtree is scoped to — rather than whichever backend is
+ *  active.
+ *
+ *  Controller checks ("is the session's controllerClientId me?") must
+ *  use this. A remote worktree can be open while Local is the active
+ *  chip; comparing its session's controller against the ACTIVE backend's
+ *  id can never match, so the terminal sits in the spectator overlay and
+ *  Take Control appears to do nothing — the server did grant control,
+ *  but to an id the UI wasn't looking for. That shipped as a regression
+ *  of the old swap model, where active and host were always the same.
+ *
+ *  `null` follows the active backend, for chrome outside any scope. */
+export function getClientIdFor(backendId: BackendScopeId): string | null {
+  const store = backendId ? registry.getStore(backendId) : registry.getActiveStore()
+  return store?.getClientId() ?? null
+}
+
+/** Scope-resolved client id for components, as a real subscription: the
+ *  scoped store notifies on `setClientId`, so a reconnect re-renders the
+ *  reader with the fresh id on its own — no dependence on a session event
+ *  happening to arrive afterwards. */
+export function useClientId(): string | null {
+  const scope = useBackendScope()
+  return useSyncExternalStore(
+    scope ? subscribeForBackend(scope) : subscribeActive,
+    () => getClientIdFor(scope),
+    () => null
+  )
+}
+
+/** Reconnect events for ONE backend's transport. A terminal must re-join
+ *  when ITS backend reconnects, whether or not that backend is active —
+ *  filtering on the active id (the pre-fleet behaviour) left remote
+ *  terminals orphaned after their own reconnect. `null` follows active. */
+export function subscribeTransportReconnectFor(
+  backendId: BackendScopeId,
+  cb: (clientId: string) => void
+): () => void {
+  return registry.subscribeReconnect((id, clientId) => {
+    if (id !== (backendId ?? registry.getActiveId())) return
     cb(clientId)
   })
 }
@@ -416,7 +658,8 @@ export async function initStore(): Promise<void> {
   // as the standalone web client).
   initBackend({
     getActiveTransport: () => registry.getActiveTransport(),
-    getLocalTransport: () => localTransport
+    getLocalTransport: () => localTransport,
+    getTransportFor: (backendId) => registry.getTransport(backendId)
   })
 
   const [snapshot, id] = await Promise.all([
@@ -693,14 +936,44 @@ function getActiveState(): AppState {
   return registry.getActiveStore().getState()
 }
 
-/** Selector hook reading from the **active** backend's store. Re-fires
- *  on inner-store events AND on active-backend changes (so switching
- *  backends triggers a re-render that reads fresh state from the new
- *  active store). */
+/** Selector hook reading from whichever backend the calling subtree is
+ *  scoped to — see `BackendScope`. Outside any scope that's the **active**
+ *  backend, and the hook behaves exactly as it always did: re-firing on
+ *  inner-store events and on active-backend changes.
+ *
+ *  Inside a scope it reads that backend's mirror instead, which is what
+ *  lets a remote worktree's panes render their own data while a local
+ *  worktree's panes stay mounted beside them.
+ *
+ *  Every slice hook below funnels through here, so all 35 of them became
+ *  scope-aware with this one change — no per-hook variants to keep in
+ *  step. */
 export function useAppState<T>(selector: (s: AppState) => T): T {
+  const scope = useBackendScope()
   return useSyncExternalStore(
-    subscribeActive,
-    () => selector(getActiveState()),
+    scope ? subscribeForBackend(scope) : subscribeActive,
+    () => selector(scope ? getStateFor(scope) : getActiveState()),
+    () => selector(initialState)
+  )
+}
+
+/** Selector hook pinned to an explicitly-named backend, for callers that
+ *  know the id but aren't rendered inside that backend's subtree.
+ *
+ *  App.tsx is the motivating case: it holds the selected worktree and
+ *  reads per-worktree values (alias, PR status) for the title bar and
+ *  chrome, but it sits ABOVE every `BackendScope` — so a plain
+ *  `useAppState` there would read the active backend even when the
+ *  selected worktree belongs to a different one.
+ *
+ *  Pass `null` to follow the active backend. */
+export function useAppStateFor<T>(
+  backendId: BackendScopeId,
+  selector: (s: AppState) => T
+): T {
+  return useSyncExternalStore(
+    backendId ? subscribeForBackend(backendId) : subscribeActive,
+    () => selector(backendId ? getStateFor(backendId) : getActiveState()),
     () => selector(initialState)
   )
 }
@@ -992,6 +1265,20 @@ export function useAliases() {
  *  avoid whole-slice re-renders (CLAUDE.md anti-pattern #4). */
 export function useAliasForPath(path: string | null | undefined): string | undefined {
   return useAppState((s) => (path ? s.aliases.byPath[path] : undefined))
+}
+
+/** Alias for a worktree on an explicitly-named backend.
+ *
+ *  `useAliasForPath` resolves its store from the enclosing `BackendScope`,
+ *  which is right for anything rendered inside a worktree's subtree. App
+ *  chrome — the window title, the sidebar header — sits above every scope
+ *  but still describes the *selected* worktree, which may belong to a
+ *  backend other than the active one. Those callers pass its id. */
+export function useAliasForWorktree(
+  backendId: BackendScopeId,
+  path: string | null | undefined
+): string | undefined {
+  return useAppStateFor(backendId, (s) => (path ? s.aliases.byPath[path] : undefined))
 }
 
 /** The global "Always allow" tool grants. Only the Settings panel reads

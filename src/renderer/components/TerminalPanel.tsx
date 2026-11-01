@@ -14,7 +14,7 @@ import { AgentIcon } from './AgentIcon'
 import { repoNameColor } from './RepoIcon'
 import { AppTitleSegment } from './AppTitleSegment'
 import {
-  getClientId,
+  useClientId,
   useTerminalProgress,
   useTerminalSession,
   useTerminalStatus,
@@ -29,8 +29,10 @@ import { useReviewProgress } from '../review-progress'
  *  control lives on the terminal body, not here. */
 function SpectatorChip({ terminalId }: { terminalId: string }): JSX.Element | null {
   const session = useTerminalSession(terminalId)
+  // Scope-resolved (this terminal's own backend), and above the early
+  // return because it's a hook.
+  const myId = useClientId()
   if (!session) return null
-  const myId = getClientId()
   // Other viewers: everyone who isn't me, counted across controller + spectators.
   const others = new Set<string>()
   if (session.controllerClientId && session.controllerClientId !== myId) {

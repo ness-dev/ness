@@ -36,6 +36,8 @@ interface WorktreeTabProps {
   density: 'comfy' | 'compact'
   detailPrefs: SidebarDetailPrefs
   isEditingAlias: boolean
+  /** Backend label when this worktree is hosted elsewhere. */
+  originLabel?: string
   actions: WorktreeRowActionHandlers
   onSelect: (path: string) => void
   onStartAliasEdit: (path: string) => void
@@ -53,6 +55,7 @@ export const WorktreeTab = memo(function WorktreeTab({
   density,
   detailPrefs,
   isEditingAlias,
+  originLabel,
   actions,
   onSelect,
   onStartAliasEdit: onStartAliasEditForPath,
@@ -230,6 +233,7 @@ export const WorktreeTab = memo(function WorktreeTab({
           <SubtitleDetail
             worktree={worktree}
             repoLabel={row.repoLabel}
+            originLabel={originLabel}
             aliased={alias !== undefined}
             prStatus={prStatus}
             prefs={detailPrefs}
@@ -241,6 +245,7 @@ export const WorktreeTab = memo(function WorktreeTab({
         <SubtitleDetail
           worktree={worktree}
           repoLabel={row.repoLabel}
+          originLabel={originLabel}
           aliased={alias !== undefined}
           prStatus={prStatus}
           prefs={detailPrefs}

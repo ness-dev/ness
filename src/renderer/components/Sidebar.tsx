@@ -1,7 +1,7 @@
 import { Trash2, Layers, ListTodo, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
-import type { WorktreeListModel } from '../worktree-list-model'
+import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
 import { WorktreeList } from './WorktreeList'
 import { BackendChipStrip } from './BackendChipStrip'
 import { BottomIconStrip } from './BottomIconStrip'
@@ -20,6 +20,8 @@ interface SidebarProps {
   /** Non-main worktrees. Used to decide whether to show the "spawn your first agent" nudge. */
   agentCount: number
   onSelectWorktree: (path: string) => void
+  pathBackendId?: Record<string, string>
+  originByPath?: Record<string, string>
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
@@ -29,7 +31,7 @@ interface SidebarProps {
   onRefresh: () => void
   repoCount: number
   onAddRepo: () => void
-  onRemoveRepo: (repoRoot: string) => Promise<void>
+  onRemoveRepo: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenSettings: () => void
   onOpenAddBackend: () => void
   onOpenHotkeyCheatsheet: () => void
@@ -59,6 +61,8 @@ export function Sidebar({
   onOpenAssignedPR,
   agentCount,
   onSelectWorktree,
+  pathBackendId,
+  originByPath,
   onSelectTab,
   onDismissPendingWorktree,
   onNewWorktree,
@@ -161,6 +165,8 @@ export function Sidebar({
           onStartAliasEdit={onStartAliasEdit}
           onEndAliasEdit={onEndAliasEdit}
           onSelectWorktree={onSelectWorktree}
+          pathBackendId={pathBackendId}
+          originByPath={originByPath}
           onSelectTab={onSelectTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}

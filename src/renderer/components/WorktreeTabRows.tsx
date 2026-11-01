@@ -1,12 +1,17 @@
 import { memo, useMemo } from 'react'
 import { FileText, GitCompare, Globe, ListChecks, Loader2, SquareTerminal } from 'lucide-react'
 import { getLeaves, type TerminalTab } from '../../shared/state/terminals'
-import { useShellActivity, useTerminalStatus, useWorktreePanes } from '../store'
+import { useAppStateFor, useShellActivity, useTerminalStatus } from '../store'
 import { STATUS_LABELS } from '../worktree-row-style'
 import { AgentIcon } from './AgentIcon'
 
 interface WorktreeTabRowsProps {
   worktreePath: string
+  /** Backend that owns this worktree. The sidebar renders above every
+   *  BackendScope, so a scope-resolved read here resolves to the ACTIVE
+   *  backend and finds no pane tree for a worktree hosted on a remote —
+   *  which is why remote rows showed no nested tabs at all. */
+  backendId: string | null
   /** Focused tab when this is the active worktree, else null — only the
    *  active worktree highlights a child row. */
   activeTabId: string | null
@@ -17,10 +22,11 @@ interface WorktreeTabRowsProps {
  *  own pane tree so other worktrees' tab churn doesn't re-render it. */
 export const WorktreeTabRows = memo(function WorktreeTabRows({
   worktreePath,
+  backendId,
   activeTabId,
   onSelectTab
 }: WorktreeTabRowsProps): JSX.Element | null {
-  const tree = useWorktreePanes(worktreePath)
+  const tree = useAppStateFor(backendId, (st) => st.terminals.panes[worktreePath] ?? null)
   const entries = useMemo(
     () =>
       tree ? getLeaves(tree).flatMap((leaf) => leaf.tabs.map((tab) => ({ paneId: leaf.id, tab }))) : [],

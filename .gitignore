@@ -12,3 +12,6 @@ release/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .vercel
+.headless-alpha/
+.headless-beta/
+.headless-data/

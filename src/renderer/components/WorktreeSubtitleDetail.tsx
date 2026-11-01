@@ -1,11 +1,18 @@
 import { Fragment, type ReactNode } from 'react'
 import type { Worktree, PRStatus, SidebarDetailPrefs } from '../types'
 import { formatWorktreeAge } from './worktree-detail'
+import { Server } from 'lucide-react'
 import { repoNameColor } from './RepoIcon'
 
 interface SubtitleDetailProps {
   worktree: Worktree
   repoLabel?: string
+  /** Backend this worktree lives on, when that isn't this machine. Rows
+   *  from several backends share one list and are otherwise
+   *  indistinguishable, so a remote one has to say so — acting on the
+   *  wrong machine's worktree is not a recoverable mistake. Absent for
+   *  local worktrees: badging the common case is noise. */
+  originLabel?: string
   aliased: boolean
   prStatus?: PRStatus | null
   prefs: SidebarDetailPrefs
@@ -24,8 +31,22 @@ interface SubtitleDetailProps {
  *  worktree row. Shared between `WorktreeTab` (production use) and the
  *  Settings > Appearance > Sidebar preview so both stay in sync when the
  *  layout or item set changes. */
-export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, inline, active }: SubtitleDetailProps): JSX.Element | null {
+export function SubtitleDetail({ worktree, repoLabel, originLabel, aliased, prStatus, prefs, inline, active }: SubtitleDetailProps): JSX.Element | null {
   const items: { key: string; node: ReactNode }[] = []
+  if (originLabel) {
+    items.push({
+      key: 'origin',
+      node: (
+        <span
+          className={`inline-flex items-center gap-1 shrink-0 text-info${inline ? ' group-hover:hidden' : ''}`}
+          title={`Hosted on ${originLabel}`}
+        >
+          <Server className="icon-2xs shrink-0" />
+          <span className="truncate max-w-[5rem]">{originLabel}</span>
+        </span>
+      )
+    })
+  }
   if (repoLabel && prefs.repoLabel) {
     items.push({
       key: 'repo',

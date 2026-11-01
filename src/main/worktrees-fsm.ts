@@ -2,11 +2,13 @@ import {
   addWorktree,
   defaultWorktreeDir,
   fetchPullRequestRef,
+  getOriginRemoteUrl,
   listWorktrees,
   localBranchExists,
   runWorktreeScript,
   type WorktreeInfo
 } from './worktree'
+import { normalizeRemoteUrl } from '../shared/git-remote'
 import { getPRMetadata } from './github'
 import { loadRepoConfig } from './repo-config'
 import { log } from './debug'
@@ -173,8 +175,44 @@ export class WorktreesFSM {
     return true
   }
 
+  /** Bumped on every refreshRepoRemotes call; a call only publishes if it
+   *  is still the newest when its git subprocesses finish. */
+  private remotesGen = 0
+
   dispatchRepos(roots: string[]): void {
     this.store.dispatch({ type: 'worktrees/reposChanged', payload: roots })
+    void this.refreshRepoRemotes(roots)
+  }
+
+  /** Resolve each repo's normalized origin URL and publish it. Runs after
+   *  reposChanged rather than inside it: the git calls are async and the
+   *  roots list shouldn't wait on them. Skips the dispatch when nothing
+   *  changed so a list refresh doesn't churn the map reference.
+   *
+   *  Public because boot seeds repoRoots straight into the store without
+   *  going through dispatchRepos — the host calls this once after
+   *  construction so remotes exist from the first paint, not only after
+   *  the first repo add/remove. */
+  async refreshRepoRemotes(roots: string[]): Promise<void> {
+    // Boot and an early repo add — or two quick add/remove clicks — can
+    // overlap, and each awaits N git subprocesses before replacing the
+    // whole map. Without this, whichever finishes LAST wins, so a stale
+    // roots list could drop a just-added repo's remote (it then falls
+    // back to a folder key and won't merge) or resurrect a removed root,
+    // until the next repo change happened to fix it.
+    const gen = ++this.remotesGen
+    const pairs = await Promise.all(
+      roots.map(async (root) => [root, normalizeRemoteUrl(await getOriginRemoteUrl(root))] as const)
+    )
+    if (gen !== this.remotesGen) return
+    const next: Record<string, string | null> = {}
+    for (const [root, remote] of pairs) next[root] = remote
+    const current = this.store.getSnapshot().state.worktrees.repoRemotes
+    const same =
+      Object.keys(current).length === Object.keys(next).length &&
+      Object.entries(next).every(([k, v]) => current[k] === v)
+    if (same) return
+    this.store.dispatch({ type: 'worktrees/repoRemotesChanged', payload: next })
   }
 
   /** Drive the creation FSM to completion. Dispatches state transitions as

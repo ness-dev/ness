@@ -1266,6 +1266,11 @@ const worktreesFSM = new WorktreesFSM(store, {
   }
 })
 
+// Boot seeds repoRoots straight into the store (build-initial-state),
+// bypassing dispatchRepos — so resolve each repo's origin once here, or
+// fleet view has no repo identity until the first repo add/remove.
+void worktreesFSM.refreshRepoRemotes([...(config.repoRoots || [])])
+
 const worktreeDeletionFSM = new WorktreeDeletionFSM(store, {
   getGlobalTeardownCmd: () => config.worktreeTeardownCommand || '',
   worktreesFSM

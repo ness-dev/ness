@@ -6,6 +6,7 @@ import type { GroupKey } from '../../shared/worktree-sort'
 import type {
   WorktreeListModel,
   WorktreeRepoSectionModel,
+  SectionRepoRoot,
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
@@ -42,6 +43,11 @@ interface WorktreeListProps {
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
   onSelectWorktree: (path: string) => void
+  /** Owning backend per worktree path, so nested tab rows read the right
+   *  store. The sidebar sits above every BackendScope. */
+  pathBackendId?: Record<string, string>
+  /** Backend label per worktree path, present only for non-local ones. */
+  originByPath?: Record<string, string>
   /** When provided, worktrees list their tabs as child rows, per the
    *  sidebarTabsExpansion setting. */
   onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
@@ -52,7 +58,7 @@ interface WorktreeListProps {
   onContinueWorktree?: (worktreePath: string, newBranchName: string) => Promise<void>
   onDeleteWorktree?: (path: string) => Promise<void>
   onPruneWorktrees?: (repoRoot: string) => Promise<void>
-  onRemoveRepo?: (repoRoot: string) => Promise<void>
+  onRemoveRepo?: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
 }
 
@@ -67,6 +73,8 @@ export function WorktreeList({
   onStartAliasEdit,
   onEndAliasEdit,
   onSelectWorktree,
+  pathBackendId,
+  originByPath,
   onSelectTab,
   onToggleGroup,
   onToggleRepo,
@@ -218,6 +226,7 @@ export function WorktreeList({
               detailPrefs={detailPrefs}
               isEditingAlias={editingAliasPath === row.path}
               actions={rowActionsFor(row)}
+              originLabel={originByPath?.[row.path]}
               onSelect={onSelectWorktree}
               onStartAliasEdit={onStartAliasEdit}
               onEndAliasEdit={onEndAliasEdit}
@@ -227,6 +236,7 @@ export function WorktreeList({
               (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId)) && (
               <WorktreeTabRows
                 worktreePath={row.path}
+                backendId={pathBackendId?.[row.path] ?? null}
                 activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
                 onSelectTab={onSelectTab}
               />
@@ -325,12 +335,12 @@ export function WorktreeList({
         </button>
       )}
       {model.sections.map((section) => (
-        <div key={section.repoRoot}>
+        <div key={section.scope}>
           {model.showRepoHeaders && (
             <RepoHeader
               section={section}
               variant={variant}
-              onToggle={() => onToggleRepo(section.repoRoot)}
+              onToggle={() => onToggleRepo(section.scope)}
               onRemove={onRemoveRepo}
             />
           )}
@@ -405,7 +415,7 @@ function RepoHeader({
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
-  onRemove?: (repoRoot: string) => Promise<void>
+  onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
 }): JSX.Element {
   return (
     <button
@@ -413,7 +423,7 @@ function RepoHeader({
       className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'
       }`}
-      title={section.repoRoot}
+      title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
       <Chevron collapsed={section.collapsed} />
       <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
@@ -430,10 +440,17 @@ function RepoHeader({
               e.stopPropagation()
               if (
                 window.confirm(
-                  `Remove ${section.repoName} from this window? Worktrees stay on disk.`
+                  // A merged section's members are matched by folder name,
+                  // so the one way to catch a wrong merge before detaching
+                  // an unrelated repo is to show exactly what will go.
+                  section.repoRoots.length > 1
+                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
+                        .map((r) => `• ${r.repoRoot}`)
+                        .join('\n')}\n\nWorktrees stay on disk everywhere.`
+                    : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
                 )
               ) {
-                void onRemove(section.repoRoot)
+                void onRemove(section.repoRoots)
               }
             }}
           >
