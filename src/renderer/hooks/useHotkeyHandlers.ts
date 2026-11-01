@@ -17,6 +17,7 @@ import {
 import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
 import { SCALES } from '../../shared/state/settings'
 import { QUESTION_TOOL_NAME } from '../../shared/state/json-claude'
+import { setFleetViewMode } from '../fleet-view'
 import { advancePreventSleep, PREVENT_SLEEP_META, PREVENT_SLEEP_TOAST_KEY } from '../prevent-sleep'
 import { showToast } from '../toast'
 
@@ -205,6 +206,10 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     (index: number) => {
       const target = connections[index]
       if (!target) return
+      // Same contract as clicking the chip: picking a host always lands
+      // in single view of it, so the early-return can't short-circuit
+      // the mode switch while merged view is showing.
+      setFleetViewMode('single')
       const registry = getBackendsRegistry()
       if (registry.getActiveId() === target.id) return
       registry.setActive(target.id)

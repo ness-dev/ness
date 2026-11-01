@@ -21,7 +21,8 @@
 // WorktreeRef work — see the step-1 commit message.
 
 import { useMemo } from 'react'
-import { useAllBackendStates, type BackendStateEntry } from '../store'
+import { useActiveBackend, useAllBackendStates, type BackendStateEntry } from '../store'
+import { useFleetViewMode } from '../fleet-view'
 import { getLeaves } from '../../shared/state/terminals'
 import type { TerminalTab } from '../types'
 import type { Worktree } from '../../shared/state/worktrees'
@@ -70,7 +71,22 @@ export interface MergedWorktreeData {
 }
 
 export function useMergedWorktrees(): MergedWorktreeData {
-  const backends = useAllBackendStates()
+  const allBackends = useAllBackendStates()
+  const viewMode = useFleetViewMode()
+  const activeId = useActiveBackend().id
+  // Single-host view is the SAME pipeline restricted to the active
+  // backend — not a separate code path. That's what makes the view
+  // toggle cheap to trust: every owner map, routing decision and render
+  // loop downstream behaves identically in both modes, single mode just
+  // sees one backend's slice of it, which reproduces the pre-merge
+  // sidebar exactly.
+  const backends = useMemo(
+    () =>
+      viewMode === 'merged'
+        ? allBackends
+        : allBackends.filter((b) => b.backendId === activeId),
+    [allBackends, viewMode, activeId]
+  )
   return useMemo(() => {
     const merged: MergedWorktreeData = {
       worktrees: [],
