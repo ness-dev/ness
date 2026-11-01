@@ -35,6 +35,7 @@ import {
   ListChecks,
   Map as MapIcon
 } from 'lucide-react'
+import { MockChat } from './MockChat'
 import { NessMark } from './NessMark'
 
 export type MockStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval' | 'merged'
@@ -401,7 +402,7 @@ function MockTabRows({ status }: { status: MockStatus }) {
         ) : status === 'waiting' ? (
           <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-warning" />
         ) : null}
-        <span className="truncate">Claude</span>
+        <span className="truncate">Chat</span>
       </div>
       <div className="pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs text-muted">
         <SquareTerminal size={12} className="shrink-0" />
@@ -473,7 +474,7 @@ function MockTabBar({ state }: { state: MockHarnessState }) {
       <div className="flex items-center h-full overflow-hidden flex-1 min-w-0">
         <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-muted text-fg-bright">
           <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_COLORS[active?.status ?? 'processing']}`} />
-          <span>Claude</span>
+          <span>Chat</span>
         </div>
         <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-transparent border-l border-l-border text-dim">
           <span className="w-1.5 h-1.5 rounded-full bg-faint" />
@@ -498,106 +499,8 @@ function MockTerminalPanel({ state }: { state: MockHarnessState }) {
       transition={{ type: 'spring', stiffness: 200, damping: 30 }}
       className="flex-1 min-w-0 flex flex-col bg-app relative"
     >
-      <ClaudeTUI active={active} />
+      <MockChat variant={active.status === 'needs-approval' ? 'needs-approval' : 'streaming'} />
     </motion.div>
-  )
-}
-
-/** Renders a screenshot of Claude Code's fullscreen TUI as seen inside a
- * Ness terminal pane. Layout mirrors the real thing: banner at top,
- * empty working area, effort indicator + path-terminated separators, the
- * input prompt (or an approval prompt when the worktree is blocked), and
- * the "accept edits on" status line. */
-function ClaudeTUI({ active }: { active: MockWorktree }) {
-  const needsApproval = active.status === 'needs-approval'
-  return (
-    <div className="h-full flex flex-col font-mono text-xs leading-[1.55] bg-app px-4 py-3 overflow-hidden">
-      <div className="flex gap-3 shrink-0">
-        <pre className="leading-[1.1] text-xs m-0" style={{ color: 'var(--color-brand)' }}>
-{` ▐▛███▜▌
-▝▜█████▛▘
-  ▘▘ ▝▝`}
-        </pre>
-        <div className="leading-[1.4] pt-[1px]">
-          <div>
-            <span className="text-fg-bright">Claude Code</span>
-            <span className="text-dim"> v2.1.301</span>
-          </div>
-          <div className="text-dim">Opus 5.5 (1M context) · Claude Max</div>
-          <div className="text-dim truncate">~/{active.path}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 text-dim shrink-0 truncate">
-        <span className="text-success">/remote-control</span> is active · Code in CLI or at{' '}
-        <span className="text-info">https://claude.ai/code/session_01EypUSUvzm5dfZ1KwhmWpLN</span>
-      </div>
-
-      <div className="flex-1" />
-
-      <AnimatePresence mode="wait" initial={false}>
-        {needsApproval && (
-          <motion.div
-            key="approval"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.25 }}
-            className="shrink-0 mb-3"
-          >
-            <div>
-              <span className="text-accent">⏺</span>{' '}
-              <span className="text-fg-bright">Bash</span>{' '}
-              <span className="text-dim">(npx prisma migrate deploy)</span>
-            </div>
-            <div className="text-dim">
-              <span>  ⎿  </span>Do you want to proceed?
-            </div>
-            <div className="pl-5 text-fg">
-              <div>
-                <span className="text-warning">❯</span> 1. Yes
-              </div>
-              <div className="pl-3 text-dim">
-                2. Yes, and don't ask again this session{' '}
-                <span className="text-faint">(shift+tab)</span>
-              </div>
-              <div className="pl-3 text-dim">
-                3. No, and tell Claude what to do differently{' '}
-                <span className="text-faint">(esc)</span>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="text-right text-dim text-xs shrink-0">
-        <span className="text-success">◉</span> high <span className="text-faint">· /effort</span>
-      </div>
-
-      <div className="flex items-center gap-2 shrink-0 mt-0.5">
-        <div className="flex-1 border-t border-border-strong" />
-        <span className="text-dim text-xs whitespace-nowrap">
-          {REPO_NAME}/{active.path.split('/').pop()}
-        </span>
-        <div className="w-3 border-t border-border-strong" />
-      </div>
-
-      <div className="shrink-0 py-1.5 min-h-[22px] flex items-center">
-        {!needsApproval && (
-          <>
-            <span className="text-accent">❯</span>
-            <span className="inline-block w-[6px] h-[12px] bg-fg-bright caret-blink ml-1 align-middle" />
-          </>
-        )}
-      </div>
-
-      <div className="border-t border-border-strong shrink-0" />
-
-      <div className="mt-1.5 text-dim shrink-0">
-        <span className="text-accent">⏵⏵</span> accept edits on{' '}
-        <span className="text-faint">(shift+tab to cycle)</span>
-      </div>
-    </div>
   )
 }
 
