@@ -85,8 +85,16 @@ class ClientStore {
     for (const l of this.listeners) l()
   }
 
+  /** Notifies subscribers like a state event would. The id changes on
+   *  every WS reconnect, and `useClientId` reads it through
+   *  `useSyncExternalStore` — without the notify, a controller check
+   *  would keep comparing against the stale id until some unrelated
+   *  session event happened to re-render it. Reconnects are rare, so the
+   *  fan-out is free. */
   setClientId(id: string): void {
+    if (this.clientIdValue === id) return
     this.clientIdValue = id
+    for (const l of this.listeners) l()
   }
 
   getClientId(): string | null {
@@ -585,11 +593,17 @@ export function getClientIdFor(backendId: BackendScopeId): string | null {
   return store?.getClientId() ?? null
 }
 
-/** Scope-resolved client id for components. Read per render like the
- *  active variant always was; a reconnect re-snapshots the store and
- *  re-renders subscribers, which is when the id changes. */
+/** Scope-resolved client id for components, as a real subscription: the
+ *  scoped store notifies on `setClientId`, so a reconnect re-renders the
+ *  reader with the fresh id on its own — no dependence on a session event
+ *  happening to arrive afterwards. */
 export function useClientId(): string | null {
-  return getClientIdFor(useBackendScope())
+  const scope = useBackendScope()
+  return useSyncExternalStore(
+    scope ? subscribeForBackend(scope) : subscribeActive,
+    () => getClientIdFor(scope),
+    () => null
+  )
 }
 
 /** Reconnect events for ONE backend's transport. A terminal must re-join
