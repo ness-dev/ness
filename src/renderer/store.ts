@@ -564,8 +564,44 @@ export function getClientId(): string | null {
 export function subscribeActiveTransportReconnect(
   cb: (clientId: string) => void
 ): () => void {
-  return registry.subscribeReconnect((backendId, clientId) => {
-    if (backendId !== registry.getActiveId()) return
+  return subscribeTransportReconnectFor(null, cb)
+}
+
+/** This renderer's server-assigned client id on ONE backend — the one a
+ *  worktree's subtree is scoped to — rather than whichever backend is
+ *  active.
+ *
+ *  Controller checks ("is the session's controllerClientId me?") must
+ *  use this. A remote worktree can be open while Local is the active
+ *  chip; comparing its session's controller against the ACTIVE backend's
+ *  id can never match, so the terminal sits in the spectator overlay and
+ *  Take Control appears to do nothing — the server did grant control,
+ *  but to an id the UI wasn't looking for. That shipped as a regression
+ *  of the old swap model, where active and host were always the same.
+ *
+ *  `null` follows the active backend, for chrome outside any scope. */
+export function getClientIdFor(backendId: BackendScopeId): string | null {
+  const store = backendId ? registry.getStore(backendId) : registry.getActiveStore()
+  return store?.getClientId() ?? null
+}
+
+/** Scope-resolved client id for components. Read per render like the
+ *  active variant always was; a reconnect re-snapshots the store and
+ *  re-renders subscribers, which is when the id changes. */
+export function useClientId(): string | null {
+  return getClientIdFor(useBackendScope())
+}
+
+/** Reconnect events for ONE backend's transport. A terminal must re-join
+ *  when ITS backend reconnects, whether or not that backend is active —
+ *  filtering on the active id (the pre-fleet behaviour) left remote
+ *  terminals orphaned after their own reconnect. `null` follows active. */
+export function subscribeTransportReconnectFor(
+  backendId: BackendScopeId,
+  cb: (clientId: string) => void
+): () => void {
+  return registry.subscribeReconnect((id, clientId) => {
+    if (id !== (backendId ?? registry.getActiveId())) return
     cb(clientId)
   })
 }

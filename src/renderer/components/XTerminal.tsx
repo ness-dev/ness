@@ -6,7 +6,7 @@ import { ProgressAddon } from '@xterm/addon-progress'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import type { StateEvent } from '../../shared/state'
-import { getClientId, LOCAL_BACKEND_ID, subscribeActiveTransportReconnect, useSettings, useTerminalSession } from '../store'
+import { LOCAL_BACKEND_ID, subscribeTransportReconnectFor, useClientId, useSettings, useTerminalSession } from '../store'
 import { getBackendFor, useBackend } from '../backend'
 import { useBackendScope } from '../backend-scope'
 import {
@@ -384,7 +384,10 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
   // state stream. Treat that as "we are controller" so input works
   // (main's gate allows writes when no session exists yet — see
   // pty:write handler).
-  const myClientId = getClientId()
+  // Scope-resolved: this terminal's session lives on its own backend, and
+  // its controllerClientId has to be compared against OUR id on THAT
+  // backend — not on whichever chip is active.
+  const myClientId = useClientId()
   const isController =
     session === null || session.controllerClientId === null || session.controllerClientId === myClientId
   const isControllerRef = useRef(isController)
@@ -855,10 +858,13 @@ export function XTerminal({ terminalId, cwd, type, agentKind, visible, sessionNa
   // the session entry stays orphaned and pty:write is silently dropped
   // by main's "controllerClientId !== ctx.clientId" gate.
   useEffect(() => {
-    return subscribeActiveTransportReconnect(() => {
+    // Our own backend's reconnects, not the active chip's — a remote
+    // terminal that isn't active still has to re-join after ITS socket
+    // comes back, or its writes are silently dropped by main's gate.
+    return subscribeTransportReconnectFor(backendScope, () => {
       backend.joinTerminal(terminalId)
     })
-  }, [terminalId, backend])
+  }, [terminalId, backend, backendScope])
 
   // Re-apply the xterm theme when the app theme changes. theme-apply.ts
   // mutates `data-theme` and inline `style` on :root; observe both so we
