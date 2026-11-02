@@ -619,6 +619,17 @@ describe('codex mapping helpers', () => {
     expect(intentForCommandActions([{ type: 'listFiles', command: 'ls', path: null }], cwd)).toBe('List files')
   })
 
+  it('keeps absolute paths intact when cwd is empty', () => {
+    expect(intentForCommandActions([{ type: 'listFiles', command: 'ls /repo/src', path: '/repo/src' }], '')).toBe(
+      'List files in /repo/src'
+    )
+  })
+
+  it('treats a read with neither name nor path as opaque instead of throwing', () => {
+    const malformed = [{ type: 'read', command: 'cat' }] as unknown as Parameters<typeof intentForCommandActions>[0]
+    expect(intentForCommandActions(malformed, '/repo')).toBeNull()
+  })
+
   it('gives no intent when any part of the command is opaque', () => {
     expect(intentForCommandActions([], '/repo')).toBeNull()
     expect(

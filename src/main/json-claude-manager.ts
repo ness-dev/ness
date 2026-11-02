@@ -2278,7 +2278,7 @@ export function claudeToolIntent(
   return trimmed.length > 0 ? trimmed : null
 }
 
-function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
+export function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
   const message = ev['message'] as { content?: unknown } | undefined
   const content = message?.content
   if (!Array.isArray(content)) return []

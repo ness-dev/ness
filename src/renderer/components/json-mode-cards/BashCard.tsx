@@ -11,7 +11,7 @@ export function BashCard({ block, result, autoApproved, sessionAllowed }: ToolCa
     <ToolCardChrome
       id={block.id}
       name="Bash"
-      subtitle={<HighlightedText text={description ?? trunc(cmd, 80)} />}
+      subtitle={description ? <HighlightedText text={description} /> : trunc(cmd, 80)}
       variant="warn"
       icon={BashIcon}
       isError={result?.isError}

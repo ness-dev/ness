@@ -12,6 +12,7 @@ import {
   type RefObject
 } from 'react'
 import { Search, X } from 'lucide-react'
+import { getToolIntent } from './json-mode-cards/tool-display'
 import type {
   JsonClaudeChatEntry,
   JsonClaudeMessageBlock
@@ -220,7 +221,7 @@ function getToolUseSegments(
   switch (block.name) {
     case 'Bash':
       return collect(
-        seg(input.description as string | undefined),
+        seg(getToolIntent(block)),
         seg(input.command as string | undefined)
       )
     case 'Read':

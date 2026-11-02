@@ -10,6 +10,8 @@ import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
 
 export interface ToolGroupRow extends TimelineRow {
   node: ReactNode
+  /** See getToolIntent — the provider's label for the call. */
+  toolIntent?: string
   hasPendingApproval?: boolean
 }
 
@@ -147,7 +149,9 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
         <Fragment key={i}>
           {i > 0 && <span className="opacity-40">·</span>}
           {d.icon && <d.icon className="icon-xs shrink-0" />}
-          <span className="whitespace-nowrap">{d.text}</span>
+          <span className="truncate min-w-0 max-w-[16rem]" title={d.text}>
+            {d.text}
+          </span>
         </Fragment>
       ))}
       {moreCount > 0 && (

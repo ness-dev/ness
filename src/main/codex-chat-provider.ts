@@ -1075,6 +1075,7 @@ export function displayCommand(command: string, actions: Array<{ command: string
 }
 
 function relativeTo(cwd: string, path: string): string {
+  if (!cwd) return path
   if (path === cwd) return '.'
   return path.startsWith(cwd + '/') ? path.slice(cwd.length + 1) : path
 }
@@ -1094,16 +1095,23 @@ export function intentForCommandActions(actions: CodexCommandAction[], cwd: stri
     reads.length = 0
   }
   for (const a of actions) {
+    // Wire data: guard every field rather than trusting the union, so a
+    // malformed action degrades to "no intent" instead of throwing in
+    // the item mapper.
+    const path = typeof (a as { path?: unknown }).path === 'string' ? (a as { path: string }).path : null
     if (a.type === 'read') {
-      reads.push(a.name || relativeTo(cwd, a.path))
+      const label = (typeof a.name === 'string' && a.name) || (path && relativeTo(cwd, path))
+      if (!label) return null
+      reads.push(label)
       continue
     }
     flushReads()
     if (a.type === 'listFiles') {
-      phrases.push(a.path ? `List files in ${relativeTo(cwd, a.path)}` : 'List files')
+      phrases.push(path ? `List files in ${relativeTo(cwd, path)}` : 'List files')
     } else if (a.type === 'search') {
-      const where = a.path ? ` in ${relativeTo(cwd, a.path)}` : ''
-      phrases.push(a.query ? `Search for "${a.query}"${where}` : `Search${where || ' files'}`)
+      const where = path ? ` in ${relativeTo(cwd, path)}` : ''
+      const query = typeof a.query === 'string' ? a.query : null
+      phrases.push(query ? `Search for "${query}"${where}` : `Search${where || ' files'}`)
     } else {
       return null
     }
