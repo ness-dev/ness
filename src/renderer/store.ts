@@ -698,28 +698,18 @@ export async function initStore(): Promise<void> {
 
   // Hydrate any saved remote backends (Tier 1 multi-backend UX). Each
   // remote becomes its own (transport, store) pair in the registry; the
-  // user can flip between them via the chip strip. WS connect failures
-  // are swallowed here — the registry entry still gets added so the
-  // chip renders (greyed-disconnected styling lands in step 8) and the
-  // user can retry.
+  // user can flip between them via the chip strip. A remote that fails
+  // to connect stays registered as disconnected, so its chip renders
+  // greyed with retry/remove and the transport keeps retrying.
   //
-  // Skipped in the web client: backend.connectionsList returns an
-  // empty stub there, so the loop is a no-op. Multi-backend is an
-  // Electron-only feature in Tier 1.
-  try {
-    const backend = getBackend()
-    const connections = await backend.connectionsList()
-    for (const conn of connections) {
-      if (conn.kind !== 'remote') continue
-      void hydrateRemoteBackend(conn, { registry, backend })
-    }
-    const savedActive = await backend.connectionsGetActive()
-    if (savedActive && registry.has(savedActive)) {
-      registry.setActive(savedActive)
-    }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn('[harness] failed to hydrate remote backends', err)
+  // Skipped in the web client. Its "local" transport is a WebSocket to
+  // whichever machine served the page, and the saved connections belong
+  // to that machine's desktop shell, not to this browser. Hydrating them
+  // used to hand a phone the desktop's remotes and switch it to the one
+  // the desktop last had active. Main refuses `connections:*` over WS
+  // now too; this skip just avoids the doomed round-trips.
+  if (!isWeb) {
+    await hydrateSavedRemotes({ registry, backend: getBackend() })
   }
 
   const local = registry.getStore(LOCAL_BACKEND_ID)
@@ -816,17 +806,60 @@ async function resyncRemoteBackend(connectionId: string): Promise<void> {
     } catch {
       /* not registered — hydrate below still does the right thing */
     }
-    await hydrateRemoteBackend(fresh, { registry, backend })
-    if (wasActive && registry.has(connectionId)) registry.setActive(connectionId)
+    const connected = await hydrateRemoteBackend(fresh, { registry, backend })
+    if (wasActive && connected) registry.setActive(connectionId)
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn(`[harness] failed to resync backend ${connectionId}`, err)
   }
 }
 
+/** Register every saved remote and restore the saved active backend —
+ *  but only once that backend has actually connected, and only if the
+ *  user is still on Local by then. Selecting a backend before its first
+ *  snapshot renders an empty store, which App.tsx reads as "no repos"
+ *  and answers with the onboarding screen.
+ *
+ *  Doesn't await the connects: an unreachable host can take a TCP
+ *  timeout to fail, and boot shouldn't wait on it.
+ *
+ *  The persisted `activeBackendId` is left alone when its remote is down.
+ *  A remote that's asleep or behind a VPN that isn't up yet is routine,
+ *  and overwriting the choice would forget it after one bad boot. */
+export async function hydrateSavedRemotes(deps: {
+  registry: BackendsRegistry
+  backend: Pick<
+    import('./types').ElectronAPI,
+    'connectionsList' | 'connectionsGetActive' | 'connectionsGetToken' | 'sshReconnect'
+  >
+  hydrate?: typeof hydrateRemoteBackend
+}): Promise<void> {
+  const { registry: reg, backend, hydrate = hydrateRemoteBackend } = deps
+  try {
+    const [connections, savedActive] = await Promise.all([
+      backend.connectionsList(),
+      backend.connectionsGetActive()
+    ])
+    for (const conn of connections) {
+      if (conn.kind !== 'remote') continue
+      const pending = hydrate(conn, { registry: reg, backend })
+      if (conn.id !== savedActive) continue
+      void pending.then((connected) => {
+        if (connected && reg.getActiveId() === LOCAL_BACKEND_ID) reg.setActive(conn.id)
+      })
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[harness] failed to hydrate remote backends', err)
+  }
+}
+
 /** Construct a WS transport for a saved remote, fetch its token from
- *  secrets, connect, and register the pair. Errors are logged but
- *  non-fatal — the user can retry from the chip strip.
+ *  secrets, connect, and register the pair. Resolves `true` once the
+ *  first connect succeeds. On failure the entry stays registered as
+ *  disconnected — the chip strip greys it and offers retry/remove, and
+ *  the transport keeps retrying on its own backoff — and resolves
+ *  `false`. Errors are logged, never thrown.
  *
  *  Exported (with dependency-injection) for tests. Production callers
  *  pass the module-level `registry` and `backend`. */
@@ -840,7 +873,7 @@ export async function hydrateRemoteBackend(
     >
     WSCtor?: typeof WebSocketClientTransport
   }
-): Promise<void> {
+): Promise<boolean> {
   const { registry: reg, backend, WSCtor = WebSocketClientTransport } = deps
   try {
     // SSH backends: ask main to (re)establish the tunnel first so we
@@ -870,7 +903,7 @@ export async function hydrateRemoteBackend(
     if (!token) {
       // eslint-disable-next-line no-console
       console.warn(`[harness] no token stored for backend ${conn.id} — skipping`)
-      return
+      return false
     }
     // BackendConnection.url is the wire URL with ws://-or-wss:// prefix
     // (parseConnectionUrl preserves the TLS choice from what the user
@@ -882,7 +915,7 @@ export async function hydrateRemoteBackend(
     // ClientStore with each fresh snapshot so an inactive backend that
     // briefly drops + reconnects in the background catches up cleanly
     // when the user switches to it.
-    if (reg.has(conn.id)) return
+    if (reg.has(conn.id)) return reg.getStatus(conn.id).state === 'connected'
     const ws = new WSCtor({
       url,
       token,
@@ -903,21 +936,18 @@ export async function hydrateRemoteBackend(
     // until the first snapshot arrives — a brief flash, gone in <100ms.
     reg.add(conn, ws)
     await ws.connect()
+    return true
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn(`[harness] failed to connect to backend ${conn.id}`, err)
-    // Drop the half-registered entry so it can't poison active-backend
-    // selection. Without this, the outer hydration loop's
-    // `if (registry.has(savedActive)) setActive(savedActive)` would pin
-    // active at this never-connected remote, and the app would render
-    // the empty-state onboarding screen even though the local backend
-    // has the user's real repos. `remove` auto-falls-back to
-    // LOCAL_BACKEND_ID if the dropped entry was active.
-    try {
-      reg.remove(conn.id)
-    } catch {
-      /* not added or already gone — fine */
-    }
+    // Keep the entry: removing it closed the transport (so it never
+    // retried) and hid the chip, leaving a saved remote the user could
+    // neither see nor delete. What removal was really protecting against
+    // is a never-connected remote being the active backend — its store
+    // is empty, so App.tsx renders onboarding over the user's local
+    // repos. Fall back to Local for that case instead.
+    if (reg.getActiveId() === conn.id) reg.setActive(LOCAL_BACKEND_ID)
+    return false
   }
 }
 
@@ -931,8 +961,8 @@ export async function reconnectBackend(connectionId: string): Promise<void> {
   if (!conn || conn.kind !== 'remote') return
   const wasActive = registry.getActiveId() === connectionId
   registry.remove(connectionId)
-  await hydrateRemoteBackend(conn, { registry, backend: getBackend() })
-  if (wasActive && registry.has(connectionId)) registry.setActive(connectionId)
+  const connected = await hydrateRemoteBackend(conn, { registry, backend: getBackend() })
+  if (wasActive && connected) registry.setActive(connectionId)
 }
 
 function getActiveState(): AppState {
