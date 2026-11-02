@@ -16,7 +16,9 @@ import {
   removeLeaf
 } from '../shared/state/terminals'
 import type { PersistedPaneNode } from './persistence'
-import { agentDisplayName, getAgentInfo, supportsConversationFork } from '../shared/agent-registry'
+import { persistedTabFields } from './pane-persistence'
+import { agentDisplayName, getAgentInfo, supportsChat, supportsConversationFork } from '../shared/agent-registry'
+import { findReviewerTab } from '../shared/agent-tabs'
 import { log } from './debug'
 
 interface PanesFSMOptions {
@@ -70,14 +72,6 @@ function newPaneId(): string {
 
 function newSplitId(): string {
   return `split-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function stripTransientTabFields(tab: TerminalTab): TerminalTab {
-  if (!tab.initialPrompt && !tab.teleportSessionId) return tab
-  const { initialPrompt: _ip, teleportSessionId: _ts, ...rest } = tab
-  void _ip
-  void _ts
-  return rest
 }
 
 export class PanesFSM {
@@ -169,18 +163,7 @@ export class PanesFSM {
       : null
     let claimedLatest = false
     const tabs: TerminalTab[] = allTabs.map((t): TerminalTab => {
-      const base: TerminalTab = {
-        id: t.id,
-        type: t.type,
-        label: t.label,
-        agentKind: t.agentKind,
-        sessionId: t.sessionId,
-        url: t.url,
-        command: t.command,
-        cwd: t.cwd,
-        model: t.model,
-        ...(t.customLabel ? { customLabel: t.customLabel } : {})
-      }
+      const base: TerminalTab = persistedTabFields(t)
       // Persisted json-claude and shell tabs hydrate as 'asleep' so app
       // launch doesn't construct an xterm + spawn a subprocess per tab
       // across every restored worktree. The renderer wakes them on
@@ -263,14 +246,19 @@ export class PanesFSM {
     const model = opts?.model && opts.model.trim() ? opts.model.trim() : undefined
     const shellTabId = `shell-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
     // Branch to a json-claude default tab when the user has opted in
-    // and the kind is Claude. teleport sessions stay on xterm (json-
+    // and the agent has a chat provider. teleport sessions stay on xterm (json-
     // claude has no `--resume <id>` analog for an arbitrary external
     // session today). initialPrompt is honored for both — for the
     // json-claude side we pre-spawn the subprocess and send it as the
     // first message via startJsonClaudeWithPrompt below.
+    // An agent that assigns its own session ids can't be handed the forked
+    // conversation's id on a terminal command line — the fork only becomes
+    // a real conversation inside its chat provider (Codex forks the thread
+    // when the chat tab boots). So such a fork can only open in Chat.
+    const forkNeedsChat = !!opts?.forkedSessionId && !agentInfo.assignsSessionId
     const wantsJson =
-      agentKind === 'claude' &&
-      this.opts.getDefaultClaudeTabType?.() === 'json' &&
+      supportsChat(agentKind) &&
+      (this.opts.getDefaultClaudeTabType?.() === 'json' || forkNeedsChat) &&
       !opts?.teleportSessionId
     let agentTab: TerminalTab
     let jsonClaudeKickoff: { sessionId: string; initialPrompt?: string; model?: string } | null = null
@@ -282,6 +270,7 @@ export class PanesFSM {
         label: 'Chat',
         sessionId,
         mode: 'awake',
+        ...(agentKind !== 'claude' ? { agentKind } : {}),
         model
       }
       jsonClaudeKickoff = { sessionId, initialPrompt: opts?.initialPrompt, model }
@@ -492,10 +481,9 @@ export class PanesFSM {
     if (!tab) return
     if (tab.type === newType) return
     if (tab.type !== 'agent' && tab.type !== 'json-claude') return
-    if (tab.type === 'agent' && tab.agentKind && tab.agentKind !== 'claude') {
-      // Only Claude agent tabs have a json-claude counterpart; refuse
-      // to swap a Codex tab.
-      log('panes-fsm', `convertTabType refused for non-claude agent kind=${tab.agentKind}`)
+    if (!supportsChat(tab.agentKind)) {
+      // Only agents with a chat provider have a json-claude counterpart.
+      log('panes-fsm', `convertTabType refused for agent without chat kind=${tab.agentKind}`)
       return
     }
     const sessionId = tab.sessionId ?? crypto.randomUUID()
@@ -512,10 +500,23 @@ export class PanesFSM {
       newType === 'json-claude'
         ? sessionId
         : `agent-${wtPath.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`
-    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName('claude')
+    const newLabel = newType === 'json-claude' ? 'Chat' : agentDisplayName(tab.agentKind)
     this.store.dispatch({
       type: 'terminals/tabTypeChanged',
       payload: { worktreePath: wtPath, tabId, newId, newType, newLabel }
+    })
+    this.opts.persist(this.buildPersistPayload())
+  }
+
+  /** Record the agent's own id for a chat tab's conversation (a Codex
+   *  thread id) so a restart resumes it. No-op if the tab is gone. */
+  setTabProviderSessionId(tabId: string, providerSessionId: string): void {
+    const panes = this.store.getSnapshot().state.terminals.panes
+    const wtPath = Object.keys(panes).find((p) => findLeafByTabId(panes[p], tabId))
+    if (!wtPath) return
+    this.store.dispatch({
+      type: 'terminals/tabProviderSessionIdChanged',
+      payload: { worktreePath: wtPath, tabId, providerSessionId }
     })
     this.opts.persist(this.buildPersistPayload())
   }
@@ -546,16 +547,99 @@ export class PanesFSM {
     this.commit(wtPath, updated)
   }
 
-  renameTab(wtPath: string, tabId: string, label: string): void {
+  /** Returns whether the rename landed. An agent rename is refused when
+   *  the user has named the tab themselves, and the control server needs
+   *  to tell the agent that so it stops trying. */
+  renameTab(
+    wtPath: string,
+    tabId: string,
+    label: string,
+    source: 'user' | 'agent'
+  ): boolean {
+    const tree = this.getTree(wtPath)
+    if (!tree) return false
+    const leaf = findLeafByTabId(tree, tabId)
+    if (!leaf) return false
+    const tab = leaf.tabs.find((t) => t.id === tabId)
+    if (!tab) return false
+    // Mirrors the reducer's lock rule. Checked here rather than inferred
+    // from a no-op dispatch so re-setting the same name — which the
+    // reducer also treats as no change — isn't reported as a refusal.
+    if (
+      source === 'agent' &&
+      tab.customLabel !== undefined &&
+      tab.customLabelSource !== 'agent'
+    ) {
+      return false
+    }
+    this.store.dispatch({
+      type: 'terminals/tabRenamed',
+      payload: { worktreePath: wtPath, tabId, label, source }
+    })
+    this.opts.persist(this.buildPersistPayload())
+    return true
+  }
+
+  /** Find this worktree's reviewer Chat tab for `requesterTabId`, if one
+   *  is already open. */
+  findReviewerTab(wtPath: string, requesterTabId: string): TerminalTab | null {
+    return findReviewerTab(this.store.getSnapshot().state, wtPath, requesterTabId)
+  }
+
+  /** Open a reviewer Chat tab for `requesterTabId` and focus the Review
+   *  tab beside it, then deliver the request as its first turn. A second
+   *  request from the same tab reuses the reviewer that is already open,
+   *  so an author asking for a re-review keeps one conversation with the
+   *  same reviewer rather than accumulating tabs.
+   *
+   *  The reviewer is a Chat tab whatever the requester is: a submitted
+   *  review is delivered by Ness, and only Chat tabs can receive it. */
+  openReviewerTab(
+    wtPath: string,
+    requesterTabId: string,
+    prompt: string,
+    opts?: { agentKind?: AgentKind; model?: string; label?: string }
+  ): { tabId: string; reused: boolean } {
+    const existing = this.findReviewerTab(wtPath, requesterTabId)
+    if (existing) {
+      // Asleep or dead, startJsonClaudeWithPrompt revives it; awake, it
+      // just takes the turn.
+      this.focusTab(wtPath, existing.id)
+      this.openReviewTab(wtPath)
+      this.opts.startJsonClaudeWithPrompt?.(existing.id, wtPath, prompt)
+      return { tabId: existing.id, reused: true }
+    }
+    const sessionId = crypto.randomUUID()
+    const agentKind = opts?.agentKind ?? this.opts.getDefaultAgentKind?.() ?? 'claude'
+    const tab: TerminalTab = {
+      id: sessionId,
+      type: 'json-claude',
+      label: opts?.label ?? 'Reviewer',
+      sessionId,
+      mode: 'awake',
+      reviewOf: requesterTabId,
+      ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {}),
+      ...(opts?.model?.trim() ? { model: opts.model.trim() } : {})
+    }
+    this.addTab(wtPath, tab)
+    this.openReviewTab(wtPath)
+    // Put focus back on the reviewer: openReviewTab activates the Review
+    // tab in the same pane, and the user wants to watch the review happen.
+    this.focusTab(wtPath, sessionId)
+    this.opts.startJsonClaudeWithPrompt?.(sessionId, wtPath, prompt)
+    return { tabId: sessionId, reused: false }
+  }
+
+  /** Make `tabId` the active tab of whichever pane holds it. */
+  private focusTab(wtPath: string, tabId: string): void {
     const tree = this.getTree(wtPath)
     if (!tree) return
     const leaf = findLeafByTabId(tree, tabId)
-    if (!leaf) return
-    this.store.dispatch({
-      type: 'terminals/tabRenamed',
-      payload: { worktreePath: wtPath, tabId, label }
-    })
-    this.opts.persist(this.buildPersistPayload())
+    if (!leaf || leaf.activeTabId === tabId) return
+    this.commit(
+      wtPath,
+      mapLeaves(tree, (l) => (l.id === leaf.id ? { ...l, activeTabId: tabId } : l))
+    )
   }
 
   /** Activate the existing review tab for this worktree, or create one if
@@ -744,7 +828,7 @@ export class PanesFSM {
       // a brand-new session with no existing jsonl on disk — that drives
       // startJsonClaudeSession to use --session-id (new) rather than
       // --resume. Carry over only fields that make sense for a fresh
-      // chat (label, model) — never copy initialPrompt/teleportSessionId.
+      // chat (label, agent, model) — never copy initialPrompt/teleportSessionId.
       const sessionId = crypto.randomUUID()
       tab = {
         id: sessionId,
@@ -752,6 +836,7 @@ export class PanesFSM {
         label: sourceActive!.label,
         sessionId,
         mode: 'awake',
+        ...(sourceActive!.agentKind ? { agentKind: sourceActive!.agentKind } : {}),
         model: sourceActive!.model
       }
     } else {
@@ -819,4 +904,3 @@ export class PanesFSM {
   }
 }
 
-export { stripTransientTabFields }

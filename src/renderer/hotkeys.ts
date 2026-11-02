@@ -31,6 +31,7 @@ export type Action =
   | 'openPR'
   | 'openInEditor'
   | 'toggleCommandCenter'
+  | 'toggleTaskList'
   | 'commandPalette'
   | 'fileQuickOpen'
   | 'splitPaneRight'
@@ -104,6 +105,7 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
   openPR: { key: 'g', modifiers: { cmd: true, shift: true } },
   openInEditor: { key: 'e', modifiers: { cmd: true, shift: true } },
   toggleCommandCenter: { key: 'k', modifiers: { cmd: true, shift: true } },
+  toggleTaskList: { key: 'l', modifiers: { cmd: true, shift: true } },
   commandPalette: { key: 'k', modifiers: { cmd: true } },
   fileQuickOpen: { key: 'p', modifiers: { cmd: true } },
   splitPaneRight: { key: 'd', modifiers: { cmd: true } },
@@ -330,6 +332,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   openPR: 'Open PR in browser',
   openInEditor: 'Open worktree in editor',
   toggleCommandCenter: 'Toggle command center',
+  toggleTaskList: 'Toggle task list',
   commandPalette: 'Command palette',
   fileQuickOpen: 'Open file...',
   splitPaneRight: 'Split pane right',
@@ -411,7 +414,7 @@ export const ACTION_CATEGORIES: HotkeyCategory[] = [
   {
     id: 'commands',
     label: 'Search & commands',
-    actions: ['commandPalette', 'fileQuickOpen', 'toggleCommandCenter', 'hotkeyCheatsheet']
+    actions: ['commandPalette', 'fileQuickOpen', 'toggleCommandCenter', 'toggleTaskList', 'hotkeyCheatsheet']
   },
   {
     id: 'overlays',

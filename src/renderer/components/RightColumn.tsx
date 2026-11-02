@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import type { PRStatus, Worktree, RepoConfig, ToolSpec } from '../types'
 import {
   effectiveHiddenRightPanels,
@@ -55,7 +55,9 @@ interface RightColumnProps {
   onBuildCustomTool: (branch: string, prompt: string) => void
 }
 
-export function RightColumn({
+/** Memoized so the sidebar's first-frame highlight render (see
+ *  `sidebarActiveId` in App) can skip it; App keeps its props stable. */
+export const RightColumn = memo(function RightColumn({
   width,
   activeWorktreeId,
   activeRepoRoot,
@@ -224,4 +226,4 @@ export function RightColumn({
       {order.map((key) => renderPanel(key))}
     </div>
   )
-}
+})

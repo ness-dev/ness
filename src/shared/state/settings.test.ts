@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
+  CLIENT_OWNED_CONFIG_CHANNELS,
+  CLIENT_OWNED_SETTING_KEYS,
   DEFAULT_NESSIE_COLOR,
+  mergeClientOwnedSettings,
   NESSIE_COLORS,
   initialSettings,
+  DEFAULT_REVIEW_PROMPT,
   nessieColorById,
   settingsReducer,
   type SettingsEvent,
@@ -312,6 +316,20 @@ describe('settingsReducer', () => {
     expect(comfy.sidebarDensity).toBe('comfy')
   })
 
+  it('sidebarTabsExpansionChanged sets which rows list their tabs', () => {
+    expect(initialSettings.sidebarTabsExpansion).toBe('selected')
+    const all = apply(initialSettings, {
+      type: 'settings/sidebarTabsExpansionChanged',
+      payload: 'all'
+    })
+    expect(all.sidebarTabsExpansion).toBe('all')
+    const never = apply(all, {
+      type: 'settings/sidebarTabsExpansionChanged',
+      payload: 'never'
+    })
+    expect(never.sidebarTabsExpansion).toBe('never')
+  })
+
   it('sidebarDetailsChanged replaces the whole per-mode prefs object', () => {
     // Comfy defaults: everything on.
     expect(initialSettings.sidebarDetails.comfy.diff).toBe(true)
@@ -568,6 +586,20 @@ describe('settingsReducer', () => {
       payload: false
     })
     expect(off.worktreeMessagingEnabled).toBe(false)
+  })
+
+  it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
+    expect(initialSettings.agentTabNamingEnabled).toBe(true)
+    const off = apply(initialSettings, {
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: false
+    })
+    expect(off.agentTabNamingEnabled).toBe(false)
+    const on = apply(off, {
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: true
+    })
+    expect(on.agentTabNamingEnabled).toBe(true)
   })
 
   it('browserToolsModeChanged switches between view and full', () => {
@@ -878,6 +910,43 @@ describe('settingsReducer', () => {
     expect(off.preventSleepMode).toBe('off')
   })
 
+  it('agentReviewDeliveryChanged switches modes and keeps identity on a no-op', () => {
+    expect(initialSettings.agentReviewDelivery).toBe('draft')
+    const auto = apply(initialSettings, {
+      type: 'settings/agentReviewDeliveryChanged',
+      payload: 'auto'
+    })
+    expect(auto.agentReviewDelivery).toBe('auto')
+    expect(
+      apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
+    ).toBe(auto)
+  })
+
+  it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {
+    expect(initialSettings.autoReviewOnGreenCi).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/autoReviewOnGreenCiChanged',
+      payload: true
+    })
+    expect(on.autoReviewOnGreenCi).toBe(true)
+    expect(apply(on, { type: 'settings/autoReviewOnGreenCiChanged', payload: true })).toBe(on)
+  })
+
+  it('review agent, model and prompt round-trip and keep identity on a no-op', () => {
+    expect(initialSettings.reviewAgent).toBe('inherit')
+    expect(initialSettings.reviewModel).toBe('')
+    expect(initialSettings.reviewPrompt).toBe(DEFAULT_REVIEW_PROMPT)
+    const agent = apply(initialSettings, { type: 'settings/reviewAgentChanged', payload: 'codex' })
+    expect(agent.reviewAgent).toBe('codex')
+    expect(apply(agent, { type: 'settings/reviewAgentChanged', payload: 'codex' })).toBe(agent)
+    const model = apply(agent, { type: 'settings/reviewModelChanged', payload: 'opus' })
+    expect(model.reviewModel).toBe('opus')
+    expect(apply(model, { type: 'settings/reviewModelChanged', payload: 'opus' })).toBe(model)
+    const prompt = apply(model, { type: 'settings/reviewPromptChanged', payload: 'be harsh' })
+    expect(prompt.reviewPrompt).toBe('be harsh')
+    expect(apply(prompt, { type: 'settings/reviewPromptChanged', payload: 'be harsh' })).toBe(prompt)
+  })
+
   it('preventSleepUntilChanged arms and clears the timer deadline', () => {
     expect(initialSettings.preventSleepUntil).toBeNull()
     const armed = apply(initialSettings, {
@@ -929,5 +998,116 @@ describe('settingsReducer', () => {
     const next = apply(start, { type: 'settings/themeDarkChanged', payload: 'nord' })
     expect(next.claudeCommand).toBe('pre-existing')
     expect(next.nameClaudeSessions).toBe(true)
+  })
+})
+
+describe('mergeClientOwnedSettings', () => {
+  it('takes client-owned fields from the client and the rest from the backend', () => {
+    const client: SettingsState = {
+      ...initialSettings,
+      themeDark: 'dracula',
+      uiScale: 'large',
+      claudeCommand: 'local-claude'
+    }
+    const backend: SettingsState = {
+      ...initialSettings,
+      themeDark: 'nord',
+      uiScale: 'small',
+      claudeCommand: 'remote-claude'
+    }
+    const merged = mergeClientOwnedSettings(client, backend)
+    // Appearance follows the client looking at the workspace…
+    expect(merged.themeDark).toBe('dracula')
+    expect(merged.uiScale).toBe('large')
+    // …while operational config stays with the box doing the work.
+    expect(merged.claudeCommand).toBe('remote-claude')
+  })
+
+  it('returns the backend object itself when client and backend are the same', () => {
+    // The single-backend case, and the web client — where the registry's
+    // "local" entry IS the only backend. Reference identity matters: the
+    // renderer's getSnapshot must not allocate for an unchanged read.
+    const merged = mergeClientOwnedSettings(initialSettings, initialSettings)
+    expect(merged).toBe(initialSettings)
+  })
+
+  it('mutates neither input', () => {
+    const client: SettingsState = { ...initialSettings, themeDark: 'dracula' }
+    const backend: SettingsState = { ...initialSettings, themeDark: 'nord' }
+    mergeClientOwnedSettings(client, backend)
+    expect(client.themeDark).toBe('dracula')
+    expect(backend.themeDark).toBe('nord')
+  })
+
+  it('copies every declared client-owned key', () => {
+    // Guards the merge loop against a key being added to the list but
+    // skipped by the copy (e.g. if the loop were ever narrowed).
+    const backend = initialSettings
+    const client: SettingsState = { ...initialSettings }
+    for (const key of CLIENT_OWNED_SETTING_KEYS) {
+      ;(client as unknown as Record<string, unknown>)[key] = `sentinel-${key}`
+    }
+    const merged = mergeClientOwnedSettings(client, backend)
+    for (const key of CLIENT_OWNED_SETTING_KEYS) {
+      expect(merged[key]).toBe(`sentinel-${key}`)
+    }
+  })
+
+  it('keeps operational, backend-derived and transport settings workspace-owned', () => {
+    // These are the categories deliberately excluded from the list. If one
+    // ever moves, that's a decision to make on purpose — with a push-down
+    // to each backend for the operational ones — not a drive-by edit.
+    const workspaceOwned: (keyof SettingsState)[] = [
+      'claudeCommand',
+      'worktreeScripts',
+      'claudeEnvVars',
+      'worktreeBase',
+      'editor',
+      'autoSleepMinutes',
+      'showAssignedPRs',
+      'notifyChatOnCiFailure',
+      'preventSleepMode',
+      'claudeTuiFullscreen',
+      'hasGithubToken',
+      'viewerLogin',
+      'wsTransportPort'
+    ]
+    for (const key of workspaceOwned) {
+      expect(CLIENT_OWNED_SETTING_KEYS).not.toContain(key)
+    }
+  })
+})
+
+describe('CLIENT_OWNED_CONFIG_CHANNELS', () => {
+  it('has a channel for every client-owned setting that the UI can change', () => {
+    // A field read from the client's store whose setter still goes to the
+    // active backend renders a control that visibly does nothing. Derived
+    // from the key list so adding a setting surfaces the missing channel
+    // here rather than as a dead toggle in Settings.
+    const noSetterChannel = new Set<string>([
+      // Populated by reloadCustomThemes / getAvailableThemes rather than a setter.
+      'customThemes'
+    ])
+    for (const key of CLIENT_OWNED_SETTING_KEYS) {
+      if (noSetterChannel.has(key)) continue
+      const channel = `config:set${key[0].toUpperCase()}${key.slice(1)}`
+      expect(
+        CLIENT_OWNED_CONFIG_CHANNELS.has(channel),
+        `${key} is client-owned but ${channel} is not routed to the client`
+      ).toBe(true)
+    }
+  })
+
+  it('does not route another backend-owned config channel to the client', () => {
+    for (const channel of [
+      'config:setClaudeCommand',
+      'config:setWorktreeScripts',
+      'config:setWsTransportPort',
+      'config:rotateWsToken',
+      'config:readRawConfig',
+      'config:getAvailableEditors'
+    ]) {
+      expect(CLIENT_OWNED_CONFIG_CHANNELS.has(channel)).toBe(false)
+    }
   })
 })

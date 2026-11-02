@@ -15,6 +15,12 @@
 //
 // Sockets are ephemeral — each approval opens one, gets one reply, and
 // closes. One server per session, destroyed when the session dies.
+//
+// Chat providers whose agent asks for approval over its own protocol
+// (Codex app-server) skip the socket and call requestApproval directly.
+// Everything after the transport — allowlist, session grants, auto-review,
+// the card — is shared. Those sessions have no socket server, so their
+// provider must call cancelPendingForSession itself when the session ends.
 
 import { createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -30,7 +36,7 @@ import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
 
-interface ApprovalResult {
+export interface ApprovalResult {
   behavior: 'allow' | 'deny'
   updatedInput?: Record<string, unknown>
   updatedPermissions?: unknown[]
@@ -48,8 +54,12 @@ interface RequestFrame {
   timestamp?: number
 }
 
-interface PendingSocket {
-  socket: Socket
+interface PendingResponse {
+  /** Delivers the decision to whoever asked: the MCP socket for Claude,
+   *  a promise resolver for in-process providers (requestApproval). */
+  respond: (result: ApprovalResult) => void
+  /** Set for socket-borne requests so a closed socket can drop them. */
+  socket?: Socket
   sessionId: string
   /** Full request payload stashed so a re-review (triggered from the
    *  approval card after the user edits steering guidance) can rebuild
@@ -79,7 +89,7 @@ export interface ApprovalBridgeDeps {
 export class ApprovalBridge {
   private store: Store
   private sessions = new Map<string, SessionEntry>()
-  private pendingResponses = new Map<string, PendingSocket>()
+  private pendingResponses = new Map<string, PendingResponse>()
   private deps: ApprovalBridgeDeps | null
 
   constructor(store: Store, deps?: ApprovalBridgeDeps) {
@@ -127,7 +137,7 @@ export class ApprovalBridge {
     // the MCP server doesn't hang its model turn on an abandoned request.
     for (const [id, pending] of Array.from(this.pendingResponses.entries())) {
       if (pending.sessionId !== sessionId) continue
-      this.writeResponse(pending.socket, id, {
+      pending.respond({
         behavior: 'deny',
         message: 'session ended before approval resolved'
       })
@@ -166,7 +176,7 @@ export class ApprovalBridge {
   cancelPendingForSession(sessionId: string, reason = 'session rewound'): void {
     for (const [id, pending] of Array.from(this.pendingResponses.entries())) {
       if (pending.sessionId !== sessionId) continue
-      this.writeResponse(pending.socket, id, {
+      pending.respond({
         behavior: 'deny',
         message: reason
       })
@@ -178,13 +188,51 @@ export class ApprovalBridge {
     }
   }
 
+  /** Claude Code abandoned the tool call we were asking about, so the
+   *  answer can no longer land anywhere. The usual cause is its MCP
+   *  idle timeout firing on our `approve` call after 1800s of silence
+   *  ("sent no response or progress for 1800s; aborting") — by design,
+   *  so an agent nobody answered works around the question instead of
+   *  blocking forever. It reports that as an is_error tool_result on
+   *  the *original* tool_use; the approval socket itself hears nothing.
+   *  So without this reconciliation the pending entry outlives the
+   *  turn, and the sidebar keeps a needs-approval dot for a tool the
+   *  chat already shows as skipped.
+   *
+   *  Called from the json-claude stream reader for every tool_result:
+   *  a result means the call was decided, so any approval still pending
+   *  for that tool_use id is by definition stale. Answers the socket so
+   *  the MCP subprocess unwinds, then drops the card. */
+  cancelPendingForToolUse(
+    sessionId: string,
+    toolUseId: string,
+    reason = 'tool call abandoned before approval resolved'
+  ): boolean {
+    for (const [id, pending] of Array.from(this.pendingResponses.entries())) {
+      if (pending.sessionId !== sessionId) continue
+      if (pending.payload.toolUseId !== toolUseId) continue
+      pending.respond({ behavior: 'deny', message: reason })
+      this.pendingResponses.delete(id)
+      this.store.dispatch({
+        type: 'jsonClaude/approvalResolved',
+        payload: { requestId: id }
+      })
+      log(
+        'approval-bridge',
+        `stale approval dropped session=${sessionId} id=${id} tool=${pending.payload.toolName} toolUseId=${toolUseId} reason="${reason}"`
+      )
+      return true
+    }
+    return false
+  }
+
   /** Dispatched from the renderer-facing IPC handler. Push the user's
    *  chosen PermissionResult back out over the waiting socket. */
   resolveApproval(requestId: string, result: ApprovalResult): boolean {
     const pending = this.pendingResponses.get(requestId)
     if (!pending) return false
     this.pendingResponses.delete(requestId)
-    this.writeResponse(pending.socket, requestId, result)
+    pending.respond(result)
     this.store.dispatch({
       type: 'jsonClaude/approvalResolved',
       payload: { requestId }
@@ -219,7 +267,7 @@ export class ApprovalBridge {
       'approval-bridge',
       `re-running auto-review session=${pending.sessionId} id=${requestId} tool=${refreshedPayload.toolName}`
     )
-    void this.runAutoReviewer(refreshedPayload, pending.socket)
+    void this.runAutoReviewer(refreshedPayload, pending.respond)
     return true
   }
 
@@ -259,12 +307,11 @@ export class ApprovalBridge {
    *  form of the persistent grant that fired, omitted for session-scoped
    *  grants. */
   private resolveAllowed(
-    socket: Socket,
-    requestId: string,
+    respond: (result: ApprovalResult) => void,
     base: { sessionId: string; toolName: string; toolUseId?: string; input: Record<string, unknown> },
     rule?: string
   ): void {
-    this.writeResponse(socket, requestId, {
+    respond({
       behavior: 'allow',
       updatedInput: base.input
     })
@@ -298,14 +345,49 @@ export class ApprovalBridge {
       return
     }
 
-    const basePayload = {
-      requestId: frame.id,
-      sessionId: frame.sessionId || sessionId,
-      toolName: frame.tool_name,
-      input: frame.input || {},
-      toolUseId: frame.tool_use_id,
-      timestamp: frame.timestamp || Date.now()
-    }
+    const requestId = frame.id
+    this.handleRequest(
+      {
+        requestId,
+        sessionId: frame.sessionId || sessionId,
+        toolName: frame.tool_name,
+        input: frame.input || {},
+        toolUseId: frame.tool_use_id,
+        timestamp: frame.timestamp || Date.now()
+      },
+      (result) => this.writeResponse(socket, requestId, result),
+      socket
+    )
+  }
+
+  /** Raise an approval from an in-process chat provider (one whose agent
+   *  asks over its own protocol rather than through the permission MCP).
+   *  Runs the same allowlist / session-grant / auto-review pipeline and
+   *  surfaces the same card, resolving once a decision is made. */
+  requestApproval(request: {
+    requestId: string
+    sessionId: string
+    toolName: string
+    input: Record<string, unknown>
+    toolUseId?: string
+  }): Promise<ApprovalResult> {
+    return new Promise((resolve) => {
+      this.handleRequest({ ...request, timestamp: Date.now() }, resolve)
+    })
+  }
+
+  private handleRequest(
+    basePayload: {
+      requestId: string
+      sessionId: string
+      toolName: string
+      input: Record<string, unknown>
+      toolUseId?: string
+      timestamp: number
+    },
+    respond: (result: ApprovalResult) => void,
+    socket?: Socket
+  ): void {
 
     // AskUserQuestion carries the user's answers back in the approval
     // response itself, so it must always reach a human — see
@@ -330,10 +412,10 @@ export class ApprovalBridge {
       )
       if (matched) {
         const key = ruleKey(matched)
-        this.resolveAllowed(socket, frame.id, basePayload, key)
+        this.resolveAllowed(respond, basePayload, key)
         log(
           'approval-bridge',
-          `rule-allowed session=${basePayload.sessionId} id=${frame.id} tool=${basePayload.toolName} rule=${key}`
+          `rule-allowed session=${basePayload.sessionId} id=${basePayload.requestId} tool=${basePayload.toolName} rule=${key}`
         )
         return
       }
@@ -342,10 +424,10 @@ export class ApprovalBridge {
     const slice = rootState.jsonClaude
     const session = slice.sessions[basePayload.sessionId]
     if (!isQuestion && session?.sessionToolApprovals.includes(basePayload.toolName)) {
-      this.resolveAllowed(socket, frame.id, basePayload)
+      this.resolveAllowed(respond, basePayload)
       log(
         'approval-bridge',
-        `session-allowed session=${basePayload.sessionId} id=${frame.id} tool=${basePayload.toolName}`
+        `session-allowed session=${basePayload.sessionId} id=${basePayload.requestId} tool=${basePayload.toolName}`
       )
       return
     }
@@ -366,7 +448,8 @@ export class ApprovalBridge {
     }
 
     const payload: JsonClaudePendingApproval = { ...basePayload, autoReview }
-    this.pendingResponses.set(frame.id, {
+    this.pendingResponses.set(payload.requestId, {
+      respond,
       socket,
       sessionId: payload.sessionId,
       payload
@@ -374,12 +457,12 @@ export class ApprovalBridge {
     this.store.dispatch({ type: 'jsonClaude/approvalRequested', payload })
     log(
       'approval-bridge',
-      `approvalRequested session=${payload.sessionId} id=${frame.id} tool=${frame.tool_name}` +
+      `approvalRequested session=${payload.sessionId} id=${payload.requestId} tool=${payload.toolName}` +
         (autoReview ? ` autoReview=${autoReview.state}` : '')
     )
 
     if (enabled && !denyReason) {
-      void this.runAutoReviewer(payload, socket)
+      void this.runAutoReviewer(payload, respond)
     }
   }
 
@@ -392,7 +475,7 @@ export class ApprovalBridge {
    *  static text instead of a spinner. */
   private async runAutoReviewer(
     payload: JsonClaudePendingApproval,
-    socket: Socket
+    respond: (result: ApprovalResult) => void
   ): Promise<void> {
     const claudeCommand = this.deps?.getClaudeCommand() ?? 'claude'
     const steerInstructions =
@@ -414,7 +497,7 @@ export class ApprovalBridge {
 
     // Race check: did the user resolve manually while we were waiting?
     const stillPending = this.pendingResponses.get(payload.requestId)
-    if (!stillPending || stillPending.socket !== socket) {
+    if (!stillPending || stillPending.respond !== respond) {
       log(
         'approval-bridge',
         `auto-review superseded session=${payload.sessionId} id=${payload.requestId} decision=${decision.kind}`
@@ -424,7 +507,7 @@ export class ApprovalBridge {
 
     if (decision.kind === 'approve') {
       this.pendingResponses.delete(payload.requestId)
-      this.writeResponse(socket, payload.requestId, {
+      respond({
         behavior: 'allow',
         updatedInput: payload.input
       })

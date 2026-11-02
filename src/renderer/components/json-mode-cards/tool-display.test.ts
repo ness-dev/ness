@@ -4,6 +4,7 @@ import {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   normalizeServerName,
   parseMcpToolName,
@@ -426,5 +427,16 @@ describe('pre-rename harness-control tools in existing transcripts', () => {
     expect(getToolDisplay('mcp__harness-control__create_worktree').label).toBe(
       'Ness · Create Worktree'
     )
+  })
+})
+
+describe('getToolIntent', () => {
+  it('returns the trimmed provider-set intent', () => {
+    expect(getToolIntent({ intent: ' Read a.ts ' })).toBe('Read a.ts')
+  })
+
+  it('returns null when there is no intent', () => {
+    expect(getToolIntent({})).toBeNull()
+    expect(getToolIntent({ intent: '   ' })).toBeNull()
   })
 })

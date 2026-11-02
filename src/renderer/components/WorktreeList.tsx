@@ -1,4 +1,4 @@
-import { useCallback, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
@@ -6,11 +6,14 @@ import type { GroupKey } from '../../shared/worktree-sort'
 import type {
   WorktreeListModel,
   WorktreeRepoSectionModel,
+  SectionRepoRoot,
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
 import { repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type WorktreeListVariant } from './WorktreeTab'
+import type { WorktreeRowActionHandlers } from './worktree-row-actions'
+import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
 import { Tooltip } from './Tooltip'
 import { HotkeyBadge } from './HotkeyBadge'
@@ -31,6 +34,8 @@ interface WorktreeListProps {
   model: WorktreeListModel
   variant: WorktreeListVariant
   activeWorktreeId: string | null
+  /** Focused tab of the active worktree, highlighted among its nested tabs. */
+  activeTabId?: string | null
   snoozeDefaultDays?: number
   /** Non-main worktrees. Drives the "spawn your first agent" nudge. */
   agentCount: number
@@ -38,6 +43,14 @@ interface WorktreeListProps {
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
   onSelectWorktree: (path: string) => void
+  /** Owning backend per worktree path, so nested tab rows read the right
+   *  store. The sidebar sits above every BackendScope. */
+  pathBackendId?: Record<string, string>
+  /** Backend label per worktree path, present only for non-local ones. */
+  originByPath?: Record<string, string>
+  /** When provided, worktrees list their tabs as child rows, per the
+   *  sidebarTabsExpansion setting. */
+  onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
   onToggleRepo: (repoRoot: string) => void
   onNewWorktree?: (repoRoot?: string) => void
@@ -45,7 +58,7 @@ interface WorktreeListProps {
   onContinueWorktree?: (worktreePath: string, newBranchName: string) => Promise<void>
   onDeleteWorktree?: (path: string) => Promise<void>
   onPruneWorktrees?: (repoRoot: string) => Promise<void>
-  onRemoveRepo?: (repoRoot: string) => Promise<void>
+  onRemoveRepo?: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
 }
 
@@ -53,12 +66,16 @@ export function WorktreeList({
   model,
   variant,
   activeWorktreeId,
+  activeTabId,
   snoozeDefaultDays,
   agentCount,
   editingAliasPath,
   onStartAliasEdit,
   onEndAliasEdit,
   onSelectWorktree,
+  pathBackendId,
+  originByPath,
+  onSelectTab,
   onToggleGroup,
   onToggleRepo,
   onNewWorktree,
@@ -76,6 +93,7 @@ export function WorktreeList({
   const settings = useSettings()
   const density = settings.sidebarDensity
   const detailPrefs = settings.sidebarDetails[density]
+  const tabsExpansion = settings.sidebarTabsExpansion
   const metaHeld = useMetaHeld() && !touch
 
   const [continueTarget, setContinueTarget] = useState<{ path: string; oldBranch: string } | null>(
@@ -136,8 +154,8 @@ export function WorktreeList({
     [snoozeDays, backend]
   )
 
-  const rowActionsFor = useCallback(
-    (row: WorktreeRowModel) => {
+  const buildRowActionHandlers = useCallback(
+    (row: WorktreeRowModel): WorktreeRowActionHandlers => {
       const { worktree, deleting } = row
       const locked = worktree.isMain || deleting
       return {
@@ -163,6 +181,22 @@ export function WorktreeList({
     [beginContinue, onSnoozeRow, backend, onContinueWorktree, onPruneWorktrees, onDeleteWorktree]
   )
 
+  // Cached per row object so WorktreeTab's memo holds: rows are
+  // reference-stable across renders until their data changes, and the
+  // cache resets whenever a handler it closes over does.
+  const rowActionsCache = useMemo(
+    () => new WeakMap<WorktreeRowModel, WorktreeRowActionHandlers>(),
+    [buildRowActionHandlers]
+  )
+  const rowActionsFor = (row: WorktreeRowModel): WorktreeRowActionHandlers => {
+    let actions = rowActionsCache.get(row)
+    if (!actions) {
+      actions = buildRowActionHandlers(row)
+      rowActionsCache.set(row, actions)
+    }
+    return actions
+  }
+
   const renderGroup = (
     section: WorktreeRepoSectionModel,
     group: WorktreeListGroupModel
@@ -182,6 +216,7 @@ export function WorktreeList({
       {!group.collapsed &&
         group.rows.map((row) => (
           <div key={row.path}>
+            <div className={row.path === activeWorktreeId ? 'bg-surface' : ''}>
             <WorktreeTab
               row={row}
               variant={variant}
@@ -191,10 +226,22 @@ export function WorktreeList({
               detailPrefs={detailPrefs}
               isEditingAlias={editingAliasPath === row.path}
               actions={rowActionsFor(row)}
-              onClick={() => onSelectWorktree(row.path)}
-              onStartAliasEdit={() => onStartAliasEdit(row.path)}
+              originLabel={originByPath?.[row.path]}
+              onSelect={onSelectWorktree}
+              onStartAliasEdit={onStartAliasEdit}
               onEndAliasEdit={onEndAliasEdit}
             />
+            {onSelectTab &&
+              !row.deleting &&
+              (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId)) && (
+              <WorktreeTabRows
+                worktreePath={row.path}
+                backendId={pathBackendId?.[row.path] ?? null}
+                activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
+                onSelectTab={onSelectTab}
+              />
+            )}
+            </div>
             {continueTarget?.path === row.path && (
               <div className="border-y-2 border-accent bg-panel-raised p-2.5 shadow-inner">
                 <div className="text-xs font-semibold uppercase tracking-wider text-accent mb-1.5 px-0.5">
@@ -288,12 +335,12 @@ export function WorktreeList({
         </button>
       )}
       {model.sections.map((section) => (
-        <div key={section.repoRoot}>
+        <div key={section.scope}>
           {model.showRepoHeaders && (
             <RepoHeader
               section={section}
               variant={variant}
-              onToggle={() => onToggleRepo(section.repoRoot)}
+              onToggle={() => onToggleRepo(section.scope)}
               onRemove={onRemoveRepo}
             />
           )}
@@ -368,7 +415,7 @@ function RepoHeader({
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
-  onRemove?: (repoRoot: string) => Promise<void>
+  onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
 }): JSX.Element {
   return (
     <button
@@ -376,7 +423,7 @@ function RepoHeader({
       className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'
       }`}
-      title={section.repoRoot}
+      title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
       <Chevron collapsed={section.collapsed} />
       <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
@@ -393,10 +440,17 @@ function RepoHeader({
               e.stopPropagation()
               if (
                 window.confirm(
-                  `Remove ${section.repoName} from this window? Worktrees stay on disk.`
+                  // A merged section's members are matched by folder name,
+                  // so the one way to catch a wrong merge before detaching
+                  // an unrelated repo is to show exactly what will go.
+                  section.repoRoots.length > 1
+                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
+                        .map((r) => `• ${r.repoRoot}`)
+                        .join('\n')}\n\nWorktrees stay on disk everywhere.`
+                    : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
                 )
               ) {
-                void onRemove(section.repoRoot)
+                void onRemove(section.repoRoots)
               }
             }}
           >

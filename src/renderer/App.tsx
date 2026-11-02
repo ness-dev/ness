@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { useAppState, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForPath } from './store'
-import { useBackend } from './backend'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStates, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { getBackendFor } from './backend'
+import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
 import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
@@ -28,6 +29,9 @@ import { QuestCard } from './components/QuestCard'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
+import { BackendScope } from './backend-scope'
+import { repoKeyFor } from './worktree-list-model'
+import { useMergedWorktrees } from './hooks/useMergedWorktrees'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
@@ -39,6 +43,7 @@ import { InterfaceToggle } from './components/InterfaceToggle'
 import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
 import { CommandCenter } from './components/CommandCenter'
+import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
 import { HotkeyCheatsheet } from './components/HotkeyCheatsheet'
 import { NewProjectScreen } from './components/NewProjectScreen'
@@ -83,9 +88,16 @@ const SIDEBAR_MAX_PX = 400
 export default function App(): JSX.Element {
   const { isMobile } = useViewport()
   const active = useActiveTheme()
-  // Narrow selector, not useSettings() — App re-rendering re-renders the whole
-  // tree beneath it, so it must not subscribe to the entire settings slice.
-  const nessieColor = useAppState((s) => s.settings.nessieColor)
+  // Narrow selector, not useSettings() — App re-rendering re-renders the
+  // whole tree beneath it (DesktopApp is not memoized), so it must not
+  // subscribe to the entire settings slice. useActiveTheme above narrows
+  // for the same reason; before it did, it subscribed to the whole slice
+  // and this selector saved nothing.
+  //
+  // Local rather than active: nessieColor is client-owned (see
+  // CLIENT_OWNED_SETTING_KEYS), so it must not change when the user
+  // switches to a remote backend.
+  const nessieColor = useLocalAppState((s) => s.settings.nessieColor)
   useEffect(() => {
     applyTheme(active, nessieColor)
     getBackend().setLastEffectiveAppBg(effectiveAppBg(active))
@@ -97,14 +109,120 @@ export default function App(): JSX.Element {
 function DesktopApp(): JSX.Element {
   // Multi-backend RPC surface — routes through the active backend's
   // transport (local IPC handle for local, WS direct for remotes).
-  const backend = useBackend()
+  //
+  // Narrowed: App renders above every BackendScope, so this handle must not
+  // be able to reach worktree-scoped methods. Those go through
+  // `backendFor(path)` below. See backend-routing.ts.
+  const backend = useGlobalBackend()
+  // Which backend the mounted worktree subtrees belong to. Every row in
+  // `worktrees` below was read out of this backend's store, so this is the
+  // id their panes must route through — see the BackendScope in the
+  // worktree map.
+  const activeBackendId = useActiveBackend().id
+  // Worktrees from every registered backend, each tagged with its owner.
+  // The sidebar model is built from the same merged inputs (see
+  // useWorktreeListModel), so rows and mounted workspaces can't disagree
+  // about which backends exist.
+  const mergedData = useMergedWorktrees()
+  const mergedWorktrees = mergedData.worktrees
+  // Routes a per-worktree call to the backend hosting that worktree.
+  // App has no ambient handle that can reach these methods — see
+  // backend-routing.ts for why.
+  const backendFor = useBackendForWorktree(mergedData.pathBackendId)
+  // Backend label per worktree path, for rows that aren't on this machine.
+  // Local ones are deliberately absent — badging the common case is noise,
+  // and the badge's job is to make "this acts on another machine" obvious
+  // before you act, not to annotate everything.
+  // Host label per repo root for the new-worktree picker — in fleet view
+  // the same repo can be open on several hosts, and picking the pill is
+  // picking the host.
+  const hostLabelByRoot = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const [root, backendId] of Object.entries(mergedData.repoBackendId)) {
+      out[root] = mergedData.backendMeta[backendId]?.label ?? backendId
+    }
+    return out
+  }, [mergedData.repoBackendId, mergedData.backendMeta])
+  const repoKeyByRoot = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const root of mergedData.repoRoots) out[root] = repoKeyFor(root, mergedData.repoRemotes[root])
+    return out
+  }, [mergedData.repoRoots, mergedData.repoRemotes])
+  const originByPath = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const { backendId, backendLabel, worktree } of mergedData.worktrees) {
+      // Keyed on the registry's local entry, NOT on connection `kind`. In
+      // the web client the serving backend is registered kind:'remote'
+      // (it genuinely is, over a socket), so a kind test badges every row
+      // including the one you're attached to — noise, and it buries the
+      // signal the badge exists to carry.
+      if (backendId === LOCAL_BACKEND_ID) continue
+      out[worktree.path] = backendLabel || backendId
+    }
+    return out
+  }, [mergedData.worktrees])
+  // Worktrees the user has actually opened this session, keyed the same way
+  // the render loop keys its rows.
+  //
+  // Mounting every worktree keeps PTYs alive across switches, which is right
+  // for local ones — the processes are already on this machine. It is NOT
+  // right across a network: mounting a remote worktree fires pty:create on
+  // ITS backend, so mounting all of them at once asks a remote to spawn a
+  // shell and an agent for every worktree it hosts the moment we connect.
+  // On a large fleet that is enough to take the box down, which it did.
+  // Remote worktrees therefore mount on first open and stay mounted after.
+  const [openedWorktrees, setOpenedWorktrees] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  // Forget worktrees that no longer exist anywhere in the fleet (deleted,
+  // or their backend removed). Pruned against ALL backends, not the
+  // view-filtered list, so flipping to single view doesn't forget which
+  // remote worktrees were open. Without this, a worktree recreated at the
+  // same path — or a backend re-added — would mount eagerly on reappearance
+  // without the user opening it: the fan-out this set exists to prevent.
+  const fleetBackends = useAllBackendStates()
+  // `fleetBackends` is a new array on any backend event, status ticks
+  // included. The pruning only cares about worktree LISTS, so compare
+  // those by reference and bail before touching state when none moved.
+  const fleetListsRef = useRef<Map<string, unknown>>(new Map())
+  useEffect(() => {
+    const prev = fleetListsRef.current
+    const next = new Map<string, unknown>()
+    let changed = prev.size !== fleetBackends.length
+    for (const b of fleetBackends) {
+      next.set(b.backendId, b.state.worktrees.list)
+      if (prev.get(b.backendId) !== b.state.worktrees.list) changed = true
+    }
+    fleetListsRef.current = next
+    if (!changed) return
+    setOpenedWorktrees((prev) => {
+      if (prev.size === 0) return prev
+      const live = new Set<string>()
+      for (const b of fleetBackends) {
+        for (const w of b.state.worktrees.list) live.add(`${b.backendId}\u0000${w.path}`)
+      }
+      let next: Set<string> | null = null
+      for (const key of prev) {
+        if (!live.has(key)) {
+          next ??= new Set(prev)
+          next.delete(key)
+        }
+      }
+      return next ?? prev
+    })
+  }, [fleetBackends])
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
-  const wtState = useWorktrees()
-  const worktrees = wtState.list
-  const pendingWorktrees = wtState.pending
-  const pendingDeletions = wtState.pendingDeletions ?? []
+  //
+  // These read the MERGED list, not the active backend's. Leaving them
+  // active-scoped silently broke selecting a remote row: the
+  // "active id points at something that no longer exists" guard below
+  // validates activeWorktreeId against this array, so a remote worktree's
+  // path looked stale the instant it was selected and got reset back.
+  const worktrees = mergedData.flatWorktrees
+  const pendingWorktrees = mergedData.pendingWorktrees
+  const pendingDeletions = mergedData.pendingDeletions
   const pendingDeletionByPath = useMemo(() => {
     const m: Record<string, (typeof pendingDeletions)[number]> = {}
     for (const d of pendingDeletions) m[d.path] = d
@@ -119,7 +237,43 @@ function DesktopApp(): JSX.Element {
   const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(
     () => worktrees[0]?.path ?? null
   )
-  const activeAlias = useAliasForPath(activeWorktreeId)
+  // Switching worktrees re-renders the newly shown workspace and right
+  // column, which can take a few frames. The sidebar reads this optimistic
+  // copy so its highlight moves on the first frame, while the real switch
+  // renders in a transition behind it.
+  const [sidebarActiveId, setSidebarActiveId] = useOptimistic(activeWorktreeId)
+  // Which backend the SELECTED worktree belongs to. Distinct from
+  // `activeBackendId` above: that's whose rows are currently listed, this
+  // is whose worktree is open. They're the same today, because the sidebar
+  // only lists one backend's worktrees — once rows merge across backends
+  // they diverge, and every read describing the open worktree has to follow
+  // this one rather than the chip.
+  //
+  // A path is only unique WITHIN a backend, so this is the other half of
+  // the worktree's identity, not a convenience.
+  // DERIVED, never stored. Every path that changes the selected worktree
+  // would otherwise have to remember to update a stored copy, and six of
+  // them didn't: hotkey cycling (x2), Command Center, Command Palette,
+  // "go to main", and the stale-focus reset. Each left the chrome reading
+  // a different backend than the one hosting the open worktree.
+  //
+  // The owner map is the single source of truth, so selecting a worktree
+  // by ANY route now implies its backend. Ambiguous only when two backends
+  // share an absolute path — the known composite-identity gap.
+  const selectedBackendId =
+    (activeWorktreeId ? mergedData.pathBackendId[activeWorktreeId] : undefined) ??
+    activeBackendId
+  const switchWorktree = useCallback(
+    (path: string, alsoInTransition?: () => void) => {
+      startTransition(() => {
+        setSidebarActiveId(path)
+        setActiveWorktreeId(path)
+        alsoInTransition?.()
+      })
+    },
+    [setSidebarActiveId]
+  )
+  const activeAlias = useAliasForWorktree(selectedBackendId, activeWorktreeId)
   useEffect(() => {
     if (!activeWorktreeId) {
       document.title = 'Ness'
@@ -138,7 +292,12 @@ function DesktopApp(): JSX.Element {
   // and dispatches every mutation as an IPC method call. Per-client UI
   // focus (which pane in each worktree the user last interacted with) is
   // still renderer-local — like activeWorktreeId.
-  const panes = usePanes()
+  // Pane trees across ALL backends. `usePanes()` would be the active
+  // backend's slice only, which silently breaks every cross-backend lookup
+  // below: `activeWorkspaceVisible` would find no tree for a remote
+  // worktree and render the "Select a worktree to begin" fallback at the
+  // same time as the workspace it claims isn't there.
+  const panes = mergedData.panes
   const [activePaneId, setActivePaneId] = useState<Record<string, string>>({})
 
   // Derived flat-tab views — preserved so the read-heavy parts of the app
@@ -171,7 +330,7 @@ function DesktopApp(): JSX.Element {
   // Per-worktree last-active timestamps — derived in main by the
   // activity-deriver, dispatched as terminals/lastActiveChanged events.
   const lastActive = useLastActive()
-  const repoRoots = wtState.repoRoots
+  const repoRoots = mergedData.repoRoots
   // Per-repo config lives in the main-process store. Active repo derived
   // below from the focused worktree.
   const repoConfigs = useRepoConfigs()
@@ -287,6 +446,7 @@ function DesktopApp(): JSX.Element {
   const [showActivity, setShowActivity] = useState(false)
   const [showCleanup, setShowCleanup] = useState(false)
   const [showCommandCenter, setShowCommandCenter] = useState(false)
+  const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [commandPaletteMode, setCommandPaletteMode] = useState<'root' | 'files'>('root')
   const [showPerfMonitor, setShowPerfMonitor] = useState(false)
@@ -557,15 +717,15 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Ask main for a single-worktree PR refresh. Used by the activity observer
   // when a terminal enters the "waiting" state (likely just pushed).
   const fetchPRStatus = useCallback((wtPath: string) => {
-    void backend.refreshPRsOne(wtPath)
-  }, [])
+    void backendFor(wtPath).refreshPRsOne(wtPath)
+  }, [backendFor])
 
   // Ask main for a stale-only single-worktree refresh. Used when the user
   // activates a worktree — main dedups internally so rapid switching won't
   // hammer the GitHub API.
   const fetchPRStatusIfStale = useCallback((wtPath: string) => {
-    void backend.refreshPRsOneIfStale(wtPath)
-  }, [])
+    void backendFor(wtPath).refreshPRsOneIfStale(wtPath)
+  }, [backendFor])
 
   // On window focus, ask main for a stale-only bulk refresh. Main dedups
   // against its own lastAllFetchAt clock. Announcements piggyback on the
@@ -628,9 +788,20 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // panes (ensureInitialized in main returns early).
   useEffect(() => {
     if (!activeWorktreeId) return
+    const key = `${selectedBackendId}\u0000${activeWorktreeId}`
+    setOpenedWorktrees((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+  }, [activeWorktreeId, selectedBackendId])
+
+  useEffect(() => {
+    if (!activeWorktreeId) return
     if (isPendingId(activeWorktreeId)) return
-    void backend.panesEnsureInitialized(activeWorktreeId)
-  }, [activeWorktreeId])
+    // Routed to the worktree's OWNING backend, not the active one. App sits
+    // above every BackendScope, so the default `backend` here is
+    // active-routed — which would ask the local backend to initialize panes
+    // for a path that only exists on a remote, leaving the remote worktree
+    // permanently tab-less and unselectable.
+    void getBackendFor(selectedBackendId).panesEnsureInitialized(activeWorktreeId)
+  }, [activeWorktreeId, selectedBackendId])
 
   // If the active id points at something that no longer exists — a
   // finished deletion, a dismissed pending creation, a stale focus after
@@ -698,6 +869,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleConfirmRepoResolve,
     handleDismissRepoPrompt
   } = useWorktreeHandlers({
+    pathBackendId: mergedData.pathBackendId,
+    repoBackendId: mergedData.repoBackendId,
+    pendingBackendId: mergedData.pendingBackendId,
     worktrees,
     pendingWorktrees,
     repoRoots,
@@ -738,7 +912,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
     activePaneId,
     setActivePaneId,
     activeWorktreeId,
-    setActiveWorktreeId
+    setActiveWorktreeId,
+    pathBackendId: mergedData.pathBackendId
   })
 
   // Hoisted out of the WorkspaceView JSX below. Every worktree stays mounted,
@@ -746,6 +921,53 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // defeats WorkspaceView's memo before it can compare anything else.
   const handleFocusPane = useCallback((wtPath: string, paneId: string) => {
     setActivePaneId((prev) => (prev[wtPath] === paneId ? prev : { ...prev, [wtPath]: paneId }))
+  }, [])
+
+  const handleSidebarSelectWorktree = useCallback(
+    (path: string) => {
+      switchWorktree(
+        path,
+        () => {
+          setShowNewWorktree(false)
+          setShowActivity(false)
+          setShowCleanup(false)
+          setShowCommandCenter(false)
+          setShowTaskList(false)
+        }
+      )
+    },
+    [switchWorktree]
+  )
+
+  const handleSidebarSelectTab = useCallback(
+    (wtPath: string, paneId: string, tabId: string) => {
+      handleSidebarSelectWorktree(wtPath)
+      startTransition(() => handleSelectTab(wtPath, paneId, tabId))
+    },
+    [handleSidebarSelectWorktree, handleSelectTab]
+  )
+
+  const handleEndAliasEdit = useCallback(() => setEditingAliasPath(null), [])
+
+  // Hoisted for RightColumn's memo, so the sidebar's optimistic highlight
+  // render doesn't re-render the whole right column with unchanged data.
+  const handleOpenGithubSettings = useCallback(() => {
+    setSettingsInitialSection('github')
+    setShowSettings(true)
+  }, [])
+  const handleOpenActivePR = useCallback(
+    (url: string) => {
+      if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
+    },
+    [activeWorktreeId, handleOpenPR]
+  )
+  const handleOpenActiveReview = useCallback(() => {
+    if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
+  }, [activeWorktreeId, backendFor])
+  const handleCollapseRightColumn = useCallback(() => setRightColumnHidden(true), [])
+  const handleBuildCustomTool = useCallback((branch: string, prompt: string) => {
+    setNewWorktreePrefill({ branch, prompt })
+    setShowNewWorktree(true)
   }, [])
 
   const effectiveDefaultAgent = defaultAgent ?? 'claude'
@@ -831,6 +1053,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Sidebar-aware hotkey handlers + the resolved binding map for tooltips.
   // The hook also subscribes to keystrokes via useHotkeys internally.
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
+    pathBackendId: mergedData.pathBackendId,
     worktrees,
     repoRoots,
     unifiedRepos,
@@ -852,6 +1075,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setSingleScreenMode,
     setShowNewWorktree,
     setShowCommandCenter,
+    setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
     setShowPerfMonitor,
@@ -945,6 +1169,24 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const myWeekOverlay = showMyWeek ? (
     <div className="fixed inset-0 z-50 flex">
       <WeeklyWrappedScreen onClose={() => setShowMyWeek(false)} />
+    </div>
+  ) : null
+
+  const taskListOverlay = showTaskList ? (
+    <div className="fixed inset-0 z-50 flex">
+      <TaskListView
+        model={worktreeListModel}
+        pathBackendId={mergedData.pathBackendId}
+        activeWorktreeId={activeWorktreeId}
+        activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
+        unifiedRepos={unifiedRepos}
+        repoCount={repoRoots.length}
+        onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
+        onClose={() => setShowTaskList(false)}
+        onSelect={handleSidebarSelectWorktree}
+        onSelectTab={handleSidebarSelectTab}
+        onToggleGroup={toggleGroup}
+      />
     </div>
   ) : null
 
@@ -1322,6 +1564,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       </div>
       {settingsOverlay}
       {myWeekOverlay}
+      {taskListOverlay}
       {repoPickerOverlay}
       {repoAddPromptOverlay}
       </HotkeysProvider>
@@ -1521,18 +1764,16 @@ const setQuestStep = useCallback((next: QuestStep) => {
         {!singleScreenMode && sidebarVisible && (
           <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: effectiveSidebarWidth }}><div className="drag-region h-10 shrink-0 flex items-stretch border-b border-border-strong bg-panel titlebar-lead"><AppTitleSegment fillParent /></div><div className="flex-1 min-h-0 flex"><Sidebar
             model={worktreeListModel}
-            activeWorktreeId={activeWorktreeId}
+            activeWorktreeId={sidebarActiveId}
+            activeTabId={sidebarActiveId ? (activeTabId[sidebarActiveId] ?? null) : null}
             snoozeDefaultDays={settings.snoozeDefaultDays}
             prLoading={prLoading}
             onOpenAssignedPR={handleOpenAssignedPR}
             agentCount={agentWorktreeCount}
-            onSelectWorktree={(path) => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(false)
-              setActiveWorktreeId(path)
-            }}
+            onSelectWorktree={handleSidebarSelectWorktree}
+            pathBackendId={mergedData.pathBackendId}
+            originByPath={originByPath}
+            onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {
               setNewWorktreeRepo(repoRoot)
@@ -1550,6 +1791,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenActivity={() => setShowActivity(true)}
             onOpenCleanup={() => setShowCleanup(true)}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1566,7 +1808,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onCollapseSidebar={() => setSidebarVisible(false)}
             editingAliasPath={editingAliasPath}
             onStartAliasEdit={setEditingAliasPath}
-            onEndAliasEdit={() => setEditingAliasPath(null)}
+            onEndAliasEdit={handleEndAliasEdit}
           /></div></div>
         )}
         {!singleScreenMode && !sidebarVisible && (
@@ -1578,6 +1820,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(true)
             }}
             onOpenCleanup={() => setShowCleanup(true)}
+            onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
               setShowNewWorktree(false)
               setShowActivity(false)
@@ -1594,19 +1837,36 @@ const setQuestStep = useCallback((next: QuestStep) => {
         {!singleScreenMode && sidebarVisible && (
           <div className="shrink-0 flex flex-col"><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleSidebarResize} /></div></div>
         )}
-        {/* Render ALL worktrees' terminals to keep PTYs alive across switches */}
-        {worktrees.map((wt) => {
+        {/* Render ALL worktrees' terminals to keep PTYs alive across switches.
+            Now spans every backend, not just the active one — each subtree is
+            pinned to its owning backend below, so a remote worktree's panes
+            keep streaming while a local one is on screen. */}
+        {mergedWorktrees.map(({ backendId, worktree: wt }) => {
           const paneTree = panes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
+          const mountKey = `${backendId}\u0000${wt.path}`
+          // Local worktrees mount eagerly (cheap, keeps PTYs warm); remote
+          // ones only once opened, so connecting never fans out across the
+          // network. See openedWorktrees above.
+          const eagerMount = backendId === LOCAL_BACKEND_ID
+          const everOpened = openedWorktrees.has(mountKey)
+          const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
+          if (!eagerMount && !everOpened && !isSelected) return null
           const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
           return (
             <div
-              key={wt.path}
+              key={`${backendId}\u0000${wt.path}`}
               className="flex-1 min-w-0"
               style={{ display: isVisible ? 'flex' : 'none' }}
             >
+              {/* Pins this worktree's panes to the backend that owns it, so
+                  their requests, sends and terminal:data subscriptions go to
+                  the right transport even though every worktree stays
+                  mounted. This is what lets a local and a remote worktree be
+                  live at the same time. */}
+              <BackendScope backendId={backendId}>
               <ErrorBoundary label={`worktree:${wt.path}`}>
                 <WorkspaceView
                   worktreePath={wt.path}
@@ -1652,6 +1912,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   }
                 />
               </ErrorBoundary>
+              </BackendScope>
             </div>
           )
         })}
@@ -1661,6 +1922,8 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onPRSubmit={handleSubmitNewPRWorktree}
             onCancel={() => setShowNewWorktree(false)}
             repoRoots={repoRoots}
+            hostLabelByRoot={hostLabelByRoot}
+            repoKeyByRoot={repoKeyByRoot}
             defaultRepoRoot={newWorktreeRepo ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined)}
             initialPRNumber={newWorktreeInitialPRNumber}
             forkSource={newWorktreeForkSource}
@@ -1705,23 +1968,21 @@ const setQuestStep = useCallback((next: QuestStep) => {
         )}
         {showCommandCenter && (
           <CommandCenter
-            worktrees={worktrees}
-            worktreeStatuses={worktreeStatuses}
-            worktreePendingTools={worktreePendingTools}
-            prStatuses={prStatuses}
-            mergedPaths={mergedPaths}
+            model={worktreeListModel}
             lastActive={lastActive}
             tailLines={tailLines}
             terminalTabs={terminalTabs}
+            unifiedRepos={unifiedRepos}
+            onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
             onClose={() => setShowCommandCenter(false)}
             onSelect={(path) => {
               setShowCommandCenter(false)
+              setShowTaskList(false)
               setShowNewWorktree(false)
               setShowActivity(false)
               setShowCleanup(false)
               setActiveWorktreeId(path)
             }}
-            isGroupCollapsed={isGroupCollapsed}
             onToggleGroup={toggleGroup}
           />
         )}
@@ -1780,7 +2041,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
-          <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
+          <BackendScope backendId={selectedBackendId}><div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
             activeRepoRoot={activeRepoRoot}
@@ -1791,28 +2052,18 @@ const setQuestStep = useCallback((next: QuestStep) => {
             hasGithubToken={hasGithubToken}
             activeRepoConfig={activeRepoConfig}
             onRefreshPRs={fetchAllPRStatuses}
-            onOpenGithubSettings={() => {
-              setSettingsInitialSection('github')
-              setShowSettings(true)
-            }}
+            onOpenGithubSettings={handleOpenGithubSettings}
             onMerged={refreshMergedStatus}
             onRemoveWorktree={handleDeleteWorktree}
             onOpenDiff={handleOpenDiff}
             onOpenCommitFileDiff={handleOpenCommitFileDiff}
             onOpenFile={handleOpenFile}
             onSendToAgent={handleSendToAgent}
-            onOpenPR={(url) => {
-              if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
-            }}
-            onOpenReview={() => {
-              if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
-            }}
-            onCollapse={() => setRightColumnHidden(true)}
-            onBuildCustomTool={(branch, prompt) => {
-              setNewWorktreePrefill({ branch, prompt })
-              setShowNewWorktree(true)
-            }}
-          /></div></div>
+            onOpenPR={handleOpenActivePR}
+            onOpenReview={handleOpenActiveReview}
+            onCollapse={handleCollapseRightColumn}
+            onBuildCustomTool={handleBuildCustomTool}
+          /></div></div></BackendScope>
         )}
         {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
@@ -1822,7 +2073,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               if (activeWorktreeId) handleOpenPR(activeWorktreeId, url)
             }}
             onReview={() => {
-              if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
+              if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
             }}
             onFileQuickOpen={() => {
               setShowHotkeyCheatsheet(false)
@@ -1844,6 +2095,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     </div>
     {settingsOverlay}
     {myWeekOverlay}
+    {taskListOverlay}
     {repoPickerOverlay}
     {repoAddPromptOverlay}
     {showPerfMonitor && <PerfMonitorHUD onClose={() => setShowPerfMonitor(false)} />}

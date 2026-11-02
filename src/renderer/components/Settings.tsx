@@ -11,6 +11,7 @@ import {
   usePermissionRules
 } from '../store'
 import { useBackend } from '../backend'
+import type { ReviewAgentChoice } from '../../shared/state/settings'
 import { LEGACY_REPO_CONFIG_FILENAME } from '../../shared/state/repo-configs'
 import type { UpdaterStatus, MergeStrategy, RepoConfig, AgentKind, SidebarDensity, SidebarDetailPrefs, Worktree, PRStatus } from '../types'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
@@ -65,6 +66,7 @@ type SubSectionId =
   | 'experimental-browser-control'
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
+  | 'experimental-agent-reviews'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
 
@@ -115,6 +117,7 @@ const SECTIONS: Section[] = [
     { id: 'experimental-browser-control', label: 'Browser control' },
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'experimental-agent-reviews', label: 'Agent reviews' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
   ]}
@@ -247,6 +250,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-browser-control': null,
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
+    'experimental-agent-reviews': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
   })
@@ -422,6 +426,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     mergeStrategy,
     sidebarDensity,
     sidebarDetails,
+    sidebarTabsExpansion,
     hasGithubToken: settingsHasToken,
     githubAuthSource: authSource,
     harnessStarred,
@@ -437,6 +442,12 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    agentTabNamingEnabled,
+    agentReviewDelivery,
+    autoReviewOnGreenCi,
+    reviewAgent,
+    reviewModel,
+    reviewPrompt,
     wsTransportEnabled,
     wsTransportPort,
     wsTransportHost,
@@ -1050,6 +1061,40 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     await backend.setHarnessSystemPromptMain('')
     setSystemPromptSaveResult({ ok: true, message: 'Reset to defaults' })
     setTimeout(() => setSystemPromptSaveResult(null), 2000)
+  }, [])
+
+  const [reviewPromptDraft, setReviewPromptDraft] = useState<string>(reviewPrompt)
+  useEffect(() => { setReviewPromptDraft(reviewPrompt) }, [reviewPrompt])
+  const [reviewPromptSaveResult, setReviewPromptSaveResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  // The reviewer's model list follows its agent. 'inherit' can resolve to
+  // either agent at spawn time, so both are offered, grouped, and the
+  // hint says the pin has to match whoever ends up reviewing.
+  const reviewModelGroups = useMemo(
+    () =>
+      reviewAgent === 'codex'
+        ? [{ label: 'Codex', models: CODEX_MODELS }]
+        : reviewAgent === 'cursor'
+          ? [{ label: 'Cursor', models: CURSOR_MODELS }]
+          : reviewAgent === 'claude'
+            ? [{ label: 'Claude', models: CLAUDE_MODELS }]
+            : [
+                { label: 'Claude', models: CLAUDE_MODELS },
+                { label: 'Codex', models: CODEX_MODELS }
+              ],
+    [reviewAgent]
+  )
+
+  const handleSaveReviewPrompt = useCallback(async () => {
+    await backend.setReviewPrompt(reviewPromptDraft)
+    setReviewPromptSaveResult({ ok: true, message: 'Saved · the next review uses this' })
+    setTimeout(() => setReviewPromptSaveResult(null), 2000)
+  }, [reviewPromptDraft])
+
+  const handleResetReviewPrompt = useCallback(async () => {
+    await backend.setReviewPrompt('')
+    setReviewPromptSaveResult({ ok: true, message: 'Reset to default' })
+    setTimeout(() => setReviewPromptSaveResult(null), 2000)
   }, [])
 
   const handleSavePrReviewPrompt = useCallback(async () => {
@@ -2028,6 +2073,56 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 ))}
               </div>
 
+              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Worktree tabs in the sidebar</h3>
+              <p className="text-xs text-dim mb-3">
+                List each worktree's tabs underneath it, with their status.
+                Click one to jump straight to that tab.
+              </p>
+              <div className="space-y-2">
+                {(
+                  [
+                    {
+                      id: 'never' as const,
+                      label: 'Never expanded',
+                      description: 'Rows show only the worktree'
+                    },
+                    {
+                      id: 'selected' as const,
+                      label: 'Only the selected is expanded',
+                      description: 'The selected worktree lists its tabs'
+                    },
+                    {
+                      id: 'all' as const,
+                      label: 'Expand all',
+                      description: 'Every worktree lists its tabs'
+                    }
+                  ]
+                ).map((opt) => {
+                  const isActive = sidebarTabsExpansion === opt.id
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => void backend.setSidebarTabsExpansion(opt.id)}
+                      className={`w-full text-left rounded border px-3 py-2 transition-colors cursor-pointer ${
+                        isActive
+                          ? 'border-accent bg-panel-raised'
+                          : 'border-border hover:border-border-strong'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-3 h-3 rounded-full border ${
+                            isActive ? 'border-accent bg-accent' : 'border-border-strong'
+                          }`}
+                        />
+                        <span className="text-sm text-fg-bright">{opt.label}</span>
+                      </div>
+                      <p className="text-xs text-dim mt-1 ml-5">{opt.description}</p>
+                    </button>
+                  )
+                })}
+              </div>
+
             </section>
 
             {/* Agent section */}
@@ -2078,6 +2173,38 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     />
                   </div>
                 )}
+              </div>
+
+              <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">
+                Agent tab naming
+              </h3>
+              <div className="bg-panel-raised border border-border rounded-lg p-4">
+                <p className="text-xs text-dim mb-3">
+                  Lets an agent name the tab it&apos;s running in, so a worktree
+                  holding four sessions doesn&apos;t show four tabs called
+                  &quot;Claude&quot;. An agent can only ever rename its own tab.
+                  If you rename a tab yourself, your name is final and the
+                  agent is refused from then on — turning this off is for
+                  stopping agents naming tabs at all, not for protecting one
+                  tab. Only takes effect on the next agent session.
+                </p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={agentTabNamingEnabled}
+                    onChange={(e) => { void backend.setAgentTabNamingEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Let agents name their own tab</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">set_tab_name</code>{' '}
+                      MCP tool and asks agents to keep the name current. Your own
+                      renaming (double-click the tab,{' '}
+                      <HotkeyBadge binding={bindingToString(resolvedHotkeys.renameTab)} />, or
+                      the right-click menu) works either way.
+                    </div>
+                  </div>
+                </label>
               </div>
 
               <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-3">
@@ -3957,6 +4084,153 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 </label>
               </div>
 
+              {/* Agent reviews sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['experimental-agent-reviews'] = el }}
+                id="experimental-agent-reviews"
+                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Agent reviews</h3>
+                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
+                    Experimental
+                  </span>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  An agent that has finished a piece of work can call
+                  <code className="bg-panel px-1 rounded text-xs">request_review</code>, which opens a
+                  second Chat tab to review the branch and shows the Review tab beside it. The
+                  reviewer leaves inline comments, then submits — and Ness delivers the review back
+                  to whichever tab asked for it. Reviewer tabs start in plan mode and are told not
+                  to change the branch they are reviewing. A requested review is always delivered —
+                  the agent that asked is waiting on it. The choice below is for a review nobody
+                  asked for, e.g. one you started by hand in a Chat tab.
+                </p>
+                <fieldset className="grid grid-cols-2 gap-2">
+                  {([
+                    {
+                      id: 'draft',
+                      label: 'Hold as a draft',
+                      hint: 'An unrequested review waits in the Review tab so you can edit or delete comments, then send it yourself.'
+                    },
+                    {
+                      id: 'auto',
+                      label: 'Send automatically',
+                      hint: "Deliver every review straight to the author's agent tab."
+                    }
+                  ] as const).map((opt) => {
+                    const isActive = agentReviewDelivery === opt.id
+                    return (
+                      <label
+                        key={opt.id}
+                        className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                          isActive
+                            ? 'bg-surface text-fg-bright border-fg'
+                            : 'bg-panel-raised text-muted border-border hover:text-fg hover:border-border-strong'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="agent-review-delivery"
+                          value={opt.id}
+                          checked={isActive}
+                          onChange={() => { void backend.setAgentReviewDelivery(opt.id) }}
+                          className="sr-only"
+                        />
+                        <div className="text-sm">{opt.label}</div>
+                        <div className="text-xs text-dim mt-0.5">{opt.hint}</div>
+                      </label>
+                    )
+                  })}
+                </fieldset>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
+                  <p className="text-xs text-dim mb-2">
+                    Which agent and model review. Pick a different one — or a stronger model — to
+                    get a second opinion rather than the same brain twice. With &quot;same as the
+                    requester&quot; the agent isn&apos;t known until the review starts; a model
+                    that agent doesn&apos;t know is ignored in favour of its own default.
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={reviewAgent}
+                      onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
+                      className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="inherit">Same as the requester</option>
+                      <option value="claude">Claude</option>
+                      <option value="codex">Codex</option>
+                    </select>
+                    <select
+                      value={reviewModel}
+                      onChange={(e) => { void backend.setReviewModel(e.target.value) }}
+                      className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="">(Default — the agent&apos;s own model)</option>
+                      {reviewModelGroups.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.models.map((m) => (
+                            <option key={`${group.label}-${m.id}`} value={m.id}>
+                              {m.displayName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
+                  <p className="text-xs text-dim mb-2">
+                    What a reviewer is told to look for. The requester&apos;s own description of the
+                    work is added above it, and Ness appends how to use the review tools.
+                  </p>
+                  <textarea
+                    value={reviewPromptDraft}
+                    onChange={(e) => setReviewPromptDraft(e.target.value)}
+                    rows={10}
+                    spellCheck={false}
+                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={handleSaveReviewPrompt}
+                      disabled={reviewPromptDraft === reviewPrompt}
+                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleResetReviewPrompt}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="icon-xs" />
+                      Reset to default
+                    </button>
+                    {reviewPromptSaveResult && (
+                      <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
+                        {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <label className="flex items-start gap-3 cursor-pointer mt-4">
+                  <input
+                    type="checkbox"
+                    checked={autoReviewOnGreenCi}
+                    onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
               {/* Auto-approve safe tool calls sub-card */}
               <div
                 ref={(el) => { subSectionRefs.current['experimental-auto-approve'] = el }}
@@ -4292,6 +4566,7 @@ function SidebarRowPreview({ density, prefs }: SidebarRowPreviewProps): JSX.Elem
               aliased
               prStatus={PREVIEW_PR}
               prefs={prefs}
+              active
             />
           )}
         </div>
@@ -4302,6 +4577,7 @@ function SidebarRowPreview({ density, prefs }: SidebarRowPreviewProps): JSX.Elem
             aliased
             prStatus={PREVIEW_PR}
             prefs={prefs}
+            active
             inline
           />
         )}

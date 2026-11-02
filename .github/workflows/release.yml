@@ -99,6 +99,15 @@ jobs:
           npm install --no-save --ignore-scripts --legacy-peer-deps --force \
             "@anthropic-ai/claude-code-darwin-x64@${CLAUDE_VERSION}"
 
+      # Same story for the bundled Codex binary (Codex Chat tabs). Its
+      # platform packages are npm aliases of the main package, so the
+      # alias spec has to be spelled out.
+      - name: Install cross-arch codex binary (darwin-x64)
+        run: |
+          CODEX_VERSION=$(node -e "console.log(require('./package.json').dependencies['@openai/codex'])")
+          npm install --no-save --ignore-scripts --legacy-peer-deps --force \
+            "@openai/codex-darwin-x64@npm:@openai/codex@${CODEX_VERSION}-darwin-x64"
+
       - name: Build renderer + main
         run: npm run build
 

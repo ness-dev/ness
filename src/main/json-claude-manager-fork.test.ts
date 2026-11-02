@@ -51,6 +51,7 @@ function makeManager(store: Store): JsonClaudeManager {
     getUseSystemClaude: () => false,
     getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
     closeApprovalSession: vi.fn(),
+    cancelApprovalForToolUse: vi.fn(),
     getClaudeEnvVars: () => ({}),
     getControlServer: () => null,
     getControlBridgeScriptPath: () => '/tmp/bridge.js',

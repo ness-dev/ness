@@ -22,6 +22,9 @@ export interface PersistedTab {
   label: string
   agentKind?: AgentKind
   sessionId?: string
+  /** For json-claude tabs on agents that assign their own conversation
+   *  ids (Codex): that id, so a restart resumes the same thread. */
+  providerSessionId?: string
   /** For browser tabs: last URL so we can restore the tab on reload. */
   url?: string
   /** For shell tabs: the command the tab was created with (agent-spawned).
@@ -34,6 +37,12 @@ export interface PersistedTab {
   model?: string
   /** User-defined label override. Empty/undefined falls back to `label`. */
   customLabel?: string
+  /** Set only when an agent named the tab. A `customLabel` without this
+   *  is user-set and locks agents out — which is also what every label
+   *  written before this field existed restores as. */
+  customLabelSource?: 'agent'
+  /** For a reviewer Chat tab: the tab that requested the review. */
+  reviewOf?: string
 }
 
 export interface PersistedPane {

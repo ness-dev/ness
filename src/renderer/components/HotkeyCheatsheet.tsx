@@ -44,6 +44,7 @@ function buildGroups(hotkeys: Record<Action, HotkeyBinding>): ShortcutGroup[] {
         { label: 'Toggle sidebar', binding: b('toggleSidebar') },
         { label: 'Toggle right column', binding: b('toggleRightColumn') },
         { label: 'Toggle command center', binding: b('toggleCommandCenter') },
+        { label: 'Toggle task list', binding: b('toggleTaskList') },
       ],
     },
     {

@@ -17,10 +17,18 @@
     "log:perf:clear": "rm -f ~/Library/Application\\ Support/harness/perf.log ~/Library/Application\\ Support/harness/perf.log.1",
     "build": "electron-vite build && vite build --config vite.web.config.ts",
     "build:web": "vite build --config vite.web.config.ts",
-    "build:headless": "vite build --config vite.headless.config.ts && vite build --config vite.headless-web.config.ts",
+    "build:headless": "vite build --config vite.headless.config.ts && vite build --config vite.headless-web.config.ts && mkdir -p dist-headless/mcp && cp resources/permission-prompt-mcp.js resources/mcp-bridge.js dist-headless/mcp/",
     "dev:headless": "npm run build:headless && HARNESS_DATA_DIR=./.headless-data HARNESS_WS_HOST=${HARNESS_WS_HOST:-127.0.0.1} node dist-headless/main/index.js",
     "pack:headless": "node scripts/pack-headless.mjs",
     "pack:headless:all": "echo 'Cross-platform packaging happens in CI. Run pack:headless to build for the current host.'",
+    "remote:up": "./scripts/ness-remote.sh up",
+    "remote:down": "./scripts/ness-remote.sh down",
+    "remote:reset": "./scripts/ness-remote.sh reset",
+    "remote:restart": "./scripts/ness-remote.sh restart",
+    "remote:logs": "./scripts/ness-remote.sh logs",
+    "remote:shell": "./scripts/ness-remote.sh shell",
+    "remote:url": "./scripts/ness-remote.sh url",
+    "remote:status": "./scripts/ness-remote.sh status",
     "preview": "electron-vite preview",
     "typecheck": "tsc -b --force",
     "test": "vitest run",
@@ -60,7 +68,9 @@
     "asarUnpack": [
       "**/node_modules/node-pty/**/*",
       "**/node_modules/@anthropic-ai/claude-code/**/*",
-      "**/node_modules/@anthropic-ai/claude-code-*/**/*"
+      "**/node_modules/@anthropic-ai/claude-code-*/**/*",
+      "**/node_modules/@openai/codex/**/*",
+      "**/node_modules/@openai/codex-*/**/*"
     ],
     "extraResources": [
       {
@@ -95,7 +105,10 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "Ness connects to Ness servers and dev servers on your local network."
+      }
     },
     "dmg": {
       "contents": [
@@ -138,10 +151,11 @@
     }
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.285",
+    "@anthropic-ai/claude-code": "2.1.301",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@openai/codex": "0.165.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@types/diff": "^7.0.2",
     "@xterm/addon-fit": "^0.11.0",

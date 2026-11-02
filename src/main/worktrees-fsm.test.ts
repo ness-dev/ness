@@ -9,7 +9,8 @@ vi.mock('./worktree', () => ({
   fetchPullRequestRef: vi.fn(),
   localBranchExists: vi.fn(async () => false),
   runWorktreeScript: vi.fn(),
-  unsymlinkClaudeSettings: vi.fn(() => null)
+  unsymlinkClaudeSettings: vi.fn(() => null),
+  getOriginRemoteUrl: vi.fn(async () => null)
 }))
 vi.mock('./github', () => ({
   getPRMetadata: vi.fn()
@@ -20,7 +21,7 @@ vi.mock('./repo-config', () => ({
 
 import { Store } from './store'
 import { sanitizeHeadBranchForLocal, WorktreesFSM } from './worktrees-fsm'
-import { listWorktrees, addWorktree, runWorktreeScript } from './worktree'
+import { listWorktrees, addWorktree, runWorktreeScript, getOriginRemoteUrl } from './worktree'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 
 describe('sanitizeHeadBranchForLocal', () => {
@@ -218,5 +219,59 @@ describe('WorktreesFSM.runPending', () => {
       id: 'pending:empty',
       status: 'error'
     })
+  })
+})
+
+describe('refreshRepoRemotes ordering', () => {
+  // Two overlapping refreshes each await N git subprocesses and then
+  // replace the whole map. If the OLDER call finishes last it used to
+  // win, dropping a just-added repo's remote (folder-key fallback, no
+  // cross-host merge) or resurrecting a removed root — with nothing to
+  // correct it until the next repo change. A generation counter makes
+  // the newest call the only one that publishes.
+  it('discards a stale resolution that finishes after a newer one', async () => {
+    const store = new Store()
+    const fsm = new WorktreesFSM(store, {
+      getRepoRoots: () => ['/a', '/b'],
+      getWorktreeSetupCmd: () => '',
+      getWorktreeBaseMode: () => 'remote',
+      onWorktreeCreated: () => {}
+    })
+    const deferred: Array<(url: string | null) => void> = []
+    vi.mocked(getOriginRemoteUrl).mockImplementation(
+      () => new Promise<string | null>((resolve) => { deferred.push(resolve) })
+    )
+
+    const older = fsm.refreshRepoRemotes(['/a'])          // deferred[0]
+    const newer = fsm.refreshRepoRemotes(['/a', '/b'])    // deferred[1], deferred[2]
+    expect(deferred).toHaveLength(3)
+
+    deferred[1]('https://github.com/x/a')
+    deferred[2]('https://github.com/x/b')
+    await newer
+    const settled = { '/a': 'github.com/x/a', '/b': 'github.com/x/b' }
+    expect(store.getSnapshot().state.worktrees.repoRemotes).toEqual(settled)
+
+    // The older call now completes with a stale, smaller map. It must not
+    // overwrite the newer result.
+    deferred[0]('https://github.com/stale/a')
+    await older
+    expect(store.getSnapshot().state.worktrees.repoRemotes).toEqual(settled)
+  })
+
+  it('skips the dispatch when the map is unchanged', async () => {
+    const store = new Store()
+    const fsm = new WorktreesFSM(store, {
+      getRepoRoots: () => ['/a'],
+      getWorktreeSetupCmd: () => '',
+      getWorktreeBaseMode: () => 'remote',
+      onWorktreeCreated: () => {}
+    })
+    vi.mocked(getOriginRemoteUrl).mockImplementation(async () => 'git@github.com:x/a.git')
+    await fsm.refreshRepoRemotes(['/a'])
+    const first = store.getSnapshot().state.worktrees.repoRemotes
+    expect(first).toEqual({ '/a': 'github.com/x/a' })
+    await fsm.refreshRepoRemotes(['/a'])
+    expect(store.getSnapshot().state.worktrees.repoRemotes).toBe(first)
   })
 })

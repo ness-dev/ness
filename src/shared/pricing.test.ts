@@ -153,3 +153,21 @@ describe('Fable / Mythos 5.1', () => {
     expect(rateFor('claude-fable-5-1-20261013')?.cacheReadMult).toBe(0.025)
   })
 })
+
+describe('current Codex models', () => {
+  it('prices the GPT-6 and GPT-5.6 families at the published short-context rates', () => {
+    expect(rateFor('gpt-6-luna')).toMatchObject({ in: 0.1, out: 0.5 })
+    expect(rateFor('gpt-6-sol')).toMatchObject({ in: 2, out: 10 })
+    expect(rateFor('gpt-6-astra')).toMatchObject({ in: 10, out: 50 })
+    expect(rateFor('gpt-5.6-sol')).toMatchObject({ in: 4, out: 20 })
+    expect(rateFor('gpt-5.6-terra')).toMatchObject({ in: 2, out: 12 })
+    expect(rateFor('gpt-5.6-luna')).toMatchObject({ in: 0.2, out: 1.2 })
+  })
+
+  it('bills cached input at a tenth of the input rate', () => {
+    // 1M uncached + 1M cached + 1M output on gpt-6-luna: 0.10 + 0.01 + 0.50
+    expect(
+      priceFor('gpt-6-luna', { input_tokens: 1_000_000, cached_input_tokens: 1_000_000, output_tokens: 1_000_000 })
+    ).toBeCloseTo(0.61, 6)
+  })
+})

@@ -1,3 +1,5 @@
+// The Claude ChatProvider (see chat-provider.ts).
+//
 // Runs `claude -p --input-format stream-json --output-format stream-json`
 // as a long-lived subprocess per json-claude tab. Mirrors PtyManager's
 // lifecycle shape (create / send / kill / killAll) and dispatches state
@@ -36,6 +38,14 @@ import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
+import type {
+  ChatImageInput,
+  ChatProvider,
+  ForkIntoWorktreeParams,
+  ForkOutcome,
+  RewindOutcome
+} from './chat-provider'
+import { nessControlMcpServer } from './ness-control-mcp'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
 import { cachedShellEnv, claudeProjectsDirFor } from './claude-env'
@@ -103,6 +113,11 @@ export interface JsonClaudeManagerOptions {
   getUseSystemClaude: () => boolean
   getApprovalSocketPath: (sessionId: string) => string
   closeApprovalSession: (sessionId: string) => void
+  /** Called for every tool_result we see so an approval still pending
+   *  for that tool_use id can be dropped — Claude Code aborting its
+   *  `approve` MCP call (idle timeout) is otherwise invisible to us.
+   *  See ApprovalBridge.cancelPendingForToolUse. */
+  cancelApprovalForToolUse: (sessionId: string, toolUseId: string) => void
   getClaudeEnvVars: () => Record<string, string>
   /** Looked up from main when building the inline MCP config. Returning
    *  null means the ness-control bridge isn't injected (settings flag
@@ -199,17 +214,6 @@ function transcriptPathFor(sessionId: string, worktreePath: string): string {
  *  the caller an empty chat. */
 export function hasForkableTranscript(sessionId: string, worktreePath: string): boolean {
   return existsSync(transcriptPathFor(sessionId, worktreePath))
-}
-
-export interface RewindOutcome {
-  ok: boolean
-  reason?: string
-}
-
-export interface ForkOutcome {
-  ok: boolean
-  newSessionId?: string
-  reason?: string
 }
 
 export interface ForkTranscriptParams {
@@ -330,7 +334,7 @@ export function forkTranscript(params: ForkTranscriptParams): ForkOutcome {
   return { ok: true, newSessionId }
 }
 
-export class JsonClaudeManager {
+export class JsonClaudeManager implements ChatProvider {
   private instances = new Map<string, JsonClaudeInstance>()
   private store: Store
   private opts: JsonClaudeManagerOptions
@@ -356,6 +360,20 @@ export class JsonClaudeManager {
 
   hasSession(sessionId: string): boolean {
     return this.instances.has(sessionId)
+  }
+
+  transcriptPath(sessionId: string, worktreePath: string): string {
+    return transcriptPathFor(sessionId, worktreePath)
+  }
+
+  canForkIntoWorktree(sessionId: string, worktreePath: string): boolean {
+    return hasForkableTranscript(sessionId, worktreePath)
+  }
+
+  /** Copies the transcript into the destination's project dir under a new
+   *  session id; the new tab's `--resume` picks it up from there. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    return forkTranscript(params)
   }
 
   /** Mint the next chat entry id for a session. `kind` distinguishes the
@@ -594,6 +612,14 @@ export class JsonClaudeManager {
     // need a separate Node install in packaged builds.
     //   * ness-permissions: receives the per-tool approval requests
     //     Claude raises via --permission-prompt-tool. Tool is 'approve'.
+    //     Deliberately carries no per-server `timeout`, so Claude's
+    //     default MCP idle timeout (1800s) still aborts an approval
+    //     nobody answered. That's wanted: the agent gets an error
+    //     tool_result and can work around the question or move to
+    //     something else instead of parking forever. Ness reconciles
+    //     the abort via cancelApprovalForToolUse — setting a timeout
+    //     here to "fix" a vanishing approval card would trade a
+    //     self-healing agent for a blocked one.
     //   * ness-control: the same MCP bridge used by xterm-backed
     //     Claude tabs, exposing ness-control tools (worktree mgmt,
     //     browser tabs, shell tabs, etc.). Skipped when settings has
@@ -615,26 +641,12 @@ export class JsonClaudeManager {
     if (this.opts.isHarnessMcpEnabled()) {
       const controlInfo = this.opts.getControlServer()
       if (controlInfo) {
-        const scope = this.opts.getCallerScope(sessionId)
-        const controlEnv: Record<string, string> = {
-          ELECTRON_RUN_AS_NODE: '1',
-          HARNESS_PORT: String(controlInfo.port),
-          HARNESS_TOKEN: controlInfo.token,
-          // The bridge keys every control-server call by terminal id —
-          // for json-claude tabs the tab id IS the session id.
-          HARNESS_TERMINAL_ID: sessionId,
-          HARNESS_SESSION_ID: sessionId
-        }
-        if (scope) {
-          controlEnv.HARNESS_WORKTREE_ID = scope.worktreePath
-          controlEnv.HARNESS_REPO_ROOT = scope.repoRoot
-          if (scope.isMain) controlEnv.HARNESS_IS_MAIN = '1'
-        }
-        mcpServers['ness-control'] = {
-          command: process.execPath,
-          args: [this.opts.getControlBridgeScriptPath()],
-          env: controlEnv
-        }
+        mcpServers['ness-control'] = nessControlMcpServer({
+          sessionId,
+          controlServer: controlInfo,
+          bridgeScriptPath: this.opts.getControlBridgeScriptPath(),
+          scope: this.opts.getCallerScope(sessionId)
+        })
       }
     }
     const mcpConfig = { mcpServers }
@@ -860,7 +872,7 @@ export class JsonClaudeManager {
   send(
     sessionId: string,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const inst = this.instances.get(sessionId)
     if (!inst) return
@@ -898,7 +910,7 @@ export class JsonClaudeManager {
   private writeUserTurn(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     this.appendUserEntry(inst, text, images, {
       entryId: this.nextEntryId(inst.sessionId, 'u')
@@ -913,9 +925,7 @@ export class JsonClaudeManager {
   private appendUserEntry(
     inst: JsonClaudeInstance,
     text: string,
-    images:
-      | Array<{ mediaType: string; data: string; path: string }>
-      | undefined,
+    images: ChatImageInput[] | undefined,
     extra: { entryId: string; isQueued?: boolean }
   ): void {
     const hasImages = !!images && images.length > 0
@@ -955,7 +965,7 @@ export class JsonClaudeManager {
   private writeUserStdin(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const hasImages = !!images && images.length > 0
     const annotatedText = hasImages
@@ -1714,6 +1724,10 @@ export class JsonClaudeManager {
     if (type === 'user') {
       const results = extractToolResults(parsed)
       for (const r of results) {
+        // A result means this tool call is decided, so an approval still
+        // pending for it can never be answered — drop it before the
+        // card and its needs-approval dot outlive the turn.
+        this.opts.cancelApprovalForToolUse(instance.sessionId, r.toolUseId)
         this.store.dispatch({
           type: 'jsonClaude/toolResultAttached',
           payload: {
@@ -2250,7 +2264,24 @@ function streamEventBlockToMessageBlock(
   return null
 }
 
-function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
+// Tools whose `description` input is the model's own one-line account
+// of why it's making the call ("Run the reducer tests"). TaskCreate et
+// al. also take a `description`, but there it's the task body, not an
+// explanation of the call, so they're deliberately left out.
+const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
+
+export function claudeToolIntent(
+  name: string | undefined,
+  input: Record<string, unknown> | undefined
+): string | null {
+  if (!name || !INTENT_TOOLS.has(name)) return null
+  const raw = input?.description
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
   const message = ev['message'] as { content?: unknown } | undefined
   const content = message?.content
   if (!Array.isArray(content)) return []
@@ -2270,14 +2301,18 @@ function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageB
             : ''
       })
     } else if (t === 'tool_use') {
+      const name = typeof block['name'] === 'string' ? (block['name'] as string) : undefined
+      const input =
+        block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
+          ? (block['input'] as Record<string, unknown>)
+          : undefined
+      const intent = claudeToolIntent(name, input)
       out.push({
         type: 'tool_use',
         id: typeof block['id'] === 'string' ? (block['id'] as string) : undefined,
-        name: typeof block['name'] === 'string' ? (block['name'] as string) : undefined,
-        input:
-          block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
-            ? (block['input'] as Record<string, unknown>)
-            : undefined
+        name,
+        input,
+        ...(intent ? { intent } : {})
       })
     }
   }

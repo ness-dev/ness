@@ -3,7 +3,8 @@ import { buildClaudeLaunchSettings } from './claude-launch'
 import {
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
-  HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH
+  HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH,
+  HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION
 } from './persistence'
 import type { Worktree } from '../shared/state/worktrees'
 
@@ -47,6 +48,35 @@ describe('buildClaudeLaunchSettings', () => {
     expect(on.systemPrompt).toBe(DEFAULT_HARNESS_SYSTEM_PROMPT)
     expect(on.systemPrompt).toContain(HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH)
     expect(PROMPT_WITHOUT_FORK).not.toContain(HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH)
+  })
+
+  it('includes the tab-naming section by default and drops it when disabled', () => {
+    const wt = makeWorktree()
+    const on = buildClaudeLaunchSettings({ cwd: wt.path, worktrees: [wt], config: {} })
+    expect(on.systemPrompt).toContain(HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION)
+
+    const off = buildClaudeLaunchSettings({
+      cwd: wt.path,
+      worktrees: [wt],
+      config: { agentTabNamingEnabled: false }
+    })
+    expect(off.systemPrompt).not.toContain(HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION)
+    expect(off.systemPrompt).not.toContain('set_tab_name')
+  })
+
+  it('leaves the surrounding tool list intact when the tab-naming section is dropped', () => {
+    // The section is the tail of a bullet list, so a sloppy strip would
+    // either eat the preceding newline or leave a dangling blank line.
+    const wt = makeWorktree()
+    const off = buildClaudeLaunchSettings({
+      cwd: wt.path,
+      worktrees: [wt],
+      config: { agentTabNamingEnabled: false }
+    })
+    expect(off.systemPrompt).toContain(
+      "- mcp__ness-control__clear_worktree_alias: Remove a worktree's display alias so its branch name shows again. Defaults to the caller's worktree.\n\nWhen the user wants to start a new task"
+    )
+    expect(off.systemPrompt).not.toMatch(/\n\n\n/)
   })
 
   it('leaves a custom system prompt untouched when fork is disabled', () => {

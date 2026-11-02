@@ -9,7 +9,7 @@ import {
   ChevronDown,
   FileDiff
 } from 'lucide-react'
-import { getBackend } from '../backend'
+import { useBackend } from '../backend'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import type { ChangedFile, CommitMeta } from '../types'
 
@@ -130,6 +130,7 @@ export function CommitInfoModal({
   onOpenFileDiff,
   onClose
 }: CommitInfoModalProps): JSX.Element {
+  const backend = useBackend()
   const [meta, setMeta] = useState<CommitMeta | null>(null)
   const [files, setFiles] = useState<ChangedFile[]>([])
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -155,7 +156,6 @@ export function CommitInfoModal({
   useEffect(() => {
     let cancelled = false
     setState('loading')
-    const backend = getBackend()
     void Promise.all([
       backend.getCommitMeta(worktreePath, sha),
       backend.getCommitChangedFiles(worktreePath, sha)
@@ -176,7 +176,7 @@ export function CommitInfoModal({
     return () => {
       cancelled = true
     }
-  }, [worktreePath, sha])
+  }, [worktreePath, sha, backend])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

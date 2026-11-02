@@ -8,13 +8,13 @@ import {
 import { useDroppable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { WorkspacePane, TerminalTab, PtyStatus, AgentKind } from '../types'
-import { AGENT_REGISTRY, agentDisplayName } from '../../shared/agent-registry'
+import { AGENT_REGISTRY, agentDisplayName, supportsChat } from '../../shared/agent-registry'
 import { Tooltip } from './Tooltip'
 import { AgentIcon } from './AgentIcon'
 import { repoNameColor } from './RepoIcon'
 import { AppTitleSegment } from './AppTitleSegment'
 import {
-  getClientId,
+  useClientId,
   useTerminalProgress,
   useTerminalSession,
   useTerminalStatus,
@@ -23,14 +23,17 @@ import {
 } from '../store'
 import { useBackend } from '../backend'
 import { useReviewProgress } from '../review-progress'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 
 /** Chip shown in the tab bar when other clients are attached to the
  *  active terminal. Click-through is intentional — taking/releasing
  *  control lives on the terminal body, not here. */
 function SpectatorChip({ terminalId }: { terminalId: string }): JSX.Element | null {
   const session = useTerminalSession(terminalId)
+  // Scope-resolved (this terminal's own backend), and above the early
+  // return because it's a hook.
+  const myId = useClientId()
   if (!session) return null
-  const myId = getClientId()
   // Other viewers: everyone who isn't me, counted across controller + spectators.
   const others = new Set<string>()
   if (session.controllerClientId && session.controllerClientId !== myId) {
@@ -114,6 +117,7 @@ const TAB_STATUS_DOT: Record<PtyStatus, string> = {
 
 interface SortableTabProps {
   tab: TerminalTab
+  worktreePath: string
   isActive: boolean
   showClose: boolean
   onSelect: () => void
@@ -166,7 +170,7 @@ function TabProgressBar({ terminalId }: { terminalId: string }): JSX.Element | n
   )
 }
 
-function SortableTab({ tab, isActive, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
+function SortableTab({ tab, worktreePath, isActive, showClose, onSelect, onClose, onConvertTabType, onSleepTab, onRename }: SortableTabProps): JSX.Element {
   // Read per-tab rather than taking the whole statuses/shellActivity maps as
   // props: a single terminal's status change used to allocate a new map and
   // re-render every mounted worktree's subtree. Same pattern as
@@ -310,7 +314,9 @@ function SortableTab({ tab, isActive, showClose, onSelect, onClose, onConvertTab
         ) : (
           <span className="w-1.5 h-1.5 rounded-full bg-faint" />
         )
-      ) : tab.type !== 'diff' && tab.type !== 'file' && tab.type !== 'review' ? (
+      ) : tab.type === 'review' ? (
+        <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
+      ) : tab.type !== 'diff' && tab.type !== 'file' ? (
         <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_DOT[status]}`} />
       ) : null}
       {editing ? (
@@ -676,13 +682,14 @@ export function TerminalPanel({
         >
           <SortableContext items={pane.tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
             {pane.tabs.map((tab) => {
-              const isClaudeAgent = tab.type === 'agent' && tab.agentKind === 'claude'
+              const isChatCapableAgent = tab.type === 'agent' && supportsChat(tab.agentKind)
               const isJsonClaude = tab.type === 'json-claude'
-              const convertible = !!onConvertTabType && (isClaudeAgent || isJsonClaude)
+              const convertible = !!onConvertTabType && (isChatCapableAgent || isJsonClaude)
               return (
                 <SortableTab
                   key={tab.id}
                   tab={tab}
+                  worktreePath={worktreePath}
                   isActive={tab.id === pane.activeTabId}
                   showClose={pane.tabs.length > 1 || paneCount > 1}
                   onSelect={() => onSelectTab(tab.id)}

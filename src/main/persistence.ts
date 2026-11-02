@@ -21,6 +21,7 @@ import {
 } from './persistence-migrations'
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
+import type { WorktreeReview } from '../shared/state/reviews'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 
@@ -150,6 +151,9 @@ export interface Config {
   // detail cluster on a second line; 'compact' folds it onto the right of
   // a single line.
   sidebarDensity?: 'compact' | 'comfy'
+  // Which sidebar worktree rows list their tabs underneath. Missing =
+  // DEFAULT_SIDEBAR_TABS_EXPANSION.
+  sidebarTabsExpansion?: 'never' | 'selected' | 'all'
   // Per-density detail-item toggles for the sidebar row. Compact and
   // comfy have independent toggle sets. Missing keys/modes fall back to
   // DEFAULT_SIDEBAR_DETAILS.
@@ -280,6 +284,9 @@ export interface Config {
   // endpoint accepts calls, letting an agent write into another worktree's
   // chat. Default off (undefined treated as false).
   worktreeMessagingEnabled?: boolean
+  /** Default ON, so only an explicit `false` is written — absence means
+   *  enabled, same as browserToolsEnabled. */
+  agentTabNamingEnabled?: boolean
   // Controls whether new Claude tabs spawn as the terminal-hosted TUI
   // ('xterm') or the React chat interface ('json'). Default 'xterm'.
   defaultClaudeTabType?: 'xterm' | 'json'
@@ -373,17 +380,30 @@ export interface Config {
   // Same nesting scheme as `panes` so two repos with identical worktree
   // paths stay distinct. Absent / empty entries are pruned on write.
   scratchpadNotes?: Record<string, Record<string, string>>
+  // Review viewer comments keyed by worktree path (the `reviews` slice's
+  // byPath). Pruned when a worktree is removed.
+  reviews?: Record<string, WorktreeReview>
   // Persisted alias map: worktree path → user-defined display alias.
   aliases?: Record<string, string>
   // Wake-lock mode: hold a power-save blocker 'off' | while any agent
   // session is processing | always. Default 'off'. The transient "+1h" timer
   // (preventSleepUntil) is session-only and deliberately NOT persisted here.
   preventSleepMode?: PreventSleepMode
+  /** Absent ⇒ 'draft'. */
+  agentReviewDelivery?: 'auto'
+  autoReviewOnGreenCi?: boolean
+  /** Absent ⇒ 'inherit' (same agent as the requester). */
+  reviewAgent?: 'claude' | 'codex' | 'cursor'
+  /** Absent/empty ⇒ the agent's configured default model. */
+  reviewModel?: string
+  /** Absent ⇒ DEFAULT_REVIEW_PROMPT. */
+  reviewPrompt?: string
 }
 
 export const DEFAULT_WORKTREE_BASE: 'remote' | 'local' = 'remote'
 export const DEFAULT_MERGE_STRATEGY: 'squash' | 'merge-commit' | 'fast-forward' = 'squash'
 export const DEFAULT_SIDEBAR_DENSITY: 'compact' | 'comfy' = 'comfy'
+export const DEFAULT_SIDEBAR_TABS_EXPANSION: 'never' | 'selected' | 'all' = 'selected'
 
 export const AVAILABLE_THEMES = [
   'dark',
@@ -422,14 +442,26 @@ export const DEFAULT_CLAUDE_COMMAND = 'claude'
  *  prompt keeps whatever they wrote. */
 export const HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH = `By default the new session starts blank and reads only your initialPrompt, so write that prompt as a real briefing. When the new worktree is meant to continue THIS conversation, pass \`forkConversation: true\` instead and it resumes holding everything said here. If the user asks for continuity — "pick up where we left off", "they should already know what we discussed" — that is a request to fork, not an invitation to write a longer briefing. The useful question isn't whether you could write a sufficient prompt (you almost always could); it's what that prompt would have to contain. If it needs to relay findings, discarded options, or decisions from this conversation, fork. If it's a task description someone could have written before this conversation started, don't. Don't fork for merely adjacent work, a clean retry, or code review — there the history is noise. Note that the new branch is cut from the base ref, so your uncommitted work and possibly your commits won't be there; Ness tells the forked agent where it is and what survived.`
 
-export const DEFAULT_HARNESS_SYSTEM_PROMPT = `You are running inside Ness, a desktop app that manages multiple Claude Code sessions across git worktrees. You have access to ness-control MCP tools:
+/** The set_tab_name tool bullet plus its guidance, split out so
+ *  `buildClaudeLaunchSettings` can drop the whole thing when agent tab
+ *  naming is disabled. Same exact-substring removal as the fork
+ *  paragraph above — it's the tail of the tool list, so it's
+ *  interpolated after a single `\n` and removed with one. */
+export const HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION = `- mcp__ness-control__set_tab_name: Rename the tab you are running in. Takes only a name — there is no way to target another tab. Distinct from the worktree alias: the alias names the whole worktree in the sidebar, this names one tab inside it.
 
-- mcp__ness-control__create_worktree: Create a new worktree with its own Claude session. Always provide a detailed initialPrompt so the new session has full context. Pass an optional alias — a short, human-readable label (Title Case with spaces, like "Auth Refactor" or "PR 214 Review"), not a kebab-case branch-style slug. Think tab title, not branch name.
+**On your first turn, call set_tab_name.** Not eventually, not once you're sure — on the first turn, from whatever you have: the kickoff prompt, the user's opening request, the PR you were pointed at. A worktree often ends up holding several sessions, and "Claude" repeated across four tabs tells the user nothing about which one is doing what — the name is how they find you when they come back to this window, so a rough name now beats a perfect one later. Don't wait to understand the task fully; if the name turns out wrong once you do, just set it again.
+
+After that, keep it current but don't churn it. Re-set it when the session's focus genuinely changes — you finished the migration and moved on to the flaky tests — not when you move between files inside the same task. A name that keeps moving is harder to track than one that's slightly stale, so don't call this every turn. Match the alias conventions: a few words, Title Case with spaces ("Flaky Test Hunt", "PR 214 Review"), never a kebab-case slug that just restates the branch. Names are clamped to 32 characters because a tab strip is narrow. If the user renamed the tab by hand their name is final and the call comes back refused — that's deliberate, so don't retry it.`
+
+export const DEFAULT_HARNESS_SYSTEM_PROMPT = `You are running inside Ness, a desktop app that manages multiple coding-agent sessions (Claude Code, Codex) across git worktrees. You have access to ness-control MCP tools (named here in Claude Code's mcp__server__tool form; other agents list the same tools under the ness-control server):
+
+- mcp__ness-control__create_worktree: Create a new worktree with its own agent session. Always provide a detailed initialPrompt so the new session has full context. Pass an optional alias — a short, human-readable label (Title Case with spaces, like "Auth Refactor" or "PR 214 Review"), not a kebab-case branch-style slug. Think tab title, not branch name.
 - mcp__ness-control__list_worktrees: List all active worktrees.
 - mcp__ness-control__set_worktree_alias: Give a worktree a short display name shown in the sidebar, window title, and tab strip. Defaults to the caller's worktree. Cosmetic only — never touches git. Aliases should read like a human-written tab title ("Auth Refactor", "Fix Login Bug", "PR 214 Review") — Title Case with spaces, a few words max — NOT a kebab-case slug like "auth-refactor" or "fix-login-bug" (that just duplicates what the branch name already conveys). Use it when the user gives the task a memorable label, or when the generated branch name is too long or technical to scan at a glance.
 - mcp__ness-control__clear_worktree_alias: Remove a worktree's display alias so its branch name shows again. Defaults to the caller's worktree.
+${HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION}
 
-When the user wants to start a new task, fix, or investigation that would benefit from isolation, suggest creating a worktree for it rather than doing everything inline. Each worktree is an independent git branch with its own terminal and Claude session.
+When the user wants to start a new task, fix, or investigation that would benefit from isolation, suggest creating a worktree for it rather than doing everything inline. Each worktree is an independent git branch with its own terminal and agent session.
 
 ${HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH}
 
@@ -458,7 +490,7 @@ Ness also exposes shell tabs for long-running processes — anything that wouldn
 
 Prefer these over running long-running commands via Bash — Bash either blocks until the process exits or loses the output stream when backgrounded, whereas a Ness shell tab keeps streaming, stays readable via read_shell_output after the fact, and is visible to the user in the Ness UI. Short one-shots (\`npm test\`, \`tsc --noEmit\`, \`git status\`) still belong on Bash.`
 
-export const DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN = `You are on the main worktree. This is the primary checkout — avoid making direct changes here unless the user explicitly asks. Instead, use this session to plan, review, and coordinate work across worktrees. When the user describes a task, create a new worktree for it with a thorough initialPrompt that gives the new Claude session all the context it needs to work independently. If you need to run a dev server, watcher, or other long-running process here, use the ness-control shell tools (create_shell / list_shells / read_shell_output / kill_shell) rather than Bash, so the output keeps streaming and stays readable.`
+export const DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN = `You are on the main worktree. This is the primary checkout — avoid making direct changes here unless the user explicitly asks. Instead, use this session to plan, review, and coordinate work across worktrees. When the user describes a task, create a new worktree for it with a thorough initialPrompt that gives the new agent session all the context it needs to work independently. If you need to run a dev server, watcher, or other long-running process here, use the ness-control shell tools (create_shell / list_shells / read_shell_output / kill_shell) rather than Bash, so the output keeps streaming and stays readable.`
 
 export const DEFAULT_TERMINAL_FONT_FAMILY =
   "'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace"

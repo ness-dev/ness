@@ -23,6 +23,15 @@ import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
 import { initialPermissions } from '../shared/state/permissions'
+import {
+  initialReviews,
+  type ReviewAuthor,
+  type ReviewComment,
+  type ReviewRequest,
+  type ReviewSubmission,
+  type ReviewsState,
+  type WorktreeReview
+} from '../shared/state/reviews'
 import { ruleKey, type StoredPermissionRule } from '../shared/permission-match'
 import {
   initialSettings,
@@ -36,6 +45,7 @@ import {
   BOTTOM_ICON_KEYS,
   resolveBottomIconOrder,
   type PreventSleepMode,
+  DEFAULT_REVIEW_PROMPT,
   type BottomIconKey
 } from '../shared/state/settings'
 import {
@@ -45,6 +55,7 @@ import {
   DEFAULT_WORKTREE_BASE,
   DEFAULT_MERGE_STRATEGY,
   DEFAULT_SIDEBAR_DENSITY,
+  DEFAULT_SIDEBAR_TABS_EXPANSION,
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
   type Config
@@ -98,6 +109,90 @@ function flattenScratchpadNotes(
   return out
 }
 
+function isReviewAuthor(a: unknown): a is ReviewAuthor {
+  if (!a || typeof a !== 'object') return false
+  const o = a as Record<string, unknown>
+  return o.kind === 'human' || (o.kind === 'agent' && typeof o.tabId === 'string')
+}
+
+/** `config.json` is user-editable; drop entries that would crash the
+ *  Review viewer rather than fail the whole boot. Optional fields added
+ *  later (resolvedBy, headSha) are stripped when malformed rather than
+ *  dropping the whole record. */
+function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: ReviewsState['byPath'] = {}
+  for (const [path, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const comments = (entry as { comments?: unknown } | null)?.comments
+    const rawSubmissions = (entry as { submissions?: unknown } | null)?.submissions
+    const rawRequests = (entry as { requests?: unknown } | null)?.requests
+    if (!Array.isArray(comments)) continue
+    const submissions: ReviewSubmission[] = Array.isArray(rawSubmissions)
+      ? rawSubmissions
+          .filter(
+            (s) =>
+              s &&
+              typeof s === 'object' &&
+              typeof s.id === 'string' &&
+              typeof s.summary === 'string' &&
+              Array.isArray(s.commentIds) &&
+              (s.state === 'draft' || s.state === 'sent' || s.state === 'failed') &&
+              (s.verdict === 'approve' || s.verdict === 'changes-requested' || s.verdict === 'comment')
+          )
+          .map((s: ReviewSubmission) => {
+            if (s.headSha === undefined || typeof s.headSha === 'string') return s
+            const { headSha: _drop, ...rest } = s
+            void _drop
+            return rest
+          })
+      : []
+    const requests: ReviewRequest[] = Array.isArray(rawRequests)
+      ? rawRequests.filter(
+          (r) =>
+            r &&
+            typeof r === 'object' &&
+            typeof r.id === 'string' &&
+            typeof r.context === 'string' &&
+            typeof r.createdAt === 'number' &&
+            isReviewAuthor(r.requester) &&
+            isReviewAuthor(r.reviewer) &&
+            (r.source === 'agent' || r.source === 'ci-green' || r.source === 'user')
+        )
+      : []
+    const valid: ReviewComment[] = comments
+      .filter(
+        (c) =>
+          c &&
+          typeof c === 'object' &&
+          typeof c.id === 'string' &&
+          typeof c.filePath === 'string' &&
+          typeof c.line === 'number' &&
+          c.anchor &&
+          typeof c.anchor.snippet === 'string'
+      )
+      .map((c: ReviewComment) => {
+        const resolved = c.status === 'resolved'
+        const keepBy = resolved && isReviewAuthor(c.resolvedBy)
+        const keepAt = resolved && typeof c.resolvedAt === 'number'
+        if (keepBy === (c.resolvedBy !== undefined) && keepAt === (c.resolvedAt !== undefined)) {
+          return c
+        }
+        const { resolvedBy, resolvedAt, ...rest } = c
+        return {
+          ...rest,
+          ...(keepBy ? { resolvedBy } : {}),
+          ...(keepAt ? { resolvedAt } : {})
+        }
+      })
+    if (valid.length === 0 && submissions.length === 0 && requests.length === 0) continue
+    const review: WorktreeReview = { comments: valid }
+    if (submissions.length > 0) review.submissions = submissions
+    if (requests.length > 0) review.requests = requests
+    out[path] = review
+  }
+  return out
+}
+
 const PREVENT_SLEEP_MODES: PreventSleepMode[] = ['off', 'while-agents-running', 'always']
 
 export function buildInitialAppState(
@@ -135,6 +230,7 @@ export function buildInitialAppState(
     permissions: config.permissionRules
       ? { rules: sanitizePermissionRules(config.permissionRules) }
       : initialPermissions,
+    reviews: config.reviews ? { byPath: sanitizeReviews(config.reviews) } : initialReviews,
     settings: {
       ...initialSettings,
       themeMode:
@@ -165,6 +261,7 @@ export function buildInitialAppState(
       worktreeBase: config.worktreeBase || DEFAULT_WORKTREE_BASE,
       mergeStrategy: config.mergeStrategy || DEFAULT_MERGE_STRATEGY,
       sidebarDensity: config.sidebarDensity || DEFAULT_SIDEBAR_DENSITY,
+      sidebarTabsExpansion: config.sidebarTabsExpansion || DEFAULT_SIDEBAR_TABS_EXPANSION,
       sidebarDetails: {
         compact: { ...DEFAULT_SIDEBAR_DETAILS.compact, ...(config.sidebarDetails?.compact || {}) },
         comfy: { ...DEFAULT_SIDEBAR_DETAILS.comfy, ...(config.sidebarDetails?.comfy || {}) }
@@ -190,6 +287,7 @@ export function buildInitialAppState(
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
       conversationForkEnabled: config.conversationForkEnabled === true,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
+      agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,
       autoApprovePermissions: config.autoApprovePermissions === true,
@@ -238,6 +336,16 @@ export function buildInitialAppState(
       preventSleepMode: PREVENT_SLEEP_MODES.includes(config.preventSleepMode as PreventSleepMode)
         ? (config.preventSleepMode as PreventSleepMode)
         : 'off',
+      agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
+      autoReviewOnGreenCi: config.autoReviewOnGreenCi === true,
+      reviewAgent:
+        config.reviewAgent === 'claude' ||
+        config.reviewAgent === 'codex' ||
+        config.reviewAgent === 'cursor'
+          ? config.reviewAgent
+          : 'inherit',
+      reviewModel: config.reviewModel || '',
+      reviewPrompt: config.reviewPrompt || DEFAULT_REVIEW_PROMPT,
       // The temporary "+1h" timer never survives a relaunch — always seed null.
       preventSleepUntil: null,
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),

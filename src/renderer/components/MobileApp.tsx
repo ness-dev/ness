@@ -3,6 +3,7 @@ import { ChevronDown, RefreshCw, Loader2, SquareTerminal, FileText, FileDiff, Gl
 import { useWorktrees, usePanes, useTerminals, usePrs, useSettings, useAliases } from '../store'
 import { useBackend } from '../backend'
 import { getLeaves } from '../../shared/state/terminals'
+import { supportsChat } from '../../shared/agent-registry'
 import type { AgentKind, PtyStatus, TerminalTab, Worktree } from '../types'
 import type { ForkSource } from '../../shared/state/worktrees'
 import { WorktreeList } from './WorktreeList'
@@ -415,7 +416,7 @@ function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, picker
         {tabs.map((tab) => {
           const convertible =
             !!onConvertTabType &&
-            ((tab.type === 'agent' && tab.agentKind === 'claude') || tab.type === 'json-claude')
+            ((tab.type === 'agent' && supportsChat(tab.agentKind)) || tab.type === 'json-claude')
           return (
             <TabChip
               key={tab.id}
@@ -518,7 +519,7 @@ function TabChip({ tab, active, status, shellActivity, onSelect, onConvertTabTyp
         }
       >
         <TabIcon tab={tab} shellActivity={shellActivity} status={status} />
-        <span className="max-w-[140px] truncate">{tab.label}</span>
+        <span className="max-w-[140px] truncate">{tab.customLabel ?? tab.label}</span>
       </button>
       {menu && onConvertTabType && (
         <div
@@ -575,7 +576,7 @@ function TabIcon({ tab, shellActivity, status }: { tab: TerminalTab; shellActivi
   if (tab.type === 'json-claude') {
     return (
       <span className="inline-flex items-center gap-1">
-        <AgentIcon kind="claude" className="icon-xs" />
+        <AgentIcon kind={tab.agentKind ?? 'claude'} className="icon-xs" />
         <span className="w-1.5 h-1.5 rounded-full bg-accent" />
       </span>
     )
@@ -684,7 +685,7 @@ function NonRunnableTabPlaceholder({ tab }: { tab: TerminalTab }): JSX.Element {
     <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="text-sm text-fg-bright">{label} — desktop only</div>
       <div className="text-xs text-dim max-w-xs">
-        {tab.label}
+        {tab.customLabel ?? tab.label}
       </div>
       {tab.type === 'browser' && tab.url && (
         <a

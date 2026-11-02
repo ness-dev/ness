@@ -1,7 +1,7 @@
-import { Trash2, Layers, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, ListTodo, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
-import type { WorktreeListModel } from '../worktree-list-model'
+import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
 import { WorktreeList } from './WorktreeList'
 import { BackendChipStrip } from './BackendChipStrip'
 import { BottomIconStrip } from './BottomIconStrip'
@@ -13,12 +13,16 @@ import { BottomIconStrip } from './BottomIconStrip'
 interface SidebarProps {
   model: WorktreeListModel
   activeWorktreeId: string | null
+  activeTabId: string | null
   snoozeDefaultDays?: number
   prLoading: boolean
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
   /** Non-main worktrees. Used to decide whether to show the "spawn your first agent" nudge. */
   agentCount: number
   onSelectWorktree: (path: string) => void
+  pathBackendId?: Record<string, string>
+  originByPath?: Record<string, string>
+  onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
   onContinueWorktree: (worktreePath: string, newBranchName: string) => Promise<void>
@@ -27,12 +31,13 @@ interface SidebarProps {
   onRefresh: () => void
   repoCount: number
   onAddRepo: () => void
-  onRemoveRepo: (repoRoot: string) => Promise<void>
+  onRemoveRepo: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenSettings: () => void
   onOpenAddBackend: () => void
   onOpenHotkeyCheatsheet: () => void
   onOpenActivity: () => void
   onOpenCleanup: () => void
+  onOpenTaskList: () => void
   onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenMyWeek: () => void
@@ -50,11 +55,15 @@ interface SidebarProps {
 export function Sidebar({
   model,
   activeWorktreeId,
+  activeTabId,
   snoozeDefaultDays,
   prLoading,
   onOpenAssignedPR,
   agentCount,
   onSelectWorktree,
+  pathBackendId,
+  originByPath,
+  onSelectTab,
   onDismissPendingWorktree,
   onNewWorktree,
   onContinueWorktree,
@@ -69,6 +78,7 @@ export function Sidebar({
   onOpenHotkeyCheatsheet,
   onOpenActivity,
   onOpenCleanup,
+  onOpenTaskList,
   onOpenCommandCenter,
   onOpenNewProject,
   onOpenMyWeek,
@@ -97,6 +107,15 @@ export function Sidebar({
         </Tooltip>
         <span className="text-xs font-medium text-dim">WORKTREES</span>
         <div className="ml-auto flex items-center gap-1">
+          <Tooltip label="Task list" action="toggleTaskList" side="bottom">
+            <button
+              onClick={onOpenTaskList}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
+              aria-label="Task list"
+            >
+              <ListTodo className="icon-xs" />
+            </button>
+          </Tooltip>
           <Tooltip label="Clean up old worktrees" side="bottom">
             <button
               onClick={onOpenCleanup}
@@ -139,12 +158,16 @@ export function Sidebar({
           model={model}
           variant="desktop"
           activeWorktreeId={activeWorktreeId}
+          activeTabId={activeTabId}
           snoozeDefaultDays={snoozeDefaultDays}
           agentCount={agentCount}
           editingAliasPath={editingAliasPath}
           onStartAliasEdit={onStartAliasEdit}
           onEndAliasEdit={onEndAliasEdit}
           onSelectWorktree={onSelectWorktree}
+          pathBackendId={pathBackendId}
+          originByPath={originByPath}
+          onSelectTab={onSelectTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}
           onNewWorktree={onNewWorktree}

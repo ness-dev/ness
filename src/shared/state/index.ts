@@ -139,6 +139,12 @@ import {
   type AliasesEvent,
   type AliasesState
 } from './aliases'
+import {
+  initialReviews,
+  reviewsReducer,
+  type ReviewsEvent,
+  type ReviewsState
+} from './reviews'
 
 export type { SettingsState, SettingsEvent }
 export type { UpdaterState, UpdaterEvent, UpdaterStatus } from './updater'
@@ -238,6 +244,18 @@ export type { AssignedPRsState, AssignedPRsEvent, AssignedPR } from './assigned-
 export type { ConfigHealthState, ConfigLoadError } from './config-health'
 export type { AliasesState, AliasesEvent } from './aliases'
 export type {
+  ReviewsState,
+  ReviewsEvent,
+  ReviewComment,
+  ReviewReply,
+  ReviewAuthor,
+  ReviewAnchor,
+  ReviewSide,
+  ReviewCommentStatus,
+  ReviewAnchorUpdate,
+  WorktreeReview
+} from './reviews'
+export type {
   PermissionsState,
   PermissionsEvent,
   PermissionRule,
@@ -267,6 +285,7 @@ export interface AppState {
   configHealth: ConfigHealthState
   aliases: AliasesState
   permissions: PermissionsState
+  reviews: ReviewsState
 }
 
 export type StateEvent =
@@ -291,6 +310,7 @@ export type StateEvent =
   | AssignedPRsEvent
   | AliasesEvent
   | PermissionsEvent
+  | ReviewsEvent
 
 export const initialState: AppState = {
   settings: initialSettings,
@@ -314,7 +334,8 @@ export const initialState: AppState = {
   assignedPRs: initialAssignedPRs,
   configHealth: initialConfigHealth,
   aliases: initialAliases,
-  permissions: initialPermissions
+  permissions: initialPermissions,
+  reviews: initialReviews
 }
 
 export function rootReducer(state: AppState, event: StateEvent): AppState {
@@ -432,6 +453,12 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       permissions: permissionsReducer(state.permissions, event as PermissionsEvent)
     }
   }
+  if (event.type.startsWith('reviews/')) {
+    return {
+      ...state,
+      reviews: reviewsReducer(state.reviews, event as ReviewsEvent)
+    }
+  }
   // configHealth has no events — it's seeded at construction only (see
   // config-health.ts), so there's no reducer branch. The field flows through
   // unchanged via the `...state` spreads above.
@@ -487,7 +514,8 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     assignedPRs: { ...initialState.assignedPRs, ...state.assignedPRs },
     configHealth: { ...initialState.configHealth, ...state.configHealth },
     aliases: { ...initialState.aliases, ...state.aliases },
-    permissions: { ...initialState.permissions, ...state.permissions }
+    permissions: { ...initialState.permissions, ...state.permissions },
+    reviews: { ...initialState.reviews, ...state.reviews }
   }
 }
 

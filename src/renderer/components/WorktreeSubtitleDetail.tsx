@@ -1,11 +1,18 @@
 import { Fragment, type ReactNode } from 'react'
 import type { Worktree, PRStatus, SidebarDetailPrefs } from '../types'
 import { formatWorktreeAge } from './worktree-detail'
+import { Server } from 'lucide-react'
 import { repoNameColor } from './RepoIcon'
 
 interface SubtitleDetailProps {
   worktree: Worktree
   repoLabel?: string
+  /** Backend this worktree lives on, when that isn't this machine. Rows
+   *  from several backends share one list and are otherwise
+   *  indistinguishable, so a remote one has to say so — acting on the
+   *  wrong machine's worktree is not a recoverable mistake. Absent for
+   *  local worktrees: badging the common case is noise. */
+  originLabel?: string
   aliased: boolean
   prStatus?: PRStatus | null
   prefs: SidebarDetailPrefs
@@ -15,14 +22,31 @@ interface SubtitleDetailProps {
    *  action buttons. When false (default), renders as a stacked line-2
    *  cluster that grows into `flex-1 min-w-0` next to the label. */
   inline?: boolean
+  /** The row is selected. `text-faint` sits too close to `bg-surface` in
+   *  most themes to read, so the cluster lifts to `text-muted`. */
+  active?: boolean
 }
 
 /** The right-hand / line-2 detail cluster shown next to each sidebar
  *  worktree row. Shared between `WorktreeTab` (production use) and the
  *  Settings > Appearance > Sidebar preview so both stay in sync when the
  *  layout or item set changes. */
-export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, inline }: SubtitleDetailProps): JSX.Element | null {
+export function SubtitleDetail({ worktree, repoLabel, originLabel, aliased, prStatus, prefs, inline, active }: SubtitleDetailProps): JSX.Element | null {
   const items: { key: string; node: ReactNode }[] = []
+  if (originLabel) {
+    items.push({
+      key: 'origin',
+      node: (
+        <span
+          className={`inline-flex items-center gap-1 shrink-0 text-info${inline ? ' group-hover:hidden' : ''}`}
+          title={`Hosted on ${originLabel}`}
+        >
+          <Server className="icon-2xs shrink-0" />
+          <span className="truncate max-w-[5rem]">{originLabel}</span>
+        </span>
+      )
+    })
+  }
   if (repoLabel && prefs.repoLabel) {
     items.push({
       key: 'repo',
@@ -116,6 +140,7 @@ export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, 
     })
   }
   if (items.length === 0) return null
+  const tone = active ? 'text-muted' : 'text-faint'
   return (
     <div
       className={
@@ -126,8 +151,8 @@ export function SubtitleDetail({ worktree, repoLabel, aliased, prStatus, prefs, 
           // flexible items inside (repoLabel / branch / milestone) truncate
           // first via their own `truncate min-w-0`; rigid items (age, diff,
           // #N, avatar) stay legible.
-          ? 'text-xs text-faint flex items-center gap-1.5 min-w-0 max-w-[50%] overflow-hidden'
-          : 'text-xs text-faint flex items-center gap-1.5 min-w-0'
+          ? `text-xs ${tone} flex items-center gap-1.5 min-w-0 max-w-[50%] overflow-hidden`
+          : `text-xs ${tone} flex items-center gap-1.5 min-w-0`
       }
     >
       {items.map((item) => (

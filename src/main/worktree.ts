@@ -10,7 +10,7 @@ import {
   readFileSync,
   writeFileSync
 } from 'fs'
-import { readFile, writeFile } from 'fs/promises'
+import { open, readFile, writeFile } from 'fs/promises'
 import { log } from './debug'
 import { perfLog } from './perf-log'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
@@ -18,6 +18,7 @@ import { detectInProgressOp } from './git-ops-state'
 import { cachedGitRead } from './git-poll-cache'
 import { runGitRead, type GitPriority } from './git-limiter'
 import type { Worktree } from '../shared/state/worktrees'
+import { destOf } from '../shared/git-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -693,13 +694,6 @@ function logGitOp(
   )
 }
 
-/** Renamed entries from `git status --porcelain` are stored as
- * "old -> new" — match numstat by the destination path. */
-function destOf(p: string): string {
-  const idx = p.indexOf(' -> ')
-  return idx >= 0 ? p.slice(idx + 4) : p
-}
-
 function applyCounts(file: ChangedFile, counts: NumstatCounts | undefined): void {
   if (!counts) return
   file.additions = counts.additions
@@ -1026,17 +1020,11 @@ export async function getCommitRangeFileDiffSides(
     !/^[0-9a-fA-F]{4,64}$/.test(fromHash) ||
     !/^[0-9a-fA-F]{4,64}$/.test(toHash)
   ) {
-    return { original: '', modified: '', originalExists: false, modifiedExists: false, modifiedBinary: false }
+    return EMPTY_DIFF_SIDES
   }
-  const original = await getFileAtRef(worktreePath, `${fromHash}^`, filePath)
-  const modified = await getFileAtRef(worktreePath, toHash, filePath)
-  return {
-    original: original ?? '',
-    modified: modified ?? '',
-    originalExists: original != null,
-    modifiedExists: modified != null,
-    modifiedBinary: false
-  }
+  const original = await readDiffSideAtRef(worktreePath, `${fromHash}^`, filePath)
+  const modified = await readDiffSideAtRef(worktreePath, toHash, filePath)
+  return combineDiffSides(original, modified)
 }
 
 export async function getCommitFileDiffSides(
@@ -1045,17 +1033,11 @@ export async function getCommitFileDiffSides(
   filePath: string
 ): Promise<FileDiffSides> {
   if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) {
-    return { original: '', modified: '', originalExists: false, modifiedExists: false, modifiedBinary: false }
+    return EMPTY_DIFF_SIDES
   }
-  const original = await getFileAtRef(worktreePath, `${hash}^`, filePath)
-  const modified = await getFileAtRef(worktreePath, hash, filePath)
-  return {
-    original: original ?? '',
-    modified: modified ?? '',
-    originalExists: original != null,
-    modifiedExists: modified != null,
-    modifiedBinary: false
-  }
+  const original = await readDiffSideAtRef(worktreePath, `${hash}^`, filePath)
+  const modified = await readDiffSideAtRef(worktreePath, hash, filePath)
+  return combineDiffSides(original, modified)
 }
 
 /** Get the diff for a single file in a worktree */
@@ -1148,8 +1130,82 @@ export interface FileDiffSides {
   modified: string
   originalExists: boolean
   modifiedExists: boolean
-  modifiedBinary: boolean
+  /** Either side is binary. Both text sides are blanked so the renderer
+   *  never feeds binary junk to Monaco. */
+  binary: boolean
+  /** Either side exceeds MAX_DIFF_SIDE_BYTES. Blanked like `binary` — a
+   *  multi-MB side would stall the diff editor (and the IPC carrying it). */
+  tooLarge: boolean
   error?: string
+}
+
+const MAX_DIFF_SIDE_BYTES = 2 * 1024 * 1024
+
+const EMPTY_DIFF_SIDES: FileDiffSides = {
+  original: '',
+  modified: '',
+  originalExists: false,
+  modifiedExists: false,
+  binary: false,
+  tooLarge: false
+}
+
+interface DiffSide {
+  content: string
+  exists: boolean
+  binary: boolean
+  tooLarge: boolean
+  /** Bytes actually read, including sides blanked as binary/too large —
+   *  feeds `outputBytes` in the `[git-op]` line. */
+  bytesRead: number
+}
+
+const MISSING_SIDE: DiffSide = { content: '', exists: false, binary: false, tooLarge: false, bytesRead: 0 }
+
+/** Same heuristic as git and readWorktreeFile: a NUL in the first 8KB.
+ *  NUL survives utf8 decoding as U+0000, so the string can be sniffed. */
+function looksBinary(content: string): boolean {
+  return content.slice(0, 8192).includes('\0')
+}
+
+function combineDiffSides(original: DiffSide, modified: DiffSide, error?: string): FileDiffSides {
+  const binary = original.binary || modified.binary
+  const tooLarge = original.tooLarge || modified.tooLarge
+  const blank = binary || tooLarge
+  return {
+    original: blank ? '' : original.content,
+    modified: blank ? '' : modified.content,
+    originalExists: original.exists,
+    modifiedExists: modified.exists,
+    binary,
+    tooLarge,
+    ...(error ? { error } : {})
+  }
+}
+
+/** One `git show` capped at MAX_DIFF_SIDE_BYTES: Node kills git once the
+ *  cap is hit, so a committed video costs at most 2MB of reading and no
+ *  extra size-probe exec on the common small-file path. */
+async function readDiffSideAtRef(
+  worktreePath: string,
+  ref: string,
+  filePath: string
+): Promise<DiffSide> {
+  try {
+    const { stdout } = await execGitRead(['show', `${ref}:${filePath}`], {
+      cwd: worktreePath,
+      maxBuffer: MAX_DIFF_SIDE_BYTES
+    })
+    if (looksBinary(stdout)) {
+      return { content: '', exists: true, binary: true, tooLarge: false, bytesRead: stdout.length }
+    }
+    return { content: stdout, exists: true, binary: false, tooLarge: false, bytesRead: stdout.length }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      return { content: '', exists: true, binary: false, tooLarge: true, bytesRead: MAX_DIFF_SIDE_BYTES }
+    }
+    return MISSING_SIDE
+  }
 }
 
 async function getFileAtRef(
@@ -1177,6 +1233,32 @@ async function getMergeBase(worktreePath: string, ref: string): Promise<string |
   } catch {
     return null
   }
+}
+
+export async function resolveCommitSha(worktreePath: string, ref: string): Promise<string | null> {
+  try {
+    const { stdout } = await execGitRead(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+      cwd: worktreePath
+    })
+    return stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+/** The commit the Review viewer's whole-branch diff uses as its old side. */
+export async function getBranchDiffBase(worktreePath: string): Promise<string | null> {
+  const baseRef = await getDefaultBaseRef(worktreePath)
+  if (baseRef === 'HEAD') return null
+  return getMergeBase(worktreePath, baseRef)
+}
+
+export function readFileAtCommit(
+  worktreePath: string,
+  sha: string,
+  filePath: string
+): Promise<string | null> {
+  return getFileAtRef(worktreePath, sha, filePath)
 }
 
 /** Resolve the two sides of a single-file diff as plain text, suitable for
@@ -1209,61 +1291,44 @@ export async function getFileDiffSides(
     return sides
   }
 
+  const track = (side: DiffSide): DiffSide => {
+    outputBytes += side.bytesRead
+    return side
+  }
+
   if (mode === 'branch') {
     const baseRef = await timed(() => getDefaultBaseRef(worktreePath))
-    if (baseRef === 'HEAD') {
-      return finish({ original: '', modified: '', originalExists: false, modifiedExists: false, modifiedBinary: false })
-    }
+    if (baseRef === 'HEAD') return finish(EMPTY_DIFF_SIDES)
     const mb = await timed(() => getMergeBase(worktreePath, baseRef))
-    const original = mb ? await timed(() => getFileAtRef(worktreePath, mb, filePath)) : null
-    if (original) outputBytes += original.length
-    const modified = await timed(() => getFileAtRef(worktreePath, 'HEAD', filePath))
-    if (modified) outputBytes += modified.length
-    return finish({
-      original: original ?? '',
-      modified: modified ?? '',
-      originalExists: original != null,
-      modifiedExists: modified != null,
-      modifiedBinary: false
-    })
+    const original = mb
+      ? track(await timed(() => readDiffSideAtRef(worktreePath, mb, filePath)))
+      : MISSING_SIDE
+    const modified = track(await timed(() => readDiffSideAtRef(worktreePath, 'HEAD', filePath)))
+    return finish(combineDiffSides(original, modified))
   }
 
   if (staged) {
-    const original = await timed(() => getFileAtRef(worktreePath, 'HEAD', filePath))
-    if (original) outputBytes += original.length
-    const modified = await timed(() => getFileAtRef(worktreePath, ':0', filePath))
-    if (modified) outputBytes += modified.length
-    return finish({
-      original: original ?? '',
-      modified: modified ?? '',
-      originalExists: original != null,
-      modifiedExists: modified != null,
-      modifiedBinary: false
-    })
+    const original = track(await timed(() => readDiffSideAtRef(worktreePath, 'HEAD', filePath)))
+    const modified = track(await timed(() => readDiffSideAtRef(worktreePath, ':0', filePath)))
+    return finish(combineDiffSides(original, modified))
   }
 
-  let original = await timed(() => getFileAtRef(worktreePath, ':0', filePath))
-  if (original == null) original = await timed(() => getFileAtRef(worktreePath, 'HEAD', filePath))
-  if (original) outputBytes += original.length
+  let original = await timed(() => readDiffSideAtRef(worktreePath, ':0', filePath))
+  if (!original.exists) original = await timed(() => readDiffSideAtRef(worktreePath, 'HEAD', filePath))
+  track(original)
   const read = await timed(() => readWorktreeFile(worktreePath, filePath))
-  if (read.content) outputBytes += read.content.length
-  if (read.binary) {
-    return finish({
-      original: original ?? '',
-      modified: '',
-      originalExists: original != null,
-      modifiedExists: true,
-      modifiedBinary: true
-    })
+  const bytesRead = Math.min(read.size, MAX_FILE_READ_BYTES)
+  outputBytes += bytesRead
+  // A working-tree deletion surfaces as ENOENT; that's the diff, not an error.
+  const deleted = original.exists && read.error?.startsWith('ENOENT')
+  const modified: DiffSide = {
+    content: read.content ?? '',
+    exists: read.content != null || read.binary,
+    binary: read.binary,
+    tooLarge: read.size > MAX_DIFF_SIDE_BYTES,
+    bytesRead
   }
-  return finish({
-    original: original ?? '',
-    modified: read.content ?? '',
-    originalExists: original != null,
-    modifiedExists: read.content != null,
-    modifiedBinary: false,
-    error: read.error
-  })
+  return finish(combineDiffSides(original, modified, deleted ? undefined : read.error))
 }
 
 export type MergeStrategy = 'squash' | 'merge-commit' | 'fast-forward'
@@ -1738,6 +1803,17 @@ export async function listAllFiles(worktreePath: string): Promise<string[]> {
 
 const MAX_FILE_READ_BYTES = 2 * 1024 * 1024
 
+async function readHead(target: string, bytes: number): Promise<Buffer> {
+  const fh = await open(target, 'r')
+  try {
+    const buf = Buffer.alloc(bytes)
+    const { bytesRead } = await fh.read(buf, 0, bytes, 0)
+    return buf.subarray(0, bytesRead)
+  } finally {
+    await fh.close()
+  }
+}
+
 export interface FileReadResult {
   content: string | null
   size: number
@@ -1763,8 +1839,7 @@ export async function readWorktreeFile(
       return { content: null, size: 0, binary: false, truncated: false, error: 'Not a regular file' }
     }
     const truncated = st.size > MAX_FILE_READ_BYTES
-    const buf = await readFile(target)
-    const slice = truncated ? buf.subarray(0, MAX_FILE_READ_BYTES) : buf
+    const slice = truncated ? await readHead(target, MAX_FILE_READ_BYTES) : await readFile(target)
     // Heuristic binary check: NUL byte in the first 8KB.
     const sniff = slice.subarray(0, Math.min(slice.length, 8192))
     let binary = false
@@ -2048,4 +2123,20 @@ export async function pruneWorktrees(repoRoot: string): Promise<void> {
     await unlockWorktree(repoRoot, wt.path)
   }
   await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot })
+}
+
+/** `origin`'s URL for a repo, or null when there is no origin remote (or
+ *  the path isn't a git repo). Read raw here; the caller normalizes it,
+ *  since the normalized form is what fleet view compares across hosts. */
+export async function getOriginRemoteUrl(repoRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
+      cwd: repoRoot,
+      env: readOnlyGitEnv()
+    })
+    const url = stdout.trim()
+    return url || null
+  } catch {
+    return null
+  }
 }

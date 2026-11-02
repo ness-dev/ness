@@ -2,7 +2,8 @@ import type { Worktree } from '../shared/state/worktrees'
 import {
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
-  HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH
+  HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH,
+  HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION
 } from './persistence'
 
 export interface ClaudeLaunchConfig {
@@ -13,6 +14,7 @@ export interface ClaudeLaunchConfig {
   claudeTuiFullscreen?: boolean
   nameClaudeSessions?: boolean
   conversationForkEnabled?: boolean
+  agentTabNamingEnabled?: boolean
 }
 
 export interface ClaudeLaunchSettings {
@@ -41,6 +43,9 @@ export function buildClaudeLaunchSettings(input: {
     let base = config.harnessSystemPrompt || DEFAULT_HARNESS_SYSTEM_PROMPT
     if (config.conversationForkEnabled !== true) {
       base = base.replace(`\n\n${HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH}`, '')
+    }
+    if (config.agentTabNamingEnabled === false) {
+      base = base.replace(`\n${HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION}`, '')
     }
     if (isMain) {
       const mainAddition =

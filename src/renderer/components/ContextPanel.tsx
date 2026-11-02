@@ -122,12 +122,13 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
   const snapshot = useContextWindow(focusedTabId)
   const [showDiscoverable, setShowDiscoverable] = useState(false)
 
-  // Codex and Cursor never produce a snapshot, so a "no data yet"
-  // message would promise something that is never coming.
-  const supported = useMemo(
-    () => isClaudeBackedTab(focusedTabId ? findTabById(panes, focusedTabId) : null),
-    [panes, focusedTabId]
-  )
+  // Terminal tabs other than Claude never produce a snapshot, so a "no
+  // data yet" message would promise something that is never coming. Every
+  // chat provider reports one (Codex from its own usage events).
+  const supported = useMemo(() => {
+    const tab = focusedTabId ? findTabById(panes, focusedTabId) : null
+    return tab?.type === 'json-claude' || isClaudeBackedTab(tab)
+  }, [panes, focusedTabId])
 
   const rows = useMemo(() => (snapshot ? buildRows(snapshot) : []), [snapshot])
 
@@ -138,7 +139,19 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
 
   // Sorted so the biggest consumer is always the first thing read —
   // that's the whole point of the panel.
-  const sorted = rows.filter((r) => r.tokens > 0).sort((a, b) => b.tokens - a.tokens)
+  const breakdown = rows.filter((r) => r.tokens > 0).sort((a, b) => b.tokens - a.tokens)
+  // Codex reports a total but no breakdown; one row keeps the meter honest.
+  const sorted: Row[] =
+    breakdown.length === 0 && snapshot && snapshot.usedTokens > 0
+      ? [
+          {
+            label: 'In use',
+            tokens: snapshot.usedTokens,
+            color: 'bg-fg',
+            title: 'This agent reports how much of the window is in use, not what is using it.'
+          }
+        ]
+      : breakdown
   const pct = snapshot && snapshot.limit > 0 ? (snapshot.usedTokens / snapshot.limit) * 100 : 0
   const toCompact = snapshot ? snapshot.autocompactAt - snapshot.usedTokens : 0
 
@@ -238,12 +251,14 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
               </div>
             )}
 
-            <div
-              className="text-xs text-faint italic"
-              title="The total is exact — it comes off the last turn's usage record. The category split is anchored to the measured token delta between turns and divided within each turn by char proportion."
-            >
-              total is exact, split is estimated
-            </div>
+            {breakdown.length > 0 && (
+              <div
+                className="text-xs text-faint italic"
+                title="The total is exact — it comes off the last turn's usage record. The category split is anchored to the measured token delta between turns and divided within each turn by char proportion."
+              >
+                total is exact, split is estimated
+              </div>
+            )}
           </div>
         </>
       )}

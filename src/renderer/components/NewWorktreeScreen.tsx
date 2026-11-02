@@ -48,6 +48,15 @@ interface NewWorktreeScreenProps {
   ) => Promise<void>
   onCancel: () => void
   repoRoots: string[]
+  /** Host label per repo root, for fleet view where the same repo can be
+   *  open on several hosts. The picker suffixes a root's host only when
+   *  its folder name is ambiguous within repoRoots — picking the pill IS
+   *  picking the host, so the suffix is the whole host-selection UI. */
+  hostLabelByRoot?: Record<string, string>
+  /** Repo identity per root (repoKeyFor). Two roots with the same key are
+   *  the same repo on different hosts, which is when the host suffix is
+   *  needed to tell the pills apart. */
+  repoKeyByRoot?: Record<string, string>
   /** Repo to pre-select in the picker. Usually the repo of the currently active worktree. */
   defaultRepoRoot?: string
   /** When set, the modal opens on the "Open PR" tab with this PR
@@ -128,7 +137,7 @@ const STARTER_PROMPTS = [
 const KBD_CHIP = 'text-xs text-faint bg-bg px-1.5 py-0.5 rounded border border-border font-mono'
 const KBD_CHIP_ON_ACCENT = 'text-xs text-white bg-white/20 px-1.5 py-0.5 rounded border border-white/30 font-mono'
 
-export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, defaultRepoRoot, initialPRNumber, forkSource, initialBranch, initialPrompt }: NewWorktreeScreenProps): JSX.Element {
+export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, hostLabelByRoot, repoKeyByRoot, defaultRepoRoot, initialPRNumber, forkSource, initialBranch, initialPrompt }: NewWorktreeScreenProps): JSX.Element {
   const [mode, setMode] = useState<'fresh' | 'teleport' | 'pr'>(initialPRNumber ? 'pr' : 'fresh')
   const [selectedRepo, setSelectedRepo] = useState<string>(
     defaultRepoRoot && repoRoots.includes(defaultRepoRoot) ? defaultRepoRoot : repoRoots[0] || ''
@@ -406,9 +415,14 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
     setError(null)
     try {
       // Teleport mode always Claude — codex has no resume-by-session-id
-      // analog today. Same for a forked transcript: only Claude can resume one.
+      // analog today. A forked conversation can only continue as the agent
+      // that owns it (main pins this too).
       const effectiveAgent: AgentKind =
-        mode === 'teleport' || forkSource ? 'claude' : agentKindOverride
+        mode === 'teleport'
+          ? 'claude'
+          : forkSource
+            ? (forkSource.agentKind ?? 'claude')
+            : agentKindOverride
       // Existing tab: `git worktree add <dir> <branch>` (no `-b`) so git
       // checks out the already-existing local branch as-is. Ref tab: create
       // a new branch named `effectiveBranch` forked from `baseRef`.
@@ -522,6 +536,11 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
             >
               <RepoIcon repoName={r.split('/').pop() || r} className="text-sm" />
               {r.split('/').pop() || r}
+              {hostLabelByRoot?.[r] &&
+                repoKeyByRoot &&
+                repoRoots.filter((o) => repoKeyByRoot[o] === repoKeyByRoot[r]).length > 1 && (
+                  <span className="text-faint font-normal">· {hostLabelByRoot[r]}</span>
+                )}
             </button>
           ))}
         </div>
@@ -957,7 +976,7 @@ export function NewWorktreeScreen({ onSubmit, onPRSubmit, onCancel, repoRoots, d
                     defaultCodexModel={settings.codexModel}
                     defaultCursorModel={settings.cursorModel}
                     disabled={footerBusy}
-                    forkLocked={forkSource !== undefined}
+                    forkLockedAgent={forkSource ? (forkSource.agentKind ?? 'claude') : undefined}
                     collapsible={false}
                   />
                 </div>
@@ -1323,9 +1342,9 @@ interface AgentModelRowProps {
   defaultCodexModel: string | null
   defaultCursorModel: string | null
   disabled: boolean
-  /** Pins the agent to Claude because the new worktree resumes a forked
-   *  transcript, which no other agent can pick up. */
-  forkLocked?: boolean
+  /** Pins the agent to the one that owns the forked conversation — no
+   *  other agent can pick it up. Undefined when not forking. */
+  forkLockedAgent?: AgentKind
   /** Whether to render its own "Advanced" disclosure. False when an outer
    *  disclosure already owns the collapse (the fresh-start flow), so the
    *  user doesn't have to open two nested Advanced sections. */
@@ -1342,11 +1361,11 @@ function AgentModelRow({
   defaultCodexModel,
   defaultCursorModel,
   disabled,
-  forkLocked,
+  forkLockedAgent,
   collapsible = true
 }: AgentModelRowProps): JSX.Element {
-  const locked = mode === 'teleport' || forkLocked === true
-  const effectiveAgent = locked ? 'claude' : agentKind
+  const locked = mode === 'teleport' || forkLockedAgent !== undefined
+  const effectiveAgent = forkLockedAgent ?? (locked ? 'claude' : agentKind)
   const modelOptions =
     effectiveAgent === 'codex'
       ? CODEX_MODELS
@@ -1416,8 +1435,8 @@ function AgentModelRow({
               onChange={(e) => handleAgentChange(e.target.value as AgentKind)}
               disabled={disabled || locked}
               title={
-                forkLocked
-                  ? 'Forked conversations can only be resumed by Claude'
+                forkLockedAgent
+                  ? `A forked conversation continues with ${agentLabel}, the agent that owns it`
                   : locked
                     ? 'Teleport sessions require Claude'
                     : undefined

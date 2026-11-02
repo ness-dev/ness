@@ -66,6 +66,11 @@ import {
   RedisIcon,
   ReloadIcon,
   RenameIcon,
+  ReplyIcon,
+  ResolveIcon,
+  ReviewCommentIcon,
+  ReviewRequestIcon,
+  SubmitReviewIcon,
   SalesforceIcon,
   ScreenshotIcon,
   ScrollIcon,
@@ -126,6 +131,7 @@ const BUILTIN_ICONS: Record<string, ToolIcon> = {
   Read: ReadIcon,
   Edit: EditIcon,
   MultiEdit: EditIcon,
+  ApplyPatch: EditIcon,
   Write: WriteIcon,
   Bash: BashIcon,
   Grep: GrepIcon,
@@ -159,6 +165,12 @@ const BUILTIN_ICONS: Record<string, ToolIcon> = {
   TaskStop: TaskStopIcon,
   ListMcpResourcesTool: McpResourceIcon,
   ReadMcpResourceTool: McpResourceIcon
+}
+
+/** Built-ins whose wire name isn't what the user should read. */
+const BUILTIN_LABELS: Record<string, string> = {
+  // Codex's file edits (see the Codex chat provider's fileChange mapping).
+  ApplyPatch: 'Edit'
 }
 
 interface McpBrand {
@@ -318,7 +330,8 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
 
   const parsed = parseMcpToolName(name)
   if (!parsed) {
-    return { label: name, compactLabel: name, icon: BUILTIN_ICONS[name] ?? null }
+    const label = BUILTIN_LABELS[name] ?? name
+    return { label, compactLabel: label, icon: BUILTIN_ICONS[name] ?? null }
   }
 
   const normalized = normalizeServerName(parsed.server)
@@ -344,6 +357,13 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
   // Unknown MCP: the generic plug icon doesn't say which server it is,
   // so keep the server prefix even in compact form.
   return { label: full, compactLabel: full, icon: McpGenericIcon }
+}
+
+/** The provider-set "what this call is for" line, when there is one.
+ *  Reads better than the bare tool name in a collapsed summary: "Run
+ *  typecheck" says more than "Bash". */
+export function getToolIntent(block: { intent?: string }): string | null {
+  return block.intent?.trim() || null
 }
 
 /** What a single ness-control call *did*, for surfaces that summarize a
@@ -404,7 +424,15 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   rename_worktree: { icon: RenameIcon, one: 'rename', many: 'renames' },
   set_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
   clear_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
-  send_message: { icon: MessageIcon, one: 'message', many: 'messages' }
+  set_tab_name: { icon: RenameIcon, one: 'rename', many: 'renames' },
+  send_message: { icon: MessageIcon, one: 'message', many: 'messages' },
+  list_tabs: { icon: TabListIcon, one: 'tab list', many: 'tab lists' },
+  list_review_comments: { icon: ListIcon, one: 'comment list', many: 'comment lists' },
+  add_review_comment: { icon: ReviewCommentIcon, one: 'review comment', many: 'review comments' },
+  reply_to_comment: { icon: ReplyIcon, one: 'reply', many: 'replies' },
+  resolve_comment: { icon: ResolveIcon, one: 'resolve', many: 'resolves' },
+  submit_review: { icon: SubmitReviewIcon, one: 'review', many: 'reviews' },
+  request_review: { icon: ReviewRequestIcon, one: 'review request', many: 'review requests' }
 }
 
 /** Resolve a tool name to its action, or null when we have no

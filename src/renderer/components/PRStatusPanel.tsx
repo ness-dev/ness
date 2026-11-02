@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck } from 'lucide-react'
+import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck, Bot } from 'lucide-react'
 import { useCiNotify, useRepoConfigs, useSettings } from '../store'
 import { isCiNotifyEnabled } from '../../shared/state/ci-notify'
 import { useBackend } from '../backend'
@@ -756,6 +756,65 @@ interface PRApproveAction {
   errorRow: JSX.Element | null
 }
 
+/** "Request AI review": opens a reviewer Chat tab for this worktree's
+ *  author tab, the same path request_review and the CI-green spawner
+ *  take. Shown whether or not the branch has a PR — the reviewer reads
+ *  the branch diff, not GitHub. */
+function useAiReviewAction(worktree: Worktree | null | undefined): {
+  row: JSX.Element | null
+} {
+  const backend = useBackend()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    setBusy(false)
+    setError(null)
+    setDone(false)
+  }, [worktree?.path])
+
+  const request = useCallback(async () => {
+    if (!worktree) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await backend.requestAiReview(worktree.path)
+      if (result.ok) setDone(true)
+      else setError(result.error)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }, [worktree, backend])
+
+  if (!worktree) return { row: null }
+
+  const row = (
+    <div className="px-3 pb-2 pt-1 space-y-1.5">
+      <Tooltip label="Open an agent that reviews this branch and sends its review to your Chat tab">
+        <button
+          onClick={() => void request()}
+          disabled={busy || done}
+          className="w-full text-xs px-2 py-1.5 rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 bg-accent/20 hover:bg-accent/30 text-accent"
+        >
+          {busy ? (
+            <Loader2 className="icon-xs animate-spin" />
+          ) : done ? (
+            <Check className="icon-xs" />
+          ) : (
+            <Bot className="icon-xs" />
+          )}
+          {done ? 'Reviewer opened' : 'Request AI review'}
+        </button>
+      </Tooltip>
+      {error && <div className="text-xs text-danger leading-snug">{error}</div>}
+    </div>
+  )
+  return { row }
+}
+
 /** Approve-button visibility heuristic — mirrors github.com's "Approve"
  *  affordance on the Files/Review tab. The button shows only when the
  *  viewer is plausibly a reviewer of someone else's PR: not the author,
@@ -885,6 +944,7 @@ export function PRStatusPanel({
   const ciNotify = useCiNotify()
   const mergeAction = usePRMergeAction(pr, worktree, needsGithubToken)
   const approveAction = usePRApproveAction(pr, worktree, settings.viewerLogin, needsGithubToken)
+  const aiReview = useAiReviewAction(worktree)
 
   const refreshButton = !needsGithubToken && onRefresh ? (
     <Tooltip label="Refresh PR status" side="left">
@@ -938,6 +998,8 @@ export function PRStatusPanel({
       {!needsGithubToken && pr === null && (
         <div className="px-3 py-2 text-xs text-faint">No PR for this branch</div>
       )}
+
+      {!needsGithubToken && pr !== undefined && aiReview.row}
 
       {!needsGithubToken && pr === undefined && (
         <div className="px-3 py-2 text-xs text-faint">Loading...</div>

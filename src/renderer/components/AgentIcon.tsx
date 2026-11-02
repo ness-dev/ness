@@ -61,7 +61,14 @@ export function AgentIcon({ kind, className = 'icon-base' }: AgentIconProps): JS
     case 'cursor':
       return <CursorIcon className={className} />
     case 'claude':
-    default:
       return <ClaudeIcon className={className} />
+    default: {
+      // A new AgentKind fails typecheck here until it gets its own mark —
+      // otherwise its tabs silently wear Claude's. The runtime fallback
+      // covers a newer remote backend sending a kind this client predates.
+      const _exhaustive: never = kind
+      void _exhaustive
+      return <ClaudeIcon className={className} />
+    }
   }
 }

@@ -23,6 +23,9 @@ export type WorktreeBase = 'remote' | 'local'
  *  signal is too important to hide. */
 export type SidebarDensity = 'compact' | 'comfy'
 
+/** Which sidebar worktree rows list their tabs as nested child rows. */
+export type SidebarTabsExpansion = 'never' | 'selected' | 'all'
+
 /** Per-item toggles for the sidebar row's detail cluster. Each `true`
  *  means the item shows when it has data to show (e.g. `assignee` only
  *  renders when a PR actually has an assignee). Set to `false` to hide
@@ -248,6 +251,26 @@ export const DEFAULT_PR_REVIEW_PROMPT =
  *  timer overlay covers the "also keep awake right now" case. */
 export type PreventSleepMode = 'off' | 'while-agents-running' | 'always'
 
+/** What happens when an agent submits a review: hold it as a draft in the
+ *  Review tab until a human sends it, or deliver it to the author tab
+ *  straight away. Human-sent reviews always go immediately. */
+export type AgentReviewDelivery = 'draft' | 'auto'
+
+/** Which agent a reviewer Chat tab spawns with. 'inherit' means the same
+ *  agent as the tab that asked for the review. */
+export type ReviewAgentChoice = 'inherit' | AgentKindSetting
+
+/** What a reviewer is told to do. The requester's own context is added
+ *  underneath, and the tool mechanics (how to comment, that submit_review
+ *  is what sends it) are appended by Ness and not editable here. */
+export const DEFAULT_REVIEW_PROMPT = `Review this branch the way a careful colleague would.
+
+Read the diff first. Leave each concrete issue as an inline comment on the line it belongs to, and keep it specific: what is wrong, why it matters, and what to do instead. Prefer a few substantial points over a long list of nits.
+
+Look for: correctness bugs and unhandled edge cases, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
+
+Do not change any code — you share this checkout with the author.`
+
 /** Stable keys for each icon in the sidebar's bottom launcher strip. New
  *  entries can be added at the end; renaming an existing key would strand
  *  existing users' pinned/unpinned choices, so avoid it. The `settings` and
@@ -319,6 +342,7 @@ export interface SettingsState {
   mergeStrategy: MergeStrategy
   sidebarDensity: SidebarDensity
   sidebarDetails: SidebarDetailPrefsByMode
+  sidebarTabsExpansion: SidebarTabsExpansion
   /** Set once the user dismisses the starter-task cards on the New
    *  worktree screen. One-way — there is no UI to bring them back, which
    *  is the point of a "don't show me this again" affordance. */
@@ -370,6 +394,14 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default off. */
   worktreeMessagingEnabled: boolean
+  /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
+   *  guidance to keep their tab name current. Default ON — unlike the
+   *  experimental toggles this gates a cosmetic, reversible action. Off
+   *  hides the tool and strips the guidance rather than rejecting the
+   *  call, so an agent isn't told about something that will fail. The
+   *  user's own rename (double-click / Cmd+L / context menu) is never
+   *  affected. */
+  agentTabNamingEnabled: boolean
   /** Controls whether new Claude tabs spawn as the terminal-hosted TUI
    *  ('xterm') or the React chat interface ('json'). Internal values are
    *  unchanged; the user-facing label is "Terminal" / "Chat". */
@@ -470,6 +502,18 @@ export interface SettingsState {
    *  lives in the main-process WakeLockController — never in the store.
    *  Default 'off'. */
   preventSleepMode: PreventSleepMode
+  /** Default 'draft'. See AgentReviewDelivery. */
+  agentReviewDelivery: AgentReviewDelivery
+  /** Agent for reviewer tabs. Default 'inherit'. */
+  reviewAgent: ReviewAgentChoice
+  /** Model pin for reviewer tabs, e.g. a stronger model than the author
+   *  runs on. Empty ⇒ that agent's configured default. */
+  reviewModel: string
+  /** Instructions handed to a reviewer. See DEFAULT_REVIEW_PROMPT. */
+  reviewPrompt: string
+  /** Open a reviewer Chat tab automatically when a worktree's PR checks
+   *  go green. Off by default — it spawns an agent on its own. */
+  autoReviewOnGreenCi: boolean
   /** Epoch-ms deadline for the temporary "keep awake for the next hour"
    *  overlay, or null when no timer is running. Shared world state (a
    *  second client sees the countdown) but deliberately NOT persisted to
@@ -512,6 +556,7 @@ export type SettingsEvent =
   | { type: 'settings/worktreeBaseChanged'; payload: WorktreeBase }
   | { type: 'settings/mergeStrategyChanged'; payload: MergeStrategy }
   | { type: 'settings/sidebarDensityChanged'; payload: SidebarDensity }
+  | { type: 'settings/sidebarTabsExpansionChanged'; payload: SidebarTabsExpansion }
   | { type: 'settings/sidebarDetailsChanged'; payload: SidebarDetailPrefsByMode }
   | { type: 'settings/newWorktreeAdvancedOpenChanged'; payload: boolean }
   | { type: 'settings/starterTasksDismissedChanged'; payload: boolean }
@@ -537,6 +582,7 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
   | { type: 'settings/autoApprovePermissionsChanged'; payload: boolean }
@@ -561,6 +607,11 @@ export type SettingsEvent =
   | { type: 'settings/announcementsMutedChanged'; payload: boolean }
   | { type: 'settings/showAssignedPRsChanged'; payload: boolean }
   | { type: 'settings/preventSleepModeChanged'; payload: PreventSleepMode }
+  | { type: 'settings/agentReviewDeliveryChanged'; payload: AgentReviewDelivery }
+  | { type: 'settings/reviewAgentChanged'; payload: ReviewAgentChoice }
+  | { type: 'settings/reviewModelChanged'; payload: string }
+  | { type: 'settings/reviewPromptChanged'; payload: string }
+  | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
@@ -592,6 +643,7 @@ export const initialSettings: SettingsState = {
   mergeStrategy: 'squash',
   sidebarDensity: 'comfy',
   sidebarDetails: DEFAULT_SIDEBAR_DETAILS,
+  sidebarTabsExpansion: 'selected',
   newWorktreeAdvancedOpen: false,
   starterTasksDismissed: false,
   claudeModel: null,
@@ -616,6 +668,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: false,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
+  agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
   autoApprovePermissions: false,
@@ -637,6 +690,11 @@ export const initialSettings: SettingsState = {
   announcementsMuted: false,
   showAssignedPRs: false,
   preventSleepMode: 'off',
+  agentReviewDelivery: 'draft',
+  reviewAgent: 'inherit',
+  reviewModel: '',
+  reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
   bottomIconOrder: [...BOTTOM_ICON_KEYS]
@@ -677,6 +735,144 @@ function patchOverrides(
   }
   if (map[key] === editorId) return map
   return { ...map, [key]: editorId }
+}
+
+/** Settings that belong to the CLIENT looking at a workspace, not to the
+ *  workspace itself. With multi-backend, every slice hook reads the
+ *  *active* backend's store — so before this list existed, switching to a
+ *  remote backend re-themed and re-scaled the whole window to whatever
+ *  that machine had saved. The remote should never have had its own
+ *  appearance in the first place.
+ *
+ *  The membership test is "who consumes it in main": a field whose only
+ *  main-side reader is `desktop-shell.ts` is about the local Electron
+ *  window (quit confirmation, the auto-updater), and a field with no
+ *  main-side reader at all is pure renderer presentation. Both are
+ *  client-owned. Anything a backend module acts on — `claude-launch`,
+ *  `auto-sleep-monitor`, `pr-poller`, `ci-notifier`, `wake-lock-controller`
+ *  — stays workspace-owned, because the box doing the work is the one
+ *  that has to obey it.
+ *
+ *  Deliberately NOT in this list, despite looking like preferences:
+ *    - `claudeCommand` / `worktreeScripts` / `*EnvVars` / `worktreeBase` /
+ *      `editor` and friends — operational config the remote's own main
+ *      acts on. Reading these locally while the remote kept using its
+ *      own values would trade a visible bug for a silent one. Making
+ *      these client-authoritative needs a push-down to each backend,
+ *      which is a separate change.
+ *    - `hasGithubToken` / `githubAuthSource` / `viewerLogin` /
+ *      `harnessStarred` — not preferences at all, but facts derived from
+ *      whichever token that backend resolved.
+ *    - `wsTransport*` — that backend's own listener config. Overwriting
+ *      it from the client could tear down the connection in use.
+ *    - `dismissedAnnouncementIds` / `announcementsMuted` — entangled
+ *      with the per-backend `announcements` slice they filter; moving
+ *      one without the other just relocates the inconsistency. */
+export const CLIENT_OWNED_SETTING_KEYS = [
+  'themeMode',
+  'themeLight',
+  'themeDark',
+  'customThemes',
+  'hotkeys',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'sidebarDensity',
+  'sidebarDetails',
+  'sidebarTabsExpansion',
+  'starterTasksDismissed',
+  'newWorktreeAdvancedOpen',
+  'autoUpdateEnabled',
+  'warnBeforeQuitting',
+  'openPrInBrowserTab',
+  'terminalPlainClickOpensInApp',
+  'defaultClaudeTabType',
+  'chatPromotionDismissed',
+  'jsonModeChatDensity',
+  'uiScale',
+  'nessieColor',
+  'jsonModeSendOnEnter',
+  'autoScrollToBottom',
+  'jsonModeDefaultPermissionMode',
+  'jsonModeTranscriptWindow',
+  'snoozeDefaultDays',
+  'hiddenBottomIcons',
+  'bottomIconOrder'
+] as const satisfies readonly (keyof SettingsState)[]
+
+/** The `config:*` transport channels that mutate (or probe for) a
+ *  client-owned setting, and therefore have to be answered by the
+ *  client's own backend rather than the active one.
+ *
+ *  This mirrors `CLIENT_OWNED_SETTING_KEYS` and has to stay in step with
+ *  it: reading a field locally while its setter still goes to the active
+ *  backend gives you a control that visibly does nothing. They're
+ *  adjacent here so a new setting is one edit in one file.
+ *
+ *  Includes three channels with no corresponding state field, because
+ *  they act on the client's machine rather than the workspace:
+ *  `openThemesFolder` (reveals a directory in the local file manager),
+ *  `getAvailableThemes` / `getDefaultTerminalFontFamily` (probe what the
+ *  local install can actually render), and `setLastEffectiveAppBg`
+ *  (persisted purely to suppress the local window's startup flash). */
+export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
+  'config:setThemeMode',
+  'config:setThemeLight',
+  'config:setThemeDark',
+  'config:reloadCustomThemes',
+  'config:getAvailableThemes',
+  'config:openThemesFolder',
+  'config:setHotkeys',
+  'config:resetHotkeys',
+  'config:setTerminalFontFamily',
+  'config:getDefaultTerminalFontFamily',
+  'config:setTerminalFontSize',
+  'config:setSidebarDensity',
+  'config:setSidebarDetails',
+  'config:setSidebarTabsExpansion',
+  'config:setStarterTasksDismissed',
+  'config:setNewWorktreeAdvancedOpen',
+  'config:setAutoUpdateEnabled',
+  'config:setWarnBeforeQuitting',
+  'config:setOpenPrInBrowserTab',
+  'config:setTerminalPlainClickOpensInApp',
+  'config:setDefaultClaudeTabType',
+  'config:setChatPromotionDismissed',
+  'config:setJsonModeChatDensity',
+  'config:setUiScale',
+  'config:setNessieColor',
+  'config:setJsonModeSendOnEnter',
+  'config:setAutoScrollToBottom',
+  'config:setJsonModeDefaultPermissionMode',
+  'config:setJsonModeTranscriptWindow',
+  'config:setSnoozeDefaultDays',
+  'config:setHiddenBottomIcons',
+  'config:setBottomIconOrder',
+  'config:setLastEffectiveAppBg'
+])
+
+/** Overlay the client's own values for every `CLIENT_OWNED_SETTING_KEYS`
+ *  field onto a backend's settings, so the UI renders with the local
+ *  window's appearance regardless of which backend is active.
+ *
+ *  Returns `backend` unchanged when the two are the same object (the
+ *  single-backend case, and the web client where local *is* the only
+ *  backend) so callers can rely on reference identity. Otherwise the
+ *  result is a fresh object and the caller is responsible for memoizing
+ *  it — `useSyncExternalStore` will spin if `getSnapshot` allocates on
+ *  every read. See `useSettings` in src/renderer/store.ts. */
+export function mergeClientOwnedSettings(
+  client: SettingsState,
+  backend: SettingsState
+): SettingsState {
+  if (client === backend) return backend
+  const merged = { ...backend }
+  for (const key of CLIENT_OWNED_SETTING_KEYS) {
+    // Per-key assignment through a mapped write keeps the union of field
+    // types intact; a generic Object.assign over the subset would widen
+    // every value to `unknown`.
+    ;(merged as Record<string, unknown>)[key] = client[key]
+  }
+  return merged
 }
 
 export function settingsReducer(state: SettingsState, event: SettingsEvent): SettingsState {
@@ -731,6 +927,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, mergeStrategy: event.payload }
     case 'settings/sidebarDensityChanged':
       return { ...state, sidebarDensity: event.payload }
+    case 'settings/sidebarTabsExpansionChanged':
+      return { ...state, sidebarTabsExpansion: event.payload }
     case 'settings/sidebarDetailsChanged':
       return { ...state, sidebarDetails: event.payload }
     case 'settings/newWorktreeAdvancedOpenChanged':
@@ -781,6 +979,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/agentTabNamingEnabledChanged':
+      return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':
       return { ...state, defaultClaudeTabType: event.payload }
     case 'settings/chatPromotionDismissedChanged':
@@ -828,6 +1028,20 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/autoReviewOnGreenCiChanged':
+      return state.autoReviewOnGreenCi === event.payload
+        ? state
+        : { ...state, autoReviewOnGreenCi: event.payload }
+    case 'settings/reviewAgentChanged':
+      return state.reviewAgent === event.payload ? state : { ...state, reviewAgent: event.payload }
+    case 'settings/reviewModelChanged':
+      return state.reviewModel === event.payload ? state : { ...state, reviewModel: event.payload }
+    case 'settings/reviewPromptChanged':
+      return state.reviewPrompt === event.payload ? state : { ...state, reviewPrompt: event.payload }
+    case 'settings/agentReviewDeliveryChanged':
+      return state.agentReviewDelivery === event.payload
+        ? state
+        : { ...state, agentReviewDelivery: event.payload }
     case 'settings/preventSleepUntilChanged':
       return { ...state, preventSleepUntil: event.payload }
     case 'settings/hiddenBottomIconsChanged':

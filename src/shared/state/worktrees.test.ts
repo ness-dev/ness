@@ -307,11 +307,24 @@ describe('worktreesReducer', () => {
     const start: WorktreesState = {
       list: [stubWorktree()],
       repoRoots: ['/tmp/repo'],
+      repoRemotes: {},
       pending: [stubPending()],
       pendingDeletions: []
     }
     const next = apply(start, { type: 'worktrees/reposChanged', payload: ['/tmp/other'] })
     expect(next.list).toBe(start.list)
     expect(next.pending).toBe(start.pending)
+  })
+})
+
+describe('worktrees/repoRemotesChanged', () => {
+  it('replaces the normalized-remote map', () => {
+    const next = worktreesReducer(initialWorktrees, {
+      type: 'worktrees/repoRemotesChanged',
+      payload: { '/r/ness': 'github.com/ness-dev/ness', '/r/local-only': null }
+    })
+    expect(next.repoRemotes).toEqual({ '/r/ness': 'github.com/ness-dev/ness', '/r/local-only': null })
+    expect(next.repoRoots).toBe(initialWorktrees.repoRoots)
+    expect(initialWorktrees.repoRemotes).toEqual({})
   })
 })

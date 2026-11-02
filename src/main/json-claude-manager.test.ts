@@ -64,9 +64,10 @@ vi.mock('fs', async () => {
 })
 
 import { Store } from './store'
-import { JsonClaudeManager } from './json-claude-manager'
+import { claudeToolIntent, extractAssistantBlocks, JsonClaudeManager } from './json-claude-manager'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import type { ClaudeLaunchSettings } from './claude-launch'
+import { describeChatProviderContract } from './test-support/chat-provider-contract'
 
 describe('JsonClaudeManager', () => {
   beforeEach(() => {
@@ -81,13 +82,15 @@ describe('JsonClaudeManager', () => {
   function makeManager(
     store: Store,
     launchSettings: ClaudeLaunchSettings = { tuiFullscreen: true },
-    useSystemClaude = false
+    useSystemClaude = false,
+    cancelApprovalForToolUse: (sessionId: string, toolUseId: string) => void = vi.fn()
   ): JsonClaudeManager {
     return new JsonClaudeManager(store, {
       getClaudeCommand: () => 'claude',
       getUseSystemClaude: () => useSystemClaude,
       getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
       closeApprovalSession: vi.fn(),
+      cancelApprovalForToolUse,
       getClaudeEnvVars: () => ({}),
       getControlServer: () => null,
       getControlBridgeScriptPath: () => '/tmp/bridge.js',
@@ -291,6 +294,67 @@ describe('JsonClaudeManager', () => {
     expect(call.args).toContain('opus')
     expect(call.args).toContain('--name')
     expect(call.args).toContain('r/b')
+  })
+
+  // Load-bearing absence: with no per-server `timeout`, Claude's default
+  // MCP idle timeout (1800s) aborts an approval nobody answered, and the
+  // agent works around the question instead of parking forever. Setting
+  // one here to keep an approval card alive longer would trade a
+  // self-healing agent for a blocked one — Ness reconciles the abort
+  // instead (see the stale-approval test below).
+  it('sets no timeout on the ness-permissions MCP server', () => {
+    const store = new Store()
+    const mgr = makeManager(store)
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: 'sess-mcp-timeout', worktreePath: '/tmp/wt' }
+    })
+    mgr.create('sess-mcp-timeout', '/tmp/wt')
+    const call = spawnCalls
+      .filter((c) => c.args.some((a) => a.includes('--permission-prompt-tool')))
+      .pop()
+    const configIdx = call!.args.indexOf('--mcp-config')
+    const config = JSON.parse(call!.args[configIdx + 1]) as {
+      mcpServers: Record<string, { timeout?: number }>
+    }
+    expect(config.mcpServers['ness-permissions']).toBeDefined()
+    expect(config.mcpServers['ness-permissions'].timeout).toBeUndefined()
+  })
+
+  it('drops a stale approval when a tool_result lands for its tool_use', () => {
+    // Claude Code aborting its `approve` MCP call is reported as an
+    // is_error tool_result on the original tool_use — the only signal we
+    // get that the approval window closed.
+    const store = new Store()
+    const cancel = vi.fn()
+    const mgr = makeManager(store, { tuiFullscreen: true }, false, cancel)
+    const sessionId = 'sess-stale-approval'
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId, worktreePath: '/tmp/wt' }
+    })
+    mgr.create(sessionId, '/tmp/wt')
+    sessionProcs()[0].stdout.emit(
+      'data',
+      Buffer.from(
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_timeout',
+                is_error: true,
+                content:
+                  '<tool_use_error>Error calling tool (AskUserQuestion): MCP server "ness-permissions" tool "approve" sent no response or progress for 1800s; aborting.</tool_use_error>'
+              }
+            ]
+          }
+        }) + '\n'
+      )
+    )
+    expect(cancel).toHaveBeenCalledWith(sessionId, 'toolu_timeout')
   })
 
   it('omits --append-system-prompt, --model, --name when launch settings are unset', () => {
@@ -823,5 +887,87 @@ describe('JsonClaudeManager', () => {
       const ids = entries.map((e) => e.entryId)
       expect(new Set(ids).size).toBe(ids.length)
     })
+  })
+})
+
+describeChatProviderContract('claude', () => {
+  spawnedProcs.length = 0
+  spawnCalls.length = 0
+  const store = new Store()
+  const provider = new JsonClaudeManager(store, {
+    getClaudeCommand: () => 'claude',
+    getUseSystemClaude: () => false,
+    getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
+    closeApprovalSession: vi.fn(),
+    cancelApprovalForToolUse: vi.fn(),
+    getClaudeEnvVars: () => ({}),
+    getControlServer: () => null,
+    getControlBridgeScriptPath: () => '/tmp/bridge.js',
+    isHarnessMcpEnabled: () => false,
+    getCallerScope: () => null,
+    getLaunchSettings: () => ({ tuiFullscreen: true })
+  })
+  const proc = (): ReturnType<typeof makeFakeProc> => sessionProcs().at(-1)!
+  const emit = (line: unknown): void => {
+    proc().stdout.emit('data', Buffer.from(JSON.stringify(line) + '\n'))
+  }
+  return {
+    agentKind: 'claude',
+    store,
+    provider,
+    worktreePath: '/tmp/contract-wt',
+    settle: async () => {},
+    receivedUserText: () =>
+      proc()
+        .stdin.write.mock.calls.map(([raw]) => JSON.parse(String(raw)))
+        .filter((f) => f.type === 'user')
+        .map((f) => {
+          const content = f.message.content
+          if (typeof content === 'string') return content
+          return content
+            .filter((b: { type: string }) => b.type === 'text')
+            .map((b: { text: string }) => b.text)
+            .join('')
+        }),
+    replyAndFinish: async (_sid, text) => {
+      emit({ type: 'assistant', message: { id: 'msg_contract', content: [{ type: 'text', text }] } })
+      emit({ type: 'result' })
+    },
+    crash: async () => {
+      proc().emit('exit', 1, null)
+    }
+  }
+})
+
+describe('claudeToolIntent', () => {
+  it('returns the trimmed description for Bash and sub-agent calls', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls', description: ' List files ' })).toBe('List files')
+    expect(claudeToolIntent('Agent', { prompt: 'x', description: 'Find callers' })).toBe('Find callers')
+  })
+
+  it('returns null when the description is missing or blank', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls' })).toBeNull()
+    expect(claudeToolIntent('Bash', { command: 'ls', description: '   ' })).toBeNull()
+    expect(claudeToolIntent('Bash', undefined)).toBeNull()
+  })
+
+  it('ignores tools whose description is not a call explanation', () => {
+    expect(claudeToolIntent('TaskCreate', { description: 'Long task body' })).toBeNull()
+  })
+})
+
+describe('extractAssistantBlocks', () => {
+  it('sets intent on a described Bash tool_use from a raw assistant event', () => {
+    const blocks = extractAssistantBlocks({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } },
+          { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a.ts' } }
+        ]
+      }
+    })
+    expect(blocks[0].intent).toBe('Run tests')
+    expect(blocks[1].intent).toBeUndefined()
   })
 })

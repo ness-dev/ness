@@ -18,6 +18,7 @@ import {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   prettyToolName,
   type ArgEntry
@@ -31,6 +32,7 @@ export {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   prettyToolName
 }
@@ -254,6 +256,7 @@ import { TodoWriteCard } from './TodoWriteCard'
 import { TaskMutationCard } from './TaskMutationCard'
 import { TaskCard } from './TaskCard'
 import { GenericToolCard } from './GenericToolCard'
+import { ApplyPatchCard } from './ApplyPatchCard'
 
 export function dispatchToolCard(props: ToolCardProps): JSX.Element {
   switch (props.block.name) {
@@ -265,6 +268,8 @@ export function dispatchToolCard(props: ToolCardProps): JSX.Element {
       return <MultiEditCard {...props} />
     case 'Write':
       return <WriteCard {...props} />
+    case 'ApplyPatch':
+      return <ApplyPatchCard {...props} />
     case 'Bash':
       return <BashCard {...props} />
     case 'Grep':

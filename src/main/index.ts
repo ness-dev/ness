@@ -12,7 +12,12 @@ import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
-import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript, hasForkableTranscript } from './json-claude-manager'
+import { JsonClaudeManager, bundledClaudeBinPath } from './json-claude-manager'
+import { ChatRouter } from './chat-provider'
+import { CodexChatProvider } from './codex-chat-provider'
+import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
+import { bundledCodexBinPath } from './codex-binary'
+import { AGENT_REGISTRY, getChatCapabilities } from '../shared/agent-registry'
 import { buildRelocationPreamble } from './fork-relocation'
 import { shellQuote } from './shell-quote'
 import {
@@ -53,7 +58,8 @@ import { PRPoller } from './pr-poller'
 import { WorktreesFSM } from './worktrees-fsm'
 import { WorktreeDeletionFSM } from './worktree-deletion-fsm'
 import { sweepWorktreeTrashOnBoot } from './worktree-trash'
-import { PanesFSM, stripTransientTabFields } from './panes-fsm'
+import { PanesFSM } from './panes-fsm'
+import { treeToPersistedNode } from './pane-persistence'
 import { ActivityDeriver } from './activity-deriver'
 import { CiNotifier } from './ci-notifier'
 import { AutoSleepMonitor } from './auto-sleep-monitor'
@@ -65,7 +71,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
-import { listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
+import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
 import { resolveEditorId } from '../shared/editor-resolve'
@@ -85,6 +91,7 @@ import {
   DEFAULT_WORKTREE_BASE,
   DEFAULT_MERGE_STRATEGY,
   DEFAULT_SIDEBAR_DENSITY,
+  DEFAULT_SIDEBAR_TABS_EXPANSION,
   DEFAULT_HARNESS_SYSTEM_PROMPT,
   DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN,
   pruneTerminalHistory,
@@ -108,6 +115,14 @@ import { isWorktreeMerged } from '../shared/state/prs'
 import type { ForkSource } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
+import type { ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../shared/state/reviews'
+import {
+  addReviewComment,
+  addReviewReply,
+  refreshReviewAnchors,
+  setReviewCommentStatus,
+  type ReviewView
+} from './review-comments'
 import { normalizeAlias } from '../shared/state/aliases'
 import { parseRuleKey, ruleKey, type PermissionRule } from '../shared/permission-match'
 import {
@@ -130,6 +145,9 @@ import {
   type SidebarDetailPrefs,
   type SidebarDetailPrefsByMode,
   type PreventSleepMode,
+  type AgentReviewDelivery,
+  type ReviewAgentChoice,
+  DEFAULT_REVIEW_PROMPT,
   type HiddenBottomIcons,
   type BottomIconKey
 } from '../shared/state/settings'
@@ -148,10 +166,25 @@ import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
 import {
+  deliverToTab,
   deliverToWorktreeChat,
   describeWorktree,
   resolveWorktreeQuery
 } from './chat-delivery'
+import { listChatTabs } from '../shared/agent-tabs'
+import { ReviewSpawner } from './review-spawner'
+import {
+  agentAuthor,
+  buildUserReviewContext,
+  listReviewComments,
+  pickAuthorTab,
+  requestReview,
+  replyToReviewComment,
+  sendReviewSubmission,
+  setReviewCommentResolved,
+  submitReview,
+  type ReviewServiceDeps
+} from './review-service'
 import { buildMergeConflictMessage } from './merge-conflict-request'
 import { writeMcpConfigForTerminal, pruneMcpConfigs, getBridgeScriptPath } from './mcp-config'
 import { getControlServerInfo } from './control-server'
@@ -440,6 +473,8 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
     store.getSnapshot().state.settings.useSystemClaudeForJsonMode === true,
   getApprovalSocketPath: (sessionId) => approvalBridge.startSession(sessionId),
   closeApprovalSession: (sessionId) => approvalBridge.stopSession(sessionId),
+  cancelApprovalForToolUse: (sessionId, toolUseId) =>
+    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId),
   getClaudeEnvVars: () =>
     store.getSnapshot().state.settings.claudeEnvVars || {},
   getControlServer: () => getControlServerInfo(),
@@ -463,6 +498,49 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
       modelOverride
     })
 })
+const codexChatProvider = new CodexChatProvider(store, {
+  getBinPath: () => bundledCodexBinPath(),
+  clientVersion: getHarnessVersion(),
+  getThreadId: (sessionId) => findJsonClaudeTab(sessionId)?.providerSessionId,
+  setThreadId: (sessionId, threadId) => panesFSM.setTabProviderSessionId(sessionId, threadId),
+  getModel: (modelOverride) =>
+    modelOverride || store.getSnapshot().state.settings.codexModel || undefined,
+  requestApproval: (request) => approvalBridge.requestApproval(request),
+  cancelApprovalsForSession: (sessionId, reason) =>
+    approvalBridge.cancelPendingForSession(sessionId, reason),
+  cancelApprovalForToolUse: (sessionId, toolUseId) =>
+    approvalBridge.cancelPendingForToolUse(sessionId, toolUseId),
+  getMcpServers: (sessionId): Record<string, StdioMcpServer> => {
+    if (store.getSnapshot().state.settings.harnessMcpEnabled === false) return {}
+    const controlServer = getControlServerInfo()
+    if (!controlServer) return {}
+    const scope = resolveCallerScope(sessionId)
+    return {
+      'ness-control': nessControlMcpServer({
+        sessionId,
+        controlServer,
+        bridgeScriptPath: getBridgeScriptPath(),
+        scope: scope
+          ? { worktreePath: scope.worktreePath, repoRoot: scope.repoRoot, isMain: scope.isMain }
+          : null
+      })
+    }
+  },
+  getDeveloperInstructions: (worktreePath) =>
+    buildClaudeLaunchSettings({
+      cwd: worktreePath,
+      worktrees: store.getSnapshot().state.worktrees.list,
+      config
+    }).systemPrompt
+})
+const chatRouter = new ChatRouter(
+  store,
+  { claude: jsonClaudeManager, codex: codexChatProvider },
+  (sessionId) => findJsonClaudeTab(sessionId)?.agentKind
+)
+// Warm each agent's launch probes so its first terminal tab doesn't wait on
+// a login shell.
+for (const { kind } of AGENT_REGISTRY) void getAgent(kind).launchExtras?.(agentLaunchCommand(kind))
 const perfMonitor = new PerfMonitor()
 setGitHubApiRecorder(() => perfMonitor.recordGitHubApiCall())
 setGitHubApiLoggingEnabled(config.expandedDiagnosticLoggingEnabled === true)
@@ -666,7 +744,9 @@ function getLanAddresses(): Array<{ iface: string; address: string }> {
 // Tails Claude Code session jsonl transcripts on Stop hook events,
 // sums per-model usage, and dispatches costs/usageUpdated. See
 // src/main/cost-tracker.ts and src/shared/state/costs.ts.
-const costTracker = new CostTracker(store)
+const costTracker = new CostTracker(store, (sessionId, worktreePath) =>
+  chatRouter.transcriptPath(sessionId, worktreePath)
+)
 costTracker.start()
 
 // CostPanel is collapsed-by-default. Renderer signals its expand state
@@ -757,6 +837,19 @@ store.subscribe((event) => {
       delete config.pinned
     } else {
       config.pinned = byPath
+    }
+    saveConfig(config)
+  }
+})
+
+// Persist review comments so they survive restart.
+store.subscribe((event) => {
+  if (event.type.startsWith('reviews/')) {
+    const byPath = store.getSnapshot().state.reviews.byPath
+    if (Object.keys(byPath).length === 0) {
+      delete config.reviews
+    } else {
+      config.reviews = byPath
     }
     saveConfig(config)
   }
@@ -919,7 +1012,7 @@ function persistPanes(panes: Record<string, PaneNode>): void {
   for (const [wtPath, tree] of Object.entries(panes)) {
     const wt = store.getSnapshot().state.worktrees.list.find((w) => w.path === wtPath)
     const repoRoot = wt?.repoRoot || '__orphan__'
-    const persisted = treeToPersistedNode(tree)
+    const persisted = treeToPersistedNode(tree, (tabId) => browserManager.getUrl(tabId))
     if (persisted) {
       if (!nested[repoRoot]) nested[repoRoot] = {}
       nested[repoRoot][wtPath] = persisted
@@ -927,58 +1020,6 @@ function persistPanes(panes: Record<string, PaneNode>): void {
   }
   config.panes = nested
   saveConfig(config)
-}
-
-function treeToPersistedNode(node: PaneNode): PersistedPaneNode | null {
-  if (node.type === 'leaf') {
-    const tabs = node.tabs
-      .filter(
-        (t) =>
-          t.type === 'agent' ||
-          t.type === 'shell' ||
-          t.type === 'browser' ||
-          t.type === 'json-claude'
-      )
-      .map((t) => {
-        const stripped = stripTransientTabFields(t as TerminalTab)
-        // For browser tabs, the tab's state.url field is set once at
-        // creation and never updated — navigation events flow into the
-        // `browser` slice, not the pane tree. Pull the live URL from the
-        // BrowserManager so the persisted snapshot reflects where the
-        // user actually navigated to.
-        const liveUrl =
-          stripped.type === 'browser' ? browserManager.getUrl(stripped.id) : null
-        return {
-          id: stripped.id,
-          type: stripped.type as 'agent' | 'shell' | 'browser' | 'json-claude',
-          label: stripped.label,
-          agentKind: stripped.agentKind,
-          sessionId: stripped.sessionId,
-          url: liveUrl || stripped.url,
-          command: stripped.command,
-          cwd: stripped.cwd,
-          model: stripped.model,
-          ...(stripped.customLabel ? { customLabel: stripped.customLabel } : {})
-        }
-      })
-    if (tabs.length === 0) return null
-    const validActive = tabs.some((t) => t.id === node.activeTabId)
-      ? node.activeTabId
-      : tabs[0].id
-    return { type: 'leaf', id: node.id, tabs, activeTabId: validActive }
-  }
-  const left = treeToPersistedNode(node.children[0])
-  const right = treeToPersistedNode(node.children[1])
-  if (!left && !right) return null
-  if (!left) return right
-  if (!right) return left
-  return {
-    type: 'split',
-    id: node.id,
-    direction: node.direction,
-    children: [left, right],
-    ratio: node.ratio
-  }
 }
 
 // IMPORTANT — construction order is load-bearing.
@@ -1025,7 +1066,7 @@ const panesFSM = new PanesFSM(store, {
     store.dispatch({ type: 'jsonClaude/sessionCleared', payload: { sessionId } }),
   startJsonClaudeWithPrompt: (sessionId, worktreePath, initialPrompt) => {
     void startJsonClaudeSession(sessionId, worktreePath).then((running) => {
-      if (running && initialPrompt) jsonClaudeManager.send(sessionId, initialPrompt)
+      if (running && initialPrompt) chatRouter.send(sessionId, initialPrompt)
     })
   },
   startJsonClaude: (sessionId, worktreePath) => {
@@ -1033,18 +1074,38 @@ const panesFSM = new PanesFSM(store, {
   }
 })
 
-/** Look up a json-claude tab's persisted `model` override by sessionId
- *  (which is also the tab id for json-claude tabs). Returned to the
- *  json-claude manager so resume/kickoff/wake all respect a per-tab pin
- *  that was set when the worktree was created. */
-function findJsonClaudeTabModel(sessionId: string): string | undefined {
+/** The CLI command a terminal tab of this agent runs, from settings. */
+function agentLaunchCommand(kind: AgentKind): string {
+  const custom =
+    kind === 'claude' ? config.claudeCommand : kind === 'codex' ? config.codexCommand : config.cursorCommand
+  return custom || getAgent(kind).defaultCommand
+}
+
+/** Ness's MCP server for a terminal tab, keyed by its terminal id — the
+ *  same entry Claude terminals also get through their MCP config file. */
+function terminalNessMcp(terminalId: string): StdioMcpServer | null {
+  if (store.getSnapshot().state.settings.harnessMcpEnabled === false) return null
+  const controlServer = getControlServerInfo()
+  if (!controlServer) return null
+  const scope = resolveCallerScope(terminalId)
+  return nessControlMcpServer({
+    sessionId: terminalId,
+    controlServer,
+    bridgeScriptPath: getBridgeScriptPath(),
+    scope: scope ? { worktreePath: scope.worktreePath, repoRoot: scope.repoRoot, isMain: scope.isMain } : null
+  })
+}
+
+/** Look up a json-claude tab by sessionId (which is also the tab id for
+ *  json-claude tabs). startJsonClaudeSession reads its `model` override,
+ *  so resume/kickoff/wake all respect a per-tab pin set when the worktree
+ *  was created, and its `agentKind`, which picks the chat provider. */
+function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
   const panes = store.getSnapshot().state.terminals.panes
   for (const tree of Object.values(panes)) {
     for (const leaf of getLeaves(tree)) {
       for (const tab of leaf.tabs) {
-        if (tab.id === sessionId && tab.type === 'json-claude') {
-          return tab.model && tab.model.trim() ? tab.model.trim() : undefined
-        }
+        if (tab.id === sessionId && tab.type === 'json-claude') return tab
       }
     }
   }
@@ -1057,14 +1118,19 @@ const startingJsonClaude = new Map<string, { cancelled: boolean; done: Promise<b
  *  this sessionId". Used by the jsonClaude:start IPC handler, the
  *  panesFSM's startJsonClaudeWithPrompt + startJsonClaude options
  *  (kickoff + wake), so all paths produce the same dispatch + seed +
- *  create order. Idempotent — JsonClaudeManager.create() short-circuits
+ *  create order. Idempotent — every provider's create() short-circuits
  *  if the instance is already running, and a second call for an id whose
  *  start is still waiting on the worktree's shell env joins that start
  *  rather than racing it. Resolves true once the session is running,
  *  whichever caller created it: the kickoff prompt must land even when
  *  the renderer's own start beat the one carrying the prompt. */
+/** Permission mode a reviewer Chat tab starts in. 'plan' is the tightest
+ *  mode that still lets it read the branch and call the review tools;
+ *  the rest of "don't edit this branch" is said in the request prompt. */
+const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
+
 function startJsonClaudeSession(sessionId: string, worktreePath: string): Promise<boolean> {
-  if (jsonClaudeManager.hasSession(sessionId)) return Promise.resolve(true)
+  if (chatRouter.hasSession(sessionId)) return Promise.resolve(true)
   const pending = startingJsonClaude.get(sessionId)
   if (pending) return pending.done
   const token = { cancelled: false, done: Promise.resolve(false) }
@@ -1077,21 +1143,40 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): Promis
       if (startingJsonClaude.get(sessionId) === token) startingJsonClaude.delete(sessionId)
     }
     if (token.cancelled) return false
-    if (jsonClaudeManager.hasSession(sessionId)) return true
+    if (chatRouter.hasSession(sessionId)) return true
+    const tab = findJsonClaudeTab(sessionId)
+    // Every real start has a chat tab by now — kickoff, wake, fork and the
+    // renderer's mount all run after the tab is committed. The one caller
+    // without a tab is a chat view still mounted for a beat after its tab
+    // was converted to Terminal. Starting then would pick a provider with no
+    // agentKind to go on (so Claude, even for a Codex tab) and leave an
+    // orphan session that the switch back to Chat attaches to.
+    if (!tab) {
+      log('json-claude', `start skipped — no chat tab sessionId=${sessionId}`)
+      return false
+    }
     store.dispatch({
       type: 'jsonClaude/sessionStarted',
       payload: {
         sessionId,
         worktreePath,
-        defaultPermissionMode:
-          store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
+        ...(tab.agentKind ? { agentKind: tab.agentKind } : {}),
+        // A reviewer reads the branch and comments on it; it has no reason
+        // to edit, and acceptEdits (the usual default) would let it change
+        // the author's working tree without anyone seeing. Read off the
+        // tab's reviewOf link rather than remembered per session, so a
+        // reviewer that is reloaded or woken comes back in the same mode.
+        defaultPermissionMode: tab.reviewOf
+          ? REVIEWER_PERMISSION_MODE
+          : store.getSnapshot().state.settings.jsonModeDefaultPermissionMode
       }
     })
-    jsonClaudeManager.seedFromTranscript(sessionId, worktreePath)
+    chatRouter.seedFromTranscript(sessionId, worktreePath)
     const permMode =
       store.getSnapshot().state.jsonClaude.sessions[sessionId]?.permissionMode ||
       'default'
-    jsonClaudeManager.create(sessionId, worktreePath, permMode, findJsonClaudeTabModel(sessionId))
+    const model = tab.model && tab.model.trim() ? tab.model.trim() : undefined
+    chatRouter.create(sessionId, worktreePath, permMode, model)
     return true
   })()
   startingJsonClaude.set(sessionId, token)
@@ -1106,7 +1191,7 @@ function killJsonClaudeSession(sessionId: string): void {
     pending.cancelled = true
     startingJsonClaude.delete(sessionId)
   }
-  jsonClaudeManager.kill(sessionId)
+  chatRouter.kill(sessionId)
 }
 
 /** Resolve what the new worktree's first agent tab should start from,
@@ -1118,16 +1203,19 @@ async function resolveForkedKickoff(args: {
   initialPrompt?: string
   forkSource?: ForkSource
   baseRef?: string
-}): Promise<{ initialPrompt?: string; forkedSessionId?: string }> {
+}): Promise<{ initialPrompt?: string; forkedSessionId?: string; agentKind?: AgentKind }> {
   const { createdPath, initialPrompt, forkSource, baseRef } = args
   if (!forkSource) return { initialPrompt }
 
   await Promise.all([resolveShellEnv(forkSource.worktreePath), resolveShellEnv(createdPath)])
-  const outcome = forkTranscript({
-    sourceSessionId: forkSource.sessionId,
-    sourceWorktreePath: forkSource.worktreePath,
-    destWorktreePath: createdPath
-  })
+  const kind = chatRouter.forkableConversationKind(forkSource.sessionId, forkSource.worktreePath)
+  const outcome = kind
+    ? chatRouter.forkIntoWorktree({
+        sourceSessionId: forkSource.sessionId,
+        sourceWorktreePath: forkSource.worktreePath,
+        destWorktreePath: createdPath
+      })
+    : { ok: false, reason: 'source has no forkable conversation' }
   if (!outcome.ok || !outcome.newSessionId) {
     // Degrade to a normal empty session rather than failing creation —
     // the worktree already exists on disk at this point.
@@ -1150,7 +1238,9 @@ async function resolveForkedKickoff(args: {
           from: automated.from
         })
       : `${preamble}${initialPrompt ?? ''}`,
-    forkedSessionId: outcome.newSessionId
+    forkedSessionId: outcome.newSessionId,
+    // The fork can only resume as the agent that owns the conversation.
+    agentKind: kind ?? undefined
   }
 }
 
@@ -1197,7 +1287,7 @@ async function interruptAndQuiesce(sessionId: string): Promise<void> {
       }
     })
     const timer = setTimeout(() => finish('timeout'), QUIESCE_TIMEOUT_MS)
-    jsonClaudeManager.interrupt(sessionId)
+    chatRouter.interrupt(sessionId)
     armed = true
   })
 }
@@ -1212,7 +1302,7 @@ const worktreesFSM = new WorktreesFSM(store, {
     panesFSM.ensureInitialized(createdPath, {
       initialPrompt: kickoff.initialPrompt,
       teleportSessionId,
-      agentKind,
+      agentKind: kickoff.agentKind ?? agentKind,
       model,
       forkedSessionId: kickoff.forkedSessionId
     })
@@ -1221,6 +1311,11 @@ const worktreesFSM = new WorktreesFSM(store, {
     }
   }
 })
+
+// Boot seeds repoRoots straight into the store (build-initial-state),
+// bypassing dispatchRepos — so resolve each repo's origin once here, or
+// fleet view has no repo identity until the first repo add/remove.
+void worktreesFSM.refreshRepoRemotes([...(config.repoRoots || [])])
 
 const worktreeDeletionFSM = new WorktreeDeletionFSM(store, {
   getGlobalTeardownCmd: () => config.worktreeTeardownCommand || '',
@@ -1250,16 +1345,45 @@ const activityDeriver = new ActivityDeriver(store)
 // How anything in main reaches a worktree's agent chat. Shared by the CI
 // notifier and the send_message MCP tool so both route (and wake) alike.
 const chatDeliveryDeps = {
-  send: (sessionId: string, text: string) => jsonClaudeManager.send(sessionId, text),
-  hasSession: (sessionId: string) => jsonClaudeManager.hasSession(sessionId),
+  send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
+  hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
   wake: (worktreePath: string, tabId: string) =>
-    panesFSM.wakeJsonClaudeTab(worktreePath, tabId)
+    panesFSM.wakeJsonClaudeTab(worktreePath, tabId),
+  respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)
 }
 
 // Injects a "CI is failing" message into a worktree's agent chat when its
 // PR checks go red. Kept out of PRPoller so the poller stays ignorant of
 // chat sessions.
 const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
+
+const listWorktreeChatTabs = (worktreePath: string) =>
+  listChatTabs(store.getSnapshot().state, worktreePath)
+const reviewServiceDeps: ReviewServiceDeps = {
+  store,
+  listChatTabs: listWorktreeChatTabs,
+  openReviewer: (worktreePath, requesterTabId, prompt, opts) =>
+    panesFSM.openReviewerTab(worktreePath, requesterTabId, prompt, opts),
+  reviewDefaults: () => {
+    const s = store.getSnapshot().state.settings
+    return {
+      agentKind: s.reviewAgent === 'inherit' ? undefined : s.reviewAgent,
+      model: s.reviewModel || undefined,
+      prompt: s.reviewPrompt || DEFAULT_REVIEW_PROMPT
+    }
+  },
+  deliver: (worktreePath, tabId, message) =>
+    deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+}
+
+// Step 3's counterpart to request_review: when a worktree's PR checks go
+// green, open a reviewer for its author tab on the same path a hand-made
+// request takes. Declared after reviewServiceDeps, which it closes over.
+const reviewSpawner = new ReviewSpawner(store, {
+  isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
+  requestReview: (worktreePath, requesterTabId, context) =>
+    requestReview(reviewServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
+})
 
 // Tears down idle json-mode subprocesses (yellow-dot tabs older than
 // settings.autoSleepMinutes). Constructed after panesFSM since it
@@ -1531,6 +1655,19 @@ store.subscribe((event) => {
   for (const path of Object.keys(byPath)) {
     if (!live.has(path)) {
       store.dispatch({ type: 'pinned/clear', payload: path })
+    }
+  }
+})
+
+// Same for review comments — they're anchored to a worktree's commits and
+// mean nothing once it's gone.
+store.subscribe((event) => {
+  if (event.type !== 'worktrees/listChanged') return
+  const live = new Set(store.getSnapshot().state.worktrees.list.map((w) => w.path))
+  const byPath = store.getSnapshot().state.reviews.byPath
+  for (const path of Object.keys(byPath)) {
+    if (!live.has(path)) {
+      store.dispatch({ type: 'reviews/worktreeRemoved', payload: { worktreePath: path } })
     }
   }
 })
@@ -2931,6 +3068,21 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setAgentTabNamingEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
+    if (enabled) {
+      delete config.agentTabNamingEnabled
+    } else {
+      config.agentTabNamingEnabled = false
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/agentTabNamingEnabledChanged',
+      payload: config.agentTabNamingEnabled !== false
+    })
+    return true
+  })
+
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.worktreeMessagingEnabled = true
@@ -3183,6 +3335,21 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest(
+    'config:setSidebarTabsExpansion',
+    (_ctx, mode: 'never' | 'selected' | 'all') => {
+      if (mode !== 'never' && mode !== 'selected' && mode !== 'all') return false
+      if (mode === DEFAULT_SIDEBAR_TABS_EXPANSION) {
+        delete config.sidebarTabsExpansion
+      } else {
+        config.sidebarTabsExpansion = mode
+      }
+      saveConfig(config)
+      store.dispatch({ type: 'settings/sidebarTabsExpansionChanged', payload: mode })
+      return true
+    }
+  )
+
+  transport.onRequest(
     'config:setSidebarDetails',
     (_ctx, prefs: SidebarDetailPrefsByMode) => {
       if (!prefs || typeof prefs !== 'object') return false
@@ -3342,7 +3509,7 @@ function registerIpcHandlers(): void {
   transport.onRequest(
     'panes:renameTab',
     (_ctx, wtPath: string, tabId: string, label: string) => {
-      panesFSM.renameTab(wtPath, tabId, label)
+      panesFSM.renameTab(wtPath, tabId, label, 'user')
       return true
     }
   )
@@ -3492,12 +3659,7 @@ function registerIpcHandlers(): void {
       // --resume vs --session-id is decided by looking for the transcript
       // under the worktree's Claude home, which only the shell can tell us.
       if (kind === 'claude') await resolveShellEnv(opts.cwd)
-      const command =
-        kind === 'claude'
-          ? (config.claudeCommand || agent.defaultCommand)
-          : kind === 'codex'
-            ? (config.codexCommand || agent.defaultCommand)
-            : (config.cursorCommand || agent.defaultCommand)
+      const command = agentLaunchCommand(kind)
       const mcpConfigPath = writeMcpConfigForTerminal(
         opts.terminalId,
         resolveCallerScope(opts.terminalId)
@@ -3522,8 +3684,18 @@ function registerIpcHandlers(): void {
       } else {
         model = override || config.cursorModel || null
       }
+      const extras = (await agent.launchExtras?.(command)) ?? {}
 
-      return agent.buildSpawnArgs({ ...opts, command, mcpConfigPath, model, systemPrompt, tuiFullscreen })
+      return agent.buildSpawnArgs({
+        ...opts,
+        ...extras,
+        command,
+        mcpConfigPath,
+        model,
+        systemPrompt,
+        tuiFullscreen,
+        nessMcp: terminalNessMcp(opts.terminalId)
+      })
     }
   )
 
@@ -3898,13 +4070,13 @@ function registerIpcHandlers(): void {
       text: string,
       images?: Array<{ mediaType: string; data: string; path: string }>
     ) => {
-      jsonClaudeManager.send(sessionId, text, images)
+      chatRouter.send(sessionId, text, images)
     }
   )
   transport.onSignal(
     'jsonClaude:cancelQueued',
     (_ctx, sessionId: string, messageId: string) => {
-      jsonClaudeManager.cancelQueued(sessionId, messageId)
+      chatRouter.cancelQueued(sessionId, messageId)
     }
   )
   transport.onRequest('jsonClaude:kill', (_ctx, sessionId: string) => {
@@ -3912,7 +4084,7 @@ function registerIpcHandlers(): void {
     return true
   })
   transport.onRequest('jsonClaude:interrupt', (_ctx, sessionId: string) => {
-    jsonClaudeManager.interrupt(sessionId)
+    chatRouter.interrupt(sessionId)
     return true
   })
 
@@ -3945,7 +4117,7 @@ function registerIpcHandlers(): void {
 
       // busy is false by now (interrupt flips it, or it already was), so
       // this takes the fresh-turn path rather than the queue path.
-      jsonClaudeManager.send(sessionId, text, images)
+      chatRouter.send(sessionId, text, images)
       return { ok: true }
     }
   )
@@ -3966,12 +4138,15 @@ function registerIpcHandlers(): void {
       if (!sessionId || !entryId) return { ok: false, reason: 'missing args' }
       const startSession = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!startSession) return { ok: false, reason: 'unknown session' }
+      if (!getChatCapabilities(startSession.agentKind).rewind) {
+        return { ok: false, reason: 'rewind is not supported for this agent' }
+      }
 
       if (startSession.busy) await interruptAndQuiesce(sessionId)
 
       approvalBridge.cancelPendingForSession(sessionId)
 
-      const outcome = jsonClaudeManager.rewindTo(sessionId, entryId)
+      const outcome = await chatRouter.rewindTo(sessionId, entryId)
       if (!outcome.ok) return { ok: false, reason: outcome.reason }
 
       // Respawn so --resume re-seeds the slice from the truncated jsonl
@@ -3990,38 +4165,30 @@ function registerIpcHandlers(): void {
   // the source's active tab.
   transport.onRequest(
     'jsonClaude:forkAt',
-    (
+    async (
       _ctx,
       sessionId: string,
       entryId: string
-    ): { ok: boolean; newSessionId?: string; reason?: string } => {
+    ): Promise<{ ok: boolean; newSessionId?: string; reason?: string }> => {
       if (!sessionId || !entryId) return { ok: false, reason: 'missing args' }
       const source = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!source) return { ok: false, reason: 'unknown session' }
+      if (!getChatCapabilities(source.agentKind).fork) {
+        return { ok: false, reason: 'fork is not supported for this agent' }
+      }
 
-      const outcome = jsonClaudeManager.forkAt(sessionId, entryId)
+      const outcome = await chatRouter.forkAt(sessionId, entryId)
       if (!outcome.ok || !outcome.newSessionId) {
         return { ok: false, reason: outcome.reason }
       }
       const newSessionId = outcome.newSessionId
 
-      // Carry the source tab's label + per-tab model pin so the fork
-      // reads as a sibling. Walk panes for the source worktree; the
-      // source tab id equals its sessionId.
-      let sourceLabel: string | undefined
-      let sourceModel: string | undefined
-      const tree = store.getSnapshot().state.terminals.panes[source.worktreePath]
-      if (tree) {
-        outer: for (const leaf of getLeaves(tree)) {
-          for (const tab of leaf.tabs) {
-            if (tab.id === sessionId && tab.type === 'json-claude') {
-              sourceLabel = tab.customLabel?.trim() || tab.label
-              sourceModel = tab.model && tab.model.trim() ? tab.model.trim() : undefined
-              break outer
-            }
-          }
-        }
-      }
+      // Carry the source tab's label, agent and per-tab model pin so the
+      // fork reads as a sibling. The source tab id equals its sessionId.
+      const sourceTab = findJsonClaudeTab(sessionId)
+      const sourceLabel = sourceTab ? sourceTab.customLabel?.trim() || sourceTab.label : undefined
+      const sourceModel =
+        sourceTab?.model && sourceTab.model.trim() ? sourceTab.model.trim() : undefined
       const label = sourceLabel ? `${sourceLabel} (fork)` : 'Chat (fork)'
 
       panesFSM.addTab(source.worktreePath, {
@@ -4030,6 +4197,7 @@ function registerIpcHandlers(): void {
         label,
         sessionId: newSessionId,
         mode: 'awake',
+        ...(source.agentKind ? { agentKind: source.agentKind } : {}),
         ...(sourceModel ? { model: sourceModel } : {})
       })
 
@@ -4140,7 +4308,7 @@ function registerIpcHandlers(): void {
       if (!worktreePath) return { ok: false, reason: 'no owning worktree' }
 
       // Persist the per-tab override first so the respawn picks it up
-      // via findJsonClaudeTabModel(). Empty string clears the override.
+      // via findJsonClaudeTab(). Empty string clears the override.
       store.dispatch({
         type: 'terminals/tabModelChanged',
         payload: { worktreePath, tabId: sessionId, model: trimmed }
@@ -4155,7 +4323,7 @@ function registerIpcHandlers(): void {
 
       // Kill the subprocess, then respawn via the shared start helper.
       // startJsonClaudeSession is idempotent + reads the new tab.model
-      // through findJsonClaudeTabModel, so the fresh spawn gets
+      // through findJsonClaudeTab, so the fresh spawn gets
       // --model <newValue> --resume <sessionId>.
       killJsonClaudeSession(sessionId)
       void startJsonClaudeSession(sessionId, worktreePath)
@@ -4167,6 +4335,7 @@ function registerIpcHandlers(): void {
     'jsonClaude:setPermissionMode',
     (_ctx, sessionId: string, mode: JsonClaudePermissionMode) => {
       if (!sessionId) return false
+      if (!getChatCapabilities(chatRouter.agentKindOf(sessionId)).permissionModes) return false
       // Optimistically reflect in the slice so the badge updates
       // immediately. The manager writes a stdin control_request that
       // the subprocess applies mid-turn (same protocol the TUI's
@@ -4177,7 +4346,7 @@ function registerIpcHandlers(): void {
         type: 'jsonClaude/permissionModeChanged',
         payload: { sessionId, mode }
       })
-      jsonClaudeManager.setPermissionMode(sessionId, mode)
+      chatRouter.setPermissionMode(sessionId, mode)
       return true
     }
   )
@@ -4402,6 +4571,59 @@ function registerIpcHandlers(): void {
     else config.preventSleepMode = value
     saveConfig(config)
     store.dispatch({ type: 'settings/preventSleepModeChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setAgentReviewDelivery', (_ctx, value: AgentReviewDelivery) => {
+    if (value !== 'draft' && value !== 'auto') return false
+    if (value === 'auto') config.agentReviewDelivery = 'auto'
+    else delete config.agentReviewDelivery
+    saveConfig(config)
+    store.dispatch({ type: 'settings/agentReviewDeliveryChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setReviewAgent', (_ctx, value: ReviewAgentChoice) => {
+    if (value !== 'inherit' && value !== 'claude' && value !== 'codex' && value !== 'cursor') {
+      return false
+    }
+    if (value === 'inherit') delete config.reviewAgent
+    else config.reviewAgent = value
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewAgentChanged', payload: value })
+    return true
+  })
+
+  transport.onRequest('config:setReviewModel', (_ctx, value: string) => {
+    if (typeof value !== 'string') return false
+    const trimmed = value.trim()
+    if (trimmed) config.reviewModel = trimmed
+    else delete config.reviewModel
+    saveConfig(config)
+    store.dispatch({ type: 'settings/reviewModelChanged', payload: trimmed })
+    return true
+  })
+
+  transport.onRequest('config:setReviewPrompt', (_ctx, prompt: string) => {
+    if (typeof prompt !== 'string') return false
+    const trimmed = prompt.trim()
+    // Empty restores the bundled default rather than leaving a reviewer
+    // with no instructions at all.
+    if (trimmed && trimmed !== DEFAULT_REVIEW_PROMPT) config.reviewPrompt = trimmed
+    else delete config.reviewPrompt
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/reviewPromptChanged',
+      payload: trimmed || DEFAULT_REVIEW_PROMPT
+    })
+    return true
+  })
+
+  transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
+    if (enabled) config.autoReviewOnGreenCi = true
+    else delete config.autoReviewOnGreenCi
+    saveConfig(config)
+    store.dispatch({ type: 'settings/autoReviewOnGreenCiChanged', payload: enabled === true })
     return true
   })
 
@@ -4849,6 +5071,150 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest(
+    'reviews:addComment',
+    async (
+      _ctx,
+      worktreePath: string,
+      input: { filePath: string; line: number; side: ReviewSide; body: string; view?: ReviewView }
+    ) => {
+      if (typeof worktreePath !== 'string' || !worktreePath || !input) {
+        return { error: 'Invalid request' }
+      }
+      if (typeof input.filePath !== 'string' || !input.filePath) return { error: 'Missing file' }
+      if (!Number.isInteger(input.line) || input.line < 1) return { error: 'Invalid line' }
+      if (input.side !== 'old' && input.side !== 'new') return { error: 'Invalid side' }
+      if (typeof input.body !== 'string') return { error: 'Missing body' }
+      return addReviewComment(store, worktreePath, {
+        filePath: input.filePath,
+        line: input.line,
+        side: input.side,
+        body: input.body,
+        author: { kind: 'human' },
+        view: input.view
+      })
+    }
+  )
+
+  transport.onRequest('reviews:deleteComment', (_ctx, worktreePath: string, id: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    store.dispatch({ type: 'reviews/commentDeleted', payload: { worktreePath, id } })
+    return true
+  })
+
+  transport.onRequest(
+    'reviews:setCommentStatus',
+    (_ctx, worktreePath: string, id: string, status: ReviewCommentStatus) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+      if (status !== 'open' && status !== 'resolved' && status !== 'outdated') return false
+      setReviewCommentStatus(store, worktreePath, id, status, { kind: 'human' })
+      return true
+    }
+  )
+
+  transport.onRequest(
+    'reviews:addReply',
+    (_ctx, worktreePath: string, commentId: string, body: string) => {
+      if (typeof worktreePath !== 'string' || typeof commentId !== 'string') return false
+      if (typeof body !== 'string') return false
+      return addReviewReply(store, worktreePath, commentId, { kind: 'human' }, body)
+    }
+  )
+
+  transport.onRequest('reviews:editComment', (_ctx, worktreePath: string, id: string, body: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    if (typeof body !== 'string' || !body.trim()) return false
+    store.dispatch({
+      type: 'reviews/commentEdited',
+      payload: { worktreePath, id, body: body.trim() }
+    })
+    return true
+  })
+
+  // "Request AI review" in the PR panel. The user has no tab of their
+  // own to be the requester, so the review is aimed at the worktree's
+  // author Chat tab — the same tab the CI-green spawner would pick, and
+  // where the finished review is delivered.
+  transport.onRequest('reviews:requestForWorktree', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) {
+      return { ok: false, error: 'No worktree' }
+    }
+    const state = store.getSnapshot().state
+    const author = pickAuthorTab(state, worktreePath)
+    if (!author) {
+      return {
+        ok: false,
+        error: 'No Chat tab in this worktree to review for — open one and try again'
+      }
+    }
+    const result = requestReview(
+      reviewServiceDeps,
+      worktreePath,
+      author,
+      buildUserReviewContext(state.prs.byPath[worktreePath]),
+      'user'
+    )
+    log('review', `user requested review for ${worktreePath}: ${JSON.stringify(result)}`)
+    return result
+  })
+
+  transport.onRequest('reviews:listChatTabs', (_ctx, worktreePath: string) => {
+    if (typeof worktreePath !== 'string' || !worktreePath) return []
+    return listWorktreeChatTabs(worktreePath)
+  })
+
+  transport.onRequest(
+    'reviews:editSubmission',
+    (_ctx, worktreePath: string, id: string, summary: string, verdict: ReviewVerdict) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+      if (typeof summary !== 'string') return false
+      if (verdict !== 'approve' && verdict !== 'changes-requested' && verdict !== 'comment') {
+        return false
+      }
+      store.dispatch({
+        type: 'reviews/submissionEdited',
+        payload: { worktreePath, id, summary: summary.trim(), verdict }
+      })
+      return true
+    }
+  )
+
+  transport.onRequest('reviews:deleteSubmission', (_ctx, worktreePath: string, id: string) => {
+    if (typeof worktreePath !== 'string' || typeof id !== 'string') return false
+    store.dispatch({ type: 'reviews/submissionDeleted', payload: { worktreePath, id } })
+    return true
+  })
+
+  transport.onRequest(
+    'reviews:sendSubmission',
+    (_ctx, worktreePath: string, id: string, targetTabId?: string) => {
+      if (typeof worktreePath !== 'string' || typeof id !== 'string') {
+        return { ok: false, error: 'Invalid request' }
+      }
+      const result = sendReviewSubmission(
+        reviewServiceDeps,
+        worktreePath,
+        id,
+        typeof targetTabId === 'string' && targetTabId ? targetTabId : undefined
+      )
+      log('review', `send ${id} -> ${result.ok ? result.tabId : `failed: ${result.error}`}`)
+      return result
+    }
+  )
+
+  transport.onRequest(
+    'reviews:refreshAnchors',
+    async (_ctx, worktreePath: string, filePath?: string) => {
+      if (typeof worktreePath !== 'string' || !worktreePath) return false
+      await refreshReviewAnchors(
+        store,
+        worktreePath,
+        typeof filePath === 'string' && filePath ? filePath : undefined
+      )
+      return true
+    }
+  )
+
+  transport.onRequest(
     'scratchpad:setText',
     (_ctx, worktreePath: string, text: string) => {
       if (typeof worktreePath !== 'string' || !worktreePath) return false
@@ -5027,6 +5393,8 @@ async function runBoot(): Promise<void> {
 
   ciNotifier.start()
 
+  reviewSpawner.start()
+
   autoSleepMonitor.start()
 
   wakeLockController.start()
@@ -5147,7 +5515,8 @@ async function runBoot(): Promise<void> {
     getWorktreeBase: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
     getPrReviewPrompt: () => config.prReviewPrompt || DEFAULT_PR_REVIEW_PROMPT,
     resolveCallerScope,
-    hasForkableTranscript,
+    forkableConversationKind: (sessionId: string, worktreePath: string) =>
+      chatRouter.forkableConversationKind(sessionId, worktreePath),
     getConversationForkEnabled: () => config.conversationForkEnabled === true,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,
@@ -5168,6 +5537,9 @@ async function runBoot(): Promise<void> {
     clearAlias: (worktreePath) => {
       store.dispatch({ type: 'aliases/cleared', payload: { path: worktreePath } })
     },
+    getAgentTabNamingEnabled: () => config.agentTabNamingEnabled !== false,
+    renameTab: (worktreePath, tabId, label, source) =>
+      panesFSM.renameTab(worktreePath, tabId, label, source),
     renameBranch: async (worktreePath, newBranch) => {
       const result = await renameWorktreeBranch(worktreePath, newBranch)
       // The gitdir HEAD watcher would catch this on its own, but the tool
@@ -5187,7 +5559,49 @@ async function runBoot(): Promise<void> {
           chatDeliveryDeps,
           worktreePath,
           message
+        ),
+      sendToTab: (worktreePath, tabId, message) =>
+        deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+    },
+    listChatTabs: listWorktreeChatTabs,
+    reviews: {
+      list: (worktreePath, filter) => listReviewComments(store, worktreePath, filter),
+      addComment: (worktreePath, callerTabId, input) =>
+        addReviewComment(store, worktreePath, {
+          ...input,
+          author: agentAuthor(store.getSnapshot().state, worktreePath, callerTabId)
+        }),
+      reply: (worktreePath, callerTabId, commentId, body) =>
+        replyToReviewComment(
+          store,
+          worktreePath,
+          commentId,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
+          body
+        ),
+      setResolved: (worktreePath, callerTabId, commentId, resolved) =>
+        setReviewCommentResolved(
+          store,
+          worktreePath,
+          commentId,
+          resolved,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId)
+        ),
+      request: (worktreePath, callerTabId, context) =>
+        requestReview(reviewServiceDeps, worktreePath, callerTabId, context),
+      submit: async (worktreePath, callerTabId, input) => {
+        const headSha = (await resolveCommitSha(worktreePath, 'HEAD')) ?? undefined
+        return submitReview(
+          reviewServiceDeps,
+          worktreePath,
+          agentAuthor(store.getSnapshot().state, worktreePath, callerTabId),
+          {
+            ...input,
+            headSha,
+            holdAsDraft: store.getSnapshot().state.settings.agentReviewDelivery === 'draft'
+          }
         )
+      }
     },
     browser: {
       listTabsForWorktree: (wtPath) => {
@@ -5397,7 +5811,7 @@ async function runBoot(): Promise<void> {
             })
             panesFSM.ensureInitialized(p.worktree.path, {
               initialPrompt: kickoff.initialPrompt,
-              agentKind: p.agentKind,
+              agentKind: kickoff.agentKind ?? p.agentKind,
               model: p.model,
               forkedSessionId: kickoff.forkedSessionId
             })
@@ -5465,7 +5879,7 @@ if (desktopShellMod && desktopEarly) {
       void worktreesFSM.refreshList()
     },
     onBeforeQuit: () => {
-      jsonClaudeManager.killAll()
+      chatRouter.killAll()
       approvalBridge.stopAll()
       // Close local tunnel ends — the remote `harness-server` is left
       // running (intentional; see plans/remote-main.md §4).
@@ -5494,7 +5908,7 @@ if (desktopShellMod && desktopEarly) {
     stopWatchingStatus?.()
     stopWatchingStatus = null
     ptyManager.killAll('SIGKILL')
-    jsonClaudeManager.killAll()
+    chatRouter.killAll()
     approvalBridge.stopAll()
     worktreeWatcher.shutdown()
     browserManager.destroyAll()

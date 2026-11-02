@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as monaco from 'monaco-editor'
-import { ArrowRightFromLine, Check, WrapText } from 'lucide-react'
-import type { FileDiffSides, ChangedFile } from '../types'
-import type { ReviewComment } from './ReviewFileTree'
+import { ArrowRightFromLine, Bot, Check, ChevronRight, Pencil, RotateCcw, WrapText, X } from 'lucide-react'
+import type { FileDiffSides, ChangedFile, ReviewComment, ReviewCommentStatus } from '../types'
+import { placeComment, splitLines } from '../../shared/review-anchor'
+import { reviewAuthorLabel } from '../../shared/review-format'
 import { MonacoDiffEditor } from './MonacoDiffEditor'
 import { Tooltip } from './Tooltip'
 import { useSettings } from '../store'
@@ -22,10 +23,15 @@ interface ReviewDiffPaneProps {
   reviewed: boolean
   comments: ReviewComment[]
   onToggleReviewed: () => void
-  onAddComment: (lineNumber: number, body: string) => void
+  /** Resolves to an error message, or null on success. */
+  onAddComment: (lineNumber: number, body: string) => Promise<string | null>
   onDeleteComment: (id: string) => void
+  onSetCommentStatus: (id: string, status: ReviewCommentStatus) => void
+  onEditComment: (id: string, body: string) => void
   wordWrap: boolean
   onWordWrapChange: (next: boolean) => void
+  /** Scroll to this comment once it's on screen. A new nonce re-jumps. */
+  focusComment?: { id: string; nonce: number } | null
 }
 
 const STATUS_LABEL: Record<ChangedFile['status'], string> = {
@@ -44,45 +50,187 @@ const STATUS_COLOR: Record<ChangedFile['status'], string> = {
   untracked: 'text-dim'
 }
 
+const STATUS_ACCENT: Record<ReviewCommentStatus, string> = {
+  open: 'var(--color-info, #58a6ff)',
+  resolved: 'var(--color-success, #3fb950)',
+  outdated: 'var(--color-faint)'
+}
+
+const actionButtonStyle: React.CSSProperties = {
+  flexShrink: 0,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.25rem',
+  color: 'var(--color-faint)',
+  cursor: 'pointer',
+  background: 'none',
+  border: 'none',
+  fontSize: '0.75rem',
+  padding: '0 0.125rem'
+}
+
+function countLines(text: string): number {
+  return text.split('\n').length
+}
+
+/** View zones need a height up front. Approximates one editor line per
+ *  text line; the zone is then resized to the rendered height, which is
+ *  what catches soft-wrapped comments. */
+function zoneHeightInLines(comment: ReviewComment): number {
+  let lines = countLines(comment.body)
+  for (const r of comment.replies ?? []) lines += countLines(r.body)
+  return Math.max(2, Math.min(20, lines + 1))
+}
+
+function AuthorLabel({ author }: { author: ReviewComment['author'] }): JSX.Element {
+  if (author.kind === 'human') return <>{reviewAuthorLabel(author)}</>
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-accent)' }}
+    >
+      <Bot className="icon-xs" />
+      {reviewAuthorLabel(author)}
+    </span>
+  )
+}
+
 function InlineComment({
   comment,
-  onDelete
+  location,
+  onDelete,
+  onSetStatus,
+  onEdit
 }: {
   comment: ReviewComment
+  /** Shown when the comment isn't drawn on its line, e.g. "L42". */
+  location?: string
   onDelete: () => void
+  onSetStatus: (status: ReviewCommentStatus) => void
+  onEdit: (body: string) => void
 }): JSX.Element {
+  const accent = STATUS_ACCENT[comment.status]
+  const muted = comment.status !== 'open'
+  const [draft, setDraft] = useState<string | null>(null)
+  const saveEdit = (): void => {
+    if (draft !== null && draft.trim() && draft.trim() !== comment.body) onEdit(draft.trim())
+    setDraft(null)
+  }
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'flex-start',
-        gap: '0.5rem',
+        flexDirection: 'column',
+        gap: '0.125rem',
         padding: '0.375rem 0.75rem',
         fontSize: '0.75rem',
-        borderLeft: '3px solid var(--color-info, #58a6ff)',
-        background: 'color-mix(in srgb, var(--color-info, #58a6ff) 8%, transparent)',
-        margin: '0.125rem 0.5rem'
+        borderLeft: `3px solid ${accent}`,
+        background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+        margin: '0.125rem 0.5rem',
+        opacity: muted ? 0.6 : 1
       }}
     >
-      <span style={{ flex: 1, color: 'var(--color-fg)', whiteSpace: 'pre-wrap' }}>
-        {comment.body}
-      </span>
-      <button
-        onClick={onDelete}
-        style={{
-          flexShrink: 0,
-          color: 'var(--color-faint)',
-          cursor: 'pointer',
-          background: 'none',
-          border: 'none',
-          fontSize: '0.6875rem',
-          padding: '0 0.125rem'
-        }}
-        onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-danger, #f85149)')}
-        onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
-      >
-        ✕
-      </button>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+        <span style={{ flexShrink: 0, color: 'var(--color-faint)' }}>
+          <AuthorLabel author={comment.author} />
+          {location && <span style={{ fontFamily: 'monospace' }}> · {location}</span>}
+          {comment.status === 'resolved' && ' · Resolved'}
+          {comment.status === 'outdated' && ' · Outdated'}
+        </span>
+        {draft !== null ? (
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={saveEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                saveEdit()
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setDraft(null)
+              }
+              e.stopPropagation()
+            }}
+            rows={Math.max(1, countLines(draft))}
+            style={{
+              flex: 1,
+              background: 'var(--color-surface)',
+              color: 'var(--color-fg)',
+              fontSize: '0.75rem',
+              borderRadius: '0.25rem',
+              border: '1px solid var(--color-border)',
+              padding: '0 0.25rem',
+              resize: 'none',
+              outline: 'none',
+              fontFamily: 'inherit'
+            }}
+          />
+        ) : (
+          <span
+            style={{
+              flex: 1,
+              color: 'var(--color-fg)',
+              whiteSpace: 'pre-wrap',
+              textDecoration: comment.status === 'outdated' ? 'line-through' : undefined
+            }}
+          >
+            {comment.body}
+          </span>
+        )}
+        {draft === null && (
+          <button
+            onClick={() => setDraft(comment.body)}
+            aria-label="Edit comment"
+            style={actionButtonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-fg)')}
+            onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
+          >
+            <Pencil className="icon-xs" />
+          </button>
+        )}
+        {comment.status === 'resolved' ? (
+          <button
+            onClick={() => onSetStatus('open')}
+            aria-label="Reopen comment"
+            style={actionButtonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-fg)')}
+            onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
+          >
+            <RotateCcw className="icon-xs" />
+            Reopen
+          </button>
+        ) : (
+          <button
+            onClick={() => onSetStatus('resolved')}
+            aria-label="Resolve comment"
+            style={actionButtonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-success, #3fb950)')}
+            onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
+          >
+            <Check className="icon-xs" />
+            Resolve
+          </button>
+        )}
+        <button
+          onClick={onDelete}
+          aria-label="Delete comment"
+          style={actionButtonStyle}
+          onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-danger, #f85149)')}
+          onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-faint)')}
+        >
+          <X className="icon-xs" />
+        </button>
+      </div>
+      {comment.replies?.map((r) => (
+        <div key={r.id} style={{ display: 'flex', gap: '0.5rem', paddingLeft: '1rem' }}>
+          <span style={{ flexShrink: 0, color: 'var(--color-faint)' }}>
+            ↳ <AuthorLabel author={r.author} />
+          </span>
+          <span style={{ flex: 1, color: 'var(--color-fg)', whiteSpace: 'pre-wrap' }}>{r.body}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -93,15 +241,31 @@ function InlineCommentInput({
   onCancel
 }: {
   lineNumber: number
-  onSubmit: (body: string) => void
+  /** Resolves to an error message, or null on success. */
+  onSubmit: (body: string) => Promise<string | null>
   onCancel: () => void
 }): JSX.Element {
   const [body, setBody] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
+
+  const canSubmit = !!body.trim() && !submitting
+  const submit = (): void => {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError(null)
+    onSubmit(body.trim())
+      .then((err) => {
+        if (err) setError(err)
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSubmitting(false))
+  }
 
   return (
     <div
@@ -117,20 +281,15 @@ function InlineCommentInput({
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.625rem', color: 'var(--color-faint)', fontFamily: 'monospace' }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-faint)', fontFamily: 'monospace' }}>
           Line {lineNumber}
         </span>
         <button
           onClick={onCancel}
-          style={{
-            color: 'var(--color-faint)',
-            cursor: 'pointer',
-            background: 'none',
-            border: 'none',
-            fontSize: '0.75rem'
-          }}
+          aria-label="Cancel comment"
+          style={actionButtonStyle}
         >
-          ✕
+          <X className="icon-xs" />
         </button>
       </div>
       <textarea
@@ -140,7 +299,7 @@ function InlineCommentInput({
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()
-            if (body.trim()) onSubmit(body.trim())
+            submit()
           }
           if (e.key === 'Escape') {
             e.preventDefault()
@@ -163,22 +322,31 @@ function InlineCommentInput({
           fontFamily: 'inherit'
         }}
       />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.625rem', color: 'var(--color-faint)' }}>⌘Enter to submit</span>
-        <button
-          onClick={() => {
-            if (body.trim()) onSubmit(body.trim())
-          }}
-          disabled={!body.trim()}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+        <span
           style={{
-            fontSize: '0.6875rem',
+            fontSize: '0.75rem',
+            color: error ? 'var(--color-danger, #f85149)' : 'var(--color-faint)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {error ?? '⌘Enter to submit'}
+        </span>
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          style={{
+            flexShrink: 0,
+            fontSize: '0.75rem',
             padding: '0.125rem 0.5rem',
             borderRadius: '0.25rem',
-            background: body.trim() ? 'var(--color-accent)' : 'var(--color-border)',
+            background: canSubmit ? 'var(--color-accent)' : 'var(--color-border)',
             color: 'var(--color-fg)',
             border: 'none',
-            cursor: body.trim() ? 'pointer' : 'default',
-            opacity: body.trim() ? 1 : 0.3
+            cursor: canSubmit ? 'pointer' : 'default',
+            opacity: canSubmit ? 1 : 0.3
           }}
         >
           Add Comment
@@ -193,6 +361,7 @@ interface ViewZoneEntry {
   root: Root
   domNode: HTMLDivElement
   stickyWrapper: HTMLDivElement
+  observer: ResizeObserver
 }
 
 export function ReviewDiffPane({
@@ -206,16 +375,26 @@ export function ReviewDiffPane({
   onToggleReviewed,
   onAddComment,
   onDeleteComment,
+  onSetCommentStatus,
+  onEditComment,
   wordWrap,
-  onWordWrapChange
+  onWordWrapChange,
+  focusComment
 }: ReviewDiffPaneProps): JSX.Element {
   const backend = useBackend()
   const settings = useSettings()
   const [sides, setSides] = useState<FileDiffSides | null>(null)
   const [loading, setLoading] = useState(false)
   const [commentLine, setCommentLine] = useState<number | null>(null)
-  const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
+  const [unplacedOpen, setUnplacedOpen] = useState(true)
+  // State, not a ref: the editor is recreated on every file switch, and
+  // the view-zone effect has to re-run against the new instance.
+  const [editor, setEditor] = useState<monaco.editor.IStandaloneDiffEditor | null>(null)
   const viewZonesRef = useRef<ViewZoneEntry[]>([])
+  // File the current `sides` were loaded for. On a file switch the old
+  // sides linger for a render, and placing comments against them would
+  // send a jump to the wrong line.
+  const sidesPathRef = useRef<string | undefined>(undefined)
 
   // Working-tree diffs reflect the live file on disk; commit-range diffs
   // are immutable. Only the working-tree case is watched for refresh.
@@ -232,7 +411,10 @@ export function ReviewDiffPane({
         return () => {}
       }
       let cancelled = false
-      if (showLoading) setLoading(true)
+      if (showLoading) {
+        setLoading(true)
+        setEditor(null)
+      }
       const promise =
         fromHash && toHash
           ? backend.getCommitRangeFileDiffSides(worktreePath, fromHash, toHash, filePathStr)
@@ -241,7 +423,9 @@ export function ReviewDiffPane({
             : backend.getFileDiffSides(worktreePath, filePathStr, !!fileStaged, mode)
       promise
         .then((result) => {
-          if (!cancelled) setSides(result)
+          if (cancelled) return
+          sidesPathRef.current = filePathStr
+          setSides(result)
         })
         .catch(() => {
           if (!cancelled) setSides(null)
@@ -269,52 +453,73 @@ export function ReviewDiffPane({
     }
   )
 
-  const clearViewZones = useCallback(() => {
-    const editor = editorRef.current
-    if (!editor) return
-    const modifiedEd = editor.getModifiedEditor()
-    const zones = viewZonesRef.current
-    if (zones.length === 0) return
-    modifiedEd.changeViewZones((accessor) => {
-      for (const z of zones) {
-        accessor.removeZone(z.zoneId)
-        z.root.unmount()
-      }
-    })
-    viewZonesRef.current = []
-  }, [])
+  // Comments are placed by snippet rather than trusting the stored line,
+  // so a commit- or range-scoped view (whose content differs from HEAD)
+  // still draws each comment on the code it was written about. Anything
+  // that can't be placed — outdated, old-side, or a line that doesn't
+  // exist in this revision — is listed above the diff instead.
+  const { placed, unplaced } = useMemo(() => {
+    const placedOut: { line: number; comment: ReviewComment }[] = []
+    const unplacedOut: ReviewComment[] = []
+    if (!sides || sides.binary || sides.tooLarge) return { placed: placedOut, unplaced: comments }
+    const lines = splitLines(sides.modified)
+    for (const c of comments) {
+      const line = c.side === 'new' ? placeComment(lines, c) : null
+      if (line === null) unplacedOut.push(c)
+      else placedOut.push({ line, comment: c })
+    }
+    return { placed: placedOut, unplaced: unplacedOut }
+  }, [sides, comments])
 
-  // Sync view zones whenever comments or commentLine changes
+  const focusedNonceRef = useRef<number | null>(null)
   useEffect(() => {
-    const editor = editorRef.current
-    if (!editor) return
-
-    clearViewZones()
-
+    if (!focusComment || focusedNonceRef.current === focusComment.nonce) return
+    if (loading || !sides || sidesPathRef.current !== filePathStr) return
+    if (unplaced.some((c) => c.id === focusComment.id)) {
+      focusedNonceRef.current = focusComment.nonce
+      setUnplacedOpen(true)
+      return
+    }
+    const hit = placed.find((p) => p.comment.id === focusComment.id)
+    if (!hit || !editor) return
     const modifiedEd = editor.getModifiedEditor()
-    const newZones: ViewZoneEntry[] = []
+    const nonce = focusComment.nonce
+    // Near the top, so the comment's zone below the line is in view.
+    const reveal = (): void =>
+      modifiedEd.revealLineNearTop(hit.line, monaco.editor.ScrollType.Immediate)
+    // Comment zones above the line resize to their rendered height after
+    // layout, pushing it down; follow them until they settle.
+    let sub: monaco.IDisposable | null = null
+    let settle: ReturnType<typeof setTimeout> | null = null
+    const raf = requestAnimationFrame(() => {
+      focusedNonceRef.current = nonce
+      modifiedEd.setPosition({ lineNumber: hit.line, column: 1 })
+      reveal()
+      sub = modifiedEd.onDidContentSizeChange(reveal)
+      settle = setTimeout(() => sub?.dispose(), 500)
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      if (settle) clearTimeout(settle)
+      sub?.dispose()
+    }
+  }, [focusComment, placed, unplaced, editor, loading, sides, filePathStr])
 
-    // Collect all items to render: existing comments + the input (if active)
+  useEffect(() => {
+    if (!editor) return
+    const modifiedEd = editor.getModifiedEditor()
+
     interface ZoneItem {
-      type: 'comment' | 'input'
       lineNumber: number
       comment?: ReviewComment
     }
-    const items: ZoneItem[] = []
-
-    for (const c of comments) {
-      items.push({ type: 'comment', lineNumber: c.lineNumber, comment: c })
-    }
-    if (commentLine !== null) {
-      items.push({ type: 'input', lineNumber: commentLine })
-    }
-
-    // Sort by line number so zones don't interfere with each other
+    const items: ZoneItem[] = placed.map((p) => ({ lineNumber: p.line, comment: p.comment }))
+    if (commentLine !== null) items.push({ lineNumber: commentLine })
+    if (items.length === 0) return
     items.sort((a, b) => a.lineNumber - b.lineNumber)
 
-    if (items.length === 0) return
-
     const contentWidth = modifiedEd.getLayoutInfo().contentWidth
+    const entries: ViewZoneEntry[] = []
 
     modifiedEd.changeViewZones((accessor) => {
       for (const item of items) {
@@ -328,60 +533,91 @@ export function ReviewDiffPane({
         stickyWrapper.style.position = 'sticky'
         stickyWrapper.style.left = '0'
         stickyWrapper.style.width = `${contentWidth}px`
+        // Contain the comment's margins so the measured height includes them.
+        stickyWrapper.style.display = 'flow-root'
         domNode.appendChild(stickyWrapper)
 
-        const heightInLines = item.type === 'input' ? 7 : 2
-        const zoneId = accessor.addZone({
+        const zone: monaco.editor.IViewZone = {
           afterLineNumber: item.lineNumber,
-          heightInLines,
+          heightInLines: item.comment ? zoneHeightInLines(item.comment) : 7,
           domNode,
           suppressMouseDown: false
+        }
+        const zoneId = accessor.addZone(zone)
+
+        // Size the zone to what actually rendered: comments soft-wrap, and
+        // a line-count estimate let long ones spill over the code below.
+        // Monaco re-reads the zone object on layoutZone.
+        const observer = new ResizeObserver(() => {
+          const height = Math.ceil(stickyWrapper.getBoundingClientRect().height)
+          if (height <= 0 || zone.heightInPx === height) return
+          zone.heightInPx = height
+          delete zone.heightInLines
+          try {
+            modifiedEd.changeViewZones((a) => a.layoutZone(zoneId))
+          } catch {
+            // editor disposed
+          }
         })
+        observer.observe(stickyWrapper)
 
         const root = createRoot(stickyWrapper)
-        if (item.type === 'comment' && item.comment) {
-          const c = item.comment
+        const c = item.comment
+        if (c) {
           root.render(
-            <InlineComment comment={c} onDelete={() => onDeleteComment(c.id)} />
+            <InlineComment
+              comment={c}
+              onDelete={() => onDeleteComment(c.id)}
+              onSetStatus={(status) => onSetCommentStatus(c.id, status)}
+              onEdit={(body) => onEditComment(c.id, body)}
+            />
           )
-        } else if (item.type === 'input') {
+        } else {
           root.render(
             <InlineCommentInput
               lineNumber={item.lineNumber}
-              onSubmit={(body) => {
-                onAddComment(item.lineNumber, body)
-                setCommentLine(null)
+              onSubmit={async (body) => {
+                const err = await onAddComment(item.lineNumber, body)
+                if (!err) setCommentLine(null)
+                return err
               }}
               onCancel={() => setCommentLine(null)}
             />
           )
         }
 
-        newZones.push({ zoneId, root, domNode, stickyWrapper })
+        entries.push({ zoneId, root, domNode, stickyWrapper, observer })
       }
     })
+    viewZonesRef.current = entries
 
-    viewZonesRef.current = newZones
-  }, [comments, commentLine, clearViewZones, onAddComment, onDeleteComment])
-
-  // Clean up view zones on unmount
-  useEffect(() => {
     return () => {
-      const zones = viewZonesRef.current
-      for (const z of zones) z.root.unmount()
+      // The editor may already be disposed (file switch unmounts it first);
+      // its zones went with it, so only the React roots need tearing down.
+      try {
+        modifiedEd.changeViewZones((accessor) => {
+          for (const z of entries) accessor.removeZone(z.zoneId)
+        })
+      } catch {
+        // disposed
+      }
+      for (const z of entries) {
+        z.observer.disconnect()
+        z.root.unmount()
+      }
       viewZonesRef.current = []
     }
-  }, [])
+  }, [editor, placed, commentLine, onAddComment, onDeleteComment, onSetCommentStatus, onEditComment])
 
   const handleReferenceLine = useCallback((lineNumber: number) => {
     setCommentLine(lineNumber)
   }, [])
 
   const handleEditorMount = useCallback(
-    (editor: monaco.editor.IStandaloneDiffEditor) => {
-      editorRef.current = editor
+    (mounted: monaco.editor.IStandaloneDiffEditor) => {
+      setEditor(mounted)
       // Keep sticky wrappers sized to the visible viewport on resize
-      editor.getModifiedEditor().onDidLayoutChange((layout) => {
+      mounted.getModifiedEditor().onDidLayoutChange((layout) => {
         for (const z of viewZonesRef.current) {
           z.stickyWrapper.style.width = `${layout.contentWidth}px`
         }
@@ -443,6 +679,35 @@ export function ReviewDiffPane({
         </Tooltip>
       </div>
 
+      {!loading && unplaced.length > 0 && (
+        <div className="shrink-0 border-b border-border bg-panel max-h-[12rem] overflow-y-auto">
+          <button
+            onClick={() => setUnplacedOpen((v) => !v)}
+            className="w-full flex items-center gap-1 px-3 py-1 text-xs text-faint hover:text-fg cursor-pointer"
+          >
+            <ChevronRight
+              className={`icon-2xs shrink-0 transition-transform ${unplacedOpen ? 'rotate-90' : ''}`}
+            />
+            {unplaced.length} {unplaced.length === 1 ? 'comment' : 'comments'} not on a line in
+            this diff
+          </button>
+          {unplacedOpen && (
+            <div className="pb-1">
+              {unplaced.map((c) => (
+                <InlineComment
+                  key={c.id}
+                  comment={c}
+                  location={c.side === 'old' ? `L${c.line} (old)` : `L${c.line}`}
+                  onDelete={() => onDeleteComment(c.id)}
+                  onSetStatus={(status) => onSetCommentStatus(c.id, status)}
+                  onEdit={(body) => onEditComment(c.id, body)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Diff with inline comments via view zones */}
       <div className="flex-1 min-h-0 relative">
         {loading && (
@@ -450,7 +715,7 @@ export function ReviewDiffPane({
             Loading diff...
           </div>
         )}
-        {!loading && sides && (
+        {!loading && sides && !sides.binary && !sides.tooLarge && (
           <MonacoDiffEditor
             original={sides.original}
             modified={sides.modified}
@@ -470,9 +735,9 @@ export function ReviewDiffPane({
             {sides.error}
           </div>
         )}
-        {!loading && sides?.modifiedBinary && (
+        {!loading && (sides?.binary || sides?.tooLarge) && (
           <div className="absolute inset-0 flex items-center justify-center text-faint text-sm">
-            Binary file — cannot display diff
+            {sides.binary ? 'Binary file — cannot display diff' : 'File too large — cannot display diff'}
           </div>
         )}
       </div>

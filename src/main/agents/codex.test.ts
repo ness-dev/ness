@@ -23,6 +23,28 @@ vi.mock('../debug', () => ({
   log: () => {}
 }))
 
+const execState: { calls: string[]; reply: { err: Error | null; stdout: string } } = {
+  calls: [],
+  reply: { err: null, stdout: '' }
+}
+
+vi.mock('child_process', () => ({
+  execFile: (
+    _shell: string,
+    args: string[],
+    _opts: unknown,
+    cb: (err: Error | null, stdout: string) => void
+  ) => {
+    execState.calls.push(args[args.length - 1])
+    cb(execState.reply.err, execState.reply.stdout)
+  }
+}))
+
+vi.mock('../user-shell', () => ({
+  resolveUserShell: () => '/bin/zsh',
+  loginShellCommandArgs: (cmd: string) => ['-ilc', cmd]
+}))
+
 vi.mock('../hooks', () => ({
   makeHookCommand: (event: string) =>
     `bash -c 'd=/tmp/harness-status; printf "${event}" >> "$d/$h.ndjson"'`
@@ -31,7 +53,11 @@ vi.mock('../hooks', () => ({
 import { homedir } from 'os'
 import { join } from 'path'
 import {
+  buildSpawnArgs,
   extractSessionId,
+  supportsNoDaemon,
+  launchExtras,
+  mcpServerOverrides,
   hooksInstalled,
   installHooks,
   hookEvents,
@@ -172,5 +198,55 @@ describe('codex extractSessionId', () => {
     expect(extractSessionId({})).toBeNull()
     expect(extractSessionId({ session_id: '' })).toBeNull()
     expect(extractSessionId({ session_id: 42 })).toBeNull()
+  })
+})
+
+describe('codex --no-daemon', () => {
+  it('detects support from --help and caches per command', async () => {
+    execState.calls = []
+    execState.reply = { err: null, stdout: '  --no-daemon\n      Run without the shared background server' }
+    await expect(supportsNoDaemon('codex-a')).resolves.toBe(true)
+    await expect(supportsNoDaemon('codex-a')).resolves.toBe(true)
+    expect(execState.calls).toEqual(['codex-a --help'])
+  })
+
+  it('reports no support when the flag is absent or the probe fails', async () => {
+    execState.reply = { err: null, stdout: 'Usage: codex [OPTIONS]' }
+    await expect(supportsNoDaemon('codex-old')).resolves.toBe(false)
+    execState.reply = { err: new Error('not found'), stdout: '' }
+    await expect(supportsNoDaemon('codex-missing')).resolves.toBe(false)
+  })
+
+  it('reports --no-daemon support through launchExtras', async () => {
+    execState.reply = { err: null, stdout: '--no-daemon' }
+    await expect(launchExtras('codex-extras')).resolves.toEqual({ noDaemon: true })
+  })
+
+  it('adds --no-daemon to fresh and resumed launches only when asked', () => {
+    expect(buildSpawnArgs({ command: 'codex', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
+    expect(buildSpawnArgs({ command: 'codex', cwd: '/x' })).toBe('codex')
+    expect(buildSpawnArgs({ command: 'codex --no-daemon', cwd: '/x', noDaemon: true })).toBe('codex --no-daemon')
+  })
+})
+
+describe('codex Ness MCP overrides', () => {
+  const server = {
+    command: '/Applications/Ness Dev.app/Contents/MacOS/Ness',
+    args: ['/res/mcp-bridge.js'],
+    env: { ELECTRON_RUN_AS_NODE: '1', HARNESS_TOKEN: 'a"b' }
+  }
+
+  it('encodes the server as TOML -c values with env inline', () => {
+    expect(mcpServerOverrides('ness-control', server)).toEqual([
+      'mcp_servers.ness-control.command="/Applications/Ness Dev.app/Contents/MacOS/Ness"',
+      'mcp_servers.ness-control.args=["/res/mcp-bridge.js"]',
+      'mcp_servers.ness-control.env={ELECTRON_RUN_AS_NODE = "1", HARNESS_TOKEN = "a\\"b"}'
+    ])
+  })
+
+  it('adds shell-quoted -c flags to the launch command', () => {
+    const cmd = buildSpawnArgs({ command: 'codex', cwd: '/x', nessMcp: server })
+    expect(cmd.startsWith("codex -c 'mcp_servers.ness-control.command=")).toBe(true)
+    expect(cmd.match(/ -c '/g)).toHaveLength(3)
   })
 })
