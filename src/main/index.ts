@@ -35,8 +35,10 @@ import type { Server as HttpServer } from 'http'
 import type { ServerTransport } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
+import { ChatStartGate } from './chat-start-gate'
 import {
   knownClaudeConfigDirs,
+  onShellEnvCaptured,
   resolveShellEnv,
   setExplicitClaudeConfigDirSource,
   warmShellEnv
@@ -1112,7 +1114,12 @@ function findJsonClaudeTab(sessionId: string): TerminalTab | undefined {
   return undefined
 }
 
-const startingJsonClaude = new Map<string, { cancelled: boolean; done: Promise<boolean> }>()
+const chatStarts = new ChatStartGate()
+
+/** Permission mode a reviewer Chat tab starts in. 'plan' is the tightest
+ *  mode that still lets it read the branch and call the review tools;
+ *  the rest of "don't edit this branch" is said in the request prompt. */
+const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
 
 /** Single source of truth for "spin up the json-claude subprocess for
  *  this sessionId". Used by the jsonClaude:start IPC handler, the
@@ -1123,26 +1130,15 @@ const startingJsonClaude = new Map<string, { cancelled: boolean; done: Promise<b
  *  start is still waiting on the worktree's shell env joins that start
  *  rather than racing it. Resolves true once the session is running,
  *  whichever caller created it: the kickoff prompt must land even when
- *  the renderer's own start beat the one carrying the prompt. */
-/** Permission mode a reviewer Chat tab starts in. 'plan' is the tightest
- *  mode that still lets it read the branch and call the review tools;
- *  the rest of "don't edit this branch" is said in the request prompt. */
-const REVIEWER_PERMISSION_MODE: JsonClaudePermissionMode = 'plan'
-
+ *  the renderer's own start beat the one carrying the prompt. Calls that
+ *  reach the session while it is starting wait through `chatStarts`. */
 function startJsonClaudeSession(sessionId: string, worktreePath: string): Promise<boolean> {
   if (chatRouter.hasSession(sessionId)) return Promise.resolve(true)
-  const pending = startingJsonClaude.get(sessionId)
-  if (pending) return pending.done
-  const token = { cancelled: false, done: Promise.resolve(false) }
-  token.done = (async () => {
+  return chatStarts.begin(sessionId, async (isCancelled) => {
     // Both the --resume decision and the subprocess env key off the Claude
     // home the worktree's shell reports; resolve it before touching either.
-    try {
-      await resolveShellEnv(worktreePath)
-    } finally {
-      if (startingJsonClaude.get(sessionId) === token) startingJsonClaude.delete(sessionId)
-    }
-    if (token.cancelled) return false
+    await resolveShellEnv(worktreePath)
+    if (isCancelled()) return false
     if (chatRouter.hasSession(sessionId)) return true
     const tab = findJsonClaudeTab(sessionId)
     // Every real start has a chat tab by now — kickoff, wake, fork and the
@@ -1178,19 +1174,13 @@ function startJsonClaudeSession(sessionId: string, worktreePath: string): Promis
     const model = tab.model && tab.model.trim() ? tab.model.trim() : undefined
     chatRouter.create(sessionId, worktreePath, permMode, model)
     return true
-  })()
-  startingJsonClaude.set(sessionId, token)
-  return token.done
+  })
 }
 
 /** Kill a chat subprocess, or a start for it that is still waiting on the
  *  shell-env probe — closing a tab in that window must not leave an orphan. */
 function killJsonClaudeSession(sessionId: string): void {
-  const pending = startingJsonClaude.get(sessionId)
-  if (pending) {
-    pending.cancelled = true
-    startingJsonClaude.delete(sessionId)
-  }
+  chatStarts.cancel(sessionId)
   chatRouter.kill(sessionId)
 }
 
@@ -1395,10 +1385,10 @@ const autoSleepMonitor = new AutoSleepMonitor(store, panesFSM)
 // subscribes to the store, never owns slice state.
 const wakeLockController = new WakeLockController(store)
 
-// Folder-scoped env tooling (mise, direnv) can point a worktree at a
-// different Claude home. Probe each worktree's login shell once, so the
-// synchronous readers (transcript lookups, context + cost trackers) know
-// the home before the first tab spawns, and hook any home that is new.
+// Folder-scoped env tooling (mise) can point a worktree at a different
+// Claude home. Probe each worktree's login shell once, so the synchronous
+// readers (transcript lookups, context + cost trackers) know the home
+// before the first tab spawns, and hook any home a probe turns up.
 const hookedClaudeHomes = new Set<string>()
 
 function hookNewClaudeHomes(): void {
@@ -1409,12 +1399,14 @@ function hookNewClaudeHomes(): void {
   for (const dir of dirs) hookedClaudeHomes.add(dir)
 }
 
+onShellEnvCaptured(hookNewClaudeHomes)
+
 store.subscribe((event) => {
   if (event.type !== 'worktrees/listChanged') return
   // Sweeping the whole list is fine here: warmShellEnv is a cache hit for
   // every path already probed, and listChanged is infrequent.
   for (const wt of store.getSnapshot().state.worktrees.list) {
-    void warmShellEnv(wt.path).then(hookNewClaudeHomes)
+    void warmShellEnv(wt.path)
   }
 })
 
@@ -4070,13 +4062,15 @@ function registerIpcHandlers(): void {
       text: string,
       images?: Array<{ mediaType: string; data: string; path: string }>
     ) => {
-      chatRouter.send(sessionId, text, images)
+      // The start may still be waiting on the shell-env probe, with no
+      // instance to take the message yet.
+      chatStarts.afterStart(sessionId, () => chatRouter.send(sessionId, text, images))
     }
   )
   transport.onSignal(
     'jsonClaude:cancelQueued',
     (_ctx, sessionId: string, messageId: string) => {
-      chatRouter.cancelQueued(sessionId, messageId)
+      chatStarts.afterStart(sessionId, () => chatRouter.cancelQueued(sessionId, messageId))
     }
   )
   transport.onRequest('jsonClaude:kill', (_ctx, sessionId: string) => {
@@ -4108,6 +4102,9 @@ function registerIpcHandlers(): void {
       if (!sessionId) return { ok: false, reason: 'missing args' }
       if (!text && !(images && images.length > 0)) {
         return { ok: false, reason: 'empty message' }
+      }
+      if (!(await chatStarts.settled(sessionId))) {
+        return { ok: false, reason: 'session did not start' }
       }
       const session = store.getSnapshot().state.jsonClaude.sessions[sessionId]
       if (!session) return { ok: false, reason: 'unknown session' }

@@ -1,24 +1,32 @@
 // The environment a Claude session sees depends on where it starts:
-// folder-scoped tooling (mise, direnv, asdf) sets variables such as
-// CLAUDE_CONFIG_DIR per directory tree, and only a login shell started in
-// that directory produces them. Terminal tabs get this for free because
-// they run through `zsh -ilc`. The bundled json-mode binary is spawned
-// directly, and everything that reads Claude's home on Ness's behalf
-// (session lookups for --resume, transcripts, hook install) runs in main
-// with Ness's own env — so all of those need the shell's answer for the
-// worktree in question, which is what this module captures and caches.
+// folder-scoped tooling such as mise sets variables like CLAUDE_CONFIG_DIR
+// per directory tree, and only a login shell started in that directory
+// produces them. Terminal tabs get this for free because they run through
+// `zsh -ilc`. The bundled json-mode binary is spawned directly, and
+// everything that reads Claude's home on Ness's behalf (session lookups
+// for --resume, transcripts, hook install) runs in main with Ness's own
+// env — so all of those need the shell's answer for the worktree in
+// question, which is what this module captures and caches.
+//
+// The probe sees exactly what a terminal tab's `zsh -ilc` sees, on
+// purpose: tooling that exports at shell startup (`mise activate`) shows
+// up, tooling that only exports from a prompt or chpwd hook (direnv)
+// does not, in either place. Running `direnv export` here would point
+// Ness at a home the terminal tab's claude never uses.
 //
 // A probe costs one full login-shell startup (~1s with a heavy rc file),
 // so it never runs on the hot path: spawn paths await `resolveShellEnv`,
-// which only re-probes when the entry is older than FRESH_MS, and sync
+// which only blocks when nothing good is cached and otherwise serves the
+// cache while a stale entry refreshes in the background, and sync
 // readers consult the cache without side effects. Probes also never run
 // all at once: the boot warm-up covers every worktree, and fifty login
 // shells starting together starve each other past any timeout, which
 // would cache a failure for the very spawn that needed the answer.
 
 import { spawn } from 'child_process'
+import { realpathSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { resolveUserShell } from './user-shell'
 import { log } from './debug'
 
@@ -41,6 +49,7 @@ const inflight = new Map<string, Promise<ShellEnv | null>>()
 const queue: Array<{ cwd: string; start: () => void }> = []
 let running = 0
 let explicitConfigDir: () => string | undefined = () => undefined
+const captureListeners = new Set<() => void>()
 
 export function parseEnvProbeOutput(stdout: string): ShellEnv | null {
   const beginIdx = stdout.indexOf(BEGIN)
@@ -153,6 +162,9 @@ function refresh(cwd: string, urgent: boolean): Promise<ShellEnv | null> {
     pump()
   })
     .then((env) => {
+      // A relative value means relative to the directory the shell ran in,
+      // not to Ness's cwd — anchor it before anything else reads it.
+      if (env?.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = resolve(cwd, env.CLAUDE_CONFIG_DIR)
       // A failed probe must not erase a good earlier capture — a transient
       // timeout would otherwise flip the worktree back to the default home.
       const kept = env ?? cache.get(cwd)?.env ?? null
@@ -160,6 +172,7 @@ function refresh(cwd: string, urgent: boolean): Promise<ShellEnv | null> {
       if (env?.CLAUDE_CONFIG_DIR) {
         log('claude-env', `cwd=${cwd} CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`)
       }
+      if (env) for (const listener of captureListeners) listener()
       return kept
     })
     .finally(() => {
@@ -169,14 +182,18 @@ function refresh(cwd: string, urgent: boolean): Promise<ShellEnv | null> {
   return probe
 }
 
-/** The login-shell environment for `cwd`, re-probed when the cached copy
- *  is older than FRESH_MS so env changes made while Ness runs are picked
- *  up by the next spawn. A cached failure is never an answer: it is
- *  retried on every call. Null when the probe failed and nothing better
- *  is cached. */
+/** The login-shell environment for `cwd`. A good capture is served at
+ *  once; when it is older than FRESH_MS a background re-probe picks up env
+ *  changes made while Ness runs, for the spawn after this one. Only a path
+ *  with nothing good cached waits on a probe. A cached failure is never an
+ *  answer: it is retried on every call. Null when the probe failed and
+ *  nothing better is cached. */
 export function resolveShellEnv(cwd: string): Promise<ShellEnv | null> {
   const hit = cache.get(cwd)
-  if (hit?.env && Date.now() - hit.capturedAt < FRESH_MS) return Promise.resolve(hit.env)
+  if (hit?.env) {
+    if (Date.now() - hit.capturedAt >= FRESH_MS) void refresh(cwd, false)
+    return Promise.resolve(hit.env)
+  }
   return refresh(cwd, true)
 }
 
@@ -201,6 +218,13 @@ export function cachedShellEnv(cwd: string): ShellEnv | null {
   return best?.env ?? null
 }
 
+/** Called after every successful probe, so a Claude home first seen by a
+ *  spawn or a background refresh still gets hooked. */
+export function onShellEnvCaptured(listener: () => void): () => void {
+  captureListeners.add(listener)
+  return () => captureListeners.delete(listener)
+}
+
 /** Settings-level override (the user's `claudeEnvVars` map) beats anything
  *  the shell reports, matching the precedence both spawn paths apply. */
 export function setExplicitClaudeConfigDirSource(source: () => string | undefined): void {
@@ -215,9 +239,9 @@ export function defaultClaudeConfigDir(): string {
  *  env, then ~/.claude, when nothing has been captured for the path. */
 export function claudeConfigDirFor(cwd: string): string {
   const explicit = explicitConfigDir()
-  if (explicit) return explicit
+  if (explicit) return resolve(explicit)
   const env = cachedShellEnv(cwd) ?? process.env
-  return env.CLAUDE_CONFIG_DIR || defaultClaudeConfigDir()
+  return env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : defaultClaudeConfigDir()
 }
 
 export function claudeProjectsDirFor(cwd: string): string {
@@ -226,16 +250,26 @@ export function claudeProjectsDirFor(cwd: string): string {
 
 /** Every Claude home Ness has seen a worktree resolve to, plus the
  *  defaults. Used where there is no single cwd to key off (cost roll-ups,
- *  hook install). */
+ *  hook install), so one home spelled two ways — trailing slash, symlink —
+ *  must come out once or its sessions get counted twice. */
 export function knownClaudeConfigDirs(): string[] {
-  const dirs = new Set<string>([defaultClaudeConfigDir()])
-  if (process.env.CLAUDE_CONFIG_DIR) dirs.add(process.env.CLAUDE_CONFIG_DIR)
-  const explicit = explicitConfigDir()
-  if (explicit) dirs.add(explicit)
-  for (const entry of cache.values()) {
-    if (entry.env?.CLAUDE_CONFIG_DIR) dirs.add(entry.env.CLAUDE_CONFIG_DIR)
+  const byRealPath = new Map<string, string>()
+  const add = (dir: string | undefined): void => {
+    if (!dir) return
+    const abs = resolve(dir)
+    let key = abs
+    try {
+      key = realpathSync(abs)
+    } catch {
+      // Not created yet — the resolved spelling is the best identity we have.
+    }
+    if (!byRealPath.has(key)) byRealPath.set(key, abs)
   }
-  return [...dirs]
+  add(defaultClaudeConfigDir())
+  add(process.env.CLAUDE_CONFIG_DIR)
+  add(explicitConfigDir())
+  for (const entry of cache.values()) add(entry.env?.CLAUDE_CONFIG_DIR)
+  return [...byRealPath.values()]
 }
 
 export function resetClaudeEnvCacheForTests(): void {
@@ -244,4 +278,5 @@ export function resetClaudeEnvCacheForTests(): void {
   queue.length = 0
   running = 0
   explicitConfigDir = () => undefined
+  captureListeners.clear()
 }

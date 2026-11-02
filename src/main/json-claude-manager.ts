@@ -14,7 +14,7 @@
 // Environment: the bundled binary is spawned without a login shell, so
 // the subprocess env is the one captured from the worktree's shell
 // (claude-env.ts) rather than Ness's own — that is what makes a
-// folder-scoped CLAUDE_CONFIG_DIR (mise, direnv) apply to chat tabs the
+// folder-scoped CLAUDE_CONFIG_DIR (mise) apply to chat tabs the
 // same way it applies to terminal tabs. Transcript paths resolve
 // through the same capture. Auto-memory is disabled per session via
 // CLAUDE_CODE_DISABLE_AUTO_MEMORY so chat tabs don't scribble into the
@@ -700,7 +700,7 @@ export class JsonClaudeManager implements ChatProvider {
     const envVars = this.opts.getClaudeEnvVars() || {}
     // Build env for the subprocess. The bundled binary is spawned without
     // a login shell, so start from the env a shell would produce in this
-    // worktree (folder-scoped CLAUDE_CONFIG_DIR, mise/direnv PATH, …) the
+    // worktree (folder-scoped CLAUDE_CONFIG_DIR, mise PATH, …) the
     // way a terminal tab's `zsh -ilc` does — falling back to process.env
     // when no capture exists yet. Scrub env vars that the user-scope Ness
     // hooks key off of so the subprocess's hook firings don't masquerade
