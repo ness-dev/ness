@@ -1,19 +1,24 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { CompoundServerTransport } from './transport-compound'
-import type { RequestHandler, ServerTransport } from '../shared/transport/transport'
+import type { RequestHandler, ServerTransport, SignalHandler } from '../shared/transport/transport'
 
-function recordingTransport(): { transport: ServerTransport; handlers: Map<string, RequestHandler> } {
+function recordingTransport(): {
+  transport: ServerTransport
+  handlers: Map<string, RequestHandler>
+  signals: Map<string, SignalHandler>
+} {
   const handlers = new Map<string, RequestHandler>()
+  const signals = new Map<string, SignalHandler>()
   const transport: ServerTransport = {
     start: () => undefined,
     stop: () => undefined,
     broadcastStateEvent: () => undefined,
     onRequest: (name, handler) => void handlers.set(name, handler),
-    onSignal: () => undefined,
+    onSignal: (name, handler) => void signals.set(name, handler),
     sendSignal: () => undefined,
     onClientDisconnect: () => undefined
   }
-  return { transport, handlers }
+  return { transport, handlers, signals }
 }
 
 describe('CompoundServerTransport local-shell guard', () => {
@@ -39,5 +44,15 @@ describe('CompoundServerTransport local-shell guard', () => {
     const a = recordingTransport()
     new CompoundServerTransport([a.transport]).onRequest('config:getWsTransportInfo', () => 'info')
     expect(a.handlers.get('config:getWsTransportInfo')!({ clientId: 'c', via: 'ws' })).toBe('info')
+  })
+
+  it('drops WS signals on a local-shell channel and delivers IPC ones', () => {
+    const a = recordingTransport()
+    const inner = vi.fn()
+    new CompoundServerTransport([a.transport]).onSignal('ssh:somethingFired', inner)
+    a.signals.get('ssh:somethingFired')!({ clientId: 'c', via: 'ws' }, 1)
+    expect(inner).not.toHaveBeenCalled()
+    a.signals.get('ssh:somethingFired')!({ clientId: 'c', via: 'ipc' }, 1)
+    expect(inner).toHaveBeenCalledWith({ clientId: 'c', via: 'ipc' }, 1)
   })
 })

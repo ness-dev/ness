@@ -17,7 +17,7 @@ import type {
   ServerTransport,
   SignalHandler
 } from '../shared/transport/transport'
-import { isLocalShellOnly, localShellOnly } from './local-shell-only'
+import { isLocalShellOnly, localShellOnly, localShellOnlySignal } from './local-shell-only'
 
 export class CompoundServerTransport implements ServerTransport {
   constructor(private readonly inner: ServerTransport[]) {}
@@ -40,7 +40,8 @@ export class CompoundServerTransport implements ServerTransport {
   }
 
   onSignal(name: string, handler: SignalHandler): void {
-    for (const t of this.inner) t.onSignal(name, handler)
+    const guarded = isLocalShellOnly(name) ? localShellOnlySignal(handler) : handler
+    for (const t of this.inner) t.onSignal(name, guarded)
   }
 
   sendSignal(name: string, ...args: unknown[]): void {
