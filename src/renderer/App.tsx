@@ -1962,6 +1962,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               prStatuses={prStatuses}
               mergedPaths={mergedPaths}
               lastActive={lastActive}
+              backendFor={backendFor}
               onBulkDelete={handleBulkDeleteWorktrees}
             />
           </div>

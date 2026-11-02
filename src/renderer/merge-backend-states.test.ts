@@ -163,4 +163,50 @@ describe('getMergedWorktrees (shared cache)', () => {
     expect(second.statuses.t1).toBe('processing')
     expect(second.tabsByWorktree['/w']).toBe(first.tabsByWorktree['/w']) // but not the tab walk
   })
+
+  it('keeps unchanged outputs by reference when another field changes', () => {
+    const list = [wt('/w', '/r')]
+    const first = getMergedWorktrees(
+      [backend('local', { kind: 'local', worktrees: list, statuses: { t1: 'idle' } })],
+      'merged',
+      'local'
+    )
+    const second = getMergedWorktrees(
+      [backend('local', { kind: 'local', worktrees: list, statuses: { t1: 'processing' } })],
+      'merged',
+      'local'
+    )
+    expect(second.statuses).not.toBe(first.statuses)
+    expect(second.flatWorktrees).toBe(first.flatWorktrees)
+    expect(second.worktrees).toBe(first.worktrees)
+    expect(second.pathBackendId).toBe(first.pathBackendId)
+    expect(second.backendMeta).toBe(first.backendMeta)
+  })
+
+  it('returns the previous result when an event changed nothing it reads', () => {
+    const list = [wt('/w', '/r')]
+    const first = getMergedWorktrees(
+      [backend('local', { kind: 'local', worktrees: list })],
+      'merged',
+      'local'
+    )
+    const second = getMergedWorktrees(
+      [backend('local', { kind: 'local', worktrees: list })],
+      'merged',
+      'local'
+    )
+    expect(second).toBe(first)
+  })
+
+  it('hands out a new worktree list when a worktree is added', () => {
+    const a = wt('/a', '/r')
+    const first = getMergedWorktrees([backend('local', { kind: 'local', worktrees: [a] })], 'merged', 'local')
+    const second = getMergedWorktrees(
+      [backend('local', { kind: 'local', worktrees: [a, wt('/b', '/r')] })],
+      'merged',
+      'local'
+    )
+    expect(second.flatWorktrees).not.toBe(first.flatWorktrees)
+    expect(second.flatWorktrees.map((w) => w.path)).toEqual(['/a', '/b'])
+  })
 })
