@@ -102,8 +102,57 @@
   <!-- Releases -->
   <div class="max-w-3xl mx-auto px-6 pb-24">
 
+    <!-- v2.18.0 -->
+    <section id="v2.18.0" class="release-section py-10">
+      <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
+        <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.18.0" class="release-anchor">v2.18.0<span class="anchor-icon">🔗</span></a></h2>
+        <span class="text-sm text-neutral-500">November 2, 2026</span>
+      </div>
+      <a href="https://github.com/ness-dev/ness/releases/tag/v2.18.0" class="text-sm text-amber-400/80 hover:text-amber-300 transition-colors">Download &rarr;</a>
+      <p class="text-neutral-400 mt-4 mb-4 leading-relaxed">Chat mode now works with Codex, a new Fleet view puts every host's worktrees in one sidebar, and the Reviews view gets review history, GFM rendering, and MCP tools for agents. Also adds a dense Task list, a one-command Docker remote, and an Agents panel in chat.</p>
+      <div class="note-body">
+        <h4>New features</h4>
+        <ul>
+          <li><strong>Fleet view</strong> — see every host's worktrees together in a single sidebar.</li>
+          <li><strong>Task list</strong> — a dense, one-line-per-worktree view of your whole fleet.</li>
+          <li><strong>Chat mode for Codex</strong> — Chat tabs now work with Codex, built on a provider layer that can support other agents too.</li>
+          <li><strong>Review history</strong> — the Review pane now shows a history of review rounds.</li>
+          <li><strong>Review MCP tools</strong> — agents can read your review comments and submitted reviews, and reviews can be delivered to a specific tab.</li>
+          <li><strong>Agents panel in chat</strong> — watch sub-agents live with a peek view, expand or collapse agent rows in place, and see Tasks tool support. Settled agents are no longer rebuilt, and old ones collapse in the panel.</li>
+          <li><strong>Agent-named tabs</strong> — agents can name their own tab, and a name you set always wins.</li>
+          <li><strong>Embedded screenshots</strong> — agents can embed a screenshot in their reply, with a configurable display size and a smaller default.</li>
+          <li><strong>Run a remote in Docker</strong> — start a Ness remote with a single command.</li>
+          <li><strong>Pinned section in Command Center</strong> — pinned worktrees now appear at the top.</li>
+          <li><strong>File list tree view</strong> — toggle file lists between a path-sorted list and a tree. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/330" class="text-amber-400/80 hover:text-amber-300">#330</a>)</em></li>
+        </ul>
+        <h4>Improvements</h4>
+        <ul>
+          <li><strong>Per-worktree Claude home</strong> — Claude's config directory is now resolved per worktree from your login shell, so folder-scoped setups like mise work correctly. <em class="text-neutral-500">(thanks <a href="https://github.com/ljacomet" class="text-amber-400/80 hover:text-amber-300">@ljacomet</a>, <a href="https://github.com/ness-dev/ness/pull/326" class="text-amber-400/80 hover:text-amber-300">#326</a>)</em></li>
+          <li><strong>Nested worktree tabs</strong> — tabs now nest under their worktree in the sidebar, with a preference for when to expand.</li>
+          <li><strong>Pinned worktrees stay hidden while snoozed</strong> — snoozing a pinned worktree hides it until it wakes. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/331" class="text-amber-400/80 hover:text-amber-300">#331</a>)</em></li>
+          <li><strong>Removing locked worktrees</strong> — you can now remove locked worktrees, including ones whose directory is gone. <em class="text-neutral-500">(thanks <a href="https://github.com/blindpirate" class="text-amber-400/80 hover:text-amber-300">@blindpirate</a>, <a href="https://github.com/ness-dev/ness/pull/322" class="text-amber-400/80 hover:text-amber-300">#322</a>)</em></li>
+          <li><strong>Reviews view</strong> — renders GitHub-flavored Markdown and gives the timeline more room.</li>
+          <li><strong>Appearance settings follow the client</strong> — appearance settings now belong to your window rather than whichever backend is active.</li>
+          <li><strong>Accurate agent mark</strong> — Chat tabs show the real agent's mark instead of always showing Claude's.</li>
+          <li><strong>Clearer collapsed tool calls</strong> — collapsed tool calls are labeled with what they're for.</li>
+          <li><strong>Readable subtitles</strong> — the worktree subtitle line is now readable on selected rows.</li>
+          <li><strong>Simpler agent list</strong> — sub-agents are no longer all labeled "background", and the agent list is flattened.</li>
+          <li><strong>Local Network access</strong> — Ness now declares Local Network usage so macOS can prompt for it properly.</li>
+          <li>Bundled Claude Code updated to 2.1.301.</li>
+        </ul>
+        <h4>Fixes</h4>
+        <ul>
+          <li>The web client no longer picks up the host's saved remotes, and failed remotes stay visible.</li>
+          <li>Binary and very large files are no longer fed to the review diff.</li>
+          <li>An abandoned approval in chat no longer leaves a stuck needs-approval dot.</li>
+          <li>Derived chat panels now update correctly when entries change, and a launch stub is no longer shown as a finished agent.</li>
+        </ul>
+        <p class="text-neutral-400 text-sm mt-6 leading-relaxed">Huge thanks to <a href="https://github.com/blindpirate" class="text-amber-400/80 hover:text-amber-300">@blindpirate</a>, <a href="https://github.com/ljacomet" class="text-amber-400/80 hover:text-amber-300">@ljacomet</a>, and <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a> for their contributions to this release.</p>
+      </div>
+    </section>
+
     <!-- v2.17.0 -->
-    <section id="v2.17.0" class="release-section py-10">
+    <section id="v2.17.0"class="release-section py-10">
       <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
         <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.17.0" class="release-anchor">v2.17.0<span class="anchor-icon">🔗</span></a></h2>
         <span class="text-sm text-neutral-500">October 9, 2026</span>
