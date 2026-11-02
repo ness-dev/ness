@@ -431,34 +431,12 @@ describe('pre-rename harness-control tools in existing transcripts', () => {
 })
 
 describe('getToolIntent', () => {
-  it('returns the trimmed description for Bash and sub-agent calls', () => {
-    expect(getToolIntent({ name: 'Bash', input: { command: 'ls', description: ' List files ' } })).toBe(
-      'List files'
-    )
-    expect(getToolIntent({ name: 'Agent', input: { prompt: 'x', description: 'Find callers' } })).toBe(
-      'Find callers'
-    )
+  it('returns the trimmed provider-set intent', () => {
+    expect(getToolIntent({ intent: ' Read a.ts ' })).toBe('Read a.ts')
   })
 
-  it('returns null when the description is missing or blank', () => {
-    expect(getToolIntent({ name: 'Bash', input: { command: 'ls' } })).toBeNull()
-    expect(getToolIntent({ name: 'Bash', input: { command: 'ls', description: '   ' } })).toBeNull()
-    expect(getToolIntent({ name: 'Bash' })).toBeNull()
-  })
-
-  it('ignores tools whose description is not a call explanation', () => {
-    expect(getToolIntent({ name: 'TaskCreate', input: { description: 'Long task body' } })).toBeNull()
-  })
-})
-
-describe('getToolIntent with a provider-set intent', () => {
-  it('prefers the block intent over any native description', () => {
-    expect(
-      getToolIntent({ name: 'Bash', input: { description: 'native' }, intent: 'Read a.ts' })
-    ).toBe('Read a.ts')
-  })
-
-  it('works for tools with no native description field', () => {
-    expect(getToolIntent({ name: 'ApplyPatch', input: {}, intent: 'Edit a.ts' })).toBe('Edit a.ts')
+  it('returns null when there is no intent', () => {
+    expect(getToolIntent({})).toBeNull()
+    expect(getToolIntent({ intent: '   ' })).toBeNull()
   })
 })

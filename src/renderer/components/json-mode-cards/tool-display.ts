@@ -359,30 +359,11 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
   return { label: full, compactLabel: full, icon: McpGenericIcon }
 }
 
-// Tools whose `description` input is the model's own one-line account
-// of why it's making the call ("Run the reducer tests"). TaskCreate et
-// al. also take a `description`, but there it's the task body, not an
-// explanation of the call, so they're deliberately left out.
-const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
-
-/** The "what this call is for" line, when there is one. Reads better
- *  than the bare tool name in a collapsed summary: "Run typecheck" says
- *  more than "Bash". A provider-set `intent` wins; otherwise fall back
- *  to Claude's native `description` arg. */
-export function getToolIntent(block: {
-  name?: string
-  input?: unknown
-  intent?: string
-}): string | null {
-  const fromProvider = block.intent?.trim()
-  if (fromProvider) return fromProvider
-  const { name, input } = block
-  if (!name || !INTENT_TOOLS.has(name)) return null
-  if (!input || typeof input !== 'object') return null
-  const raw = (input as Record<string, unknown>).description
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
+/** The provider-set "what this call is for" line, when there is one.
+ *  Reads better than the bare tool name in a collapsed summary: "Run
+ *  typecheck" says more than "Bash". */
+export function getToolIntent(block: { intent?: string }): string | null {
+  return block.intent?.trim() || null
 }
 
 /** What a single ness-control call *did*, for surfaces that summarize a
