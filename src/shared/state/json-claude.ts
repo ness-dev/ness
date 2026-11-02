@@ -76,6 +76,12 @@ export interface JsonClaudeMessageBlock {
   id?: string
   name?: string
   input?: Record<string, unknown>
+  // For 'tool_use': a short "what this call is for" line ("Read
+  // store.ts") shown in place of the tool name in collapsed views.
+  // Providers whose harness has no native field for it fill this in
+  // themselves; Claude's comes from its own `description` arg instead
+  // (see getToolIntent), so Claude blocks leave it unset.
+  intent?: string
   // For 'tool_result': correlation + rendered body.
   toolUseId?: string
   content?: string

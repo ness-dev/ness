@@ -1275,7 +1275,7 @@ function renderEntries(
             entryId: entry.entryId,
             type: 'tool',
             toolName: block.name,
-            toolIntent: getToolIntent(block.name, block.input) ?? undefined,
+            toolIntent: getToolIntent(block) ?? undefined,
             hasError: !!result?.isError,
             images: result?.images,
             hasPendingApproval:

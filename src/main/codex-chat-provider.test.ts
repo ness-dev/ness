@@ -15,6 +15,8 @@ import {
   toolResultFor,
   unwrapShellCommand,
   displayCommand,
+  intentForCommandActions,
+  toolUseBlockFor,
   type CodexChatProviderOptions
 } from './codex-chat-provider'
 import type { CodexTurn } from './codex-app-server'
@@ -600,6 +602,50 @@ describe('CodexChatProvider', () => {
 })
 
 describe('codex mapping helpers', () => {
+  it('phrases recognised command actions as an intent line', () => {
+    const cwd = '/repo'
+    expect(
+      intentForCommandActions(
+        [
+          { type: 'read', command: 'cat a.ts', name: 'a.ts', path: '/repo/src/a.ts' },
+          { type: 'read', command: 'cat b.ts', name: 'b.ts', path: '/repo/src/b.ts' }
+        ],
+        cwd
+      )
+    ).toBe('Read a.ts, b.ts')
+    expect(
+      intentForCommandActions([{ type: 'search', command: 'rg foo src', query: 'foo', path: '/repo/src' }], cwd)
+    ).toBe('Search for "foo" in src')
+    expect(intentForCommandActions([{ type: 'listFiles', command: 'ls', path: null }], cwd)).toBe('List files')
+  })
+
+  it('gives no intent when any part of the command is opaque', () => {
+    expect(intentForCommandActions([], '/repo')).toBeNull()
+    expect(
+      intentForCommandActions(
+        [
+          { type: 'read', command: 'cat a.ts', name: 'a.ts', path: '/repo/a.ts' },
+          { type: 'unknown', command: 'npm test' }
+        ],
+        '/repo'
+      )
+    ).toBeNull()
+  })
+
+  it('puts the derived intent on the Bash tool_use block', () => {
+    const block = toolUseBlockFor({
+      type: 'commandExecution',
+      id: 'c1',
+      command: "/bin/zsh -lc 'cat a.ts'",
+      cwd: '/repo',
+      status: 'completed',
+      commandActions: [{ type: 'read', command: 'cat a.ts', name: 'a.ts', path: '/repo/a.ts' }],
+      aggregatedOutput: '',
+      exitCode: 0
+    })
+    expect(block?.intent).toBe('Read a.ts')
+  })
+
   it('unwraps the login-shell wrapper Codex puts around commands', () => {
     expect(unwrapShellCommand("/bin/zsh -lc 'echo hello > out.txt'")).toBe('echo hello > out.txt')
     expect(unwrapShellCommand("bash -lc 'echo '\\''hi'\\'''")).toBe("echo 'hi'")

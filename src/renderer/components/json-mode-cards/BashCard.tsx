@@ -6,7 +6,7 @@ export function BashCard({ block, result, autoApproved, sessionAllowed }: ToolCa
   const cmd = String(block.input?.command ?? '')
   // The model's description is the header when present — the raw
   // command is one click away in the body.
-  const description = getToolIntent('Bash', block.input)
+  const description = getToolIntent(block)
   return (
     <ToolCardChrome
       id={block.id}

@@ -365,13 +365,18 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
 // explanation of the call, so they're deliberately left out.
 const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
 
-/** The model-written "what this call is for" line, when the tool takes
- *  one. Reads better than the bare tool name in a collapsed summary:
- *  "Run typecheck" says more than "Bash". */
-export function getToolIntent(
-  name: string | undefined,
-  input: unknown
-): string | null {
+/** The "what this call is for" line, when there is one. Reads better
+ *  than the bare tool name in a collapsed summary: "Run typecheck" says
+ *  more than "Bash". A provider-set `intent` wins; otherwise fall back
+ *  to Claude's native `description` arg. */
+export function getToolIntent(block: {
+  name?: string
+  input?: unknown
+  intent?: string
+}): string | null {
+  const fromProvider = block.intent?.trim()
+  if (fromProvider) return fromProvider
+  const { name, input } = block
   if (!name || !INTENT_TOOLS.has(name)) return null
   if (!input || typeof input !== 'object') return null
   const raw = (input as Record<string, unknown>).description

@@ -10,7 +10,7 @@
 //   userMessage       → user entry (live ones are appended locally on send)
 //   agentMessage      → assistant text block, streamed via deltas
 //   reasoning         → assistant thinking block (summary text)
-//   commandExecution  → tool_use "Bash" + tool_result
+//   commandExecution  → tool_use "Bash" (intent from commandActions) + tool_result
 //   fileChange        → tool_use "ApplyPatch" + tool_result (the diffs)
 //   mcpToolCall       → tool_use "mcp__<server>__<tool>" + tool_result
 //   webSearch         → tool_use "WebSearch"
@@ -53,6 +53,7 @@ import type {
 import type { StdioMcpServer } from './ness-control-mcp'
 import {
   CodexAppServerClient,
+  type CodexCommandAction,
   type CodexFileChange,
   type CodexThreadItem,
   type CodexThreadResponse,
@@ -1073,6 +1074,44 @@ export function displayCommand(command: string, actions: Array<{ command: string
   return unwrapShellCommand(command)
 }
 
+function relativeTo(cwd: string, path: string): string {
+  if (path === cwd) return '.'
+  return path.startsWith(cwd + '/') ? path.slice(cwd.length + 1) : path
+}
+
+/** Codex's shell tool has no description arg, but it does parse each
+ *  command into actions. Phrase the recognisable ones as the intent
+ *  line ("Read store.ts", "Search for \"foo\" in src"); null as soon as
+ *  any part is opaque, since half an explanation reads as the whole. */
+export function intentForCommandActions(actions: CodexCommandAction[], cwd: string): string | null {
+  if (actions.length === 0) return null
+  const phrases: string[] = []
+  const reads: string[] = []
+  const flushReads = (): void => {
+    if (reads.length === 0) return
+    const shown = reads.slice(0, 3).join(', ')
+    phrases.push(`Read ${shown}${reads.length > 3 ? ` +${reads.length - 3}` : ''}`)
+    reads.length = 0
+  }
+  for (const a of actions) {
+    if (a.type === 'read') {
+      reads.push(a.name || relativeTo(cwd, a.path))
+      continue
+    }
+    flushReads()
+    if (a.type === 'listFiles') {
+      phrases.push(a.path ? `List files in ${relativeTo(cwd, a.path)}` : 'List files')
+    } else if (a.type === 'search') {
+      const where = a.path ? ` in ${relativeTo(cwd, a.path)}` : ''
+      phrases.push(a.query ? `Search for "${a.query}"${where}` : `Search${where || ' files'}`)
+    } else {
+      return null
+    }
+  }
+  flushReads()
+  return phrases.join(', ')
+}
+
 function summarizeChanges(changes: CodexFileChange[]): Array<{ path: string; kind: string }> {
   return changes.map((c) => ({ path: c.path, kind: c.kind.type }))
 }
@@ -1081,11 +1120,13 @@ export function toolUseBlockFor(item: CodexThreadItem): JsonClaudeMessageBlock |
   switch (item.type) {
     case 'commandExecution': {
       const it = item as Extract<CodexThreadItem, { type: 'commandExecution' }>
+      const intent = intentForCommandActions(it.commandActions ?? [], it.cwd ?? '')
       return {
         type: 'tool_use',
         id: it.id,
         name: 'Bash',
-        input: { command: displayCommand(it.command, it.commandActions ?? []) }
+        input: { command: displayCommand(it.command, it.commandActions ?? []) },
+        ...(intent ? { intent } : {})
       }
     }
     case 'fileChange': {
