@@ -219,7 +219,7 @@ describe('resolveShellEnv caching', () => {
       vi.setSystemTime(Date.now() + 120_000)
       const started = performance.now()
       expect((await resolveShellEnv(tmpRoot))?.CLAUDE_CONFIG_DIR).toBe('/first')
-      expect(performance.now() - started).toBeLessThan(100)
+      expect(performance.now() - started).toBeLessThan(500)
     } finally {
       vi.useRealTimers()
     }

@@ -71,6 +71,51 @@ describe('ChatStartGate', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
+  it('hands held calls to a start that replaces a cancelled one', async () => {
+    const gate = new ChatStartGate()
+    const first = deferred()
+    const second = deferred()
+    const fn = vi.fn()
+    const a = gate.begin('s1', async (isCancelled) => {
+      await first.promise
+      return !isCancelled()
+    })
+    gate.afterStart('s1', fn)
+    gate.cancel('s1')
+    const b = gate.begin('s1', async () => {
+      await second.promise
+      return true
+    })
+    first.resolve()
+    expect(await a).toBe(false)
+    await Promise.resolve()
+    expect(fn).not.toHaveBeenCalled()
+
+    second.resolve()
+    expect(await b).toBe(true)
+    await Promise.resolve()
+    expect(fn).toHaveBeenCalledOnce()
+  })
+
+  it('settled follows a replacement start instead of reporting the cancelled one', async () => {
+    const gate = new ChatStartGate()
+    const first = deferred()
+    const second = deferred()
+    void gate.begin('s1', async (isCancelled) => {
+      await first.promise
+      return !isCancelled()
+    })
+    const settled = gate.settled('s1')
+    gate.cancel('s1')
+    void gate.begin('s1', async () => {
+      await second.promise
+      return true
+    })
+    first.resolve()
+    second.resolve()
+    expect(await settled).toBe(true)
+  })
+
   it('treats a throwing start as a failed one rather than an unhandled rejection', async () => {
     const gate = new ChatStartGate()
     const started = gate.begin('s1', async () => {

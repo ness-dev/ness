@@ -206,7 +206,8 @@ export function warmShellEnv(cwd: string): Promise<ShellEnv | null> {
 }
 
 /** Last capture for `cwd` or its nearest cached ancestor (tabs can run in
- *  a subdirectory of their worktree). Pure cache read — never probes. */
+ *  a subdirectory of their worktree). Pure cache read — never probes. Its
+ *  CLAUDE_CONFIG_DIR is already absolute, resolved against the probe's cwd. */
 export function cachedShellEnv(cwd: string): ShellEnv | null {
   const exact = cache.get(cwd)
   if (exact) return exact.env

@@ -4332,18 +4332,21 @@ function registerIpcHandlers(): void {
     'jsonClaude:setPermissionMode',
     (_ctx, sessionId: string, mode: JsonClaudePermissionMode) => {
       if (!sessionId) return false
-      if (!getChatCapabilities(chatRouter.agentKindOf(sessionId)).permissionModes) return false
       // Optimistically reflect in the slice so the badge updates
       // immediately. The manager writes a stdin control_request that
       // the subprocess applies mid-turn (same protocol the TUI's
       // shift+tab uses). The persisted slice mode also flows into
       // --permission-mode on the next spawn, so a subsequent kill or
-      // reconnect picks it up.
-      store.dispatch({
-        type: 'jsonClaude/permissionModeChanged',
-        payload: { sessionId, mode }
+      // reconnect picks it up. Held behind a pending start: its
+      // sessionStarted would otherwise reset the mode chosen here.
+      chatStarts.afterStart(sessionId, () => {
+        if (!getChatCapabilities(chatRouter.agentKindOf(sessionId)).permissionModes) return
+        store.dispatch({
+          type: 'jsonClaude/permissionModeChanged',
+          payload: { sessionId, mode }
+        })
+        chatRouter.setPermissionMode(sessionId, mode)
       })
-      chatRouter.setPermissionMode(sessionId, mode)
       return true
     }
   )

@@ -10,10 +10,15 @@ import { log } from './debug'
 interface PendingStart {
   cancelled: boolean
   done: Promise<boolean>
+  /** The start that replaced this one after it was cancelled. */
+  next?: PendingStart
 }
 
 export class ChatStartGate {
   private readonly pending = new Map<string, PendingStart>()
+  /** Cancelled starts still in flight, waiting to be linked to the start
+   *  that replaces them (kill + restart) so their held calls follow it. */
+  private readonly cancelled = new Map<string, PendingStart>()
 
   /** Run `start` for `sessionId`, or join the start already in flight for
    *  it. Resolves true once the session is running, whichever caller
@@ -31,9 +36,15 @@ export class ChatStartGate {
         return false
       } finally {
         if (this.pending.get(sessionId) === token) this.pending.delete(sessionId)
+        if (this.cancelled.get(sessionId) === token) this.cancelled.delete(sessionId)
       }
     })()
     this.pending.set(sessionId, token)
+    const replaced = this.cancelled.get(sessionId)
+    if (replaced) {
+      replaced.next = token
+      this.cancelled.delete(sessionId)
+    }
     return token.done
   }
 
@@ -43,25 +54,40 @@ export class ChatStartGate {
     if (!token) return
     token.cancelled = true
     this.pending.delete(sessionId)
+    this.cancelled.set(sessionId, token)
   }
 
   /** Run `fn` now when no start is in flight, otherwise once it succeeds —
-   *  in call order, after anything queued by the start's own caller. */
+   *  in call order, after anything queued by the start's own caller. A
+   *  start that was cancelled and replaced (kill + restart) hands its
+   *  held calls to the replacement; they are dropped only when nothing
+   *  replaced it. */
   afterStart(sessionId: string, fn: () => void): void {
     const token = this.pending.get(sessionId)
     if (!token) {
       fn()
       return
     }
+    this.runAfter(sessionId, token, fn)
+  }
+
+  private runAfter(sessionId: string, token: PendingStart, fn: () => void): void {
     void token.done.then((running) => {
       if (running) fn()
+      else if (token.next) this.runAfter(sessionId, token.next, fn)
       else log('json-claude', `dropped call for sessionId=${sessionId}: start did not complete`)
     })
   }
 
   /** Resolves once no start is in flight: true unless the one in flight
-   *  failed or was cancelled. */
-  settled(sessionId: string): Promise<boolean> {
-    return this.pending.get(sessionId)?.done ?? Promise.resolve(true)
+   *  failed or was cancelled without a replacement. */
+  async settled(sessionId: string): Promise<boolean> {
+    let token = this.pending.get(sessionId)
+    while (token) {
+      const running = await token.done
+      if (running || !token.next) return running
+      token = token.next
+    }
+    return true
   }
 }
