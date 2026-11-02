@@ -32,8 +32,7 @@ import { createWebClientServer } from './web-client-server'
 import { getOrCreateWsToken, rotateWsToken } from './ws-token'
 import { networkInterfaces } from 'os'
 import type { Server as HttpServer } from 'http'
-import type { RequestHandler, ServerTransport } from '../shared/transport/transport'
-import { localShellOnly } from './local-shell-only'
+import type { ServerTransport } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
 import { parseCliFlags, USAGE, type CliFlags } from './cli-args'
@@ -4572,22 +4571,20 @@ function registerIpcHandlers(): void {
   // remote connections live in secrets.enc keyed `backend-token:<id>`.
   //
   // `transport` is the compound IPC+WS transport, so "only the local
-  // window" has to be enforced per call. Before it was, every WS client
-  // could read this machine's saved remotes — tokens included — and a web
-  // client opened from a phone hydrated them and switched itself to
-  // whichever remote the desktop last had active.
+  // window" is enforced per call: CompoundServerTransport refuses WS
+  // callers on every `connections:` / `ssh:` channel (local-shell-only.ts).
+  // Before it did, any WS client could read this machine's saved remotes —
+  // tokens included — and a web client opened from a phone hydrated them
+  // and switched itself to whichever remote the desktop last had active.
   //
   // Renderer-shell handlers are stateless wrt the store — they just read/
   // write `config` and persist via saveConfig. There's no slice for
   // connections by design (nothing else needs to subscribe).
-  const onLocalShellRequest = (name: string, handler: RequestHandler): void =>
-    transport.onRequest(name, localShellOnly(name, handler))
-
-  onLocalShellRequest('connections:list', () => {
+  transport.onRequest('connections:list', () => {
     return config.connections ?? []
   })
 
-  onLocalShellRequest(
+  transport.onRequest(
     'connections:add',
     (
       _ctx,
@@ -4634,7 +4631,7 @@ function registerIpcHandlers(): void {
     }
   )
 
-  onLocalShellRequest('connections:remove', (_ctx, id: string) => {
+  transport.onRequest('connections:remove', (_ctx, id: string) => {
     if (id === LOCAL_BACKEND_ID) throw new Error('cannot remove the local backend')
     const list = config.connections ?? []
     const next = list.filter((c) => c.id !== id)
@@ -4658,7 +4655,7 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  onLocalShellRequest('connections:rename', (_ctx, id: string, label: string) => {
+  transport.onRequest('connections:rename', (_ctx, id: string, label: string) => {
     if (typeof label !== 'string' || !label.trim()) throw new Error('label is required')
     const list = config.connections ?? []
     const idx = list.findIndex((c) => c.id === id)
@@ -4670,7 +4667,7 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  onLocalShellRequest('connections:setActive', (_ctx, id: string) => {
+  transport.onRequest('connections:setActive', (_ctx, id: string) => {
     const list = config.connections ?? []
     if (!list.some((c) => c.id === id)) throw new Error(`unknown backend id: ${id}`)
     config.activeBackendId = id
@@ -4678,11 +4675,11 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  onLocalShellRequest('connections:getActive', () => {
+  transport.onRequest('connections:getActive', () => {
     return config.activeBackendId ?? LOCAL_BACKEND_ID
   })
 
-  onLocalShellRequest('connections:setLastConnected', (_ctx, id: string, when?: number) => {
+  transport.onRequest('connections:setLastConnected', (_ctx, id: string, when?: number) => {
     const list = config.connections ?? []
     const idx = list.findIndex((c) => c.id === id)
     if (idx < 0) return false
@@ -4693,12 +4690,12 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  onLocalShellRequest('connections:getToken', (_ctx, id: string) => {
+  transport.onRequest('connections:getToken', (_ctx, id: string) => {
     if (id === LOCAL_BACKEND_ID) return null
     return getSecret(`backend-token:${id}`)
   })
 
-  onLocalShellRequest('connections:hasToken', (_ctx, id: string) => {
+  transport.onRequest('connections:hasToken', (_ctx, id: string) => {
     if (id === LOCAL_BACKEND_ID) return false
     return hasSecret(`backend-token:${id}`)
   })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { localShellOnly } from './local-shell-only'
+import { isLocalShellOnly, localShellOnly } from './local-shell-only'
 
 describe('localShellOnly', () => {
   it('passes IPC calls through with their args', async () => {
@@ -17,4 +17,24 @@ describe('localShellOnly', () => {
     )
     expect(inner).not.toHaveBeenCalled()
   })
+})
+
+describe('isLocalShellOnly', () => {
+  it.each([
+    'connections:list',
+    'connections:getToken',
+    'ssh:reconnect',
+    'ssh:bootstrap',
+    'ssh:upgradeServer',
+    'ssh:listConfiguredHosts'
+  ])('guards %s', (name) => {
+    expect(isLocalShellOnly(name)).toBe(true)
+  })
+
+  it.each(['config:getWsTransportInfo', 'pty:write', 'sshBootstrap/progress', 'remote-connections:x'])(
+    'leaves %s open',
+    (name) => {
+      expect(isLocalShellOnly(name)).toBe(false)
+    }
+  )
 })

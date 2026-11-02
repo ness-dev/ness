@@ -823,9 +823,16 @@ async function resyncRemoteBackend(connectionId: string): Promise<void> {
  *  Doesn't await the connects: an unreachable host can take a TCP
  *  timeout to fail, and boot shouldn't wait on it.
  *
+ *  Only the first connect attempt counts. If the saved remote is down at
+ *  boot and the transport's backoff reconnects it later, the user is NOT
+ *  switched over — by then they've been working on Local, and yanking the
+ *  whole window to another host mid-session is worse than one click on
+ *  its chip.
+ *
  *  The persisted `activeBackendId` is left alone when its remote is down.
  *  A remote that's asleep or behind a VPN that isn't up yet is routine,
- *  and overwriting the choice would forget it after one bad boot. */
+ *  and overwriting the choice would forget it after one bad boot — it
+ *  takes effect again on the next boot where the remote answers. */
 export async function hydrateSavedRemotes(deps: {
   registry: BackendsRegistry
   backend: Pick<

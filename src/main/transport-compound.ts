@@ -6,7 +6,10 @@
 //
 // Every handler is registered on every inner transport, so a request
 // from either the Electron renderer or a WS client hits the same
-// function and dispatches through the same store.
+// function and dispatches through the same store — except channels
+// `isLocalShellOnly` names, which refuse anything that didn't arrive
+// over IPC. Enforcing that here rather than at each registration site is
+// what keeps a new `connections:` / `ssh:` handler from shipping open.
 
 import type { StateEvent } from '../shared/state'
 import type {
@@ -14,6 +17,7 @@ import type {
   ServerTransport,
   SignalHandler
 } from '../shared/transport/transport'
+import { isLocalShellOnly, localShellOnly } from './local-shell-only'
 
 export class CompoundServerTransport implements ServerTransport {
   constructor(private readonly inner: ServerTransport[]) {}
@@ -31,7 +35,8 @@ export class CompoundServerTransport implements ServerTransport {
   }
 
   onRequest(name: string, handler: RequestHandler): void {
-    for (const t of this.inner) t.onRequest(name, handler)
+    const guarded = isLocalShellOnly(name) ? localShellOnly(name, handler) : handler
+    for (const t of this.inner) t.onRequest(name, guarded)
   }
 
   onSignal(name: string, handler: SignalHandler): void {
