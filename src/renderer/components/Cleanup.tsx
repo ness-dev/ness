@@ -148,38 +148,49 @@ export function Cleanup({
     (w) => dirtyMap[w.path] === undefined && !dirtyFailed[w.path]
   )
 
+  // Each backend keeps its own activity log, and in fleet view the list
+  // spans several, so the log is fetched once from every backend that owns
+  // an eligible worktree. Like the dirty sweep, a backend is asked once per
+  // open: a deletion changes `eligible` but not anyone's history.
+  // `backendFor` hands back one cached object per backend, so it is the key.
+  const requestedLogs = useRef(new Set<ElectronAPI>())
+  const logsInFlight = useRef(0)
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const log = await backend.getActivityLog()
-        if (cancelled) return
-        const lastTs: Record<string, number> = {}
-        for (const [path, rec] of Object.entries(log as ActivityLog)) {
-          // Only 'processing' proves the agent actually ran here. Waking a
-          // chat session derives 'waiting' and auto-sleep derives 'idle',
-          // so using the newest event of any kind resets a worktree's age
-          // just from the user opening it.
-          let ts: number | undefined
-          for (let i = rec.events.length - 1; i >= 0; i--) {
-            if (rec.events[i].s === 'processing') {
-              ts = rec.events[i].t
-              break
+    for (const w of eligible) {
+      const owner = backendFor(w.path)
+      if (requestedLogs.current.has(owner)) continue
+      requestedLogs.current.add(owner)
+      logsInFlight.current++
+      void owner
+        .getActivityLog()
+        .then((log) => {
+          if (!mounted.current) return
+          const lastTs: Record<string, number> = {}
+          for (const [path, rec] of Object.entries(log as ActivityLog)) {
+            if (backendFor(path) !== owner) continue
+            // Only 'processing' proves the agent actually ran here. Waking a
+            // chat session derives 'waiting' and auto-sleep derives 'idle',
+            // so using the newest event of any kind resets a worktree's age
+            // just from the user opening it.
+            let ts: number | undefined
+            for (let i = rec.events.length - 1; i >= 0; i--) {
+              if (rec.events[i].s === 'processing') {
+                ts = rec.events[i].t
+                break
+              }
             }
+            ts ??= rec.createdAt
+            if (ts !== undefined) lastTs[path] = ts
           }
-          ts ??= rec.createdAt
-          if (ts !== undefined) lastTs[path] = ts
-        }
-        setActivityLastTs(lastTs)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+          setActivityLastTs((prev) => ({ ...prev, ...lastTs }))
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (--logsInFlight.current === 0 && mounted.current) setLoading(false)
+        })
     }
-  }, [backend])
+    if (logsInFlight.current === 0) setLoading(false)
+  }, [eligible, backendFor])
 
   const ageMs = AGES.find((a) => a.id === ageKey)!.ms
 
