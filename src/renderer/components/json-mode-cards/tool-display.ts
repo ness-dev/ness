@@ -359,6 +359,27 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
   return { label: full, compactLabel: full, icon: McpGenericIcon }
 }
 
+// Tools whose `description` input is the model's own one-line account
+// of why it's making the call ("Run the reducer tests"). TaskCreate et
+// al. also take a `description`, but there it's the task body, not an
+// explanation of the call, so they're deliberately left out.
+const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
+
+/** The model-written "what this call is for" line, when the tool takes
+ *  one. Reads better than the bare tool name in a collapsed summary:
+ *  "Run typecheck" says more than "Bash". */
+export function getToolIntent(
+  name: string | undefined,
+  input: unknown
+): string | null {
+  if (!name || !INTENT_TOOLS.has(name)) return null
+  if (!input || typeof input !== 'object') return null
+  const raw = (input as Record<string, unknown>).description
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 /** What a single ness-control call *did*, for surfaces that summarize a
  *  run of them rather than describe one card. */
 export interface ToolAction {

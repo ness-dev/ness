@@ -15,6 +15,8 @@ import {
 export interface TimelineRow {
   key: string
   toolName?: string
+  /** See getToolIntent — the model's own label for the call. */
+  toolIntent?: string
   hasError?: boolean
   images?: JsonClaudeImageRef[]
   isThinking?: boolean

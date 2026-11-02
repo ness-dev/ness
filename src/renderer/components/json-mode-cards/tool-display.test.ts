@@ -4,6 +4,7 @@ import {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   normalizeServerName,
   parseMcpToolName,
@@ -426,5 +427,26 @@ describe('pre-rename harness-control tools in existing transcripts', () => {
     expect(getToolDisplay('mcp__harness-control__create_worktree').label).toBe(
       'Ness · Create Worktree'
     )
+  })
+})
+
+describe('getToolIntent', () => {
+  it('returns the trimmed description for Bash and sub-agent calls', () => {
+    expect(getToolIntent('Bash', { command: 'ls', description: ' List files ' })).toBe(
+      'List files'
+    )
+    expect(getToolIntent('Agent', { prompt: 'x', description: 'Find callers' })).toBe(
+      'Find callers'
+    )
+  })
+
+  it('returns null when the description is missing or blank', () => {
+    expect(getToolIntent('Bash', { command: 'ls' })).toBeNull()
+    expect(getToolIntent('Bash', { command: 'ls', description: '   ' })).toBeNull()
+    expect(getToolIntent('Bash', undefined)).toBeNull()
+  })
+
+  it('ignores tools whose description is not a call explanation', () => {
+    expect(getToolIntent('TaskCreate', { description: 'Long task body' })).toBeNull()
   })
 })

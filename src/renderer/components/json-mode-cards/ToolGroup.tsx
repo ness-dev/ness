@@ -133,7 +133,12 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   // "N more calls" remainder is vague on its own.
   const showChips = !showTimeline && !allNamed
 
-  const displays = toolRows.map((r) => getToolDisplay(r.toolName))
+  // A chip reads as the model's stated intent when the tool carries one
+  // ("Run typecheck" beats "Bash"); the icon still says which tool.
+  const displays = toolRows.map((r) => {
+    const d = getToolDisplay(r.toolName)
+    return { icon: d.icon, text: r.toolIntent ?? d.compactLabel }
+  })
   const visibleDisplays = displays.slice(0, 6)
   const moreCount = displays.length - 6
   const summary = (
@@ -142,7 +147,7 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
         <Fragment key={i}>
           {i > 0 && <span className="opacity-40">·</span>}
           {d.icon && <d.icon className="icon-xs shrink-0" />}
-          <span>{d.compactLabel}</span>
+          <span className="whitespace-nowrap">{d.text}</span>
         </Fragment>
       ))}
       {moreCount > 0 && (
