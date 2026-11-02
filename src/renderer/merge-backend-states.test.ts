@@ -183,6 +183,32 @@ describe('getMergedWorktrees (shared cache)', () => {
     expect(second.backendMeta).toBe(first.backendMeta)
   })
 
+  it('keeps every output stable in single mode when a hidden backend streams', () => {
+    // Single mode merges only the active backend, but the cache key spans
+    // all of them — a token on a hidden remote still reruns the merge.
+    const local = backend('local', {
+      kind: 'local',
+      worktrees: [wt('/l/a', '/l')],
+      repoRoots: ['/l'],
+      pending: [pending('p1', '/l')],
+      statuses: { t1: 'idle' }
+    })
+    const first = getMergedWorktrees(
+      [local, backend('beta', { worktrees: [wt('/b/a', '/b')], statuses: { b1: 'idle' } })],
+      'single',
+      'local'
+    )
+    const second = getMergedWorktrees(
+      [local, backend('beta', { worktrees: [wt('/b/a', '/b')], statuses: { b1: 'processing' } })],
+      'single',
+      'local'
+    )
+    expect(second).toBe(first)
+    for (const key of Object.keys(first) as (keyof typeof first)[]) {
+      expect(second[key], key).toBe(first[key])
+    }
+  })
+
   it('returns the previous result when an event changed nothing it reads', () => {
     const list = [wt('/w', '/r')]
     const first = getMergedWorktrees(

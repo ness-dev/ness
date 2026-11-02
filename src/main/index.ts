@@ -36,6 +36,7 @@ import type { ServerTransport } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
 import { ChatStartGate } from './chat-start-gate'
+import { createSingleFlight } from './single-flight'
 import {
   knownClaudeConfigDirs,
   onShellEnvCaptured,
@@ -1978,16 +1979,12 @@ function registerIpcHandlers(): void {
   // streamed token) otherwise queues thousands of reads, and each spawn
   // blocks the event loop long enough that every other request — tab
   // switches included — waits minutes behind them.
-  const dirtyInflight = new Map<string, Promise<boolean>>()
+  // Keyed on priority too, so a bulk sweep never hands its queued answer
+  // to an interactive caller.
+  const dirtyFlight = createSingleFlight<boolean>()
   transport.onRequest('worktree:isDirty', async (_ctx, path: string, opts?: { bulk?: boolean }) => {
     const priority = opts?.bulk ? 'bulk' : 'interactive'
-    const key = `${priority}\0${path}`
-    let pending = dirtyInflight.get(key)
-    if (!pending) {
-      pending = isWorktreeDirty(path, priority).finally(() => dirtyInflight.delete(key))
-      dirtyInflight.set(key, pending)
-    }
-    const git = await pending
+    const git = await dirtyFlight(`${priority}\0${path}`, () => isWorktreeDirty(path, priority))
     const scratchpad = hasScratchpadNote(store.getSnapshot().state.scratchpad, path)
     return { git, scratchpad }
   })
