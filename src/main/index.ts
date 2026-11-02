@@ -1973,8 +1973,21 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // Identical concurrent asks share one `git status`. A client that re-sends
+  // the same sweep on every render (the 2.18 Cleanup modal did, once per
+  // streamed token) otherwise queues thousands of reads, and each spawn
+  // blocks the event loop long enough that every other request — tab
+  // switches included — waits minutes behind them.
+  const dirtyInflight = new Map<string, Promise<boolean>>()
   transport.onRequest('worktree:isDirty', async (_ctx, path: string, opts?: { bulk?: boolean }) => {
-    const git = await isWorktreeDirty(path, opts?.bulk ? 'bulk' : 'interactive')
+    const priority = opts?.bulk ? 'bulk' : 'interactive'
+    const key = `${priority}\0${path}`
+    let pending = dirtyInflight.get(key)
+    if (!pending) {
+      pending = isWorktreeDirty(path, priority).finally(() => dirtyInflight.delete(key))
+      dirtyInflight.set(key, pending)
+    }
+    const git = await pending
     const scratchpad = hasScratchpadNote(store.getSnapshot().state.scratchpad, path)
     return { git, scratchpad }
   })

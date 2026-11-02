@@ -230,13 +230,69 @@ export function getMergedWorktrees(
   // evicts a backend's cached tab walk.
   const segments = tabsSelector.select(entries.map((e) => ({ id: e.backendId, state: e.state })))
   const tabsById = new Map(segments.map((s) => [s.backendId, s.value]))
-  const result = mergeBackendStates(entries, {
+  const fresh = mergeBackendStates(entries, {
     viewMode,
     activeId,
     tabsFor: (backendId) => tabsById.get(backendId) ?? {}
   })
+  const result = cache ? reuseUnchanged(cache.result, fresh) : fresh
   cache = { entries, viewMode, activeId, result }
   return result
+}
+
+/** The cache key above is each backend's whole AppState, which is a new
+ *  object after every event on that backend — a streamed token included.
+ *  So the merge reruns constantly, and before this every output was a new
+ *  array or map each time even when its contents were identical. Anything
+ *  keyed on one of them re-fired per event: the Cleanup modal's dirty sweep
+ *  re-queued a `git status` for every worktree on every token, which buried
+ *  a remote host under thousands of queued reads and stalled tab switching
+ *  behind them. Each field keeps its previous reference unless its contents
+ *  actually changed, and the whole result does too when no field did. */
+function reuseUnchanged(prev: MergedWorktreeData, next: MergedWorktreeData): MergedWorktreeData {
+  let changed = false
+  const out = {} as Record<keyof MergedWorktreeData, unknown>
+  for (const key of Object.keys(next) as (keyof MergedWorktreeData)[]) {
+    if (sameContents(prev[key], next[key])) {
+      out[key] = prev[key]
+    } else {
+      out[key] = next[key]
+      changed = true
+    }
+  }
+  return changed ? (out as unknown as MergedWorktreeData) : prev
+}
+
+function sameContents(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameEntry(a[i], b[i])) return false
+    return true
+  }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const k of aKeys) {
+    if (!(k in b) || !sameEntry(a[k], b[k])) return false
+  }
+  return true
+}
+
+/** One level deeper than reference equality, for the small wrappers the
+ *  merge allocates per element (`MergedWorktree`, `backendMeta` values).
+ *  Their fields are slice values the reducers already keep stable. */
+function sameEntry(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!isRecord(a) || !isRecord(b) || Array.isArray(a) || Array.isArray(b)) return false
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const k of aKeys) if (a[k] !== b[k]) return false
+  return true
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
 }
 
 /** Test-only: forget the shared cache between cases. */
