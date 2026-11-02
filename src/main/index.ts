@@ -4566,9 +4566,16 @@ function registerIpcHandlers(): void {
   // ---- Multi-backend connections list (Tier 1) -----------------------
   // The connections list is renderer-shell-owned (per plans/tier-1-multi-
   // backend-ux.md §C/§G) — it lives in the local Electron's config.json,
-  // not in any backend's slice, and is ONLY exposed by the local backend's
-  // transport. Remote backends don't manage other backends. Tokens for
+  // not in any backend's slice, and is ONLY exposed to the local Electron
+  // window. Remote backends don't manage other backends. Tokens for
   // remote connections live in secrets.enc keyed `backend-token:<id>`.
+  //
+  // `transport` is the compound IPC+WS transport, so "only the local
+  // window" is enforced per call: CompoundServerTransport refuses WS
+  // callers on every `connections:` / `ssh:` channel (local-shell-only.ts).
+  // Before it did, any WS client could read this machine's saved remotes —
+  // tokens included — and a web client opened from a phone hydrated them
+  // and switched itself to whichever remote the desktop last had active.
   //
   // Renderer-shell handlers are stateless wrt the store — they just read/
   // write `config` and persist via saveConfig. There's no slice for

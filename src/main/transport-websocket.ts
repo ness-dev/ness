@@ -248,7 +248,7 @@ export class WebSocketServerTransport implements ServerTransport {
       log('ws-transport', 'frame arrived for unknown socket — dropping')
       return
     }
-    const ctx: ConnectionContext = { clientId }
+    const ctx: ConnectionContext = { clientId, via: 'ws' }
     if (frame.t === 'snapreq') {
       const snapshot = stripSnapshotForWire(this.store.getSnapshot())
       this.sendFrame(ws, { t: 'snapres', id: frame.id, ok: true, snapshot })

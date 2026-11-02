@@ -1,21 +1,22 @@
-// Regression test for the e07bf05 → fix sequence. The bug:
-// hydrateRemoteBackend registered the remote BEFORE awaiting connect(),
-// and on connect failure the catch block didn't remove the entry. The
-// outer hydration loop then pinned active at the failed remote, the
-// renderer read from an empty store, and App.tsx fell through to the
-// onboarding screen even though the local backend had the user's repos.
+// hydrateRemoteBackend registers the remote BEFORE awaiting connect().
+// The original bug: the outer hydration loop then pinned active at a
+// remote that never connected, the renderer read from an empty store, and
+// App.tsx fell through to the onboarding screen even though the local
+// backend had the user's repos.
 //
-// The fix removes the half-registered entry in the catch. BackendsRegistry.remove
-// auto-falls-back to LOCAL_BACKEND_ID when the removed entry was active,
-// so this single line handles both "remote is saved active" and "remote
-// is just one of several" cases.
+// The first fix removed the entry on failure. That avoided onboarding but
+// closed the transport (so it never retried) and hid the chip, leaving a
+// saved remote the user could neither see nor delete. Now a failed remote
+// stays registered as disconnected, active falls back to Local, and the
+// saved active backend is only adopted once it actually connects.
 
 import { describe, it, expect } from 'vitest'
 import { WebSocketServer, WebSocket as WSClient } from 'ws'
 import {
   BackendsRegistry,
   LOCAL_BACKEND_ID,
-  hydrateRemoteBackend
+  hydrateRemoteBackend,
+  hydrateSavedRemotes
 } from './store'
 import type { BackendConnection } from './types'
 import type { LocalTransportHandle } from '../shared/transport/transport'
@@ -110,111 +111,156 @@ describe('BackendsRegistry.remove falls back to local', () => {
   })
 })
 
+class WSWithNode extends WebSocketClientTransport {
+  constructor(opts: ConstructorParameters<typeof WebSocketClientTransport>[0]) {
+    super({
+      ...opts,
+      initialBackoffMs: 5_000,
+      maxBackoffMs: 5_000,
+      WebSocketCtor: WSClient as unknown as typeof WebSocket
+    })
+  }
+}
+
+const nonSshBackend = {
+  connectionsGetToken: async () => 'tok',
+  // The hydrator only calls sshReconnect when `conn.ssh` is set, which it
+  // isn't here. Throwing makes a regression onto the wrong path loud.
+  sshReconnect: async () => {
+    throw new Error('should not be called for non-SSH backend')
+  }
+}
+
+function remoteAt(port: number, id = 'remote-1'): BackendConnection {
+  return { id, label: id, url: `ws://127.0.0.1:${port}/`, kind: 'remote', addedAt: Date.now() }
+}
+
 describe('hydrateRemoteBackend on failed connect', () => {
-  it('removes the registry entry after a WS connect failure', async () => {
+  it('keeps the entry registered as disconnected and resolves false', async () => {
     const { port, close } = await rejectingServer()
+    const { registry } = makeRegistry()
     try {
-      const { registry } = makeRegistry()
-      const remote: BackendConnection = {
-        id: 'remote-1',
-        label: 'R1',
-        url: `ws://127.0.0.1:${port}/`,
-        kind: 'remote',
-        addedAt: Date.now()
-      }
-
-      // Subclass to inject the Node ws ctor without touching production
-      // signatures (browser code passes the real global WebSocket).
-      class WSWithNode extends WebSocketClientTransport {
-        constructor(opts: ConstructorParameters<typeof WebSocketClientTransport>[0]) {
-          super({
-            ...opts,
-            initialBackoffMs: 5_000,
-            maxBackoffMs: 5_000,
-            WebSocketCtor: WSClient as unknown as typeof WebSocket
-          })
-        }
-      }
-
-      await hydrateRemoteBackend(remote, {
+      const connected = await hydrateRemoteBackend(remoteAt(port), {
         registry,
-        backend: {
-          connectionsGetToken: async () => 'tok',
-          // Non-SSH path — the hydrator only calls sshReconnect when
-          // `conn.ssh` is set, which it isn't for these tests. Stub
-          // throws so a regression flagging the wrong path would fail loudly.
-          sshReconnect: async () => {
-            throw new Error('should not be called for non-SSH backend')
-          }
-        },
+        backend: nonSshBackend,
         WSCtor: WSWithNode
       })
 
-      expect(registry.has('remote-1')).toBe(false)
+      expect(connected).toBe(false)
+      expect(registry.has('remote-1')).toBe(true)
+      expect(registry.getStatus('remote-1').state).toBe('disconnected')
     } finally {
+      // Closes the transport so its retry timer doesn't outlive the test.
+      registry.remove('remote-1')
       await close()
     }
   })
 
-  it('falls back to LOCAL_BACKEND_ID when the failed remote had been set active', async () => {
-    // The full bug repro: the outer loop pins active at the saved id
-    // (which the in-flight hydrate has already added) before hydrate's
-    // await connect() rejects. After the catch fires, active must be
-    // back to local so App.tsx reads the local store's repoRoots and
-    // skips the onboarding gate.
+  it('falls back to Local when the failed remote had been made active', async () => {
     const { port, close } = await rejectingServer()
+    const { registry } = makeRegistry()
     try {
-      const { registry } = makeRegistry()
-      const remote: BackendConnection = {
-        id: 'remote-1',
-        label: 'R1',
-        url: `ws://127.0.0.1:${port}/`,
-        kind: 'remote',
-        addedAt: Date.now()
-      }
-
-      class WSWithNode extends WebSocketClientTransport {
-        constructor(opts: ConstructorParameters<typeof WebSocketClientTransport>[0]) {
-          super({
-            ...opts,
-            initialBackoffMs: 5_000,
-            maxBackoffMs: 5_000,
-            WebSocketCtor: WSClient as unknown as typeof WebSocket
-          })
-        }
-      }
-
-      const hydratePromise = hydrateRemoteBackend(remote, {
+      const pending = hydrateRemoteBackend(remoteAt(port), {
         registry,
-        backend: {
-          connectionsGetToken: async () => 'tok',
-          // Non-SSH path — the hydrator only calls sshReconnect when
-          // `conn.ssh` is set, which it isn't for these tests. Stub
-          // throws so a regression flagging the wrong path would fail loudly.
-          sshReconnect: async () => {
-            throw new Error('should not be called for non-SSH backend')
-          }
-        },
+        backend: nonSshBackend,
         WSCtor: WSWithNode
       })
-
-      // Mimic the outer loop: after the token fetch resolves (the
-      // microtask above), registry.has('remote-1') is true, so the
-      // bootstrapper calls setActive. Yield twice so the token promise
-      // settles and registry.add has run.
+      // Let the token fetch settle so registry.add has run, then select it
+      // the way a racing caller would.
       await Promise.resolve()
       await Promise.resolve()
-      if (registry.has('remote-1')) {
-        registry.setActive('remote-1')
-        expect(registry.getActiveId()).toBe('remote-1')
-      }
+      expect(registry.has('remote-1')).toBe(true)
+      registry.setActive('remote-1')
 
-      await hydratePromise
+      await pending
 
-      expect(registry.has('remote-1')).toBe(false)
       expect(registry.getActiveId()).toBe(LOCAL_BACKEND_ID)
+      expect(registry.has('remote-1')).toBe(true)
     } finally {
+      registry.remove('remote-1')
       await close()
     }
+  })
+})
+
+describe('hydrateSavedRemotes', () => {
+  function deferred(): { promise: Promise<boolean>; resolve: (v: boolean) => void } {
+    let resolve!: (v: boolean) => void
+    const promise = new Promise<boolean>((r) => (resolve = r))
+    return { promise, resolve }
+  }
+
+  function setup(savedActive: string): {
+    registry: BackendsRegistry
+    finish: (id: string, connected: boolean) => Promise<void>
+    run: () => Promise<void>
+  } {
+    const { registry } = makeRegistry()
+    const pending = new Map<string, ReturnType<typeof deferred>>()
+    const connections: BackendConnection[] = ['remote-1', 'remote-2'].map((id) => ({
+      id,
+      label: id,
+      url: 'ws://example.invalid/',
+      kind: 'remote',
+      addedAt: 0
+    }))
+    const run = (): Promise<void> =>
+      hydrateSavedRemotes({
+        registry,
+        backend: {
+          ...nonSshBackend,
+          connectionsList: async () => connections,
+          connectionsGetActive: async () => savedActive
+        },
+        hydrate: async (conn, { registry: reg }) => {
+          // Mirror the real hydrator: register immediately, connect later.
+          reg.add(conn, fakeLocalTransport())
+          const d = deferred()
+          pending.set(conn.id, d)
+          return d.promise
+        }
+      })
+    const finish = async (id: string, connected: boolean): Promise<void> => {
+      pending.get(id)!.resolve(connected)
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    return { registry, finish, run }
+  }
+
+  it('does not select the saved backend before it connects', async () => {
+    const { registry, run } = setup('remote-1')
+    await run()
+    expect(registry.has('remote-1')).toBe(true)
+    expect(registry.getActiveId()).toBe(LOCAL_BACKEND_ID)
+  })
+
+  it('selects the saved backend once it connects', async () => {
+    const { registry, run, finish } = setup('remote-1')
+    await run()
+    await finish('remote-1', true)
+    expect(registry.getActiveId()).toBe('remote-1')
+  })
+
+  it('stays on Local when the saved backend fails to connect', async () => {
+    const { registry, run, finish } = setup('remote-1')
+    await run()
+    await finish('remote-1', false)
+    expect(registry.getActiveId()).toBe(LOCAL_BACKEND_ID)
+    expect(registry.has('remote-1')).toBe(true)
+  })
+
+  it('does not pull the user away from a backend they picked meanwhile', async () => {
+    const { registry, run, finish } = setup('remote-1')
+    await run()
+    registry.setActive('remote-2')
+    await finish('remote-1', true)
+    expect(registry.getActiveId()).toBe('remote-2')
+  })
+
+  it('ignores connects from backends that are not the saved active one', async () => {
+    const { registry, run, finish } = setup('remote-1')
+    await run()
+    await finish('remote-2', true)
+    expect(registry.getActiveId()).toBe(LOCAL_BACKEND_ID)
   })
 })

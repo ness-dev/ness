@@ -41,6 +41,12 @@ import type { StateEvent, StateSnapshot } from '../state'
  *  the lifetime of a connection (a BrowserWindow or a WebSocket). */
 export interface ConnectionContext {
   clientId: string
+  /** Which transport carried the call. `ipc` is the local Electron
+   *  window; `ws` is anything that reached the network listener (the
+   *  web client, another Ness using this one as a remote). Handlers for
+   *  state that belongs to the local machine's shell — saved remote
+   *  connections and their tokens — refuse `ws`. */
+  via: 'ipc' | 'ws'
 }
 
 // Handler args are typed as `any[]` because the wire boundary is
