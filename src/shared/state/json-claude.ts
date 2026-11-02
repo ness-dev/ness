@@ -76,6 +76,12 @@ export interface JsonClaudeMessageBlock {
   id?: string
   name?: string
   input?: Record<string, unknown>
+  // For 'tool_use': a short "what this call is for" line ("Read
+  // store.ts") shown in place of the tool name in collapsed views.
+  // Each provider derives it from whatever its harness offers (Claude's
+  // `description` arg, Codex's parsed command actions); the renderer
+  // only ever reads this field.
+  intent?: string
   // For 'tool_result': correlation + rendered body.
   toolUseId?: string
   content?: string

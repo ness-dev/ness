@@ -18,6 +18,7 @@ import {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   prettyToolName,
   type ArgEntry
@@ -31,6 +32,7 @@ export {
   formatActionCount,
   getToolAction,
   getToolDisplay,
+  getToolIntent,
   isNessControl,
   prettyToolName
 }

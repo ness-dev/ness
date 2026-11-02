@@ -64,7 +64,7 @@ vi.mock('fs', async () => {
 })
 
 import { Store } from './store'
-import { JsonClaudeManager } from './json-claude-manager'
+import { claudeToolIntent, extractAssistantBlocks, JsonClaudeManager } from './json-claude-manager'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { describeChatProviderContract } from './test-support/chat-provider-contract'
@@ -937,4 +937,37 @@ describeChatProviderContract('claude', () => {
       proc().emit('exit', 1, null)
     }
   }
+})
+
+describe('claudeToolIntent', () => {
+  it('returns the trimmed description for Bash and sub-agent calls', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls', description: ' List files ' })).toBe('List files')
+    expect(claudeToolIntent('Agent', { prompt: 'x', description: 'Find callers' })).toBe('Find callers')
+  })
+
+  it('returns null when the description is missing or blank', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls' })).toBeNull()
+    expect(claudeToolIntent('Bash', { command: 'ls', description: '   ' })).toBeNull()
+    expect(claudeToolIntent('Bash', undefined)).toBeNull()
+  })
+
+  it('ignores tools whose description is not a call explanation', () => {
+    expect(claudeToolIntent('TaskCreate', { description: 'Long task body' })).toBeNull()
+  })
+})
+
+describe('extractAssistantBlocks', () => {
+  it('sets intent on a described Bash tool_use from a raw assistant event', () => {
+    const blocks = extractAssistantBlocks({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } },
+          { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a.ts' } }
+        ]
+      }
+    })
+    expect(blocks[0].intent).toBe('Run tests')
+    expect(blocks[1].intent).toBeUndefined()
+  })
 })

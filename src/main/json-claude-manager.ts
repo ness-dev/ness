@@ -2261,7 +2261,24 @@ function streamEventBlockToMessageBlock(
   return null
 }
 
-function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
+// Tools whose `description` input is the model's own one-line account
+// of why it's making the call ("Run the reducer tests"). TaskCreate et
+// al. also take a `description`, but there it's the task body, not an
+// explanation of the call, so they're deliberately left out.
+const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
+
+export function claudeToolIntent(
+  name: string | undefined,
+  input: Record<string, unknown> | undefined
+): string | null {
+  if (!name || !INTENT_TOOLS.has(name)) return null
+  const raw = input?.description
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
   const message = ev['message'] as { content?: unknown } | undefined
   const content = message?.content
   if (!Array.isArray(content)) return []
@@ -2281,14 +2298,18 @@ function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageB
             : ''
       })
     } else if (t === 'tool_use') {
+      const name = typeof block['name'] === 'string' ? (block['name'] as string) : undefined
+      const input =
+        block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
+          ? (block['input'] as Record<string, unknown>)
+          : undefined
+      const intent = claudeToolIntent(name, input)
       out.push({
         type: 'tool_use',
         id: typeof block['id'] === 'string' ? (block['id'] as string) : undefined,
-        name: typeof block['name'] === 'string' ? (block['name'] as string) : undefined,
-        input:
-          block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
-            ? (block['input'] as Record<string, unknown>)
-            : undefined
+        name,
+        input,
+        ...(intent ? { intent } : {})
       })
     }
   }

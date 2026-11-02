@@ -359,6 +359,13 @@ export function getToolDisplay(name: string | undefined): ToolDisplay {
   return { label: full, compactLabel: full, icon: McpGenericIcon }
 }
 
+/** The provider-set "what this call is for" line, when there is one.
+ *  Reads better than the bare tool name in a collapsed summary: "Run
+ *  typecheck" says more than "Bash". */
+export function getToolIntent(block: { intent?: string }): string | null {
+  return block.intent?.trim() || null
+}
+
 /** What a single ness-control call *did*, for surfaces that summarize a
  *  run of them rather than describe one card. */
 export interface ToolAction {

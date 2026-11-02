@@ -33,10 +33,11 @@ export interface CodexThread {
   forkedFromId?: string | null
 }
 
-export interface CodexCommandAction {
-  type: string
-  command: string
-}
+export type CodexCommandAction =
+  | { type: 'read'; command: string; name: string; path: string }
+  | { type: 'listFiles'; command: string; path: string | null }
+  | { type: 'search'; command: string; query: string | null; path: string | null }
+  | { type: 'unknown'; command: string }
 
 export interface CodexFileChange {
   path: string

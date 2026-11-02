@@ -42,7 +42,12 @@ import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
 import { JsonClaudeQuestionCard } from './JsonClaudeQuestionCard'
 import { Tooltip } from './Tooltip'
-import { dispatchToolCard, ToolCardChrome, type ToolResultView } from './json-mode-cards'
+import {
+  dispatchToolCard,
+  getToolIntent,
+  ToolCardChrome,
+  type ToolResultView
+} from './json-mode-cards'
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TaskCard } from './json-mode-cards/TaskCard'
@@ -381,6 +386,7 @@ interface RenderedRow {
    *  (none today; reserved). */
   entryId?: string
   toolName?: string
+  toolIntent?: string
   hasError?: boolean
   hasPendingApproval?: boolean
   /** Images this row's tool returned (browser screenshots). Bubbles up
@@ -1269,6 +1275,7 @@ function renderEntries(
             entryId: entry.entryId,
             type: 'tool',
             toolName: block.name,
+            toolIntent: getToolIntent(block) ?? undefined,
             hasError: !!result?.isError,
             images: result?.images,
             hasPendingApproval:
