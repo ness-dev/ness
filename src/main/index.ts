@@ -32,12 +32,12 @@ import { createWebClientServer } from './web-client-server'
 import { getOrCreateWsToken, rotateWsToken } from './ws-token'
 import { networkInterfaces } from 'os'
 import type { Server as HttpServer } from 'http'
-import type { ServerTransport } from '../shared/transport/transport'
+import type { ServerTransport, ConnectionContext } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
 import { ChatStartGate } from './chat-start-gate'
 import { createSingleFlight } from '../shared/single-flight'
-import { isWithinRoots } from './own-paths'
+import { isWithinRoots, ownedPathsOnly } from './own-paths'
 import {
   knownClaudeConfigDirs,
   onShellEnvCaptured,
@@ -1991,9 +1991,15 @@ function registerIpcHandlers(): void {
     }
     return owned
   }
-  const assertOwnPath = (path: string): void => {
-    if (!isOwnPath(path)) throw new Error(`Not a worktree on this host: ${path}`)
-  }
+  // Every handler that takes a worktree path first and reaches git or the
+  // disk registers through these two, so a new one can't skip the check.
+  // Store-only handlers (panes, aliases, pins) don't need it: a foreign
+  // path there costs nothing.
+  type WorktreeHandler = (ctx: ConnectionContext, worktreePath: string, ...rest: any[]) => unknown // eslint-disable-line @typescript-eslint/no-explicit-any
+  const onWorktreeRequest = (name: string, handler: WorktreeHandler): void =>
+    transport.onRequest(name, ownedPathsOnly(isOwnPath, handler))
+  const onWorktreeSignal = (name: string, handler: WorktreeHandler): void =>
+    transport.onSignal(name, ownedPathsOnly(isOwnPath, handler, 'drop'))
 
   // Identical concurrent asks share one `git status`. A client that re-sends
   // the same sweep on every render (the 2.18 Cleanup modal did, once per
@@ -2003,8 +2009,7 @@ function registerIpcHandlers(): void {
   // Keyed on priority too, so a bulk sweep never hands its queued answer
   // to an interactive caller.
   const dirtyFlight = createSingleFlight<boolean>()
-  transport.onRequest('worktree:isDirty', async (_ctx, path: string, opts?: { bulk?: boolean }) => {
-    assertOwnPath(path)
+  onWorktreeRequest('worktree:isDirty', async (_ctx, path: string, opts?: { bulk?: boolean }) => {
     const priority = opts?.bulk ? 'bulk' : 'interactive'
     const git = await dirtyFlight(`${priority}\0${path}`, () => isWorktreeDirty(path, priority))
     const scratchpad = hasScratchpadNote(store.getSnapshot().state.scratchpad, path)
@@ -2139,13 +2144,12 @@ function registerIpcHandlers(): void {
   })
 
   // Changed files
-  transport.onRequest('worktree:changedFiles', async (_ctx, worktreePath: string, mode?: 'working' | 'branch') => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:changedFiles', async (_ctx, worktreePath: string, mode?: 'working' | 'branch') => {
     return getChangedFiles(worktreePath, mode ?? 'working')
   })
 
-  transport.onSignal('worktree:watchChangedFiles', (ctx, worktreePath: string) => {
-    if (!worktreePath || !isOwnPath(worktreePath)) return
+  onWorktreeSignal('worktree:watchChangedFiles', (ctx, worktreePath: string) => {
+    if (!worktreePath) return
     let subs = worktreeWatchSubs.get(ctx.clientId)
     if (!subs) {
       subs = new Map()
@@ -2171,7 +2175,7 @@ function registerIpcHandlers(): void {
   // (worktreePath, relativePath) tuple when the absolute file changes on
   // disk. Used by FileView and working-tree ReviewDiffPane to refresh
   // when an agent (or any external tool) edits the same file.
-  transport.onSignal(
+  onWorktreeSignal(
     'file:watchSubscribe',
     (ctx, worktreePath: string, relativePath: string) => {
       if (!worktreePath || !relativePath) return
@@ -2204,7 +2208,7 @@ function registerIpcHandlers(): void {
     }
   )
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:fileDiff',
     async (_ctx, 
       worktreePath: string,
@@ -2216,36 +2220,33 @@ function registerIpcHandlers(): void {
     }
   )
 
-  transport.onRequest('worktree:listFiles', async (_ctx, worktreePath: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:listFiles', async (_ctx, worktreePath: string) => {
     return listAllFiles(worktreePath)
   })
 
-  transport.onRequest('worktree:recentCommitShas', async (_ctx, worktreePath: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:recentCommitShas', async (_ctx, worktreePath: string) => {
     return listRecentCommitShas(worktreePath)
   })
 
-  transport.onRequest('worktree:readFile', async (_ctx, worktreePath: string, filePath: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:readFile', async (_ctx, worktreePath: string, filePath: string) => {
     return readWorktreeFile(worktreePath, filePath)
   })
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:readFileBinary',
     async (_ctx, worktreePath: string, filePath: string) => {
       return readWorktreeFileBinary(worktreePath, filePath)
     }
   )
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:writeFile',
     async (_ctx, worktreePath: string, filePath: string, contents: string) => {
       return writeWorktreeFile(worktreePath, filePath, contents)
     }
   )
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:fileDiffSides',
     async (_ctx, 
       worktreePath: string,
@@ -2257,16 +2258,15 @@ function registerIpcHandlers(): void {
     }
   )
 
-  transport.onRequest('worktree:branchCommits', async (_ctx, worktreePath: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:branchCommits', async (_ctx, worktreePath: string) => {
     return getBranchCommits(worktreePath)
   })
 
-  transport.onRequest('tools:list', async (_ctx, worktreePath: string) => {
+  onWorktreeRequest('tools:list', async (_ctx, worktreePath: string) => {
     return discoverTools(worktreePath)
   })
 
-  transport.onRequest('tools:run', async (_ctx, worktreePath: string, toolId: string) => {
+  onWorktreeRequest('tools:run', async (_ctx, worktreePath: string, toolId: string) => {
     const wt = store.getSnapshot().state.worktrees.list.find((w) => w.path === worktreePath)
     return runTool(worktreePath, toolId, {
       branch: wt?.branch ?? '',
@@ -2274,36 +2274,33 @@ function registerIpcHandlers(): void {
     })
   })
 
-  transport.onRequest('worktree:commitDiff', async (_ctx, worktreePath: string, hash: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:commitDiff', async (_ctx, worktreePath: string, hash: string) => {
     return getCommitDiff(worktreePath, hash)
   })
 
-  transport.onRequest('worktree:commitMeta', async (_ctx, worktreePath: string, hash: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:commitMeta', async (_ctx, worktreePath: string, hash: string) => {
     return getCommitMeta(worktreePath, hash)
   })
 
-  transport.onRequest('worktree:commitChangedFiles', async (_ctx, worktreePath: string, hash: string) => {
-    assertOwnPath(worktreePath)
+  onWorktreeRequest('worktree:commitChangedFiles', async (_ctx, worktreePath: string, hash: string) => {
     return getCommitChangedFiles(worktreePath, hash)
   })
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:commitFileDiffSides',
     async (_ctx, worktreePath: string, hash: string, filePath: string) => {
       return getCommitFileDiffSides(worktreePath, hash, filePath)
     }
   )
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:commitRangeChangedFiles',
     async (_ctx, worktreePath: string, fromHash: string, toHash: string) => {
       return getCommitRangeChangedFiles(worktreePath, fromHash, toHash)
     }
   )
 
-  transport.onRequest(
+  onWorktreeRequest(
     'worktree:commitRangeFileDiffSides',
     async (_ctx, worktreePath: string, fromHash: string, toHash: string, filePath: string) => {
       return getCommitRangeFileDiffSides(worktreePath, fromHash, toHash, filePath)
@@ -3318,7 +3315,7 @@ function registerIpcHandlers(): void {
     return AVAILABLE_EDITORS.map(({ id, name }) => ({ id, name }))
   })
 
-  transport.onRequest('editor:open', (_ctx, worktreePath: string, filePath?: string) => {
+  onWorktreeRequest('editor:open', (_ctx, worktreePath: string, filePath?: string) => {
     return openInEditor(resolveEditorForWorktree(worktreePath), worktreePath, filePath)
   })
 
@@ -3666,13 +3663,13 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  transport.onRequest('agent:sessionFileExists', async (_ctx, cwd: string, sessionId: string, agentKind?: string): Promise<boolean> => {
+  onWorktreeRequest('agent:sessionFileExists', async (_ctx, cwd: string, sessionId: string, agentKind?: string): Promise<boolean> => {
     const kind = toAgentKind(agentKind)
     if (kind === 'claude') await resolveShellEnv(cwd)
     return getAgent(kind).sessionFileExists(cwd, sessionId)
   })
 
-  transport.onRequest('agent:latestSessionId', async (_ctx, cwd: string, agentKind?: string): Promise<string | null> => {
+  onWorktreeRequest('agent:latestSessionId', async (_ctx, cwd: string, agentKind?: string): Promise<string | null> => {
     const kind = toAgentKind(agentKind)
     if (kind === 'claude') await resolveShellEnv(cwd)
     return getAgent(kind).latestSessionId(cwd)
@@ -3686,6 +3683,7 @@ function registerIpcHandlers(): void {
       sessionName?: string;
       modelOverride?: string
     }): Promise<string> => {
+      if (!isOwnPath(opts.cwd)) throw new Error(`Not a worktree on this host: ${opts.cwd}`)
       const kind = toAgentKind(agentKind)
       const agent = getAgent(kind)
       // --resume vs --session-id is decided by looking for the transcript

@@ -20,3 +20,23 @@ export function isWithinRoots(path: string, roots: Iterable<string>): boolean {
   }
   return false
 }
+
+/** Wraps a handler whose first argument after the context is a worktree
+ *  path so it only runs for paths `isOwn` accepts. A request handler
+ *  rejects a foreign path; a signal handler (`mode: 'drop'`) ignores it,
+ *  since a signal has no caller to report to. Every worktree handler that
+ *  reaches git or the disk registers through this, so a new one can't
+ *  forget the check. */
+export function ownedPathsOnly<C, R>(
+  isOwn: (path: string) => boolean,
+  handler: (ctx: C, path: string, ...rest: any[]) => R, // eslint-disable-line @typescript-eslint/no-explicit-any
+  mode: 'reject' | 'drop' = 'reject'
+): (ctx: C, path: string, ...rest: any[]) => R | undefined { // eslint-disable-line @typescript-eslint/no-explicit-any
+  return (ctx, path, ...rest) => {
+    if (!isOwn(path)) {
+      if (mode === 'drop') return undefined
+      throw new Error(`Not a worktree on this host: ${path}`)
+    }
+    return handler(ctx, path, ...rest)
+  }
+}
