@@ -554,6 +554,26 @@ export function useAllBackendStates(): readonly BackendStateEntry[] {
   )
 }
 
+/** Every backend's state, narrowed through `select` — re-renders only when
+ *  the selected value changes by reference.
+ *
+ *  Prefer this to `useAllBackendStates` anywhere near the root. That hook's
+ *  array changes on every event from every backend, so a component holding
+ *  it re-renders per streamed chat token on any host; App did, which made
+ *  the whole UI lag whenever a remote chat was streaming. `select` must be
+ *  a cached projection that returns the same reference for unchanged
+ *  inputs (getMergedWorktrees, a SegmentedSelector) — a fresh object per
+ *  call makes useSyncExternalStore re-render forever. */
+export function useAllBackendStatesSelector<T>(
+  select: (entries: readonly BackendStateEntry[]) => T
+): T {
+  return useSyncExternalStore(
+    subscribeAllBackends,
+    () => select(getAllBackendStatesSnapshot()),
+    () => select(EMPTY_BACKEND_STATES)
+  )
+}
+
 const EMPTY_BACKEND_STATES: readonly BackendStateEntry[] = []
 const getAllBackendStatesServerSnapshot = (): readonly BackendStateEntry[] =>
   EMPTY_BACKEND_STATES

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStates, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -31,7 +31,8 @@ import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
 import { BackendScope } from './backend-scope'
 import { repoKeyFor } from './worktree-list-model'
-import { useMergedWorktrees } from './hooks/useMergedWorktrees'
+import { useMergedWorktrees, useFleetWorktrees } from './hooks/useMergedWorktrees'
+import { getFleetWorktreeLists } from './merge-backend-states'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
@@ -124,7 +125,7 @@ function DesktopApp(): JSX.Element {
   // useWorktreeListModel), so rows and mounted workspaces can't disagree
   // about which backends exist.
   const mergedData = useMergedWorktrees()
-  const mergedWorktrees = mergedData.worktrees
+  const fleetData = useFleetWorktrees()
   // Routes a per-worktree call to the backend hosting that worktree.
   // App has no ambient handle that can reach these methods — see
   // backend-routing.ts for why.
@@ -180,26 +181,16 @@ function DesktopApp(): JSX.Element {
   // remote worktrees were open. Without this, a worktree recreated at the
   // same path — or a backend re-added — would mount eagerly on reappearance
   // without the user opening it: the fan-out this set exists to prevent.
-  const fleetBackends = useAllBackendStates()
-  // `fleetBackends` is a new array on any backend event, status ticks
-  // included. The pruning only cares about worktree LISTS, so compare
-  // those by reference and bail before touching state when none moved.
-  const fleetListsRef = useRef<Map<string, unknown>>(new Map())
+  // Subscribes to the worktree LISTS alone, not every backend's state:
+  // holding the full states re-rendered App on every streamed chat token
+  // from any host. This only changes when some backend's list does.
+  const fleetWorktreeLists = useAllBackendStatesSelector(getFleetWorktreeLists)
   useEffect(() => {
-    const prev = fleetListsRef.current
-    const next = new Map<string, unknown>()
-    let changed = prev.size !== fleetBackends.length
-    for (const b of fleetBackends) {
-      next.set(b.backendId, b.state.worktrees.list)
-      if (prev.get(b.backendId) !== b.state.worktrees.list) changed = true
-    }
-    fleetListsRef.current = next
-    if (!changed) return
     setOpenedWorktrees((prev) => {
       if (prev.size === 0) return prev
       const live = new Set<string>()
-      for (const b of fleetBackends) {
-        for (const w of b.state.worktrees.list) live.add(`${b.backendId}\u0000${w.path}`)
+      for (const b of fleetWorktreeLists) {
+        for (const w of b.value) live.add(`${b.backendId}\u0000${w.path}`)
       }
       let next: Set<string> | null = null
       for (const key of prev) {
@@ -210,7 +201,7 @@ function DesktopApp(): JSX.Element {
       }
       return next ?? prev
     })
-  }, [fleetBackends])
+  }, [fleetWorktreeLists])
   // Worktree list, repoRoots, and pending-creation FSM all live in the
   // main-process store. activeWorktreeId stays local — it's per-client view
   // focus that eventually becomes per-window.
@@ -1840,9 +1831,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
         {/* Render ALL worktrees' terminals to keep PTYs alive across switches.
             Now spans every backend, not just the active one — each subtree is
             pinned to its owning backend below, so a remote worktree's panes
-            keep streaming while a local one is on screen. */}
-        {mergedWorktrees.map(({ backendId, worktree: wt }) => {
-          const paneTree = panes[wt.path]
+            keep streaming while a local one is on screen. Driven by the
+            whole fleet, not the view-filtered list: see useFleetWorktrees. */}
+        {fleetData.worktrees.map(({ backendId, worktree: wt }) => {
+          const paneTree = fleetData.panes[wt.path]
           if (!paneTree) return null
           const leaves = getLeaves(paneTree)
           if (leaves.length === 0 || !leaves.some((l) => l.tabs.length > 0)) return null
@@ -1854,7 +1846,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           const everOpened = openedWorktrees.has(mountKey)
           const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
           if (!eagerMount && !everOpened && !isSelected) return null
-          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && wt.path === activeWorktreeId && !pendingDeletionByPath[wt.path]
+          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
           return (
             <div
               key={`${backendId}\u0000${wt.path}`}
