@@ -63,6 +63,8 @@ import {
 } from './composer-height'
 import { fuzzyMatch } from '../fuzzy'
 import { worktreeHandle } from '../../shared/state/worktrees'
+import { createSingleFlight } from '../../shared/single-flight'
+import type { ElectronAPI } from '../types'
 import {
   CLAUDE_MODELS,
   type ModelOption,
@@ -286,28 +288,41 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
 // Worktree file list cache. Same TTL/shape as CommandPalette uses — the
 // list rarely changes during a typing session, and listAllFiles shells
 // out to git ls-files which is cheap but not free on big repos.
-const FILE_CACHE = new Map<string, { files: string[]; ts: number }>()
+//
+// Kept per backend: a path is only unique within one host, and with the
+// whole fleet mounted two hosts with the same layout would otherwise show
+// each other's files. `useBackend()` hands out one object per backend, so
+// it keys the WeakMap.
+//
+// Listings also single-flight. Chat tabs in one worktree mount together
+// (app start, a remount), all before the first listing lands, so without
+// it each one shelled out — and each reply carries the whole file list
+// across IPC. On a large repo that burst alone stalled the main process
+// for seconds.
 const FILE_CACHE_TTL_MS = 10_000
-// Chat tabs in one worktree mount together (app start, a remount), all
-// before the first listing lands, so without this each one shelled out —
-// and each reply carries the whole file list across IPC. On a large repo
-// that burst alone stalled the main process for seconds.
-const FILE_INFLIGHT = new Map<string, Promise<string[]>>()
+interface BackendFileCache {
+  files: Map<string, { files: string[]; ts: number }>
+  flight: (key: string, fn: () => Promise<string[]>) => Promise<string[]>
+}
+const FILE_CACHES = new WeakMap<ElectronAPI, BackendFileCache>()
 
-function listWorktreeFilesOnce(
-  worktreePath: string,
-  list: (worktreePath: string) => Promise<string[]>
-): Promise<string[]> {
-  const pending = FILE_INFLIGHT.get(worktreePath)
-  if (pending) return pending
-  const started = list(worktreePath)
-    .then((files) => {
-      FILE_CACHE.set(worktreePath, { files, ts: Date.now() })
+function fileCacheFor(backend: ElectronAPI): BackendFileCache {
+  let cache = FILE_CACHES.get(backend)
+  if (!cache) {
+    cache = { files: new Map(), flight: createSingleFlight<string[]>() }
+    FILE_CACHES.set(backend, cache)
+  }
+  return cache
+}
+
+function listWorktreeFilesOnce(backend: ElectronAPI, worktreePath: string): Promise<string[]> {
+  const cache = fileCacheFor(backend)
+  return cache.flight(worktreePath, () =>
+    backend.listAllFiles(worktreePath).then((files) => {
+      cache.files.set(worktreePath, { files, ts: Date.now() })
       return files
     })
-    .finally(() => FILE_INFLIGHT.delete(worktreePath))
-  FILE_INFLIGHT.set(worktreePath, started)
-  return started
+  )
 }
 const MAX_MENTION_RESULTS = 50
 
@@ -2209,14 +2224,14 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
   // module scope so reopening the popover (or clicking through several
   // json-claude tabs in the same worktree) doesn't re-shell every time.
   useEffect(() => {
-    const cached = FILE_CACHE.get(worktreePath)
+    const cached = fileCacheFor(backend).files.get(worktreePath)
     const now = Date.now()
     if (cached && now - cached.ts < FILE_CACHE_TTL_MS) {
       setFiles(cached.files)
       return
     }
     let cancelled = false
-    void listWorktreeFilesOnce(worktreePath, (p) => backend.listAllFiles(p))
+    void listWorktreeFilesOnce(backend, worktreePath)
       .then((result) => {
         if (!cancelled) setFiles(result)
       })
@@ -2224,7 +2239,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     return () => {
       cancelled = true
     }
-  }, [worktreePath])
+  }, [worktreePath, backend])
 
   // Find the most recent trigger char (`/` or `@`) before the cursor.
   // The token between trigger+1 and cursor is the query. Returns null if
