@@ -102,6 +102,26 @@
   <!-- Releases -->
   <div class="max-w-3xl mx-auto px-6 pb-24">
 
+    <!-- v2.18.1 -->
+    <section id="v2.18.1" class="release-section py-10">
+      <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
+        <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.18.1" class="release-anchor">v2.18.1<span class="anchor-icon">🔗</span></a></h2>
+        <span class="text-sm text-neutral-500">November 3, 2026</span>
+      </div>
+      <a href="https://github.com/ness-dev/ness/releases/tag/v2.18.1" class="text-sm text-amber-400/80 hover:text-amber-300 transition-colors">Download &rarr;</a>
+      <p class="text-neutral-400 mt-4 mb-4 leading-relaxed">A stability release for working with remote hosts: streaming chats and switching between backends no longer freeze the app, and remote worktrees now show their own data instead of the local one's.</p>
+      <div class="note-body">
+        <h4>Fixes</h4>
+        <ul>
+          <li>Streaming output from a remote host and switching between backends no longer freezes the app.</li>
+          <li>Worktree views for a remote host no longer read from the local backend, so they show the remote's actual state.</li>
+          <li>Cleanup no longer floods remote hosts with dirty-state checks.</li>
+          <li>Chat file lookups are now cached separately for each backend, and Cleanup's activity log goes to the right host.</li>
+          <li>Worktree actions that touch git or disk are now guarded against failing on unavailable or remote worktrees.</li>
+        </ul>
+      </div>
+    </section>
+
     <!-- v2.18.0 -->
     <section id="v2.18.0" class="release-section py-10">
       <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
