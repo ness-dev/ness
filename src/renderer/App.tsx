@@ -129,7 +129,7 @@ function DesktopApp(): JSX.Element {
   // Routes a per-worktree call to the backend hosting that worktree.
   // App has no ambient handle that can reach these methods — see
   // backend-routing.ts for why.
-  const backendFor = useBackendForWorktree(mergedData.pathBackendId)
+  const backendFor = useBackendForWorktree(fleetData.pathBackendId)
   // Backend label per worktree path, for rows that aren't on this machine.
   // Local ones are deliberately absent — badging the common case is noise,
   // and the badge's job is to make "this acts on another machine" obvious
@@ -252,7 +252,7 @@ function DesktopApp(): JSX.Element {
   // by ANY route now implies its backend. Ambiguous only when two backends
   // share an absolute path — the known composite-identity gap.
   const selectedBackendId =
-    (activeWorktreeId ? mergedData.pathBackendId[activeWorktreeId] : undefined) ??
+    (activeWorktreeId ? fleetData.pathBackendId[activeWorktreeId] : undefined) ??
     activeBackendId
   const switchWorktree = useCallback(
     (path: string, alsoInTransition?: () => void) => {
@@ -860,9 +860,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleConfirmRepoResolve,
     handleDismissRepoPrompt
   } = useWorktreeHandlers({
-    pathBackendId: mergedData.pathBackendId,
-    repoBackendId: mergedData.repoBackendId,
-    pendingBackendId: mergedData.pendingBackendId,
+    pathBackendId: fleetData.pathBackendId,
+    repoBackendId: fleetData.repoBackendId,
+    pendingBackendId: fleetData.pendingBackendId,
     worktrees,
     pendingWorktrees,
     repoRoots,
@@ -904,7 +904,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setActivePaneId,
     activeWorktreeId,
     setActiveWorktreeId,
-    pathBackendId: mergedData.pathBackendId
+    pathBackendId: fleetData.pathBackendId
   })
 
   // Hoisted out of the WorkspaceView JSX below. Every worktree stays mounted,
@@ -1044,7 +1044,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   // Sidebar-aware hotkey handlers + the resolved binding map for tooltips.
   // The hook also subscribes to keystrokes via useHotkeys internally.
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
-    pathBackendId: mergedData.pathBackendId,
+    pathBackendId: fleetData.pathBackendId,
     worktrees,
     repoRoots,
     unifiedRepos,
@@ -1167,7 +1167,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <div className="fixed inset-0 z-50 flex">
       <TaskListView
         model={worktreeListModel}
-        pathBackendId={mergedData.pathBackendId}
+        pathBackendId={fleetData.pathBackendId}
         activeWorktreeId={activeWorktreeId}
         activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
         unifiedRepos={unifiedRepos}
@@ -1762,7 +1762,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenAssignedPR={handleOpenAssignedPR}
             agentCount={agentWorktreeCount}
             onSelectWorktree={handleSidebarSelectWorktree}
-            pathBackendId={mergedData.pathBackendId}
+            pathBackendId={fleetData.pathBackendId}
             originByPath={originByPath}
             onSelectTab={handleSidebarSelectTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}

@@ -37,6 +37,7 @@ import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
 import { ChatStartGate } from './chat-start-gate'
 import { createSingleFlight } from '../shared/single-flight'
+import { isWithinRoots } from './own-paths'
 import {
   knownClaudeConfigDirs,
   onShellEnvCaptured,
@@ -1974,6 +1975,26 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // Worktree reads only run for paths this backend hosts. A misrouted
+  // request carries another machine's path, and git spawned there blocks
+  // main — about a second per call under macOS's /home automount. See
+  // own-paths.ts.
+  const refusedForeignPaths = new Set<string>()
+  const isOwnPath = (path: string): boolean => {
+    const { worktrees, terminals } = store.getSnapshot().state
+    const owned = isWithinRoots(path, worktrees.list.map((w) => w.path)) ||
+      isWithinRoots(path, worktrees.repoRoots) ||
+      isWithinRoots(path, Object.keys(terminals.panes))
+    if (!owned && !refusedForeignPaths.has(path)) {
+      refusedForeignPaths.add(path)
+      log('ipc', `refusing worktree read for a path this backend does not host: ${path}`)
+    }
+    return owned
+  }
+  const assertOwnPath = (path: string): void => {
+    if (!isOwnPath(path)) throw new Error(`Not a worktree on this host: ${path}`)
+  }
+
   // Identical concurrent asks share one `git status`. A client that re-sends
   // the same sweep on every render (the 2.18 Cleanup modal did, once per
   // streamed token) otherwise queues thousands of reads, and each spawn
@@ -1983,6 +2004,7 @@ function registerIpcHandlers(): void {
   // to an interactive caller.
   const dirtyFlight = createSingleFlight<boolean>()
   transport.onRequest('worktree:isDirty', async (_ctx, path: string, opts?: { bulk?: boolean }) => {
+    assertOwnPath(path)
     const priority = opts?.bulk ? 'bulk' : 'interactive'
     const git = await dirtyFlight(`${priority}\0${path}`, () => isWorktreeDirty(path, priority))
     const scratchpad = hasScratchpadNote(store.getSnapshot().state.scratchpad, path)
@@ -2118,11 +2140,12 @@ function registerIpcHandlers(): void {
 
   // Changed files
   transport.onRequest('worktree:changedFiles', async (_ctx, worktreePath: string, mode?: 'working' | 'branch') => {
+    assertOwnPath(worktreePath)
     return getChangedFiles(worktreePath, mode ?? 'working')
   })
 
   transport.onSignal('worktree:watchChangedFiles', (ctx, worktreePath: string) => {
-    if (!worktreePath) return
+    if (!worktreePath || !isOwnPath(worktreePath)) return
     let subs = worktreeWatchSubs.get(ctx.clientId)
     if (!subs) {
       subs = new Map()
@@ -2194,14 +2217,17 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest('worktree:listFiles', async (_ctx, worktreePath: string) => {
+    assertOwnPath(worktreePath)
     return listAllFiles(worktreePath)
   })
 
   transport.onRequest('worktree:recentCommitShas', async (_ctx, worktreePath: string) => {
+    assertOwnPath(worktreePath)
     return listRecentCommitShas(worktreePath)
   })
 
   transport.onRequest('worktree:readFile', async (_ctx, worktreePath: string, filePath: string) => {
+    assertOwnPath(worktreePath)
     return readWorktreeFile(worktreePath, filePath)
   })
 
@@ -2232,6 +2258,7 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest('worktree:branchCommits', async (_ctx, worktreePath: string) => {
+    assertOwnPath(worktreePath)
     return getBranchCommits(worktreePath)
   })
 
@@ -2248,14 +2275,17 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('worktree:commitDiff', async (_ctx, worktreePath: string, hash: string) => {
+    assertOwnPath(worktreePath)
     return getCommitDiff(worktreePath, hash)
   })
 
   transport.onRequest('worktree:commitMeta', async (_ctx, worktreePath: string, hash: string) => {
+    assertOwnPath(worktreePath)
     return getCommitMeta(worktreePath, hash)
   })
 
   transport.onRequest('worktree:commitChangedFiles', async (_ctx, worktreePath: string, hash: string) => {
+    assertOwnPath(worktreePath)
     return getCommitChangedFiles(worktreePath, hash)
   })
 
