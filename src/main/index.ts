@@ -36,7 +36,7 @@ import type { ServerTransport } from '../shared/transport/transport'
 import { detectRuntime } from './paths'
 import { fixPathFromLoginShell } from './path-fix'
 import { ChatStartGate } from './chat-start-gate'
-import { createSingleFlight } from './single-flight'
+import { createSingleFlight } from '../shared/single-flight'
 import {
   knownClaudeConfigDirs,
   onShellEnvCaptured,
