@@ -10,6 +10,7 @@ import type { Worktree, PendingWorktree } from '../shared/state/worktrees'
 import {
   mergeBackendStates,
   getMergedWorktrees,
+  getFleetWorktreeLists,
   resetMergedWorktreesCache,
   tabsFromPanes,
   type BackendStateLike
@@ -209,6 +210,45 @@ describe('getMergedWorktrees (shared cache)', () => {
     }
   })
 
+  it('a streamed chat token on a remote leaves the merge untouched', () => {
+    // A token is a jsonClaude event: a new AppState for that backend, with
+    // nothing the merge reads changed. App subscribes through the merge,
+    // so this is what keeps it from re-rendering per token.
+    const list = [wt('/r/a', '/r')]
+    const before = backend('beta', { worktrees: list })
+    const after: BackendStateLike = {
+      ...before,
+      state: { ...before.state, jsonClaude: { ...before.state.jsonClaude } }
+    }
+    const local = backend('local', { kind: 'local' })
+    for (const mode of ['merged', 'single'] as const) {
+      const first = getMergedWorktrees([local, before], mode, 'local')
+      expect(getMergedWorktrees([local, after], mode, 'local')).toBe(first)
+    }
+  })
+
+  it('keeps one cache per view mode, so reading both never churns either', () => {
+    // App reads the visible view and the full fleet on every render. With
+    // one shared slot, alternating reads evicted each other and handed back
+    // a fresh object per read.
+    const entries = [backend('local', { kind: 'local', worktrees: [wt('/l/a', '/l')] }), backend('beta')]
+    const single = getMergedWorktrees(entries, 'single', 'local')
+    const merged = getMergedWorktrees(entries, 'merged', 'local')
+    expect(getMergedWorktrees(entries, 'single', 'local')).toBe(single)
+    expect(getMergedWorktrees(entries, 'merged', 'local')).toBe(merged)
+  })
+
+  it('the fleet view keeps a hidden backend mounted in single mode', () => {
+    const entries = [
+      backend('local', { kind: 'local', worktrees: [wt('/l/a', '/l')] }),
+      backend('beta', { worktrees: [wt('/b/a', '/b')] })
+    ]
+    const visible = getMergedWorktrees(entries, 'single', 'beta')
+    const fleet = getMergedWorktrees(entries, 'merged', 'beta')
+    expect(visible.flatWorktrees.map((w) => w.path)).toEqual(['/b/a'])
+    expect(fleet.flatWorktrees.map((w) => w.path)).toEqual(['/l/a', '/b/a'])
+  })
+
   it('returns the previous result when an event changed nothing it reads', () => {
     const list = [wt('/w', '/r')]
     const first = getMergedWorktrees(
@@ -234,5 +274,22 @@ describe('getMergedWorktrees (shared cache)', () => {
     )
     expect(second.flatWorktrees).not.toBe(first.flatWorktrees)
     expect(second.flatWorktrees.map((w) => w.path)).toEqual(['/a', '/b'])
+  })
+})
+
+describe('getFleetWorktreeLists', () => {
+  it('stays the same array until some backend list changes', () => {
+    const list = [wt('/b/a', '/b')]
+    const before = backend('beta', { worktrees: list })
+    const first = getFleetWorktreeLists([before])
+    const streamed: BackendStateLike = {
+      ...before,
+      state: { ...before.state, jsonClaude: { ...before.state.jsonClaude } }
+    }
+    expect(getFleetWorktreeLists([streamed])).toBe(first)
+
+    const grown = getFleetWorktreeLists([backend('beta', { worktrees: [...list, wt('/b/b', '/b')] })])
+    expect(grown).not.toBe(first)
+    expect(grown[0].value.map((w) => w.path)).toEqual(['/b/a', '/b/b'])
   })
 })

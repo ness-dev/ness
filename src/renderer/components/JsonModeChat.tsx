@@ -288,6 +288,27 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
 // out to git ls-files which is cheap but not free on big repos.
 const FILE_CACHE = new Map<string, { files: string[]; ts: number }>()
 const FILE_CACHE_TTL_MS = 10_000
+// Chat tabs in one worktree mount together (app start, a remount), all
+// before the first listing lands, so without this each one shelled out —
+// and each reply carries the whole file list across IPC. On a large repo
+// that burst alone stalled the main process for seconds.
+const FILE_INFLIGHT = new Map<string, Promise<string[]>>()
+
+function listWorktreeFilesOnce(
+  worktreePath: string,
+  list: (worktreePath: string) => Promise<string[]>
+): Promise<string[]> {
+  const pending = FILE_INFLIGHT.get(worktreePath)
+  if (pending) return pending
+  const started = list(worktreePath)
+    .then((files) => {
+      FILE_CACHE.set(worktreePath, { files, ts: Date.now() })
+      return files
+    })
+    .finally(() => FILE_INFLIGHT.delete(worktreePath))
+  FILE_INFLIGHT.set(worktreePath, started)
+  return started
+}
 const MAX_MENTION_RESULTS = 50
 
 // `@worktree:<repo>/<branch>` is what a worktree mention inserts. The prefix
@@ -2195,11 +2216,11 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
       return
     }
     let cancelled = false
-    void backend.listAllFiles(worktreePath).then((result) => {
-      if (cancelled) return
-      FILE_CACHE.set(worktreePath, { files: result, ts: Date.now() })
-      setFiles(result)
-    })
+    void listWorktreeFilesOnce(worktreePath, (p) => backend.listAllFiles(p))
+      .then((result) => {
+        if (!cancelled) setFiles(result)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }

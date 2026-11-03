@@ -203,12 +203,17 @@ const tabsSelector = new SegmentedSelector<AppState, Record<string, TerminalTab[
   (state) => tabsFromPanes(state.terminals.panes)
 )
 
-let cache: {
+interface MergeCache {
   entries: readonly BackendStateLike[]
-  viewMode: FleetViewMode
   activeId: string
   result: MergedWorktreeData
-} | null = null
+}
+
+/** One entry per view mode. App reads the visible view for the sidebar and
+ *  the full fleet for what stays mounted, both on every render; a single
+ *  shared slot would evict one with the other each time and hand back a
+ *  new object per read, which useSyncExternalStore treats as a change. */
+const caches: Record<FleetViewMode, MergeCache | null> = { single: null, merged: null }
 
 /** The shared, reference-stable merge. Same three inputs → same object,
  *  across every caller — so App and useWorktreeListModel pay for one
@@ -218,12 +223,8 @@ export function getMergedWorktrees(
   viewMode: FleetViewMode,
   activeId: string
 ): MergedWorktreeData {
-  if (
-    cache &&
-    cache.entries === entries &&
-    cache.viewMode === viewMode &&
-    cache.activeId === activeId
-  ) {
+  const cache = caches[viewMode]
+  if (cache && cache.entries === entries && cache.activeId === activeId) {
     return cache.result
   }
   // All entries, not just the visible ones, so flipping view mode never
@@ -236,7 +237,7 @@ export function getMergedWorktrees(
     tabsFor: (backendId) => tabsById.get(backendId) ?? {}
   })
   const result = cache ? reuseUnchanged(cache.result, fresh) : fresh
-  cache = { entries, viewMode, activeId, result }
+  caches[viewMode] = { entries, activeId, result }
   return result
 }
 
@@ -297,5 +298,20 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /** Test-only: forget the shared cache between cases. */
 export function resetMergedWorktreesCache(): void {
-  cache = null
+  caches.single = null
+  caches.merged = null
+}
+
+const worktreeListsSelector = new SegmentedSelector<AppState, Worktree[]>(
+  (state) => [state.worktrees.list],
+  (state) => state.worktrees.list
+)
+
+/** Each backend's worktree list, visible or not. Same array back until
+ *  some backend's list actually changes, so App can watch the fleet for
+ *  deletions without re-rendering on every other event. */
+export function getFleetWorktreeLists(
+  entries: readonly BackendStateLike[]
+): readonly { backendId: string; value: Worktree[] }[] {
+  return worktreeListsSelector.select(entries.map((e) => ({ id: e.backendId, state: e.state })))
 }
