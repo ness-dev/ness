@@ -20,7 +20,7 @@ const REHYPE_PLUGINS = [rehypeHighlightShared]
 // render as text rather than as links that do nothing.
 const COMPONENTS: Components = {
   pre: MarkdownPre,
-  a:({ href, children }) =>
+  a: ({ href, children }) =>
     href && /^(https?:|mailto:)/i.test(href) ? (
       <a href={href} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
         {children}

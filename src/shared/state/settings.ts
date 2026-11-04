@@ -244,7 +244,7 @@ export function nessieColorById(id: string): NessieColor {
 /** Default kickoff prompt for "Open PR as worktree". Editable globally in
  *  Settings (`prReviewPrompt`) and per-creation in the New Worktree screen. */
 export const DEFAULT_PR_REVIEW_PROMPT =
-  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag.\n\nI usually haven't looked at the PR yet, so start by explaining it: what it does and why, and how it works, so I understand the change fundamentally. I'm a visual learner — use diagrams for flows, state and data-shape changes. A ```mermaid code block renders as a real diagram here.\n\nThen give your critique, ranked by severity. I do want to merge this, so keep real blockers (bugs, security, data loss) separate from non-blocking notes, and finish with a recommendation."
+  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag.\n\nStart by explaining it for a reader who hasn't seen the diff: what it does and why, and how it works. Include a diagram for any flow, state or data-shape change — a ```mermaid code block renders as a real diagram here.\n\nThen give your critique, ranked by severity. Keep real blockers (bugs, security, data loss) separate from non-blocking notes, and finish with a recommendation."
 
 /** Primary wake-lock mode. The actual hold = (this mode wants it) OR (the
  *  transient `preventSleepUntil` timer is still live). Single-select; the
@@ -269,10 +269,10 @@ Read the diff first. Leave each concrete issue as an inline comment on the line 
 
 Look for: correctness bugs and unhandled edge cases, design problems, security concerns, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
 
-The user has usually not looked at this change yet, so the briefing is as important as the comments. Write it so they understand the change fundamentally and can decide whether to merge it without reading the diff first:
+Write the briefing for a reader who has not looked at this change yet; it is as important as the comments. Write it so they understand the change fundamentally and can decide whether to merge it without reading the diff first:
 - What it does and why — the problem, then the approach, in plain language.
-- How it works — walk through the moving parts and how they connect. The user is a visual learner: include a diagram for any flow, state machine, sequence of calls or before/after that changed. A \`\`\`mermaid code block renders as a real diagram in Ness (flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram); quote node labels that contain punctuation. Mark what this change touches with the theme-aware classes \`:::added\`, \`:::changed\`, \`:::removed\` and \`:::focus\` rather than hex colors. A small ASCII sketch is fine for something tiny.
-- Your critique — ranked by severity. Keep real blockers (bugs, data loss, security) clearly apart from non-blocking notes; the user wants to merge, so anything that is not mission critical is a note, not a blocker.
+- How it works — walk through the moving parts and how they connect. Include a diagram for any flow, state machine, sequence of calls or before/after that changed. A \`\`\`mermaid code block renders as a real diagram in Ness (flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram); quote node labels that contain punctuation. Mark what this change touches with the theme-aware classes \`:::added\`, \`:::changed\`, \`:::removed\` and \`:::focus\` rather than hex colors. A small ASCII sketch is fine for something tiny.
+- Your critique — ranked by severity. Keep real blockers (bugs, data loss, security) clearly apart from non-blocking notes, so the reader can see at a glance what actually stands in the way of merging.
 - Recommendation — merge, merge with follow-ups, or hold, and why in one or two sentences.
 
 Do not change any code — you share this checkout with the author.`

@@ -25,7 +25,7 @@ const closed = (c: Code): boolean =>
 describe('closedMermaidBodies', () => {
   it('collects only fences that have closed', () => {
     const md = '```mermaid\ngraph TD\n  A-->B\n```\n\n```mermaid\ngraph LR\n  X-->'
-    expect([...closedMermaidBodies(md)]).toEqual(['graph TD\n  A-->B'])
+    expect([...closedMermaidBodies(md)]).toEqual(['graph TD\nA-->B'])
   })
 
   it('needs the same fence character and at least the same length', () => {
@@ -45,6 +45,18 @@ describe('remarkMermaid', () => {
 
   it('ignores other languages', () => {
     expect(codeNodes('```ts\nconst a = 1\n```\n', [remarkMermaid]).map(closed)).toEqual([false])
+  })
+
+  it('marks a block nested under a list item, where remark strips the indent', () => {
+    const md = '- How it works:\n  ```mermaid\n  graph TD\n    A-->B\n  ```\n- next point\n'
+    expect(codeNodes(md, [remarkMermaid]).map(closed)).toEqual([true])
+    const streaming = '- How it works:\n  ```mermaid\n  graph TD\n    A-->B\n'
+    expect(codeNodes(streaming, [remarkMermaid]).map(closed)).toEqual([false])
+  })
+
+  it('marks a block inside a blockquote', () => {
+    const md = '> ```mermaid\n> graph TD\n>   A-->B\n> ```\n'
+    expect(codeNodes(md, [remarkMermaid]).map(closed)).toEqual([true])
   })
 
   it('still finds a block inside an Insight card, which is re-parsed', () => {

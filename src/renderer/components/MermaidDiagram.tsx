@@ -60,6 +60,8 @@ function subscribeTheme(cb: () => void): () => void {
     if (themeListeners.size === 0) {
       themeObserver?.disconnect()
       themeObserver = null
+      // Nothing watches the theme now, so the key would go stale.
+      themeKey = ''
     }
   }
 }
