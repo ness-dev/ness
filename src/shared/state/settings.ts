@@ -271,7 +271,7 @@ Look for: correctness bugs and unhandled edge cases, design problems, security c
 
 The user has usually not looked at this change yet, so the briefing is as important as the comments. Write it so they understand the change fundamentally and can decide whether to merge it without reading the diff first:
 - What it does and why — the problem, then the approach, in plain language.
-- How it works — walk through the moving parts and how they connect. The user is a visual learner: include a diagram for any flow, state machine, sequence of calls or before/after that changed. A \`\`\`mermaid code block renders as a real diagram in Ness (flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram); quote node labels that contain punctuation. A small ASCII sketch is fine for something tiny.
+- How it works — walk through the moving parts and how they connect. The user is a visual learner: include a diagram for any flow, state machine, sequence of calls or before/after that changed. A \`\`\`mermaid code block renders as a real diagram in Ness (flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram); quote node labels that contain punctuation. Mark what this change touches with the theme-aware classes \`:::added\`, \`:::changed\`, \`:::removed\` and \`:::focus\` rather than hex colors. A small ASCII sketch is fine for something tiny.
 - Your critique — ranked by severity. Keep real blockers (bugs, data loss, security) clearly apart from non-blocking notes; the user wants to merge, so anything that is not mission critical is a note, not a blocker.
 - Recommendation — merge, merge with follow-ups, or hold, and why in one or two sentences.
 
