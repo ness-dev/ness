@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ness-dev/ness/stargazers">
+  <a href="https://github.com/ness-dev/ness">
     <img src="https://img.shields.io/github/stars/ness-dev/ness?style=for-the-badge&logo=github&logoColor=white&color=f59e0b&labelColor=18181b&label=Please%20star%20us%20on%20GitHub" alt="Please star us on GitHub" />
   </a>
   <a href="https://join.slack.com/t/harness-chat/shared_invite/zt-43w6xg34i-mGXrSEKVO0wGC7r_SiePwA">
