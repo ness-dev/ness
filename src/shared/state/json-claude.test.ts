@@ -1654,6 +1654,13 @@ describe('automated message sentinel', () => {
     expect(wire.endsWith('\n</ness-automated-message>')).toBe(true)
   })
 
+  it('strips a retired footer from a transcript written by an older build', () => {
+    const old =
+      'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.'
+    const wire = `<ness-automated-message source="review-request">\nplease review\n\n${old}\n</ness-automated-message>`
+    expect(parseAutomatedMessage(wire)).toEqual({ source: 'review-request', body: 'please review' })
+  })
+
   it('treats ordinary turns as not automated', () => {
     expect(parseAutomatedMessage('fix the build')).toBeNull()
     expect(parseAutomatedMessage('')).toBeNull()

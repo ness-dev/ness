@@ -158,7 +158,7 @@ export interface ReviewQueries {
   submit: (
     worktreePath: string,
     callerTabId: string,
-    input: { verdict: ReviewVerdict; summary: string; targetTabId?: string }
+    input: { verdict: ReviewVerdict; summary: string; briefing?: string; targetTabId?: string }
   ) => SubmitReviewResult | Promise<SubmitReviewResult>
   /** Open a reviewer Chat tab for the caller and hand it the request. */
   request: (
@@ -1046,8 +1046,14 @@ async function handleRequest(
         })
       }
       const summary = typeof body.summary === 'string' ? body.summary : ''
+      const briefing = typeof body.briefing === 'string' ? body.briefing : undefined
       const tab = typeof body.tab === 'string' && body.tab.trim() ? body.tab.trim() : undefined
-      const result = await deps.reviews.submit(wt, terminalId, { verdict, summary, targetTabId: tab })
+      const result = await deps.reviews.submit(wt, terminalId, {
+        verdict,
+        summary,
+        briefing,
+        targetTabId: tab
+      })
       if ('error' in result) return sendJson(res, 400, { error: result.error })
       const { submission, delivery } = result
       return sendJson(res, 200, {

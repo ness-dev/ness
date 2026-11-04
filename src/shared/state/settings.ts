@@ -244,7 +244,7 @@ export function nessieColorById(id: string): NessieColor {
 /** Default kickoff prompt for "Open PR as worktree". Editable globally in
  *  Settings (`prReviewPrompt`) and per-creation in the New Worktree screen. */
 export const DEFAULT_PR_REVIEW_PROMPT =
-  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag. Skip restating what the PR does — focus on what could go wrong or be improved."
+  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag.\n\nI usually haven't looked at the PR yet, so start by explaining it: what it does and why, and how it works, so I understand the change fundamentally. I'm a visual learner — use ASCII diagrams for flows, state and data-shape changes.\n\nThen give your critique, ranked by severity. I do want to merge this, so keep real blockers (bugs, security, data loss) separate from non-blocking notes, and finish with a recommendation."
 
 /** Primary wake-lock mode. The actual hold = (this mode wants it) OR (the
  *  transient `preventSleepUntil` timer is still live). Single-select; the
@@ -263,11 +263,17 @@ export type ReviewAgentChoice = 'inherit' | AgentKindSetting
 /** What a reviewer is told to do. The requester's own context is added
  *  underneath, and the tool mechanics (how to comment, that submit_review
  *  is what sends it) are appended by Ness and not editable here. */
-export const DEFAULT_REVIEW_PROMPT = `Review this branch the way a careful colleague would.
+export const DEFAULT_REVIEW_PROMPT = `Review this branch the way a careful colleague would, and then make the case for it to the user.
 
 Read the diff first. Leave each concrete issue as an inline comment on the line it belongs to, and keep it specific: what is wrong, why it matters, and what to do instead. Prefer a few substantial points over a long list of nits.
 
-Look for: correctness bugs and unhandled edge cases, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
+Look for: correctness bugs and unhandled edge cases, design problems, security concerns, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
+
+The user has usually not looked at this change yet, so the briefing is as important as the comments. Write it so they understand the change fundamentally and can decide whether to merge it without reading the diff first:
+- What it does and why — the problem, then the approach, in plain language.
+- How it works — walk through the moving parts and how they connect. The user is a visual learner: include an ASCII diagram in a code fence for any flow, state machine, data shape or before/after that changed.
+- Your critique — ranked by severity. Keep real blockers (bugs, data loss, security) clearly apart from non-blocking notes; the user wants to merge, so anything that is not mission critical is a note, not a blocker.
+- Recommendation — merge, merge with follow-ups, or hold, and why in one or two sentences.
 
 Do not change any code — you share this checkout with the author.`
 

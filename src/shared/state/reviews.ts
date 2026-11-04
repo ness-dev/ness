@@ -58,6 +58,10 @@ export interface ReviewSubmission {
   author: ReviewAuthor
   verdict: ReviewVerdict
   summary: string
+  /** The reviewer's case to the user: what the change does, how it works,
+   *  the critique and a recommendation. Shown in the Review tab only — the
+   *  author agent wrote the change and gets `summary` and the comments. */
+  briefing?: string
   /** Open comments by `author` at submit time. Only the ones still open
    *  when the submission is sent go out with it. */
   commentIds: string[]

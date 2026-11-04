@@ -546,11 +546,17 @@ describe('mcp-bridge review tools', () => {
     expect(draft.result.content[0].text).toMatch(/held as a draft.*tab author/)
     const sent = await callTool('submit_review', { verdict: 'approve', summary: 's' })
     expect(sent.result.content[0].text).toMatch(/delivered to tab author \(woke it\)/)
-    const failed = await callTool('submit_review', { verdict: 'comment', summary: 's', tab: 'term' })
+    const failed = await callTool('submit_review', {
+      verdict: 'comment',
+      summary: 's',
+      briefing: '## What it does',
+      tab: 'term'
+    })
     expect(failed.result.content[0].text).toMatch(/NOT delivered: not supported yet/)
     expect(stub.captured.filter((c) => c.url === '/reviews/submit').at(-1).body).toEqual({
       verdict: 'comment',
       summary: 's',
+      briefing: '## What it does',
       tab: 'term'
     })
   })
