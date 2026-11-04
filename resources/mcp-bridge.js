@@ -480,7 +480,7 @@ const TOOLS = [
         briefing: {
           type: 'string',
           description:
-            "Markdown for the user, not the author: the case for this change, so they can understand it and decide whether to merge without reading the diff first. Cover what it does and why, how it works (an ASCII diagram in a code fence for any flow, state or data-shape change — the user learns visually), your critique ranked by severity with blockers clearly separated from non-blocking notes, and a closing recommendation. Optional, but leave it out only for a trivial change."
+            "Markdown for the user, not the author: the case for this change, so they can understand it and decide whether to merge without reading the diff first. Cover what it does and why, how it works (a diagram for any flow, state or data-shape change — the user learns visually; a ```mermaid code block renders as a real diagram), your critique ranked by severity with blockers clearly separated from non-blocking notes, and a closing recommendation. Optional, but leave it out only for a trivial change."
         },
         tab: {
           type: 'string',

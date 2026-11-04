@@ -2,12 +2,15 @@ import { memo, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { rehypeHighlightShared } from '../rehype-highlight-shared'
+import { remarkMermaid } from '../remark-mermaid'
+import { MarkdownPre } from './MermaidDiagram'
 
 /** GFM for review comments, replies, summaries and request context. Same
  *  `.markdown` typography as chat. No rehype-raw, so raw HTML stays inert,
- *  and the default urlTransform still blanks `javascript:` and friends. */
+ *  and the default urlTransform still blanks `javascript:` and friends.
+ *  ```mermaid blocks render as diagrams. */
 
-const REMARK_PLUGINS = [remarkGfm]
+const REMARK_PLUGINS = [remarkGfm, remarkMermaid]
 const REHYPE_PLUGINS = [rehypeHighlightShared]
 
 // Rows that hold markdown are themselves clickable (jump to the diff), so
@@ -16,7 +19,8 @@ const REHYPE_PLUGINS = [rehypeHighlightShared]
 // browser and silently drops anything else — so relative file links
 // render as text rather than as links that do nothing.
 const COMPONENTS: Components = {
-  a: ({ href, children }) =>
+  pre: MarkdownPre,
+  a:({ href, children }) =>
     href && /^(https?:|mailto:)/i.test(href) ? (
       <a href={href} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
         {children}

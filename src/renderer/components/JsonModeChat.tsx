@@ -14,7 +14,9 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import { rehypeHighlightShared } from '../rehype-highlight-shared'
 import remarkGfm from 'remark-gfm'
 import { remarkInsight } from '../remark-insight'
+import { remarkMermaid } from '../remark-mermaid'
 import { InsightCard } from './InsightCard'
+import { MarkdownPre } from './MermaidDiagram'
 import {
   AlertOctagon,
   AlertTriangle,
@@ -95,7 +97,8 @@ import {
   useFindController
 } from './JsonModeChatFind'
 
-const REMARK_PLUGINS = [remarkGfm, remarkInsight]
+// remarkMermaid must run after remarkInsight, which rebuilds the tree.
+const REMARK_PLUGINS = [remarkGfm, remarkInsight, remarkMermaid]
 const REHYPE_PLUGINS = [rehypeHighlightShared, rehypeColorHex]
 
 /** Markdown `![alt](…)` in a message. An agent that just took a browser
@@ -160,7 +163,8 @@ function MarkdownImage({
 // <insight-card> element.
 const MARKDOWN_COMPONENTS = {
   'insight-card': InsightCard,
-  img: MarkdownImage
+  img: MarkdownImage,
+  pre: MarkdownPre
 } as unknown as Components
 
 // react-markdown's default transform blanks any src whose protocol isn't
