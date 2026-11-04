@@ -177,6 +177,7 @@ export function SubmissionCard({
   const [summary, setSummary] = useState(submission.summary)
   const [verdict, setVerdict] = useState<ReviewVerdict>(submission.verdict)
   const [sending, setSending] = useState(false)
+  const [showAuthorSummary, setShowAuthorSummary] = useState(false)
   const reviewerTabId = submission.author.kind === 'agent' ? submission.author.tabId : undefined
   const target = submission.targetTabId
     ? (tabLabels.get(submission.targetTabId) ?? 'a closed tab')
@@ -331,21 +332,33 @@ export function SubmissionCard({
           </div>
         </div>
       ) : (
-        submission.summary && (
+        submission.summary &&
+        (submission.briefing ? (
           <div className="mt-2">
-            {submission.briefing && (
-              <div className="mb-1 flex items-center gap-1.5 text-faint">
-                <Send className="icon-2xs" />
-                Summary for the author
+            <button
+              onClick={() => setShowAuthorSummary((v) => !v)}
+              className="flex items-center gap-1 text-faint hover:text-fg cursor-pointer"
+            >
+              <ChevronRight
+                className={`icon-2xs shrink-0 transition-transform ${showAuthorSummary ? 'rotate-90' : ''}`}
+              />
+              What the author agent receives
+            </button>
+            {showAuthorSummary && (
+              <div className="mt-1.5 pl-4">
+                <ReviewMarkdown text={submission.summary} />
               </div>
             )}
+          </div>
+        ) : (
+          <div className="mt-2">
             {fullSummary ? (
               <ReviewMarkdown text={submission.summary} />
             ) : (
               <ExpandableMarkdown text={submission.summary} lines={4} />
             )}
           </div>
-        )
+        ))
       )}
       {children}
     </div>

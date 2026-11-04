@@ -474,7 +474,8 @@ const TOOLS = [
         },
         summary: {
           type: 'string',
-          description: 'Overall assessment: what the change does well, what must change, and anything not tied to one line.'
+          description:
+            'For the author agent: a short, actionable list of what must change and anything not tied to one line. Do not repeat the briefing — the user reads that, the author reads this.'
         },
         briefing: {
           type: 'string',
