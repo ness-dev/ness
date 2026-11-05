@@ -23,6 +23,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Square,
   Terminal,
@@ -81,6 +82,7 @@ import {
 } from '../../shared/chat-image-src'
 import {
   QUESTION_TOOL_NAME,
+  type HeldNotice,
   type JsonClaudeAutomationSource,
   type JsonClaudeBackgroundAgent,
   type JsonClaudeChatEntry,
@@ -916,6 +918,27 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'subscription-started') {
+    return {
+      label: from ? `New Follower · ${from}` : 'New Follower',
+      note: 'another agent now follows this worktree',
+      brand: true
+    }
+  }
+  if (source === 'subscription-update') {
+    return {
+      label: from ? `Worktree Update · ${from}` : 'Worktree Update',
+      note: 'a worktree you follow changed',
+      brand: true
+    }
+  }
+  if (source === 'progress-report') {
+    return {
+      label: from ? `Progress Report · from ${from}` : 'Progress Report',
+      note: 'from a worktree you follow',
+      brand: true
+    }
+  }
   if (source === 'review') {
     return {
       label: from ? `Code Review · from ${from}` : 'Code Review',
@@ -1032,6 +1055,60 @@ function AutomatedTurnCard({
   )
 }
 
+/** Silent notifications Ness held for this tab and released with the turn
+ *  below. Collapsed by default: they were deliberately not worth an
+ *  interrupt, so they shouldn't shout in the transcript either. */
+function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex justify-end">
+      <div
+        className="border border-border bg-panel overflow-hidden"
+        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-bubble-radius)' }}
+      >
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center gap-2 text-left cursor-pointer hover:bg-app/40"
+          style={{
+            paddingInline: 'var(--chat-chrome-px)',
+            paddingBlock: 'var(--chat-chrome-py)',
+            fontSize: 'var(--chat-chrome-text)'
+          }}
+          aria-expanded={open}
+        >
+          {open ? (
+            <ChevronDown className="icon-xs shrink-0 text-muted" />
+          ) : (
+            <ChevronRight className="icon-xs shrink-0 text-muted" />
+          )}
+          <NessIcon className="icon-sm shrink-0" />
+          <span
+            className="font-semibold shrink-0 brand-gradient-text"
+            style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+          >
+            {notices.length === 1 ? '1 held notification' : `${notices.length} held notifications`}
+          </span>
+          <span className="text-muted truncate">delivered with this turn</span>
+        </button>
+        {open && (
+          <div className="border-t border-border divide-y divide-border">
+            {notices.map((n, i) => (
+              <div key={i} className="px-3 py-2" style={{ fontSize: 'var(--chat-body-text)' }}>
+                <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
+                  {automationLabel(n.source, n.from).label}
+                </div>
+                <div className="whitespace-pre-wrap break-words">
+                  <HighlightedText text={n.body} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface RenderContext {
   resultsByToolUseId: Map<string, ToolResultView>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
@@ -1061,6 +1138,14 @@ function renderEntries(
 ): RenderedRow[] {
   const rows: RenderedRow[] = []
   for (const entry of entries) {
+    if (entry.kind === 'user' && entry.heldNotices && entry.heldNotices.length > 0) {
+      rows.push({
+        key: `${entry.entryId}-held`,
+        entryId: entry.entryId,
+        type: 'text',
+        node: <HeldNoticesCard notices={entry.heldNotices} />
+      })
+    }
     if (entry.kind === 'user' && entry.automation) {
       rows.push({
         key: entry.entryId,

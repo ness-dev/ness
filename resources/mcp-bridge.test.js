@@ -606,4 +606,43 @@ describe('mcp-bridge review tools', () => {
     const missing = await callTool('send_message', { message: 'hi' })
     expect(missing.result.isError).toBe(true)
   })
+
+  it('advertises the subscription tools while messaging is on', async () => {
+    await start((req, body, res) => json(res, 404, {}))
+    bridge.send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} })
+    const names = (await bridge.next()).result.tools.map((t) => t.name)
+    for (const n of [
+      'subscribe_to_worktree',
+      'unsubscribe_from_worktree',
+      'list_subscriptions',
+      'report_progress',
+      'get_worktree_status'
+    ]) {
+      expect(names).toContain(n)
+    }
+  })
+
+  it('report_progress forwards to POST /progress and summarizes delivery', async () => {
+    await start((req, body, res) =>
+      json(res, 200, {
+        delivered: [
+          { worktreePath: '/a', tabId: 'a', delivery: 'held' },
+          { worktreePath: '/b', tabId: 'b', delivery: 'interrupt' }
+        ],
+        failed: []
+      })
+    )
+    const r = await callTool('report_progress', { message: 'halfway' })
+    expect(r.result.content[0].text).toBe('Reported to 2 of 2 follower(s); 1 held for their next turn.')
+    expect(stub.captured.find((c) => c.url === '/progress').body).toEqual({
+      message: 'halfway',
+      urgent: false
+    })
+  })
+
+  it('report_progress says so when nobody follows', async () => {
+    await start((req, body, res) => json(res, 200, { delivered: [], failed: [] }))
+    const r = await callTool('report_progress', { message: 'x' })
+    expect(r.result.content[0].text).toMatch(/^Nobody is following/)
+  })
 })

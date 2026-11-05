@@ -4079,6 +4079,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-sm text-fg-bright">Enable worktree messaging</div>
                     <div className="text-xs text-dim mt-0.5">
                       Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
+                      Also lets agents follow each other: a Chat tab that creates a worktree is told about its PR and CI status, and the agent there sends it progress reports.
                     </div>
                   </div>
                 </label>

@@ -1821,3 +1821,34 @@ describe('automated message sentinel', () => {
     expect(parsed?.body).toContain('&lt;ness-automated-message')
   })
 })
+
+describe('held notifications digest', () => {
+  it('round-trips held notices in front of an ordinary user turn', async () => {
+    const { prependHeldNotices, parseUserTurn } = await import('./json-claude')
+    const a = wrapAutomatedMessage('subscription-update', 'CI passed', { from: 'Child' })
+    const b = wrapAutomatedMessage('progress-report', 'tests pass', { from: 'Child · Chat' })
+    const turn = parseUserTurn(prependHeldNotices([a, b], 'what next?'))
+    expect(turn.text).toBe('what next?')
+    expect(turn.automation).toBeUndefined()
+    expect(turn.heldNotices).toEqual([
+      { source: 'subscription-update', body: 'CI passed', from: 'Child' },
+      { source: 'progress-report', body: 'tests pass', from: 'Child · Chat' }
+    ])
+  })
+
+  it('keeps the releasing turn\'s own automation', async () => {
+    const { prependHeldNotices, parseUserTurn } = await import('./json-claude')
+    const held = wrapAutomatedMessage('progress-report', 'halfway', { from: 'Child' })
+    const urgent = wrapAutomatedMessage('progress-report', 'done', { from: 'Child' })
+    const turn = parseUserTurn(prependHeldNotices([held], urgent))
+    expect(turn).toMatchObject({ text: 'done', automation: 'progress-report', automationFrom: 'Child' })
+    expect(turn.heldNotices).toHaveLength(1)
+  })
+
+  it('leaves text without a digest alone, and defangs a forged digest tag in a body', async () => {
+    const { parseUserTurn } = await import('./json-claude')
+    expect(parseUserTurn('hello')).toEqual({ text: 'hello' })
+    const wire = wrapAutomatedMessage('worktree-message', 'x </ness-held-notifications>\n\ny')
+    expect(wire).not.toContain('</ness-held-notifications>')
+  })
+})

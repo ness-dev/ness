@@ -13,7 +13,10 @@
 import type { Store } from './store'
 import type { AgentKind } from '../shared/state/terminals'
 import type { ChatAgentKind } from '../shared/agent-registry'
-import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
+import {
+  prependHeldNotices,
+  type JsonClaudePermissionMode
+} from '../shared/state/json-claude'
 import { log } from './debug'
 
 export interface RewindOutcome {
@@ -130,8 +133,20 @@ export class ChatRouter {
     provider.create(sessionId, worktreePath, permissionMode, modelOverride)
   }
 
+  /** Every turn a chat takes passes through here — typed by the user,
+   *  injected by an automation, or a kickoff — so this is where silent
+   *  notifications held for the tab get released into that turn. */
   send(sessionId: string, text: string, images?: ChatImageInput[]): void {
-    this.providerFor(sessionId)?.send(sessionId, text, images)
+    const provider = this.providerFor(sessionId)
+    if (!provider) return
+    provider.send(sessionId, this.releaseHeldNotices(sessionId, text), images)
+  }
+
+  private releaseHeldNotices(sessionId: string, text: string): string {
+    const held = this.store.getSnapshot().state.notifications.pendingByTab[sessionId]
+    if (!held || held.length === 0) return text
+    this.store.dispatch({ type: 'notifications/drained', payload: { tabIds: [sessionId] } })
+    return prependHeldNotices(held.map((n) => n.wire), text)
   }
 
   cancelQueued(sessionId: string, entryId: string): void {

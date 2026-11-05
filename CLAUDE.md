@@ -43,7 +43,11 @@ slice has:
 
 Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
 `terminals` (which also owns `panes` and `lastActive`), `updater`,
-`repoConfigs`, `permissions`. Adding a new piece of shared state means picking the
+`repoConfigs`, `permissions`, `subscriptions` (explicit agent→worktree
+follows), `origins` (which Chat tab created a worktree — implicit follows
+are derived from it in `shared/subscribers.ts`, never stored), and
+`notifications` (silent notices held per tab until `ChatRouter.send`
+releases them into its next turn). Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end

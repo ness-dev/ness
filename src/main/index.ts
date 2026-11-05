@@ -66,6 +66,16 @@ import { PanesFSM } from './panes-fsm'
 import { treeToPersistedNode } from './pane-persistence'
 import { ActivityDeriver } from './activity-deriver'
 import { CiNotifier } from './ci-notifier'
+import {
+  SubscriptionNotifier,
+  buildWorktreeDetail,
+  pruneForRemovedWorktrees,
+  recordWorktreeOrigin,
+  reportProgress,
+  subscribeToWorktree,
+  unsubscribeFromWorktree
+} from './worktree-subscriptions'
+import { subscribersOf, subscriptionsOfTab } from '../shared/subscribers'
 import { AutoSleepMonitor } from './auto-sleep-monitor'
 import { WakeLockController } from './wake-lock-controller'
 import { WorktreeWatcher } from './worktree-watcher'
@@ -807,6 +817,22 @@ store.subscribe((event) => {
   }
 })
 
+// Persist explicit subscriptions and worktree origins so both survive
+// restart. Held silent notifications are deliberately not persisted.
+store.subscribe((event) => {
+  if (event.type.startsWith('subscriptions/')) {
+    const list = store.getSnapshot().state.subscriptions.list
+    if (list.length === 0) delete config.worktreeSubscriptions
+    else config.worktreeSubscriptions = list
+    saveConfig(config)
+  } else if (event.type.startsWith('origins/')) {
+    const byPath = store.getSnapshot().state.origins.byPath
+    if (Object.keys(byPath).length === 0) delete config.worktreeOrigins
+    else config.worktreeOrigins = byPath
+    saveConfig(config)
+  }
+})
+
 // Persist per-worktree CI-notify overrides so they survive restart.
 store.subscribe((event) => {
   if (event.type.startsWith('ciNotify/')) {
@@ -1349,6 +1375,14 @@ const chatDeliveryDeps = {
 // chat sessions.
 const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
 
+// Tells tabs that follow a worktree (explicitly, or implicitly because they
+// created it) when its PR changes. Same delivery path as the CI notifier.
+const subscriptionNotifier = new SubscriptionNotifier(
+  store,
+  chatDeliveryDeps,
+  () => config.worktreeMessagingEnabled === true
+)
+
 const listWorktreeChatTabs = (worktreePath: string) =>
   listChatTabs(store.getSnapshot().state, worktreePath)
 const reviewServiceDeps: ReviewServiceDeps = {
@@ -1625,6 +1659,13 @@ store.subscribe((event) => {
       store.dispatch({ type: 'snooze/clear', payload: path })
     }
   }
+})
+
+// A removed worktree takes its subscriptions (either end) and its origin
+// with it, so nothing follows — or is followed from — a path that's gone.
+store.subscribe((event) => {
+  if (event.type !== 'worktrees/listChanged') return
+  pruneForRemovedWorktrees(store)
 })
 
 // Same for CI-notify overrides — a removed worktree's override would
@@ -5437,6 +5478,7 @@ async function runBoot(): Promise<void> {
   activityDeriver.start()
 
   ciNotifier.start()
+  subscriptionNotifier.start()
 
   reviewSpawner.start()
 
@@ -5608,6 +5650,33 @@ async function runBoot(): Promise<void> {
       sendToTab: (worktreePath, tabId, message) =>
         deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
     },
+    subscriptions: {
+      subscribe: (caller, targetPath, opts) =>
+        subscribeToWorktree(store, chatDeliveryDeps, {
+          subscriberPath: caller.worktreePath,
+          subscriberTabId: caller.tabId,
+          targetPath,
+          ...opts
+        }),
+      unsubscribe: (callerTabId, targetPath) =>
+        unsubscribeFromWorktree(store, callerTabId, targetPath),
+      list: (caller) => {
+        const state = store.getSnapshot().state
+        return {
+          following: subscriptionsOfTab(state, caller.tabId),
+          followers: subscribersOf(state, caller.worktreePath)
+        }
+      },
+      reportProgress: (caller, message, urgent) =>
+        reportProgress(store, chatDeliveryDeps, caller.worktreePath, caller.tabId, message, urgent),
+      recordOrigin: (worktreePath, creator) => recordWorktreeOrigin(store, worktreePath, creator)
+    },
+    getWorktreeDetail: (worktreePath) =>
+      buildWorktreeDetail(store, worktreePath, {
+        branch: getCurrentBranch,
+        commits: getBranchCommits,
+        changedFiles: (p) => getChangedFiles(p, 'working')
+      }),
     listChatTabs: listWorktreeChatTabs,
     reviews: {
       list: (worktreePath, filter) => listReviewComments(store, worktreePath, filter),

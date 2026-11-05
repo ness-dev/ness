@@ -377,6 +377,83 @@ const TOOLS = [
     }
   },
   {
+    name: 'subscribe_to_worktree',
+    description:
+      "Follow another Ness worktree's progress from this Chat tab. Two things happen: (1) Ness tells you automatically when that worktree's pull request changes — opened, new commits pushed, CI passing or failing, approved or changes requested, merge conflicts, merged or closed; (2) the agent working there is told you are following and asked to send you progress reports with report_progress. Updates arrive as turns in this chat, so after subscribing end your turn rather than polling — you will be woken when something urgent happens.\n\n`mode` decides how routine updates reach you. 'interrupt' (default) delivers each one as its own turn, waking this tab. 'silent' holds them and hands them to you with your next turn — the user's next message or the next interrupt — so they don't derail what you're doing. Urgent updates (CI failing, changes requested, conflicts, the PR merging or closing, and progress reports the sender flags urgent) always interrupt.\n\nYou already follow, silently, every worktree you created with create_worktree; subscribe explicitly only to change that to 'interrupt' or to follow a worktree you did not create. Calling it again on the same worktree updates the note and mode, and re-briefs the agent there — useful if it seems to have lost track.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description:
+            'Worktree to follow — a `<repo>/<branch>` handle, alias, or absolute path (same forms as send_message).'
+        },
+        note: {
+          type: 'string',
+          description:
+            "Optional: what you are watching for, in a sentence. Passed to the agent there so its progress reports cover what you care about."
+        },
+        mode: {
+          type: 'string',
+          enum: ['interrupt', 'silent'],
+          description: "How routine updates reach you. Defaults to 'interrupt'."
+        }
+      },
+      required: ['worktree']
+    }
+  },
+  {
+    name: 'unsubscribe_from_worktree',
+    description:
+      "Stop following a worktree you subscribed to with subscribe_to_worktree. A worktree you created is followed implicitly for as long as it exists and can't be unsubscribed from; subscribe to it with mode 'silent' instead if its updates are too noisy.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description: 'Worktree to stop following — handle, alias, or absolute path.'
+        }
+      },
+      required: ['worktree']
+    }
+  },
+  {
+    name: 'list_subscriptions',
+    description:
+      "Show which worktrees this tab follows (`following`) and which tabs follow your worktree (`followers`). Each entry has `kind` — 'explicit' (someone called subscribe_to_worktree) or 'implicit' (derived by Ness, e.g. `reason: 'created-worktree'` for the tab that created a worktree) — and `mode` ('interrupt' or 'silent'). If you have followers, keep them posted with report_progress.",
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'report_progress',
+    description:
+      "Send a short progress report to every agent following this worktree — whoever created it, plus anyone who subscribed. You don't pick recipients; Ness delivers to all of them, and tells you if there are none.\n\nReport at real milestones (plan settled, a chunk of work committed, PR opened, tests passing), when you are blocked or need a decision, and when you finish. Keep it to a few sentences: what changed, what's next, anything they need to know. Don't report PR, CI or review changes on their own — Ness already sends those. Pass `urgent: true` only when a follower should act now (you're blocked, need a decision, or are done); otherwise the report reaches followers in whatever mode they chose.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The progress report.' },
+        urgent: {
+          type: 'boolean',
+          description: 'Interrupt every follower, even ones that chose silent updates. Default false.'
+        }
+      },
+      required: ['message']
+    }
+  },
+  {
+    name: 'get_worktree_status',
+    description:
+      "Git and pull request status of one worktree: branch, the PR (number, state, CI result and failing checks, review decision, conflicts), commits on the branch with which are unpushed, uncommitted files, and how many tabs follow it. Defaults to your own worktree. The PR fields are from Ness's last GitHub poll, so they can be a few minutes behind; the git fields are read fresh.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description: 'Worktree to inspect — handle, alias, or absolute path. Optional; defaults to your own.'
+        }
+      }
+    }
+  },
+  {
     name: 'request_review',
     description:
       "Ask for a code review of the work you have just finished on this branch. Ness opens a second Chat tab in this worktree whose only job is to review your work, shows the Review tab next to it, and hands it your `context`. The reviewer reads the diff, leaves inline comments, and calls submit_review — which comes back to YOU as a message, because Ness remembers that you are the one who asked.\n\nCall this when a piece of work is complete and you would otherwise hand it to the user: changes are made and verified, and you want them checked before they go further. Say so in your reply, then end your turn — you will be woken when the review arrives, so do not poll or wait. Calling it again later asks the same reviewer for another look, carrying the earlier conversation; use that after you have addressed the first round.\n\nThis is not the way to ask the USER a question — it starts another agent. If you simply want a human to look, say so in your reply instead.",
@@ -812,6 +889,13 @@ const VIEW_BROWSER_TOOLS = new Set([
   'reload_tab',
   'set_tab_viewport'
 ])
+const MESSAGING_TOOLS = new Set([
+  'send_message',
+  'subscribe_to_worktree',
+  'unsubscribe_from_worktree',
+  'list_subscriptions',
+  'report_progress'
+])
 const FULL_CONTROL_BROWSER_TOOLS = new Set([
   'click_tab',
   'type_tab',
@@ -863,7 +947,7 @@ async function getRendersMarkdown() {
 
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
-    if (t.name === 'send_message') return perms.messaging.enabled
+    if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
     if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
@@ -1038,6 +1122,64 @@ async function handleToolCall(name, args) {
       '"' +
       (r.woke ? ' (woke its sleeping chat tab)' : '')
     )
+  }
+  if (name === 'subscribe_to_worktree') {
+    const worktree = args && typeof args.worktree === 'string' ? args.worktree.trim() : ''
+    if (!worktree) throw new Error('worktree is required')
+    if (args.mode !== undefined && args.mode !== 'interrupt' && args.mode !== 'silent') {
+      throw new Error('mode must be "interrupt" or "silent"')
+    }
+    const r = await callControl('POST', '/subscriptions', {
+      worktree,
+      note: typeof args.note === 'string' ? args.note : undefined,
+      mode: args.mode
+    })
+    const verb = r.created ? 'Subscribed to' : 'Updated your subscription to'
+    const told = r.targetNotified
+      ? 'The agent there has been asked to send you progress reports.'
+      : r.targetNotifyError === 'no-chat-tab'
+        ? 'It has no Chat tab, so no agent there was told — you will still get its PR updates.'
+        : 'Its Chat tab could not be woken, so the agent there was not told — you will still get its PR updates. Subscribe again later to re-brief it.'
+    return (
+      verb + ' ' + r.worktree + ' (' + r.mode + '). ' + told +
+      ' End your turn; updates arrive as messages in this chat.'
+    )
+  }
+  if (name === 'unsubscribe_from_worktree') {
+    const worktree = args && typeof args.worktree === 'string' ? args.worktree.trim() : ''
+    if (!worktree) throw new Error('worktree is required')
+    const r = await callControl('DELETE', '/subscriptions', { worktree })
+    return 'Unsubscribed from ' + r.worktreePath + '.'
+  }
+  if (name === 'list_subscriptions') {
+    const r = await callControl('GET', '/subscriptions')
+    return JSON.stringify(r, null, 2)
+  }
+  if (name === 'report_progress') {
+    if (!args || typeof args.message !== 'string' || !args.message.trim()) {
+      throw new Error('message is required')
+    }
+    const r = await callControl('POST', '/progress', {
+      message: args.message,
+      urgent: args.urgent === true
+    })
+    const total = r.delivered.length + r.failed.length
+    if (total === 0) {
+      return 'Nobody is following this worktree, so the report went nowhere. No need to keep reporting unless someone subscribes.'
+    }
+    const held = r.delivered.filter((d) => d.delivery === 'held').length
+    const parts = ['Reported to ' + r.delivered.length + ' of ' + total + ' follower(s)']
+    if (held > 0) parts.push(held + ' held for their next turn')
+    if (r.failed.length > 0) parts.push(r.failed.length + ' could not be reached')
+    return parts.join('; ') + '.'
+  }
+  if (name === 'get_worktree_status') {
+    const q =
+      args && typeof args.worktree === 'string' && args.worktree.trim()
+        ? '?worktree=' + encodeURIComponent(args.worktree.trim())
+        : ''
+    const r = await callControl('GET', '/worktree-status' + q)
+    return JSON.stringify(r, null, 2)
   }
   if (name === 'list_tabs') {
     const q =

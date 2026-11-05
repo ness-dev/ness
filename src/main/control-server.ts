@@ -18,6 +18,9 @@ import type {
   ReviewVerdict
 } from '../shared/state/reviews'
 import type { SubmitReviewResult } from './review-service'
+import type { NotifyMode } from '../shared/state/subscriptions'
+import type { Subscriber } from '../shared/subscribers'
+import type { FanOutResult, SubscribeResult, UnsubscribeResult } from './worktree-subscriptions'
 import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
@@ -131,6 +134,30 @@ export interface MessagingQueries {
   sendToTab: (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
 }
 
+/** Worktree subscriptions. Every subscriber identity is the caller's own
+ *  tab — an agent can't subscribe, or report progress, on another's behalf. */
+export interface SubscriptionQueries {
+  subscribe: (
+    caller: { worktreePath: string; tabId: string },
+    targetPath: string,
+    opts: { note?: string; mode?: NotifyMode }
+  ) => SubscribeResult
+  unsubscribe: (callerTabId: string, targetPath: string) => UnsubscribeResult
+  /** What the caller follows, and who follows the caller's worktree. */
+  list: (caller: { worktreePath: string; tabId: string }) => {
+    following: Subscriber[]
+    followers: Subscriber[]
+  }
+  reportProgress: (
+    caller: { worktreePath: string; tabId: string },
+    message: string,
+    urgent: boolean
+  ) => FanOutResult
+  /** Record that the caller's tab created `worktreePath`, which is what
+   *  makes it implicitly follow the new worktree. */
+  recordOrigin: (worktreePath: string, creator: { worktreePath: string; tabId: string }) => void
+}
+
 /** Review viewer comments + submissions for the caller's own worktree.
  *  Every author identity is derived from the caller's terminal id. */
 export interface ReviewQueries {
@@ -228,6 +255,9 @@ export interface ControlServerDeps {
   browser: BrowserQueries
   shell: ShellQueries
   messaging: MessagingQueries
+  subscriptions: SubscriptionQueries
+  /** Branch, PR, commits and uncommitted files of one worktree. */
+  getWorktreeDetail: (worktreePath: string) => Promise<Record<string, unknown>>
   reviews: ReviewQueries
   /** Chat tabs of a worktree, most recently active first — the only tabs
    *  reviews and tab messages can be delivered to. */
@@ -403,14 +433,23 @@ async function handleRequest(
     // sentinel a worktree-to-worktree message does. Creation from the Ness
     // UI goes through IPC, not this route, and stays unwrapped — that one
     // really was typed by the human.
-    const kickoffSender = resolveScope(req, deps).scope
-    const initialPrompt = rawInitialPrompt
-      ? wrapAutomatedMessage('worktree-kickoff', rawInitialPrompt, {
-          from: kickoffSender
-            ? deps.messaging.describe(kickoffSender.worktreePath)
-            : undefined
-        })
-      : rawInitialPrompt
+    const { scope: kickoffSender, terminalId: kickoffTerminal } = resolveScope(req, deps)
+    // A Chat tab that creates a worktree follows it implicitly (see
+    // shared/subscribers.ts), so the new agent is told who's listening.
+    const creator =
+      kickoffSender &&
+      deps.messaging.isEnabled() &&
+      deps.listChatTabs(kickoffSender.worktreePath).some((t) => t.id === kickoffTerminal)
+        ? { worktreePath: kickoffSender.worktreePath, tabId: kickoffTerminal }
+        : null
+    const creatorName = kickoffSender ? deps.messaging.describe(kickoffSender.worktreePath) : undefined
+    const kickoffBody =
+      rawInitialPrompt && creator
+        ? `${rawInitialPrompt}\n\n${followedByCreatorNote(creatorName ?? 'the agent that created it')}`
+        : rawInitialPrompt
+    const initialPrompt = kickoffBody
+      ? wrapAutomatedMessage('worktree-kickoff', kickoffBody, { from: creatorName })
+      : kickoffBody
 
     const rawAgent = typeof body.agentKind === 'string' ? body.agentKind.trim().toLowerCase() : ''
     let agentKind: AgentKind | undefined
@@ -491,6 +530,7 @@ async function handleRequest(
       if (aliasInput !== undefined) {
         deps.setAlias(result.path, aliasInput)
       }
+      if (creator) deps.subscriptions.recordOrigin(result.path, creator)
       return sendJson(res, 200, { path: result.path, branch: result.branch })
     }
 
@@ -511,6 +551,7 @@ async function handleRequest(
     if (aliasInput !== undefined) {
       deps.setAlias(created.path, aliasInput)
     }
+    if (creator) deps.subscriptions.recordOrigin(created.path, creator)
     deps.broadcast('worktrees:externalCreate', {
       repoRoot,
       worktree: created,
@@ -1162,6 +1203,119 @@ async function handleRequest(
     })
   }
 
+  // get_worktree_status — read-only, workspace-wide like list_worktrees.
+  if (req.method === 'GET' && path === '/worktree-status') {
+    const query = url.searchParams.get('worktree')?.trim()
+    let worktreePath: string | undefined
+    if (query) {
+      const resolved = deps.messaging.resolveTarget(query)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      worktreePath = resolved.path
+    } else {
+      worktreePath = resolveScope(req, deps).scope?.worktreePath
+    }
+    if (!worktreePath) {
+      return sendJson(res, 400, { error: 'worktree required when caller is not scoped to a worktree' })
+    }
+    return sendJson(res, 200, await deps.getWorktreeDetail(worktreePath))
+  }
+
+  // Subscriptions + progress reports. Gated with send_message, since both
+  // put messages into another agent's chat.
+  if (path === '/subscriptions' || path === '/progress') {
+    if (!deps.messaging.isEnabled()) {
+      return sendJson(res, 403, {
+        error:
+          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+      })
+    }
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, { error: 'caller terminal is not associated with a worktree' })
+    }
+    const caller = { worktreePath: scope.worktreePath, tabId: terminalId }
+
+    if (req.method === 'GET' && path === '/subscriptions') {
+      const { following, followers } = deps.subscriptions.list(caller)
+      const view = (s: Subscriber, side: 'target' | 'subscriber'): Record<string, unknown> => ({
+        worktree: deps.messaging.describe(side === 'target' ? s.targetPath : s.subscriberPath),
+        worktreePath: side === 'target' ? s.targetPath : s.subscriberPath,
+        ...(side === 'subscriber' ? { tab: s.subscriberTabId } : {}),
+        kind: s.kind,
+        ...(s.reason ? { reason: s.reason } : {}),
+        mode: s.mode,
+        ...(s.note ? { note: s.note } : {}),
+        since: s.since
+      })
+      return sendJson(res, 200, {
+        following: following.map((s) => view(s, 'target')),
+        followers: followers.map((s) => view(s, 'subscriber'))
+      })
+    }
+
+    const body = await readJson(req)
+
+    if (req.method === 'POST' && path === '/progress') {
+      const message = typeof body.message === 'string' ? body.message.trim() : ''
+      if (!message) return sendJson(res, 400, { error: 'message required' })
+      const result = deps.subscriptions.reportProgress(caller, message, body.urgent === true)
+      log(
+        'control',
+        `progress ${scope.worktreePath} -> delivered=${result.delivered.length} failed=${result.failed.length}`
+      )
+      return sendJson(res, 200, result)
+    }
+
+    const target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
+    if (!target) return sendJson(res, 400, { error: 'worktree required' })
+    const resolved = deps.messaging.resolveTarget(target)
+    if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+    if (resolved.path === scope.worktreePath) {
+      return sendJson(res, 400, { error: 'cannot subscribe to your own worktree' })
+    }
+
+    if (req.method === 'POST') {
+      // Updates have to land in the caller's chat, and only Chat tabs can
+      // receive them.
+      if (!deps.listChatTabs(scope.worktreePath).some((t) => t.id === terminalId)) {
+        return sendJson(res, 400, {
+          error: 'only a Chat tab can subscribe — terminal tabs cannot receive updates'
+        })
+      }
+      const rawMode = body.mode
+      if (rawMode !== undefined && rawMode !== 'interrupt' && rawMode !== 'silent') {
+        return sendJson(res, 400, { error: 'mode must be "interrupt" or "silent"' })
+      }
+      const note = typeof body.note === 'string' ? body.note : undefined
+      const result = deps.subscriptions.subscribe(caller, resolved.path, {
+        note,
+        mode: rawMode
+      })
+      return sendJson(res, 200, {
+        worktreePath: resolved.path,
+        worktree: deps.messaging.describe(resolved.path),
+        ...result
+      })
+    }
+
+    if (req.method === 'DELETE') {
+      const outcome = deps.subscriptions.unsubscribe(terminalId, resolved.path)
+      if (outcome === 'not-subscribed') {
+        return sendJson(res, 404, { error: `you are not subscribed to ${target}` })
+      }
+      if (outcome === 'implicit') {
+        return sendJson(res, 409, {
+          error:
+            'that subscription is implicit — you follow this worktree because you created it, and it lasts as long as the worktree does. To get its updates quietly instead, call subscribe_to_worktree with mode "silent".'
+        })
+      }
+      return sendJson(res, 200, { worktreePath: resolved.path, removed: true })
+    }
+  }
+
   // /scope — returns the caller's current scope. The MCP bridge calls this
   // once at startup so it can adapt tool descriptions (e.g. signalling
   // "create_worktree defaults to this repo" for feature callers) and filter
@@ -1182,6 +1336,16 @@ async function handleRequest(
 
   res.writeHead(404)
   res.end('not found')
+}
+
+/** Appended to the kickoff brief of a worktree a Chat tab created. */
+export function followedByCreatorNote(creatorName: string): string {
+  return (
+    `Ness: ${creatorName} created this worktree and follows it — it is told about this ` +
+    'branch\'s PR, CI and review status automatically. Call `report_progress` with a short update ' +
+    'at real milestones, when you are blocked or need a decision (pass `urgent: true`), and when ' +
+    'you finish.'
+  )
 }
 
 /** A comment as the review MCP tools return it: flat, with authors named

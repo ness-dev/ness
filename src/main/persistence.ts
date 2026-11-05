@@ -22,6 +22,8 @@ import {
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
 import type { WorktreeReview } from '../shared/state/reviews'
+import type { WorktreeSubscription } from '../shared/state/subscriptions'
+import type { WorktreeOrigin } from '../shared/state/origins'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 
@@ -383,6 +385,12 @@ export interface Config {
   // Review viewer comments keyed by worktree path (the `reviews` slice's
   // byPath). Pruned when a worktree is removed.
   reviews?: Record<string, WorktreeReview>
+  // Agent-to-worktree progress subscriptions (the `subscriptions` slice).
+  // Pruned when either end's worktree is removed.
+  worktreeSubscriptions?: WorktreeSubscription[]
+  // Which agent Chat tab created each worktree (the `origins` slice).
+  // Pruned when the worktree is removed.
+  worktreeOrigins?: Record<string, WorktreeOrigin>
   // Persisted alias map: worktree path → user-defined display alias.
   aliases?: Record<string, string>
   // Wake-lock mode: hold a power-save blocker 'off' | while any agent
