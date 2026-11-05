@@ -3,6 +3,13 @@
 // of its own — the local module declaration in `highlight-common.d.ts`
 // fills that in.
 import hljs from 'highlight.js/lib/common'
+import groovy from 'highlight.js/lib/languages/groovy'
+import properties from 'highlight.js/lib/languages/properties'
+import asciidoc from 'highlight.js/lib/languages/asciidoc'
+
+hljs.registerLanguage('groovy', groovy)
+hljs.registerLanguage('properties', properties)
+hljs.registerLanguage('asciidoc', asciidoc)
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -20,6 +27,12 @@ const EXT_TO_LANG: Record<string, string> = {
   rs: 'rust',
   java: 'java',
   kt: 'kotlin',
+  kts: 'kotlin',
+  groovy: 'groovy',
+  gradle: 'groovy',
+  properties: 'properties',
+  adoc: 'asciidoc',
+  asciidoc: 'asciidoc',
   swift: 'swift',
   c: 'c',
   h: 'c',
