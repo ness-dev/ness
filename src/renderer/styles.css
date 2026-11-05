@@ -410,6 +410,23 @@ mark.find-hit-current {
   display: none;
 }
 
+/* Semantic node classes for mermaid diagrams (`A:::added`). Agents can't
+   see the theme, so instead of picking hex colors they name a meaning and
+   the theme supplies the color. !important because mermaid's own <style>
+   block is scoped by the svg's id and outranks a class selector. */
+.mermaid-diagram { --mm-tone: var(--color-accent); }
+.mermaid-diagram g.added { --mm-tone: var(--color-success); }
+.mermaid-diagram g.changed { --mm-tone: var(--color-warning); }
+.mermaid-diagram g.removed { --mm-tone: var(--color-danger); }
+.mermaid-diagram g.focus { --mm-tone: var(--color-accent); }
+.mermaid-diagram :is(g.added, g.changed, g.removed, g.focus) :is(rect, polygon, circle, ellipse, path) {
+  fill: color-mix(in srgb, var(--mm-tone) 22%, var(--color-panel)) !important;
+  stroke: var(--mm-tone) !important;
+}
+.mermaid-diagram g.removed :is(.nodeLabel, text) {
+  text-decoration: line-through;
+}
+
 /* Markdown rendering for json-claude assistant text. The global preflight
    reset zeros out lists/headings/paragraphs; restore them inside .markdown
    so react-markdown output looks the way users expect. */

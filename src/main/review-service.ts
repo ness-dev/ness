@@ -338,6 +338,8 @@ export function requestReview(
 export interface SubmitReviewInput {
   verdict: ReviewVerdict
   summary: string
+  /** Explanation for the user; shown in the Review tab, never delivered. */
+  briefing?: string
   /** Explicit author tab. Must be a Chat tab in the worktree other than
    *  the reviewer's. */
   targetTabId?: string
@@ -385,11 +387,13 @@ export function submitReview(
   const requester = reviewRequester(state, worktreePath, reviewerTabId)
   const targetTabId =
     input.targetTabId ?? requester ?? pickReviewTarget(tabs, reviewerTabId) ?? undefined
+  const briefing = input.briefing?.trim()
   const submission: ReviewSubmission = {
     id: randomUUID(),
     author,
     verdict: input.verdict,
     summary: input.summary.trim(),
+    ...(briefing ? { briefing } : {}),
     commentIds,
     createdAt: Date.now(),
     state: 'draft',

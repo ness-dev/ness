@@ -298,6 +298,27 @@ describe('submitReview', () => {
     expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0].state).toBe('sent')
   })
 
+  it('keeps the briefing on the submission but out of the delivered message', () => {
+    const { store, deps, deliver } = setup([comment('mine')])
+    const result = submitReview(deps, WT, author, {
+      verdict: 'approve',
+      summary: 'lgtm',
+      briefing: ' ## What it does\nAdds a cache. ',
+      holdAsDraft: false
+    })
+    if ('error' in result) throw new Error(result.error)
+    expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0].briefing).toBe(
+      '## What it does\nAdds a cache.'
+    )
+    expect(deliver.mock.calls[0][2]).not.toContain('Adds a cache')
+  })
+
+  it('omits a blank briefing', () => {
+    const { store, deps } = setup([comment('mine')])
+    submitReview(deps, WT, author, { verdict: 'comment', summary: 's', briefing: '  ', holdAsDraft: true })
+    expect(store.getSnapshot().state.reviews.byPath[WT].submissions![0]).not.toHaveProperty('briefing')
+  })
+
   it('records a failed delivery with a readable reason', () => {
     const { store, deps } = setup([comment('mine')], () => ({
       ok: false,

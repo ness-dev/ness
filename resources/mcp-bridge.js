@@ -462,7 +462,7 @@ const TOOLS = [
   {
     name: 'submit_review',
     description:
-      "Finish a review of this worktree's branch: a verdict plus a summary, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nIf you were opened by `request_review`, the review goes back to the tab that asked for it — you do not need to work out who that is. Otherwise it goes to the most recently active Chat tab other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
+      "Finish a review of this worktree's branch: a verdict, a summary, and a briefing, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nThe summary and comments go to the author agent. The briefing does not: it is shown to the user in the Review tab, above the summary, and is written for a human who has probably not read the change yet.\n\nIf you were opened by `request_review`, the review goes back to the tab that asked for it — you do not need to work out who that is. Otherwise it goes to the most recently active Chat tab other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -474,7 +474,13 @@ const TOOLS = [
         },
         summary: {
           type: 'string',
-          description: 'Overall assessment: what the change does well, what must change, and anything not tied to one line.'
+          description:
+            'For the author agent: a short, actionable list of what must change and anything not tied to one line. Do not repeat the briefing — the user reads that, the author reads this.'
+        },
+        briefing: {
+          type: 'string',
+          description:
+            "Markdown for the user, not the author: the case for this change, so they can understand it and decide whether to merge without reading the diff first. Cover what it does and why, how it works (a diagram for any flow, state or data-shape change — a ```mermaid code block renders as a real diagram; mark the nodes this change touches with :::added, :::changed or :::removed, which follow the user's theme), your critique ranked by severity with blockers clearly separated from non-blocking notes, and a closing recommendation. Optional, but leave it out only for a trivial change."
         },
         tab: {
           type: 'string',
@@ -1109,6 +1115,7 @@ async function handleToolCall(name, args) {
     const r = await callControl('POST', '/reviews/submit', {
       verdict: args.verdict,
       summary: typeof args.summary === 'string' ? args.summary : '',
+      briefing: typeof args.briefing === 'string' && args.briefing.trim() ? args.briefing : undefined,
       tab: typeof args.tab === 'string' && args.tab.trim() ? args.tab.trim() : undefined
     })
     const what =

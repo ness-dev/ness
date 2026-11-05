@@ -140,10 +140,10 @@ function sanitizeReviews(raw: unknown): ReviewsState['byPath'] {
               (s.verdict === 'approve' || s.verdict === 'changes-requested' || s.verdict === 'comment')
           )
           .map((s: ReviewSubmission) => {
-            if (s.headSha === undefined || typeof s.headSha === 'string') return s
-            const { headSha: _drop, ...rest } = s
-            void _drop
-            return rest
+            const next = { ...s }
+            if (next.headSha !== undefined && typeof next.headSha !== 'string') delete next.headSha
+            if (next.briefing !== undefined && typeof next.briefing !== 'string') delete next.briefing
+            return next
           })
       : []
     const requests: ReviewRequest[] = Array.isArray(rawRequests)

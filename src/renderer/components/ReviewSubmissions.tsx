@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, ChevronDown, ChevronRight, MessageSquare, Pencil, Send, SquareTerminal, X } from 'lucide-react'
+import { BookOpen, Bot, ChevronDown, ChevronRight, MessageSquare, Pencil, Send, SquareTerminal, X } from 'lucide-react'
 import type { ReviewSubmission, ReviewVerdict } from '../types'
 import { useBackend } from '../backend'
 import { useWorktreePanes } from '../store'
@@ -177,6 +177,7 @@ export function SubmissionCard({
   const [summary, setSummary] = useState(submission.summary)
   const [verdict, setVerdict] = useState<ReviewVerdict>(submission.verdict)
   const [sending, setSending] = useState(false)
+  const [showAuthorSummary, setShowAuthorSummary] = useState(false)
   const reviewerTabId = submission.author.kind === 'agent' ? submission.author.tabId : undefined
   const target = submission.targetTabId
     ? (tabLabels.get(submission.targetTabId) ?? 'a closed tab')
@@ -276,6 +277,19 @@ export function SubmissionCard({
       {submission.state === 'failed' && submission.error && (
         <div className="mt-1 text-danger">{submission.error}</div>
       )}
+      {submission.briefing && (
+        <div className="mt-2.5 rounded border border-accent/30 bg-accent/5 px-3 py-2">
+          <div className="mb-1.5 flex items-center gap-1.5 font-medium text-accent">
+            <BookOpen className="icon-xs" />
+            Briefing for you
+          </div>
+          {fullSummary ? (
+            <ReviewMarkdown text={submission.briefing} />
+          ) : (
+            <ExpandableMarkdown text={submission.briefing} lines={4} />
+          )}
+        </div>
+      )}
       {editing ? (
         <div className="mt-1.5 flex flex-col gap-1.5">
           <div className="flex gap-1">
@@ -318,7 +332,25 @@ export function SubmissionCard({
           </div>
         </div>
       ) : (
-        submission.summary && (
+        submission.summary &&
+        (submission.briefing ? (
+          <div className="mt-2">
+            <button
+              onClick={() => setShowAuthorSummary((v) => !v)}
+              className="flex items-center gap-1 text-faint hover:text-fg cursor-pointer"
+            >
+              <ChevronRight
+                className={`icon-2xs shrink-0 transition-transform ${showAuthorSummary ? 'rotate-90' : ''}`}
+              />
+              What the author agent receives
+            </button>
+            {showAuthorSummary && (
+              <div className="mt-1.5 pl-4">
+                <ReviewMarkdown text={submission.summary} />
+              </div>
+            )}
+          </div>
+        ) : (
           <div className="mt-2">
             {fullSummary ? (
               <ReviewMarkdown text={submission.summary} />
@@ -326,7 +358,7 @@ export function SubmissionCard({
               <ExpandableMarkdown text={submission.summary} lines={4} />
             )}
           </div>
-        )
+        ))
       )}
       {children}
     </div>

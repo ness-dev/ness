@@ -95,7 +95,8 @@ describe('buildInitialAppState', () => {
               { id: 'c3', filePath: 'a.ts', line: 1, anchor, status: 'resolved', resolvedBy: { kind: 'robot' }, resolvedAt: 6 }
             ],
             submissions: [
-              { id: 's1', summary: '', commentIds: [], state: 'sent', verdict: 'approve', headSha: 7 }
+              { id: 's1', summary: '', commentIds: [], state: 'sent', verdict: 'approve', headSha: 7, briefing: { md: 'x' } },
+              { id: 's2', summary: '', commentIds: [], state: 'sent', verdict: 'approve', briefing: '## What it does' }
             ],
             requests: [
               { id: 'r1', requester: author, reviewer: author, context: 'c', source: 'agent', reused: false, createdAt: 1 },
@@ -113,6 +114,8 @@ describe('buildInitialAppState', () => {
     expect(wt.comments[2]).not.toHaveProperty('resolvedBy')
     expect(wt.comments[2].resolvedAt).toBe(6)
     expect(wt.submissions?.[0]).not.toHaveProperty('headSha')
+    expect(wt.submissions?.[0]).not.toHaveProperty('briefing')
+    expect(wt.submissions?.[1].briefing).toBe('## What it does')
     expect(wt.requests?.map((r) => r.id)).toEqual(['r1'])
   })
 })

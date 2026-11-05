@@ -122,7 +122,7 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // user's `reviewPrompt` setting, which arrives in the body above — two
   // sets of instructions would fight, and a custom prompt should win.
   'review-request':
-    'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.',
+    'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict, a summary and a briefing — that is what sends the review back to the agent that asked, and nothing reaches them until you do. The summary and comments go to that agent; the briefing goes to the user, in the Review tab, so write it for a human who has not read the diff.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.',
   review:
     'Address this review. The id in [brackets] after each comment works with the ness-control MCP tools: call `reply_to_comment` to answer a comment or push back on it, and `resolve_comment` once you have fixed it, so the reviewer and the user can see where each one stands in the Review tab. A comment you disagree with deserves a reply rather than a silent change. If you do not have those tools, just address the feedback.',
   'worktree-kickoff':
@@ -133,6 +133,14 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // the agent can read its own branch from git anyway.
   'worktree-autoname':
     'The message above is the user\'s own kickoff prompt, typed by them. Ness created this worktree from it and guessed the branch name — before you start the work, call the `rename_worktree` tool from the ness-control MCP server once with a better `branchName` (kebab-case, e.g. `fix-login-redirect`) and a short Title Case `alias` for the sidebar (e.g. "Login Redirect"). One call, no need to ask first, then get on with the task. If you do not have that tool, skip this and carry on.'
+}
+
+/** Earlier wordings of a footer. Transcripts on disk still carry them, and
+ *  the card would show the stale footer if parse only knew the current one. */
+const RETIRED_AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string[]>> = {
+  'review-request': [
+    'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.'
+  ]
 }
 
 const AUTOMATION_TAG = 'ness-automated-message'
@@ -218,10 +226,9 @@ export function parseAutomatedMessage(
   let body = text.slice(open[0].length, text.length - close.length)
   // Optional so sentinels written before a source grew its guidance footer
   // still round-trip.
-  const footer = AUTOMATION_GUIDANCE[source]
-  if (footer && body.endsWith(`\n\n${footer}`)) {
-    body = body.slice(0, -(footer.length + 2))
-  }
+  const footers = [AUTOMATION_GUIDANCE[source], ...(RETIRED_AUTOMATION_GUIDANCE[source] ?? [])]
+  const footer = footers.find((f) => f && body.endsWith(`\n\n${f}`))
+  if (footer) body = body.slice(0, -(footer.length + 2))
   return { source, body, ...(from ? { from } : {}) }
 }
 
