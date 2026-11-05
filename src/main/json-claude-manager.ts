@@ -34,7 +34,7 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { parseUserTurn } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
@@ -473,14 +473,12 @@ export class JsonClaudeManager implements ChatProvider {
           ) {
             continue
           }
-          const automated = parseAutomatedMessage(content)
+          const turn = parseUserTurn(content)
           seededEntries.push({
             kind: 'user',
-            text: automated ? automated.body : content,
+            ...turn,
             timestamp: Date.now(),
             entryId: `${sessionId}-seed-u-${counter++}`,
-            ...(automated ? { automation: automated.source } : {}),
-            ...(automated?.from ? { automationFrom: automated.from } : {}),
             ...(transcriptUuid ? { transcriptUuid } : {})
           })
         } else if (Array.isArray(content)) {
@@ -541,14 +539,12 @@ export class JsonClaudeManager implements ChatProvider {
         if (attachment?.type !== 'queued_command') continue
         const prompt = attachment.prompt
         if (typeof prompt !== 'string' || prompt.length === 0) continue
-        const automated = parseAutomatedMessage(prompt)
+        const turn = parseUserTurn(prompt)
         seededEntries.push({
           kind: 'user',
-          text: automated ? automated.body : prompt,
+          ...turn,
           timestamp: Date.now(),
           entryId: `${sessionId}-seed-u-${counter++}`,
-          ...(automated ? { automation: automated.source } : {}),
-          ...(automated?.from ? { automationFrom: automated.from } : {}),
           ...(transcriptUuid ? { transcriptUuid } : {})
         })
       } else if (type === 'system' && parsed['subtype'] === 'compact_boundary') {
@@ -931,14 +927,12 @@ export class JsonClaudeManager implements ChatProvider {
     const hasImages = !!images && images.length > 0
     // The sentinel is for claude's benefit on the wire; the slice keeps the
     // stripped body plus a flag so the renderer can style the bubble.
-    const automated = parseAutomatedMessage(text)
+    const turn = parseUserTurn(text)
     this.appendEntry(inst, {
       kind: 'user',
-      text: automated ? automated.body : text,
+      ...turn,
       timestamp: Date.now(),
       entryId: extra.entryId,
-      ...(automated ? { automation: automated.source } : {}),
-      ...(automated?.from ? { automationFrom: automated.from } : {}),
       ...(extra.isQueued ? { isQueued: true } : {}),
       ...(hasImages
         ? {

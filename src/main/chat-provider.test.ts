@@ -126,3 +126,26 @@ describe('ChatRouter', () => {
     expect(codex.killAll).toHaveBeenCalled()
   })
 })
+
+describe('ChatRouter held notifications', () => {
+  it('releases a tab\'s held notices into its next turn, then forgets them', async () => {
+    const { parseUserTurn, wrapAutomatedMessage } = await import('../shared/state/json-claude')
+    const store = new Store(initialState)
+    const claude = fakeProvider()
+    const router = new ChatRouter(store, { claude, codex: fakeProvider() })
+    startSession(store, 's1')
+    const wire = wrapAutomatedMessage('subscription-update', 'CI passed', { from: 'Child' })
+    store.dispatch({
+      type: 'notifications/queued',
+      payload: { tabId: 's1', notice: { id: 'n1', source: 'subscription-update', wire, queuedAt: 0 } }
+    })
+
+    router.send('s1', 'hi')
+    const sent = (claude.send as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(parseUserTurn(sent)).toMatchObject({ text: 'hi', heldNotices: [{ body: 'CI passed' }] })
+    expect(store.getSnapshot().state.notifications.pendingByTab).toEqual({})
+
+    router.send('s1', 'again')
+    expect((claude.send as ReturnType<typeof vi.fn>).mock.calls[1][1]).toBe('again')
+  })
+})

@@ -10,6 +10,7 @@ import type { ChatTabInfo } from '../shared/agent-tabs'
 import type { ReviewComment } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { followedByCreatorNote } from './control-server'
 
 // Integration test for the local HTTP control server. Exercises the
 // `/aliases` endpoint end-to-end (POST + DELETE, both scoped and
@@ -143,6 +144,36 @@ const runPendingPR = vi.fn<
   >
 >(async () => ({ ok: false, error: 'not used in these tests' }))
 
+const subscriptions = {
+  subscribe: vi.fn<ControlServerDeps['subscriptions']['subscribe']>(() => ({
+    created: true,
+    mode: 'interrupt',
+    targetNotified: true
+  })),
+  unsubscribe: vi.fn<ControlServerDeps['subscriptions']['unsubscribe']>((_tab, target) =>
+    target === EXPLICIT_WORKTREE ? 'removed' : 'implicit'
+  ),
+  list: vi.fn<ControlServerDeps['subscriptions']['list']>(() => ({
+    following: [
+      {
+        subscriberPath: CALLER_WORKTREE,
+        subscriberTabId: CALLER_TERMINAL,
+        targetPath: EXPLICIT_WORKTREE,
+        kind: 'implicit',
+        reason: 'created-worktree',
+        mode: 'silent',
+        since: 1
+      }
+    ],
+    followers: []
+  })),
+  reportProgress: vi.fn<ControlServerDeps['subscriptions']['reportProgress']>(() => ({
+    delivered: [{ worktreePath: EXPLICIT_WORKTREE, tabId: 'other-chat', delivery: 'held' }],
+    failed: []
+  })),
+  recordOrigin: vi.fn<ControlServerDeps['subscriptions']['recordOrigin']>()
+}
+
 const BROWSER_TAB = 'browser-tab-1'
 let browserEnabled = false
 let captureResult: CaptureResult | null = null
@@ -208,6 +239,8 @@ const deps: ControlServerDeps = {
     send: (path, message) => sendMessage(path, message),
     sendToTab: (path, tabId, message) => sendToTab(path, tabId, message)
   },
+  subscriptions,
+  getWorktreeDetail: async (path) => ({ worktreePath: path, branch: 'b' }),
   reviews,
   listChatTabs: (path) => tabsByWorktree[path] ?? [],
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
@@ -593,9 +626,33 @@ describe('control-server POST /worktrees kickoff wrapping', () => {
     expect(r.status).toBe(200)
     expect(parseAutomatedMessage(runPendingPR.mock.calls[0][0].initialPrompt)).toEqual({
       source: 'worktree-kickoff',
-      body: 'refactor the auth flow',
+      body: `refactor the auth flow\n\n${followedByCreatorNote('Callers Tree')}`,
       from: 'Callers Tree'
     })
+  })
+
+  it('records the creating Chat tab as the new worktree\'s origin', async () => {
+    subscriptions.recordOrigin.mockClear()
+    await call('POST', '/worktrees', { prNumber: 7, initialPrompt: 'go' })
+    expect(subscriptions.recordOrigin).toHaveBeenCalledWith(EXPLICIT_WORKTREE, {
+      worktreePath: CALLER_WORKTREE,
+      tabId: CALLER_TERMINAL
+    })
+  })
+
+  it('neither records an origin nor mentions followers when messaging is off', async () => {
+    runPendingPR.mockClear()
+    subscriptions.recordOrigin.mockClear()
+    messagingEnabled = false
+    try {
+      await call('POST', '/worktrees', { prNumber: 7, initialPrompt: 'refactor the auth flow' })
+      expect(parseAutomatedMessage(runPendingPR.mock.calls[0][0].initialPrompt)?.body).toBe(
+        'refactor the auth flow'
+      )
+      expect(subscriptions.recordOrigin).not.toHaveBeenCalled()
+    } finally {
+      messagingEnabled = true
+    }
   })
 
   it('leaves the configured PR-review default unwrapped', async () => {
@@ -999,5 +1056,79 @@ describe('control-server /browser/dom endpoint', () => {
     const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
     expect(r.status).toBe(500)
     expect(r.json.error).toMatch(/tab has no document loaded/)
+  })
+})
+
+describe('control-server subscription endpoints', () => {
+  it('subscribes the caller tab to a resolved worktree', async () => {
+    subscriptions.subscribe.mockClear()
+    const r = await call('POST', '/subscriptions', {
+      worktree: 'Other Tree',
+      note: 'API',
+      mode: 'silent'
+    })
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({ worktreePath: EXPLICIT_WORKTREE, created: true })
+    expect(subscriptions.subscribe).toHaveBeenCalledWith(
+      { worktreePath: CALLER_WORKTREE, tabId: CALLER_TERMINAL },
+      EXPLICIT_WORKTREE,
+      { note: 'API', mode: 'silent' }
+    )
+  })
+
+  it('rejects a bad mode, your own worktree, and unknown targets', async () => {
+    expect((await call('POST', '/subscriptions', { worktree: 'Other Tree', mode: 'loud' })).status).toBe(400)
+    expect((await call('POST', '/subscriptions', { worktree: 'Callers Tree' })).status).toBe(400)
+    expect((await call('POST', '/subscriptions', { worktree: 'nope' })).status).toBe(404)
+  })
+
+  it('refuses to unsubscribe from an implicit subscription', async () => {
+    expect((await call('DELETE', '/subscriptions', { worktree: 'Other Tree' })).status).toBe(200)
+    subscriptions.unsubscribe.mockImplementationOnce(() => 'implicit')
+    const r = await call('DELETE', '/subscriptions', { worktree: 'Other Tree' })
+    expect(r.status).toBe(409)
+    expect(String(r.json.error)).toMatch(/implicit/)
+  })
+
+  it('lists following and followers with worktree names', async () => {
+    const r = await get('/subscriptions')
+    expect(r.status).toBe(200)
+    expect(r.json.following).toEqual([
+      {
+        worktree: 'Other Tree',
+        worktreePath: EXPLICIT_WORKTREE,
+        kind: 'implicit',
+        reason: 'created-worktree',
+        mode: 'silent',
+        since: 1
+      }
+    ])
+  })
+
+  it('fans a progress report out from the caller', async () => {
+    subscriptions.reportProgress.mockClear()
+    const r = await call('POST', '/progress', { message: 'halfway', urgent: true })
+    expect(r.status).toBe(200)
+    expect(subscriptions.reportProgress).toHaveBeenCalledWith(
+      { worktreePath: CALLER_WORKTREE, tabId: CALLER_TERMINAL },
+      'halfway',
+      true
+    )
+    expect((await call('POST', '/progress', { message: ' ' })).status).toBe(400)
+  })
+
+  it('is gated on worktree messaging', async () => {
+    messagingEnabled = false
+    try {
+      expect((await call('POST', '/progress', { message: 'x' })).status).toBe(403)
+      expect((await get('/subscriptions')).status).toBe(403)
+    } finally {
+      messagingEnabled = true
+    }
+  })
+
+  it('reports worktree status for a named worktree or the caller', async () => {
+    expect((await get('/worktree-status?worktree=Other%20Tree')).json.worktreePath).toBe(EXPLICIT_WORKTREE)
+    expect((await get('/worktree-status')).json.worktreePath).toBe(CALLER_WORKTREE)
   })
 })
