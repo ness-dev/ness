@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { PaneNode } from '../types'
 import { findLeafByTabId } from '../../shared/state/terminals'
+import { useBackend } from '../backend'
 import {
   emptyTabHistory,
   recordVisit,
@@ -24,6 +25,7 @@ interface Options {
 }
 
 export function useTabHistory(opts: Options): { goBack: () => void; goForward: () => void } {
+  const backend = useBackend()
   const { activeWorktreeId, focusedTabId } = opts
   const optsRef = useRef(opts)
   optsRef.current = opts
@@ -81,5 +83,15 @@ export function useTabHistory(opts: Options): { goBack: () => void; goForward: (
 
   const goBack = useCallback(() => navigate(-1), [navigate])
   const goForward = useCallback(() => navigate(1), [navigate])
+
+  useEffect(() => {
+    const offBack = backend.onNavigateBack(goBack)
+    const offForward = backend.onNavigateForward(goForward)
+    return () => {
+      offBack()
+      offForward()
+    }
+  }, [backend, goBack, goForward])
+
   return { goBack, goForward }
 }

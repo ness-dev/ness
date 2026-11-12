@@ -567,6 +567,10 @@ export function buildBackend(
       onLocalSignal('app:uiScaleDown', () => callback()),
     onUiScaleReset: (callback: () => void) =>
       onLocalSignal('app:uiScaleReset', () => callback()),
+    onNavigateBack: (callback: () => void) =>
+      onLocalSignal('window:navigateBack', () => callback()),
+    onNavigateForward: (callback: () => void) =>
+      onLocalSignal('window:navigateForward', () => callback()),
     onFullscreenChanged: (callback: (isFullscreen: boolean) => void) =>
       onLocalSignal('window:fullscreenChanged', (...args: unknown[]) =>
         callback(Boolean(args[0]))
