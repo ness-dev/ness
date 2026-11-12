@@ -3,6 +3,7 @@ import { FileText, GitCompare, Globe, Loader2, SquareTerminal } from 'lucide-rea
 import { getLeaves, type TerminalTab } from '../../shared/state/terminals'
 import { useAppStateFor, useShellActivity, useTerminalStatus } from '../store'
 import { STATUS_LABELS } from '../worktree-row-style'
+import { middleClickToClose } from '../middle-click'
 import { AgentIcon } from './AgentIcon'
 import { ReviewStatusIcon } from './ReviewStatusIcon'
 
@@ -17,6 +18,9 @@ interface WorktreeTabRowsProps {
    *  active worktree highlights a child row. */
   activeTabId: string | null
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
+  /** Middle-click closes a row. Like the tab strip's ×, the last remaining
+   *  tab can't be closed. */
+  onCloseTab?: (worktreePath: string, tabId: string) => void
 }
 
 /** A worktree's tabs as indented child rows under its sidebar row. Reads its
@@ -25,7 +29,8 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
   worktreePath,
   backendId,
   activeTabId,
-  onSelectTab
+  onSelectTab,
+  onCloseTab
 }: WorktreeTabRowsProps): JSX.Element | null {
   const tree = useAppStateFor(backendId, (st) => st.terminals.panes[worktreePath] ?? null)
   const entries = useMemo(
@@ -34,6 +39,9 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
     [tree]
   )
   if (entries.length === 0) return null
+  // Same rule as the tab strip's × (`pane.tabs.length > 1 || paneCount > 1`):
+  // equivalent because a committed pane tree never holds an empty leaf.
+  const closable = !!onCloseTab && entries.length > 1
   return (
     <div className="pb-1">
       {entries.map(({ paneId, tab }) => (
@@ -43,6 +51,7 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
           tab={tab}
           isActive={tab.id === activeTabId}
           onClick={() => onSelectTab(worktreePath, paneId, tab.id)}
+          onClose={closable ? () => onCloseTab(worktreePath, tab.id) : undefined}
         />
       ))}
     </div>
@@ -53,17 +62,20 @@ function TabRow({
   worktreePath,
   tab,
   isActive,
-  onClick
+  onClick,
+  onClose
 }: {
   worktreePath: string
   tab: TerminalTab
   isActive: boolean
   onClick: () => void
+  onClose?: () => void
 }): JSX.Element {
   const asleep = tab.mode === 'asleep'
   return (
     <div
       onClick={onClick}
+      {...middleClickToClose(onClose)}
       className={`pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs cursor-pointer transition-colors ${
         isActive ? 'bg-surface-hover/60 text-fg-bright' : 'text-muted hover:bg-surface-hover/40 hover:text-fg'
       }`}

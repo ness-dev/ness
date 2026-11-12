@@ -51,6 +51,7 @@ interface WorktreeListProps {
   /** When provided, worktrees list their tabs as child rows, per the
    *  sidebarTabsExpansion setting. */
   onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
+  onCloseTab?: (worktreePath: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
   onToggleRepo: (repoRoot: string) => void
   onNewWorktree?: (repoRoot?: string) => void
@@ -76,6 +77,7 @@ export function WorktreeList({
   pathBackendId,
   originByPath,
   onSelectTab,
+  onCloseTab,
   onToggleGroup,
   onToggleRepo,
   onNewWorktree,
@@ -239,6 +241,7 @@ export function WorktreeList({
                 backendId={pathBackendId?.[row.path] ?? null}
                 activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
                 onSelectTab={onSelectTab}
+                onCloseTab={onCloseTab}
               />
             )}
             </div>
