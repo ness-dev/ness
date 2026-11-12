@@ -6,6 +6,7 @@ import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
 import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
 import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
+import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
 import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
@@ -741,6 +742,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setActiveWorktreeId
   })
 
+  const { goBack, goForward } = useTabHistory({
+    activeWorktreeId: isPendingId(activeWorktreeId) ? null : activeWorktreeId,
+    focusedTabId: activeWorktreeId ? activeTabId[activeWorktreeId] ?? null : null,
+    panes,
+    setActiveWorktreeId,
+    selectTab: handleSelectTab
+  })
+
   // Hoisted out of the WorkspaceView JSX below. Every worktree stays mounted,
   // so an inline arrow here allocates N new callbacks on every App render and
   // defeats WorkspaceView's memo before it can compare anything else.
@@ -864,6 +873,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
     handleSelectTab,
     handleSplitPane,
     handleRefreshWorktrees,
+    // NewWorktreeScreen cycles repos on Cmd+[ / Cmd+].
+    historyBack: showNewWorktree ? undefined : goBack,
+    historyForward: showNewWorktree ? undefined : goForward,
     setShowSettings,
     onStartAliasEdit: setEditingAliasPath
   })

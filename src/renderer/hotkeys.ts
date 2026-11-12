@@ -24,6 +24,8 @@ export type Action =
   | 'renameTab'
   | 'nextTab'
   | 'prevTab'
+  | 'historyBack'
+  | 'historyForward'
   | 'newWorktree'
   | 'refreshWorktrees'
   | 'focusTerminal'
@@ -93,6 +95,8 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
   renameTab: { key: 'l', modifiers: { cmd: true } },
   nextTab: { key: 'Tab', modifiers: { ctrl: true } },
   prevTab: { key: 'Tab', modifiers: { ctrl: true, shift: true } },
+  historyBack: { key: '[', modifiers: { cmd: true } },
+  historyForward: { key: ']', modifiers: { cmd: true } },
   newWorktree: { key: 'n', modifiers: { cmd: true } },
   refreshWorktrees: { key: 'r', modifiers: { cmd: true, shift: true } },
   // Gesture-driven: focusTerminal fires on a double-tap of Shift (see
@@ -323,6 +327,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   renameTab: 'Rename tab',
   nextTab: 'Next tab',
   prevTab: 'Previous tab',
+  historyBack: 'Back to previous tab',
+  historyForward: 'Forward to next tab',
   newWorktree: 'New worktree',
   refreshWorktrees: 'Refresh worktrees',
   focusTerminal: 'Focus terminal',
@@ -401,7 +407,7 @@ export const ACTION_CATEGORIES: HotkeyCategory[] = [
   {
     id: 'tabs',
     label: 'Tabs & panes',
-    actions: ['newShellTab', 'closeTab', 'renameTab', 'nextTab', 'prevTab', 'focusTerminal', 'splitPaneRight', 'splitPaneDown']
+    actions: ['newShellTab', 'closeTab', 'renameTab', 'nextTab', 'prevTab', 'historyBack', 'historyForward', 'focusTerminal', 'splitPaneRight', 'splitPaneDown']
   },
   {
     id: 'layout',

@@ -186,6 +186,14 @@ describe('matchesBinding with Option held', () => {
     expect(matchesBinding(e, parseBinding('Cmd+Shift+{'))).toBe(true)
     expect(matchesBinding(e, parseBinding('Cmd+Shift+['))).toBe(false)
   })
+
+  it('matches the tab-history defaults on Cmd+[ / Cmd+]', () => {
+    const back = keyEvent('[', 'BracketLeft', { metaKey: true })
+    const fwd = keyEvent(']', 'BracketRight', { metaKey: true })
+    expect(matchesBinding(back, DEFAULT_HOTKEYS.historyBack)).toBe(true)
+    expect(matchesBinding(fwd, DEFAULT_HOTKEYS.historyForward)).toBe(true)
+    expect(matchesBinding(back, DEFAULT_HOTKEYS.historyForward)).toBe(false)
+  })
 })
 
 describe('eventToBinding with Option held', () => {
