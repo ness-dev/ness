@@ -134,6 +134,15 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
  * Settings rebind UI omits them — they have no editable binding. */
 export const GESTURE_ACTIONS: ReadonlySet<Action> = new Set<Action>(['focusTerminal'])
 
+/** Actions whose default chord Monaco also binds (Cmd+[ / Cmd+] are its
+ * outdent / indent). useHotkeys lets the keystroke through to the editor
+ * when one has focus; the mouse side buttons still navigate there. */
+export const EDITOR_YIELD_ACTIONS: ReadonlySet<Action> = new Set<Action>(['historyBack', 'historyForward'])
+
+export function yieldsToEditor(action: Action, target: Pick<Element, 'closest'> | null): boolean {
+  return EDITOR_YIELD_ACTIONS.has(action) && !!target?.closest('.monaco-editor')
+}
+
 const CODE_TO_KEY: Record<string, string> = {
   Comma: ',',
   Period: '.',

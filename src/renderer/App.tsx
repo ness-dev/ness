@@ -155,6 +155,7 @@ function DesktopApp(): JSX.Element {
     }
     return out
   }, [panes, activePaneId])
+  const focusedTabId = activeWorktreeId ? activeTabId[activeWorktreeId] ?? null : null
   // Per-terminal status/pendingTool/shellActivity all live in the
   // main-process store. Hooks in main/hooks.ts (status) and
   // main/pty-manager.ts (shellActivity, exit) dispatch through the store;
@@ -744,7 +745,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
 
   const { goBack, goForward } = useTabHistory({
     activeWorktreeId: isPendingId(activeWorktreeId) ? null : activeWorktreeId,
-    focusedTabId: activeWorktreeId ? activeTabId[activeWorktreeId] ?? null : null,
+    focusedTabId,
     panes,
     setActiveWorktreeId,
     selectTab: handleSelectTab
@@ -1796,7 +1797,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
             activeRepoRoot={activeRepoRoot}
-            focusedTabId={activeWorktreeId ? activeTabId[activeWorktreeId] ?? null : null}
+            focusedTabId={focusedTabId}
             worktrees={worktrees}
             prStatuses={prStatuses}
             prLoading={prLoading}

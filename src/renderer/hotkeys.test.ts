@@ -8,6 +8,7 @@ import {
   bindingToString,
   matchesBinding,
   eventToBinding,
+  yieldsToEditor,
   type Action
 } from './hotkeys'
 
@@ -218,5 +219,25 @@ describe('eventToBinding with Option held', () => {
 
   it('is unchanged without Option', () => {
     expect(eventToBinding(keyEvent('A', 'KeyA', { metaKey: true, shiftKey: true }))?.key).toBe('a')
+  })
+})
+
+describe('yieldsToEditor', () => {
+  const inside = (selector: string) => ({
+    closest: (s: string) => (s.split(', ').includes(selector) ? ({} as Element) : null)
+  })
+
+  it('lets Cmd+[ / Cmd+] reach a focused Monaco editor', () => {
+    expect(yieldsToEditor('historyBack', inside('.monaco-editor'))).toBe(true)
+    expect(yieldsToEditor('historyForward', inside('.monaco-editor'))).toBe(true)
+  })
+
+  it('keeps tab history on Cmd+[ / Cmd+] outside Monaco', () => {
+    expect(yieldsToEditor('historyBack', inside('.xterm'))).toBe(false)
+    expect(yieldsToEditor('historyBack', null)).toBe(false)
+  })
+
+  it('never yields other actions', () => {
+    expect(yieldsToEditor('closeTab', inside('.monaco-editor'))).toBe(false)
   })
 })

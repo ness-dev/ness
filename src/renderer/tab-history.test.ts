@@ -4,7 +4,9 @@ import {
   recordVisit,
   pruneTabHistory,
   stepTabHistory,
+  settleVisit,
   MAX_TAB_HISTORY,
+  type PendingNavigation,
   type TabHistory,
   type TabHistoryEntry
 } from './tab-history'
@@ -87,5 +89,29 @@ describe('stepTabHistory', () => {
     const h = visit(e('/a', '1'), e('/b', '2'), e('/a', '3'))
     const back = stepTabHistory(h, -1, (x) => x.tabId !== '2')
     expect(back.target).toEqual(e('/a', '1'))
+  })
+})
+
+describe('settleVisit', () => {
+  const pending: PendingNavigation = { target: e('/b', '2'), expiresAt: 1000 }
+
+  it('records when no jump is in flight', () => {
+    expect(settleVisit(null, e('/a', '1'), 0)).toEqual({ record: true, pending: null })
+  })
+
+  it('clears the jump without recording once the target lands', () => {
+    expect(settleVisit(pending, e('/b', '2'), 0)).toEqual({ record: false, pending: null })
+  })
+
+  it('skips the in-between state in the target worktree', () => {
+    expect(settleVisit(pending, e('/b', 'old'), 999)).toEqual({ record: false, pending })
+  })
+
+  it('records focus in another worktree as the user moving on', () => {
+    expect(settleVisit(pending, e('/c', '3'), 0)).toEqual({ record: true, pending: null })
+  })
+
+  it('records anything once the jump has expired', () => {
+    expect(settleVisit(pending, e('/b', 'old'), 1000)).toEqual({ record: true, pending: null })
   })
 })

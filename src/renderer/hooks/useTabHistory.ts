@@ -4,19 +4,16 @@ import { findLeafByTabId } from '../../shared/state/terminals'
 import {
   emptyTabHistory,
   recordVisit,
-  sameEntry,
+  settleVisit,
   stepTabHistory,
+  NAVIGATION_EXPIRY_MS,
+  type PendingNavigation,
   type TabHistoryEntry
 } from '../tab-history'
 
 // Mouse buttons 3/4 are the side "back"/"forward" buttons.
 const BACK_BUTTON = 3
 const FORWARD_BUTTON = 4
-// A cross-worktree jump lands in two renders: the worktree switches at once,
-// the pane's activeTabId follows after the panesSelectTab IPC round trip.
-// Focus changes inside this window that aren't the target are those
-// in-between states, not visits.
-const SETTLE_MS = 1000
 
 interface Options {
   activeWorktreeId: string | null
@@ -31,21 +28,14 @@ export function useTabHistory(opts: Options): { goBack: () => void; goForward: (
   const optsRef = useRef(opts)
   optsRef.current = opts
   const historyRef = useRef(emptyTabHistory)
-  const pendingRef = useRef<{ target: TabHistoryEntry; until: number } | null>(null)
+  const pendingRef = useRef<PendingNavigation | null>(null)
 
   useEffect(() => {
     if (!activeWorktreeId || !focusedTabId) return
     const entry = { worktreePath: activeWorktreeId, tabId: focusedTabId }
-    const pending = pendingRef.current
-    if (pending) {
-      if (sameEntry(pending.target, entry)) {
-        pendingRef.current = null
-        return
-      }
-      if (performance.now() < pending.until) return
-      pendingRef.current = null
-    }
-    historyRef.current = recordVisit(historyRef.current, entry)
+    const { record, pending } = settleVisit(pendingRef.current, entry, performance.now())
+    pendingRef.current = pending
+    if (record) historyRef.current = recordVisit(historyRef.current, entry)
   }, [activeWorktreeId, focusedTabId])
 
   const navigate = useCallback((direction: -1 | 1): void => {
@@ -58,7 +48,7 @@ export function useTabHistory(opts: Options): { goBack: () => void; goForward: (
     historyRef.current = history
     const leaf = target && leafFor(target)
     if (!target || !leaf) return
-    pendingRef.current = { target, until: performance.now() + SETTLE_MS }
+    pendingRef.current = { target, expiresAt: performance.now() + NAVIGATION_EXPIRY_MS }
     setActiveWorktreeId(target.worktreePath)
     selectTab(target.worktreePath, leaf.id, target.tabId)
   }, [])
@@ -66,14 +56,20 @@ export function useTabHistory(opts: Options): { goBack: () => void; goForward: (
   useEffect(() => {
     const isNavButton = (e: MouseEvent): boolean =>
       e.button === BACK_BUTTON || e.button === FORWARD_BUTTON
-    const onMouseDown = (e: MouseEvent): void => {
-      if (isNavButton(e)) e.preventDefault()
-    }
-    const onMouseUp = (e: MouseEvent): void => {
-      if (!isNavButton(e)) return
+    // Swallowed on mousedown too: WorkspaceView focuses the pane under the
+    // cursor on any mousedown, which would record a stray visit (and drop
+    // forward history) just before the jump.
+    const swallow = (e: MouseEvent): boolean => {
+      if (!isNavButton(e)) return false
       e.preventDefault()
       e.stopPropagation()
-      navigate(e.button === BACK_BUTTON ? -1 : 1)
+      return true
+    }
+    const onMouseDown = (e: MouseEvent): void => {
+      swallow(e)
+    }
+    const onMouseUp = (e: MouseEvent): void => {
+      if (swallow(e)) navigate(e.button === BACK_BUTTON ? -1 : 1)
     }
     window.addEventListener('mousedown', onMouseDown, true)
     window.addEventListener('mouseup', onMouseUp, true)

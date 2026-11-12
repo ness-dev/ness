@@ -49,6 +49,33 @@ export function pruneTabHistory(
   return { entries, index }
 }
 
+// A Back/Forward jump in flight. Landing takes two renders: the worktree and
+// pane switch at once, the pane's activeTabId follows after the
+// panesSelectTab IPC round trip.
+export interface PendingNavigation {
+  target: TabHistoryEntry
+  // Leak guard only, in case the target never lands.
+  expiresAt: number
+}
+
+export const NAVIGATION_EXPIRY_MS = 5000
+
+// Decides whether an observed focus change is a real visit. While a jump is
+// in flight, the target worktree showing some other tab is the in-between
+// state, not a visit; focus anywhere else means the user moved on.
+export function settleVisit(
+  pending: PendingNavigation | null,
+  entry: TabHistoryEntry,
+  now: number
+): { record: boolean; pending: PendingNavigation | null } {
+  if (!pending) return { record: true, pending: null }
+  if (sameEntry(pending.target, entry)) return { record: false, pending: null }
+  if (now < pending.expiresAt && entry.worktreePath === pending.target.worktreePath) {
+    return { record: false, pending }
+  }
+  return { record: true, pending: null }
+}
+
 export function stepTabHistory(
   h: TabHistory,
   direction: -1 | 1,
