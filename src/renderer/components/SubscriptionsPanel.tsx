@@ -211,13 +211,13 @@ export function SubscriptionsPanel({
         {heldCount > 0 && held && (
           <>
             <div className="flex items-center gap-2 pr-3">
-              <SectionLabel>Held for next turn</SectionLabel>
+              <SectionLabel>Held</SectionLabel>
               <span className="flex-1" />
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void backend.deliverHeldNotices(worktreePath, focusedTabId)}
-                className="text-accent hover:underline cursor-pointer disabled:opacity-50 disabled:no-underline disabled:cursor-default"
+                className="text-accent hover:underline cursor-pointer whitespace-nowrap pt-1.5 disabled:opacity-50 disabled:no-underline disabled:cursor-default"
                 title={
                   busy
                     ? 'The agent is mid-turn — these go out with its next turn'
@@ -229,7 +229,8 @@ export function SubscriptionsPanel({
               <button
                 type="button"
                 onClick={() => void backend.discardHeldNotices(worktreePath, focusedTabId)}
-                className="text-muted hover:text-danger cursor-pointer"
+                className="text-muted hover:text-danger cursor-pointer whitespace-nowrap pt-1.5"
+                title="Drop these without telling the agent"
               >
                 Discard
               </button>
