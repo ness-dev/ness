@@ -75,6 +75,58 @@
   }
 }
 
+/* Chat-mode design tokens, lifted verbatim from the renderer's
+ * [data-chat-density] blocks so the mock chat sizes exactly like the real
+ * one. `compact` is the shipping default. */
+[data-chat-density='compact'] {
+  --chat-body-text: 0.875rem; /* text-sm */
+  --chat-chrome-text: 0.6875rem; /* text-[11px] */
+  --chat-meta-text: 0.625rem; /* text-[10px] */
+  --chat-chrome-px: 0.5rem; /* px-2 */
+  --chat-chrome-py: 0.25rem; /* py-1 */
+  --chat-bubble-max: 80%;
+  --chat-bubble-radius: 0.375rem; /* rounded-md */
+  --chat-tool-name-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* Block cursor trailing a streaming assistant turn. */
+.json-claude-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-accent);
+  opacity: 0.85;
+  animation: json-claude-cursor-blink 1s steps(2, jump-none) infinite;
+}
+@keyframes json-claude-cursor-blink {
+  0%,
+  50% {
+    opacity: 0.85;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Minimal subset of the renderer's `.markdown` rules — enough for the
+ * paragraphs and inline code the mock transcript uses. */
+.markdown > * + * {
+  margin-top: 0.6em;
+}
+.markdown p {
+  line-height: 1.5;
+}
+.markdown code {
+  background: var(--color-panel-raised);
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: var(--font-mono);
+}
+
 .gradient-text,
 .brand-gradient-text {
   color: var(--color-brand);
@@ -181,7 +233,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot,
-  .caret-blink {
+  .caret-blink,
+  .json-claude-cursor {
     animation: none;
   }
 }

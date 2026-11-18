@@ -34,6 +34,8 @@ function buildGroups(hotkeys: Record<Action, HotkeyBinding>): ShortcutGroup[] {
         { label: 'Rename tab', binding: b('renameTab') },
         { label: 'Next tab', binding: b('nextTab') },
         { label: 'Previous tab', binding: b('prevTab') },
+        { label: 'Back to previous tab', binding: b('historyBack') },
+        { label: 'Forward to next tab', binding: b('historyForward') },
         { label: 'Split pane right', binding: b('splitPaneRight') },
         { label: 'Split pane down', binding: b('splitPaneDown') },
       ],
@@ -44,6 +46,7 @@ function buildGroups(hotkeys: Record<Action, HotkeyBinding>): ShortcutGroup[] {
         { label: 'Toggle sidebar', binding: b('toggleSidebar') },
         { label: 'Toggle right column', binding: b('toggleRightColumn') },
         { label: 'Toggle command center', binding: b('toggleCommandCenter') },
+        { label: 'Toggle task list', binding: b('toggleTaskList') },
       ],
     },
     {

@@ -77,10 +77,12 @@ describe('repoConfigsReducer', () => {
   it('effectiveHiddenRightPanels migrates legacy hideMergePanel / hidePrPanel', () => {
     expect(effectiveHiddenRightPanels({ hideMergePanel: true })).toEqual({
       scratchpad: true,
+      subscriptions: true,
       merge: true
     })
     expect(effectiveHiddenRightPanels({ hidePrPanel: true })).toEqual({
       scratchpad: true,
+      subscriptions: true,
       pr: true
     })
     expect(
@@ -88,7 +90,7 @@ describe('repoConfigsReducer', () => {
         hideMergePanel: true,
         hiddenRightPanels: { pr: true, commits: true }
       })
-    ).toEqual({ scratchpad: true, merge: true, pr: true, commits: true })
+    ).toEqual({ scratchpad: true, subscriptions: true, merge: true, pr: true, commits: true })
   })
 
   it('effectiveHiddenRightPanels prefers new field over legacy', () => {
@@ -99,17 +101,17 @@ describe('repoConfigsReducer', () => {
         hideMergePanel: true,
         hiddenRightPanels: { merge: false }
       })
-    ).toEqual({ scratchpad: true, merge: false })
+    ).toEqual({ scratchpad: true, subscriptions: true, merge: false })
   })
 
   it('effectiveHiddenRightPanels defaults scratchpad to hidden', () => {
-    expect(effectiveHiddenRightPanels({})).toEqual({ scratchpad: true })
+    expect(effectiveHiddenRightPanels({})).toEqual({ scratchpad: true, subscriptions: true })
   })
 
   it('effectiveHiddenRightPanels lets explicit scratchpad: false override default', () => {
     expect(
-      effectiveHiddenRightPanels({ hiddenRightPanels: { scratchpad: false } })
-    ).toEqual({ scratchpad: false })
+      effectiveHiddenRightPanels({ hiddenRightPanels: { scratchpad: false, subscriptions: true } })
+    ).toEqual({ scratchpad: false, subscriptions: true })
   })
 
   it('effectiveRightPanelOrder returns default when unset', () => {
@@ -144,7 +146,8 @@ describe('repoConfigsReducer', () => {
       'changedFiles',
       'allFiles',
       'context',
-      'scratchpad'
+      'scratchpad',
+      'subscriptions'
     ])
   })
 
@@ -163,6 +166,7 @@ describe('repoConfigsReducer', () => {
       'allFiles',
       'todos',
       'agents',
+      'subscriptions',
       'context',
       'scratchpad'
     ])
@@ -204,9 +208,9 @@ describe('repoConfigsReducer', () => {
   })
 
   it('effectiveHiddenRightPanels handles null/empty config', () => {
-    expect(effectiveHiddenRightPanels(null)).toEqual({ scratchpad: true })
-    expect(effectiveHiddenRightPanels(undefined)).toEqual({ scratchpad: true })
-    expect(effectiveHiddenRightPanels({})).toEqual({ scratchpad: true })
+    expect(effectiveHiddenRightPanels(null)).toEqual({ scratchpad: true, subscriptions: true })
+    expect(effectiveHiddenRightPanels(undefined)).toEqual({ scratchpad: true, subscriptions: true })
+    expect(effectiveHiddenRightPanels({})).toEqual({ scratchpad: true, subscriptions: true })
   })
 
   it('returns a new object reference on real changes', () => {

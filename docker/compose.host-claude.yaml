@@ -1,0 +1,20 @@
+# Optional override: share the host's Claude Code credentials with the
+# container so you skip `claude /login` entirely.
+#
+#   npm run remote:up -- --host-claude
+#
+# Read the tradeoff before using it. These are read-write bind mounts of
+# your real credential and history files, so the containerised agents write
+# into the same ~/.claude.json your host Claude Code uses — session history,
+# project entries and MCP config included. Convenient for a quick test,
+# wrong if you're testing anything that mutates agent config. The default
+# (a `ness-home` volume, authed once with `claude /login`) keeps the two
+# fully separate.
+#
+# ~/.claude.json must already exist on the host — Docker creates a
+# *directory* in its place if it doesn't, which Claude Code then can't read.
+services:
+  ness-remote:
+    volumes:
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.claude.json:/root/.claude.json

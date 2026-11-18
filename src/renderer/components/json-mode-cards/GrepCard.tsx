@@ -23,7 +23,6 @@ export function GrepCard({ block, result, autoApproved, sessionAllowed }: ToolCa
       id={block.id}
       name="Grep"
       subtitle={subtitle}
-      variant="info"
       icon={GrepIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

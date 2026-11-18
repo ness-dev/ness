@@ -1,31 +1,46 @@
 import { useEffect, useState } from 'react'
 import { ImageOff } from 'lucide-react'
-import { getBackend } from '../backend'
+import { getBackendFor } from '../backend'
+import { useBackendScope } from '../backend-scope'
 
 // Module-level cache so the same image isn't re-read once per render. The
 // values are data URLs ready to drop into <img src=""/>; null marks a
 // confirmed-missing path so we don't keep retrying.
+//
+// Keyed by backend + path. The file is read off the filesystem of whichever
+// machine runs the agent, so an identical path on two backends is two
+// different images — caching on the path alone would serve one worktree's
+// screenshot in another's chat.
 const CACHE = new Map<string, string | null>()
 const INFLIGHT = new Map<string, Promise<string | null>>()
 
-function fetchImage(path: string, mediaType: string): Promise<string | null> {
-  if (CACHE.has(path)) return Promise.resolve(CACHE.get(path)!)
-  const inflight = INFLIGHT.get(path)
+function imageKey(backendId: string | null, path: string): string {
+  return `${backendId ?? ''}\x00${path}`
+}
+
+function fetchImage(
+  backendId: string | null,
+  path: string,
+  mediaType: string
+): Promise<string | null> {
+  const key = imageKey(backendId, path)
+  if (CACHE.has(key)) return Promise.resolve(CACHE.get(key)!)
+  const inflight = INFLIGHT.get(key)
   if (inflight) return inflight
-  const p = getBackend()
+  const p = getBackendFor(backendId)
     .readJsonClaudeAttachmentImage(path)
     .then((b64) => {
       const result = b64 ? `data:${mediaType};base64,${b64}` : null
-      CACHE.set(path, result)
-      INFLIGHT.delete(path)
+      CACHE.set(key, result)
+      INFLIGHT.delete(key)
       return result
     })
     .catch(() => {
-      CACHE.set(path, null)
-      INFLIGHT.delete(path)
+      CACHE.set(key, null)
+      INFLIGHT.delete(key)
       return null
     })
-  INFLIGHT.set(path, p)
+  INFLIGHT.set(key, p)
   return p
 }
 
@@ -60,21 +75,23 @@ export function JsonModeChatImageThumb({
   alt,
   dimensions
 }: Props): JSX.Element {
+  const backendId = useBackendScope()
+  const key = imageKey(backendId, path)
   const [dataUrl, setDataUrl] = useState<string | null>(
-    CACHE.has(path) ? CACHE.get(path)! : null
+    CACHE.has(key) ? CACHE.get(key)! : null
   )
-  const [pending, setPending] = useState(!CACHE.has(path))
+  const [pending, setPending] = useState(!CACHE.has(key))
   const [showFull, setShowFull] = useState(false)
 
   useEffect(() => {
-    if (CACHE.has(path)) {
-      setDataUrl(CACHE.get(path)!)
+    if (CACHE.has(key)) {
+      setDataUrl(CACHE.get(key)!)
       setPending(false)
       return
     }
     let cancelled = false
     setPending(true)
-    void fetchImage(path, mediaType).then((url) => {
+    void fetchImage(backendId, path, mediaType).then((url) => {
       if (cancelled) return
       setDataUrl(url)
       setPending(false)
@@ -82,7 +99,7 @@ export function JsonModeChatImageThumb({
     return () => {
       cancelled = true
     }
-  }, [path, mediaType])
+  }, [key, backendId, path, mediaType])
 
   useEffect(() => {
     if (!showFull) return

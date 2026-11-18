@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
-import { homedir } from 'os'
 import { log } from '../debug'
+import { claudeProjectsDirFor, knownClaudeConfigDirs } from '../claude-env'
 import { makeHookCommand } from '../hooks'
 import { shellQuote } from '../shell-quote'
 import type { AgentSpawnOpts } from './index'
@@ -32,8 +32,8 @@ interface SettingsFile {
   [key: string]: unknown
 }
 
-function globalSettingsPath(): string {
-  return join(homedir(), '.claude', 'settings.json')
+function settingsPathIn(configDir: string): string {
+  return join(configDir, 'settings.json')
 }
 
 function worktreeSettingsPath(worktreePath: string): string {
@@ -71,7 +71,11 @@ function removeOldHarnessEntries(entries: HookEntry[]): HookEntry[] {
 }
 
 export function hooksInstalled(): boolean {
-  const settings = readSettings(globalSettingsPath())
+  return knownClaudeConfigDirs().some((dir) => hooksInstalledIn(settingsPathIn(dir)))
+}
+
+function hooksInstalledIn(path: string): boolean {
+  const settings = readSettings(path)
   const hooks = settings.hooks
   if (!hooks) return false
   for (const entries of Object.values(hooks)) {
@@ -82,8 +86,15 @@ export function hooksInstalled(): boolean {
   return false
 }
 
+/** Every Claude home a Ness worktree resolves to gets the hooks: Claude
+ *  only reads the settings.json under its own CLAUDE_CONFIG_DIR, so a
+ *  worktree whose shell points elsewhere would otherwise report no
+ *  status at all. */
 export function installHooks(): void {
-  const path = globalSettingsPath()
+  for (const dir of knownClaudeConfigDirs()) installHooksInto(settingsPathIn(dir))
+}
+
+function installHooksInto(path: string): void {
   log('hooks', `installing Claude hooks into ${path}`)
   const settings = readSettings(path)
   if (!settings.hooks) settings.hooks = {}
@@ -103,7 +114,10 @@ export function installHooks(): void {
 /** Remove our entries from ~/.claude/settings.json but leave any user-authored
  *  hooks + unrelated keys intact. No-op if we're not installed. */
 export function uninstallHooks(): void {
-  const path = globalSettingsPath()
+  for (const dir of knownClaudeConfigDirs()) uninstallHooksFrom(settingsPathIn(dir))
+}
+
+function uninstallHooksFrom(path: string): void {
   if (!existsSync(path)) return
   const settings = readSettings(path)
   if (!settings.hooks) return
@@ -140,7 +154,7 @@ export function stripHooksFromWorktree(worktreePath: string): boolean {
 export function sessionFileExists(cwd: string, sessionId: string): boolean {
   try {
     const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-    return existsSync(join(homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`))
+    return existsSync(join(claudeProjectsDirFor(cwd), encoded, `${sessionId}.jsonl`))
   } catch {
     return false
   }
@@ -149,7 +163,7 @@ export function sessionFileExists(cwd: string, sessionId: string): boolean {
 export function latestSessionId(cwd: string): string | null {
   try {
     const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-    const dir = join(homedir(), '.claude', 'projects', encoded)
+    const dir = join(claudeProjectsDirFor(cwd), encoded)
     const files = readdirSync(dir).filter((f) => f.endsWith('.jsonl'))
     if (files.length === 0) return null
     let bestId: string | null = null

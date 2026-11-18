@@ -31,7 +31,7 @@
 // outputs keep costing money as long as they sit in the context.
 
 import { readFileSync } from 'fs'
-import { homedir } from 'os'
+import { claudeProjectsDirFor } from './claude-env'
 import { join } from 'path'
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
@@ -80,7 +80,14 @@ export class CostTracker {
   private interestedClients = new Set<string>()
   private lastStops = new Map<string, StopEvent>()
 
-  constructor(private store: Store) {}
+  /** `resolveChatTranscriptPath` asks the session's chat provider where its
+   *  history lives (each agent keeps its own format and layout). Null means
+   *  there's nothing to read yet. Defaults to Claude's layout. */
+  constructor(
+    private store: Store,
+    private resolveChatTranscriptPath: (sessionId: string, worktreePath: string) => string | null =
+      (sessionId, worktreePath) => jsonClaudeTranscriptPath(worktreePath, sessionId)
+  ) {}
 
   start(): void {
     this.unsubscribeHook = onStopEvent((ev) => this.handleStop(ev))
@@ -164,10 +171,8 @@ export class CostTracker {
     const session =
       this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
     if (!session) return
-    const transcriptPath = jsonClaudeTranscriptPath(
-      session.worktreePath,
-      sessionId
-    )
+    const transcriptPath = this.resolveChatTranscriptPath(sessionId, session.worktreePath)
+    if (!transcriptPath) return
     try {
       const entry = this.parseIncremental(sessionId, transcriptPath)
       if (!entry || Object.keys(entry.byModel).length === 0) return
@@ -246,9 +251,7 @@ export class CostTracker {
 
 function jsonClaudeTranscriptPath(worktreePath: string, sessionId: string): string {
   return join(
-    homedir(),
-    '.claude',
-    'projects',
+    claudeProjectsDirFor(worktreePath),
     worktreePath.replace(/[^a-zA-Z0-9]/g, '-'),
     `${sessionId}.jsonl`
   )

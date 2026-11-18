@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { randomBytes, randomUUID } from 'crypto'
-import type { AgentKind } from '../shared/state/terminals'
+import { normalizeTabLabel, type AgentKind } from '../shared/state/terminals'
 import { addWorktree, listWorktrees, defaultWorktreeDir, WorktreeInfo } from './worktree'
 import { normalizeAlias } from '../shared/state/aliases'
 import { isValidBranchName, sanitizeBranchInput } from '../shared/branch-name'
@@ -8,7 +8,19 @@ import { agentDisplayName, supportsConversationFork } from '../shared/agent-regi
 import type { GroupKey } from '../shared/worktree-sort'
 import { normalizeViewport, type BrowserViewport } from '../shared/browser-viewport'
 import type { PRStatus } from '../shared/state/prs'
-import type { ChatDeliveryResult } from './chat-delivery'
+import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
+import { describeTabDeliveryFailure } from './chat-delivery'
+import type { ChatTabInfo } from '../shared/agent-tabs'
+import type {
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewSide,
+  ReviewVerdict
+} from '../shared/state/reviews'
+import type { SubmitReviewResult } from './review-service'
+import type { NotifyMode } from '../shared/state/subscriptions'
+import type { Subscriber } from '../shared/subscribers'
+import type { FanOutResult, SubscribeResult, UnsubscribeResult } from './worktree-subscriptions'
 import type { CaptureResult } from './browser-manager-types'
 import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
@@ -119,6 +131,69 @@ export interface MessagingQueries {
   /** Route a message into a worktree's agent chat, waking a slept tab if
    * that's what delivery takes. */
   send: (worktreePath: string, message: string) => ChatDeliveryResult
+  /** Deliver into one named agent tab of a worktree. */
+  sendToTab: (worktreePath: string, tabId: string, message: string) => TabDeliveryResult
+}
+
+/** Worktree subscriptions. Every subscriber identity is the caller's own
+ *  tab — an agent can't subscribe, or report progress, on another's behalf. */
+export interface SubscriptionQueries {
+  subscribe: (
+    caller: { worktreePath: string; tabId: string },
+    targetPath: string,
+    opts: { note?: string; mode?: NotifyMode }
+  ) => SubscribeResult
+  unsubscribe: (callerTabId: string, targetPath: string) => UnsubscribeResult
+  /** What the caller follows, and who follows the caller's worktree. */
+  list: (caller: { worktreePath: string; tabId: string }) => {
+    following: Subscriber[]
+    followers: Subscriber[]
+  }
+  reportProgress: (
+    caller: { worktreePath: string; tabId: string },
+    message: string,
+    urgent: boolean
+  ) => FanOutResult
+  /** Record that the caller's tab created `worktreePath`, which is what
+   *  makes it implicitly follow the new worktree. */
+  recordOrigin: (worktreePath: string, creator: { worktreePath: string; tabId: string }) => void
+}
+
+/** Review viewer comments + submissions for the caller's own worktree.
+ *  Every author identity is derived from the caller's terminal id. */
+export interface ReviewQueries {
+  list: (
+    worktreePath: string,
+    filter: { status?: ReviewCommentStatus; file?: string }
+  ) => Promise<ReviewComment[]>
+  addComment: (
+    worktreePath: string,
+    callerTabId: string,
+    input: { filePath: string; line: number; side: ReviewSide; body: string }
+  ) => Promise<ReviewComment | { error: string }>
+  reply: (
+    worktreePath: string,
+    callerTabId: string,
+    commentId: string,
+    body: string
+  ) => { comment: ReviewComment } | { error: string }
+  setResolved: (
+    worktreePath: string,
+    callerTabId: string,
+    commentId: string,
+    resolved: boolean
+  ) => { comment: ReviewComment } | { error: string }
+  submit: (
+    worktreePath: string,
+    callerTabId: string,
+    input: { verdict: ReviewVerdict; summary: string; briefing?: string; targetTabId?: string }
+  ) => SubmitReviewResult | Promise<SubmitReviewResult>
+  /** Open a reviewer Chat tab for the caller and hand it the request. */
+  request: (
+    worktreePath: string,
+    callerTabId: string,
+    context: string
+  ) => { ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }
 }
 
 export interface CopyDraftQueries {
@@ -173,11 +248,11 @@ export interface ControlServerDeps {
   /** Returns the caller's current scope, or null if the terminal is not
    * associated with any known worktree (e.g. the worktree was deleted). */
   resolveCallerScope: (terminalId: string) => CallerScope | null
-  /** Whether the caller has a conversation transcript that can be forked
-   * into a new worktree. For Chat tabs the terminal id IS the session id;
-   * for terminal tabs it isn't, so this is how `forkConversation` gets
+  /** Which agent the caller's conversation can be forked as, or null when
+   * it has nothing to fork. For Chat tabs the terminal id IS the session
+   * id; for terminal tabs it isn't, so this is how `forkConversation` gets
    * rejected before the worktree is created. */
-  hasForkableTranscript: (sessionId: string, worktreePath: string) => boolean
+  forkableConversationKind: (sessionId: string, worktreePath: string) => AgentKind | null
   /** Whether conversation forking is enabled in settings. Re-read per request
    * so a toggle takes effect without restarting the bridge. */
   getConversationForkEnabled: () => boolean
@@ -189,11 +264,30 @@ export interface ControlServerDeps {
   browser: BrowserQueries
   shell: ShellQueries
   messaging: MessagingQueries
+  subscriptions: SubscriptionQueries
+  /** Branch, PR, commits and uncommitted files of one worktree. */
+  getWorktreeDetail: (worktreePath: string) => Promise<Record<string, unknown>>
+  reviews: ReviewQueries
+  /** Chat tabs of a worktree, most recently active first — the only tabs
+   *  reviews and tab messages can be delivered to. */
+  listChatTabs: (worktreePath: string) => ChatTabInfo[]
   copyDrafts: CopyDraftQueries
   /** Trim + 80-char clamp + dispatch. Matches the aliases:set IPC handler.
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
   clearAlias: (worktreePath: string) => void
+  /** Whether agents may name their own tab. Re-read per request so the
+   * toggle takes effect without restarting the bridge. */
+  getAgentTabNamingEnabled: () => boolean
+  /** Rename one tab in the pane tree. Returns false when the rename was
+   *  refused — for `source: 'agent'`, that means the user had already
+   *  named the tab themselves. */
+  renameTab: (
+    worktreePath: string,
+    tabId: string,
+    label: string,
+    source: 'user' | 'agent'
+  ) => boolean
   /** Rename the branch a worktree has checked out, then resync the worktree
    *  list so the sidebar picks the new name up. The directory keeps its
    *  original name — see `renameWorktreeBranch`. */
@@ -349,14 +443,23 @@ async function handleRequest(
     // sentinel a worktree-to-worktree message does. Creation from the Ness
     // UI goes through IPC, not this route, and stays unwrapped — that one
     // really was typed by the human.
-    const kickoffSender = resolveScope(req, deps).scope
-    const initialPrompt = rawInitialPrompt
-      ? wrapAutomatedMessage('worktree-kickoff', rawInitialPrompt, {
-          from: kickoffSender
-            ? deps.messaging.describe(kickoffSender.worktreePath)
-            : undefined
-        })
-      : rawInitialPrompt
+    const { scope: kickoffSender, terminalId: kickoffTerminal } = resolveScope(req, deps)
+    // A Chat tab that creates a worktree follows it implicitly (see
+    // shared/subscribers.ts), so the new agent is told who's listening.
+    const creator =
+      kickoffSender &&
+      deps.messaging.isEnabled() &&
+      deps.listChatTabs(kickoffSender.worktreePath).some((t) => t.id === kickoffTerminal)
+        ? { worktreePath: kickoffSender.worktreePath, tabId: kickoffTerminal }
+        : null
+    const creatorName = kickoffSender ? deps.messaging.describe(kickoffSender.worktreePath) : undefined
+    const kickoffBody =
+      rawInitialPrompt && creator
+        ? `${rawInitialPrompt}\n\n${followedByCreatorNote(creatorName ?? 'the agent that created it')}`
+        : rawInitialPrompt
+    const initialPrompt = kickoffBody
+      ? wrapAutomatedMessage('worktree-kickoff', kickoffBody, { from: creatorName })
+      : kickoffBody
 
     const rawAgent = typeof body.agentKind === 'string' ? body.agentKind.trim().toLowerCase() : ''
     let agentKind: AgentKind | undefined
@@ -383,7 +486,7 @@ async function handleRequest(
       }
       if (agentKind !== undefined && !supportsConversationFork(agentKind)) {
         return sendJson(res, 400, {
-          error: `forkConversation is not supported for ${agentDisplayName(agentKind)} worktrees — only Claude Code can resume a forked transcript. Retry without forkConversation and describe the task in initialPrompt instead.`
+          error: `forkConversation is not supported for ${agentDisplayName(agentKind)} worktrees. Retry without forkConversation and describe the task in initialPrompt instead.`
         })
       }
       if (prNumber !== undefined) {
@@ -393,17 +496,23 @@ async function handleRequest(
         })
       }
       const { scope, terminalId } = resolveScope(req, deps)
-      if (!scope || !deps.hasForkableTranscript(terminalId, scope.worktreePath)) {
+      const sourceKind = scope ? deps.forkableConversationKind(terminalId, scope.worktreePath) : null
+      if (!scope || !sourceKind) {
         return sendJson(res, 400, {
           error:
             'forkConversation is only available from a Ness Chat tab that already has conversation history. Retry without forkConversation and describe the task in initialPrompt instead.'
         })
       }
+      if (agentKind !== undefined && agentKind !== sourceKind) {
+        return sendJson(res, 400, {
+          error: `forkConversation continues your own ${agentDisplayName(sourceKind)} conversation, so the new worktree must run ${agentDisplayName(sourceKind)} too. Omit agentKind, or retry without forkConversation.`
+        })
+      }
       forkSource = { sessionId: terminalId, worktreePath: scope.worktreePath }
       // Pin rather than leave undefined: an omitted agentKind falls back to
-      // the user's default agent, and a non-Claude default would drop the
-      // forked session id on the floor at spawn time.
-      agentKind = 'claude'
+      // the user's default agent, which might not be the one that owns
+      // the conversation.
+      agentKind = sourceKind
     }
 
     if (prNumber !== undefined) {
@@ -431,6 +540,7 @@ async function handleRequest(
       if (aliasInput !== undefined) {
         deps.setAlias(result.path, aliasInput)
       }
+      if (creator) deps.subscriptions.recordOrigin(result.path, creator)
       return sendJson(res, 200, { path: result.path, branch: result.branch })
     }
 
@@ -451,6 +561,7 @@ async function handleRequest(
     if (aliasInput !== undefined) {
       deps.setAlias(created.path, aliasInput)
     }
+    if (creator) deps.subscriptions.recordOrigin(created.path, creator)
     deps.broadcast('worktrees:externalCreate', {
       repoRoot,
       worktree: created,
@@ -549,6 +660,41 @@ async function handleRequest(
       alias: stored ?? '',
       cleared: stored === null,
       clamped
+    })
+  }
+
+  // set_tab_name — an agent naming its OWN tab. Deliberately takes no
+  // tabId or worktreePath: the caller's scope IS the target, so there's
+  // no way to rename someone else's tab. A name the user typed wins
+  // permanently, which the reducer enforces and this reports back.
+  if (req.method === 'POST' && path === '/tab-name') {
+    if (!deps.getAgentTabNamingEnabled()) {
+      return sendJson(res, 403, {
+        error:
+          'agent tab naming is disabled in Ness settings (Settings → Agents → General → Agent tab naming)'
+      })
+    }
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, {
+        error: 'caller terminal is not associated with a worktree'
+      })
+    }
+    const body = await readJson(req)
+    const submitted = typeof body.name === 'string' ? body.name : ''
+    const stored = normalizeTabLabel(submitted)
+    if (!stored) {
+      return sendJson(res, 400, { error: 'name required' })
+    }
+    const applied = deps.renameTab(scope.worktreePath, scope.terminalId, stored, 'agent')
+    return sendJson(res, 200, {
+      name: stored,
+      applied,
+      clamped: applied && submitted.trim() !== stored,
+      ...(applied ? {} : { reason: 'user-set' })
     })
   }
 
@@ -834,6 +980,148 @@ async function handleRequest(
     return
   }
 
+  // Chat tabs in a worktree — the ids send_message's `tab` and
+  // submit_review's `tab` take. Defaults to the caller's own worktree.
+  if (req.method === 'GET' && path === '/tabs') {
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, { error: 'caller terminal is not associated with a worktree' })
+    }
+    const query = url.searchParams.get('worktree')?.trim()
+    let worktreePath = scope.worktreePath
+    if (query) {
+      const resolved = deps.messaging.resolveTarget(query)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      worktreePath = resolved.path
+    }
+    const tabs = deps.listChatTabs(worktreePath).map((t) => ({
+      ...t,
+      ...(t.id === terminalId ? { self: true } : {})
+    }))
+    return sendJson(res, 200, { worktreePath, tabs })
+  }
+
+  // Review viewer tools. Scoped to the caller's own worktree: the reviewer
+  // works in the same checkout as the author, and a comment's author is
+  // always the calling tab — never something the body can claim.
+  if (path.startsWith('/reviews/')) {
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, { error: 'caller terminal is not associated with a worktree' })
+    }
+    const wt = scope.worktreePath
+
+    if (req.method === 'GET' && path === '/reviews/comments') {
+      const rawStatus = url.searchParams.get('status') || undefined
+      if (
+        rawStatus !== undefined &&
+        rawStatus !== 'open' &&
+        rawStatus !== 'resolved' &&
+        rawStatus !== 'outdated'
+      ) {
+        return sendJson(res, 400, { error: 'status must be "open", "resolved", or "outdated"' })
+      }
+      const file = url.searchParams.get('file')?.trim() || undefined
+      const comments = await deps.reviews.list(wt, { status: rawStatus, file })
+      return sendJson(res, 200, {
+        comments: comments.map((c) => toAgentComment(c, terminalId))
+      })
+    }
+
+    const body = req.method === 'POST' ? await readJson(req) : {}
+
+    if (req.method === 'POST' && path === '/reviews/comments') {
+      const file = typeof body.file === 'string' ? body.file.trim().replace(/^\.\//, '') : ''
+      const line = typeof body.line === 'number' ? body.line : Number(body.line)
+      const side = body.side === undefined || body.side === null ? 'new' : body.side
+      const text = typeof body.body === 'string' ? body.body : ''
+      if (!file) return sendJson(res, 400, { error: 'file required' })
+      if (!Number.isInteger(line) || line < 1) {
+        return sendJson(res, 400, { error: 'line must be a positive integer' })
+      }
+      if (side !== 'new' && side !== 'old') {
+        return sendJson(res, 400, { error: 'side must be "new" or "old"' })
+      }
+      if (!text.trim()) return sendJson(res, 400, { error: 'body required' })
+      const result = await deps.reviews.addComment(wt, terminalId, {
+        filePath: file,
+        line,
+        side,
+        body: text
+      })
+      if ('error' in result) return sendJson(res, 422, { error: result.error })
+      return sendJson(res, 200, { comment: toAgentComment(result, terminalId) })
+    }
+
+    if (req.method === 'POST' && path === '/reviews/replies') {
+      const commentId = typeof body.commentId === 'string' ? body.commentId : ''
+      const text = typeof body.body === 'string' ? body.body : ''
+      if (!commentId) return sendJson(res, 400, { error: 'commentId required' })
+      if (!text.trim()) return sendJson(res, 400, { error: 'body required' })
+      const result = deps.reviews.reply(wt, terminalId, commentId, text)
+      if ('error' in result) return sendJson(res, 404, { error: result.error })
+      return sendJson(res, 200, { comment: toAgentComment(result.comment, terminalId) })
+    }
+
+    if (req.method === 'POST' && path === '/reviews/resolve') {
+      const commentId = typeof body.commentId === 'string' ? body.commentId : ''
+      if (!commentId) return sendJson(res, 400, { error: 'commentId required' })
+      const resolved = body.resolved !== false
+      const result = deps.reviews.setResolved(wt, terminalId, commentId, resolved)
+      if ('error' in result) return sendJson(res, 404, { error: result.error })
+      return sendJson(res, 200, { comment: toAgentComment(result.comment, terminalId) })
+    }
+
+    if (req.method === 'POST' && path === '/reviews/request') {
+      const context = typeof body.context === 'string' ? body.context.trim() : ''
+      if (!context) return sendJson(res, 400, { error: 'context required' })
+      const result = deps.reviews.request(wt, terminalId, context)
+      if (!result.ok) return sendJson(res, 409, { error: result.error })
+      return sendJson(res, 200, {
+        reviewerTabId: result.reviewerTabId,
+        reused: result.reused
+      })
+    }
+
+    if (req.method === 'POST' && path === '/reviews/submit') {
+      const verdict = body.verdict
+      if (verdict !== 'approve' && verdict !== 'changes-requested' && verdict !== 'comment') {
+        return sendJson(res, 400, {
+          error: 'verdict must be "approve", "changes-requested", or "comment"'
+        })
+      }
+      const summary = typeof body.summary === 'string' ? body.summary : ''
+      const briefing = typeof body.briefing === 'string' ? body.briefing : undefined
+      const tab = typeof body.tab === 'string' && body.tab.trim() ? body.tab.trim() : undefined
+      const result = await deps.reviews.submit(wt, terminalId, {
+        verdict,
+        summary,
+        briefing,
+        targetTabId: tab
+      })
+      if ('error' in result) return sendJson(res, 400, { error: result.error })
+      const { submission, delivery } = result
+      return sendJson(res, 200, {
+        id: submission.id,
+        verdict: submission.verdict,
+        commentCount: submission.commentIds.length,
+        state: submission.state,
+        targetTabId: submission.targetTabId ?? null,
+        delivery
+      })
+    }
+
+    res.writeHead(404)
+    res.end('review endpoint not found')
+    return
+  }
+
   // send_message — deliver a message into another worktree's agent chat.
   // Unlike the browser/shell tools this deliberately crosses the worktree
   // boundary; that's the entire feature. What does NOT cross is sender
@@ -857,39 +1145,185 @@ async function handleRequest(
     }
     const body = await readJson(req)
     const target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
+    const tab = typeof body.tab === 'string' ? body.tab.trim() : ''
     const message = typeof body.message === 'string' ? body.message.trim() : ''
-    if (!target) return sendJson(res, 400, { error: 'worktree required' })
+    if (!target && !tab) return sendJson(res, 400, { error: 'worktree or tab required' })
     if (!message) return sendJson(res, 400, { error: 'message required' })
 
-    const resolved = deps.messaging.resolveTarget(target)
-    if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
-    if (resolved.path === scope.worktreePath) {
+    // A tab id names exactly one recipient, so with `tab` set the worktree
+    // defaults to the caller's own and only messaging yourself is refused.
+    let targetPath = scope.worktreePath
+    if (target) {
+      const resolved = deps.messaging.resolveTarget(target)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      targetPath = resolved.path
+    }
+    if (!tab && targetPath === scope.worktreePath) {
       return sendJson(res, 400, {
-        error: 'cannot send a message to your own worktree'
+        error: 'cannot send a message to your own worktree — pass `tab` to reach another tab in it'
+      })
+    }
+    if (tab === terminalId) {
+      return sendJson(res, 400, { error: 'cannot send a message to your own tab' })
+    }
+    if (tab && !deps.listChatTabs(targetPath).some((t) => t.id === tab)) {
+      return sendJson(res, 404, {
+        error: `no Chat tab "${tab}" in ${targetPath} — only Chat tabs can receive messages; call list_tabs to see them`
       })
     }
 
-    const from = deps.messaging.describe(scope.worktreePath)
-    const result = deps.messaging.send(
-      resolved.path,
-      wrapAutomatedMessage('worktree-message', message, { from })
-    )
+    const worktreeName = deps.messaging.describe(scope.worktreePath)
+    const senderTab = deps.listChatTabs(scope.worktreePath).find((t) => t.id === terminalId)
+    const from = tab && senderTab ? `${worktreeName} · ${senderTab.label}` : worktreeName
+    const wrapped = wrapAutomatedMessage('worktree-message', message, { from })
+
+    if (tab) {
+      const result = deps.messaging.sendToTab(targetPath, tab, wrapped)
+      if (!result.ok) {
+        return sendJson(res, 409, {
+          error: `${describeTabDeliveryFailure(result.reason)} — the message was not sent`
+        })
+      }
+      log('control', `message ${terminalId} -> ${targetPath}#${tab} (woke=${result.woke})`)
+      return sendJson(res, 200, {
+        delivered: true,
+        worktreePath: targetPath,
+        tab,
+        from,
+        woke: result.woke
+      })
+    }
+
+    const result = deps.messaging.send(targetPath, wrapped)
     if (!result.ok) {
       // Nothing is queued for later — say so plainly so the caller can decide
       // whether to retry, open a chat tab, or just tell the user.
       const error =
         result.reason === 'no-chat-tab'
-          ? `worktree ${resolved.path} has no agent chat tab to deliver to — the message was not sent`
-          : `failed to wake the agent chat in ${resolved.path} — the message was not sent`
+          ? `worktree ${targetPath} has no agent chat tab to deliver to — the message was not sent`
+          : `failed to wake the agent chat in ${targetPath} — the message was not sent`
       return sendJson(res, 409, { error })
     }
-    log('control', `message ${scope.worktreePath} -> ${resolved.path} (woke=${result.woke})`)
+    log('control', `message ${scope.worktreePath} -> ${targetPath} (woke=${result.woke})`)
     return sendJson(res, 200, {
       delivered: true,
-      worktreePath: resolved.path,
+      worktreePath: targetPath,
       from,
       woke: result.woke
     })
+  }
+
+  // get_worktree_status — read-only, workspace-wide like list_worktrees.
+  if (req.method === 'GET' && path === '/worktree-status') {
+    const query = url.searchParams.get('worktree')?.trim()
+    let worktreePath: string | undefined
+    if (query) {
+      const resolved = deps.messaging.resolveTarget(query)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      worktreePath = resolved.path
+    } else {
+      worktreePath = resolveScope(req, deps).scope?.worktreePath
+    }
+    if (!worktreePath) {
+      return sendJson(res, 400, { error: 'worktree required when caller is not scoped to a worktree' })
+    }
+    return sendJson(res, 200, await deps.getWorktreeDetail(worktreePath))
+  }
+
+  // Subscriptions + progress reports. Gated with send_message, since both
+  // put messages into another agent's chat.
+  if (path === '/subscriptions' || path === '/progress') {
+    if (!deps.messaging.isEnabled()) {
+      return sendJson(res, 403, {
+        error:
+          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+      })
+    }
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, { error: 'caller terminal is not associated with a worktree' })
+    }
+    const caller = { worktreePath: scope.worktreePath, tabId: terminalId }
+
+    if (req.method === 'GET' && path === '/subscriptions') {
+      const { following, followers } = deps.subscriptions.list(caller)
+      const view = (s: Subscriber, side: 'target' | 'subscriber'): Record<string, unknown> => ({
+        worktree: deps.messaging.describe(side === 'target' ? s.targetPath : s.subscriberPath),
+        worktreePath: side === 'target' ? s.targetPath : s.subscriberPath,
+        ...(side === 'subscriber' ? { tab: s.subscriberTabId } : {}),
+        kind: s.kind,
+        ...(s.reason ? { reason: s.reason } : {}),
+        mode: s.mode,
+        ...(s.note ? { note: s.note } : {}),
+        since: s.since
+      })
+      return sendJson(res, 200, {
+        following: following.map((s) => view(s, 'target')),
+        followers: followers.map((s) => view(s, 'subscriber'))
+      })
+    }
+
+    const body = await readJson(req)
+
+    if (req.method === 'POST' && path === '/progress') {
+      const message = typeof body.message === 'string' ? body.message.trim() : ''
+      if (!message) return sendJson(res, 400, { error: 'message required' })
+      const result = deps.subscriptions.reportProgress(caller, message, body.urgent === true)
+      log(
+        'control',
+        `progress ${scope.worktreePath} -> delivered=${result.delivered.length} failed=${result.failed.length}`
+      )
+      return sendJson(res, 200, result)
+    }
+
+    const target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
+    if (!target) return sendJson(res, 400, { error: 'worktree required' })
+    const resolved = deps.messaging.resolveTarget(target)
+    if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+    if (resolved.path === scope.worktreePath) {
+      return sendJson(res, 400, { error: 'cannot subscribe to your own worktree' })
+    }
+
+    if (req.method === 'POST') {
+      // Updates have to land in the caller's chat, and only Chat tabs can
+      // receive them.
+      if (!deps.listChatTabs(scope.worktreePath).some((t) => t.id === terminalId)) {
+        return sendJson(res, 400, {
+          error: 'only a Chat tab can subscribe — terminal tabs cannot receive updates'
+        })
+      }
+      const rawMode = body.mode
+      if (rawMode !== undefined && rawMode !== 'interrupt' && rawMode !== 'silent') {
+        return sendJson(res, 400, { error: 'mode must be "interrupt" or "silent"' })
+      }
+      const note = typeof body.note === 'string' ? body.note : undefined
+      const result = deps.subscriptions.subscribe(caller, resolved.path, {
+        note,
+        mode: rawMode
+      })
+      return sendJson(res, 200, {
+        worktreePath: resolved.path,
+        worktree: deps.messaging.describe(resolved.path),
+        ...result
+      })
+    }
+
+    if (req.method === 'DELETE') {
+      const outcome = deps.subscriptions.unsubscribe(terminalId, resolved.path)
+      if (outcome === 'not-subscribed') {
+        return sendJson(res, 404, { error: `you are not subscribed to ${target}` })
+      }
+      if (outcome === 'implicit') {
+        return sendJson(res, 409, {
+          error:
+            'that subscription is implicit — Ness derives it because you created this worktree, and it lasts as long as the worktree does. To get its updates quietly instead, call subscribe_to_worktree with mode "silent".'
+        })
+      }
+      return sendJson(res, 200, { worktreePath: resolved.path, removed: true })
+    }
   }
 
   // edit_copy — hand a draft to the human and hold this response open until
@@ -950,12 +1384,48 @@ async function handleRequest(
       browser: deps.getBrowserPerms(),
       conversationFork: { enabled: deps.getConversationForkEnabled() },
       messaging: { enabled: deps.messaging.isEnabled() },
+      tabNaming: { enabled: deps.getAgentTabNamingEnabled() },
       copyEditing: { enabled: deps.copyDrafts.isEnabled() }
     })
   }
 
   res.writeHead(404)
   res.end('not found')
+}
+
+/** Appended to the kickoff brief of a worktree a Chat tab created. */
+export function followedByCreatorNote(creatorName: string): string {
+  return (
+    `Ness: ${creatorName} created this worktree and follows it — it is told about this ` +
+    'branch\'s PR, CI and review status automatically. Call `report_progress` with a short update ' +
+    'at real milestones, when you are blocked or need a decision (pass `urgent: true`), and when ' +
+    'you finish.'
+  )
+}
+
+/** A comment as the review MCP tools return it: flat, with authors named
+ *  and the caller's own comments and replies flagged. */
+function toAgentComment(c: ReviewComment, callerTabId: string): Record<string, unknown> {
+  const who = (a: ReviewComment['author']): Record<string, unknown> =>
+    a.kind === 'human'
+      ? { author: 'User' }
+      : {
+          author: a.label || 'Agent',
+          authorTab: a.tabId,
+          ...(a.tabId === callerTabId ? { mine: true } : {})
+        }
+  return {
+    id: c.id,
+    file: c.filePath,
+    line: c.line,
+    side: c.side,
+    status: c.status,
+    ...who(c.author),
+    body: c.body,
+    ...(c.replies?.length
+      ? { replies: c.replies.map((r) => ({ id: r.id, ...who(r.author), body: r.body })) }
+      : {})
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

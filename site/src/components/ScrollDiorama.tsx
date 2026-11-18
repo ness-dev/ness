@@ -1,43 +1,11 @@
 import { useRef, useState, useEffect } from 'react'
 import { motion, useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion'
-import {
-  MockHarness,
-  type MockHarnessState,
-  type MockStatus,
-  type MockWorktree
-} from './MockHarness'
+import type { MockHarnessState, MockStatus } from './MockHarness'
+import { BASE_WORKTREES } from './mock-data'
+import { ScaledMock } from './ScaledMock'
 
 type SectionIndex = 0 | 1 | 2 | 3
 type Phase = { section: SectionIndex; localProgress: number }
-
-const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
-  {
-    id: '1',
-    branch: 'feat/onboarding',
-    path: 'harness/feat-onboarding',
-    pr: { checks: 'success', additions: 142, deletions: 58 }
-  },
-  {
-    id: '2',
-    branch: 'fix/login-flash',
-    path: 'harness/fix-login-flash'
-  },
-  {
-    id: '3',
-    branch: 'refactor/auth',
-    path: 'harness/refactor-auth'
-  },
-  {
-    id: '4',
-    branch: 'chore/deps-bump',
-    path: 'harness/chore-deps-bump'
-  },
-  {
-    id: '5',
-    branch: 'docs/api-reference',
-    path: 'harness/docs-api-reference'
-  }
-]
 
 interface Section {
   eyebrow: string
@@ -108,10 +76,8 @@ export function ScrollDiorama() {
               <CopyStack activeSection={phase.section} />
             </div>
 
-            <div className="relative h-[68vh] translate-x-[8%]">
-              <div className="absolute inset-0">
-                <MockHarness state={mockState} />
-              </div>
+            <div className="relative h-[68vh] xl:translate-x-[8%]">
+              <ScaledMock state={mockState} fill />
             </div>
           </div>
 
@@ -154,9 +120,7 @@ function StackedDiorama() {
               </p>
             )}
             {!s.bonus && <div className="mb-6" />}
-            <div className="h-[360px] rounded-xl overflow-hidden">
-              <MockHarness state={mockState} />
-            </div>
+            <ScaledMock state={mockState} />
           </div>
         )
       })}

@@ -4,6 +4,8 @@
 // JsonClaudeManager, and its per-tool approval flow rides an MCP bridge
 // instead of the terminal-hook status dir.
 
+import type { AgentKind } from './terminals'
+
 export type JsonClaudeSessionState =
   | 'idle'
   | 'connecting'
@@ -79,6 +81,12 @@ export interface JsonClaudeMessageBlock {
   id?: string
   name?: string
   input?: Record<string, unknown>
+  // For 'tool_use': a short "what this call is for" line ("Read
+  // store.ts") shown in place of the tool name in collapsed views.
+  // Each provider derives it from whatever its harness offers (Claude's
+  // `description` arg, Codex's parsed command actions); the renderer
+  // only ever reads this field.
+  intent?: string
   // For 'tool_result': correlation + rendered body.
   toolUseId?: string
   content?: string
@@ -96,13 +104,27 @@ export type JsonClaudeAutomationSource =
   | 'worktree-message'
   | 'worktree-kickoff'
   | 'worktree-autoname'
+  | 'review'
+  | 'review-request'
+  | 'subscription-started'
+  | 'subscription-update'
+  | 'progress-report'
+  | 'pr-update'
+  | 'reviewed-pr-update'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
   'merge-conflict',
   'worktree-message',
   'worktree-kickoff',
-  'worktree-autoname'
+  'worktree-autoname',
+  'review',
+  'review-request',
+  'subscription-started',
+  'subscription-update',
+  'progress-report',
+  'pr-update',
+  'reviewed-pr-update'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -111,6 +133,23 @@ const AUTOMATION_SOURCES: readonly string[] = [
  *  and agents treat it as authoritative — including the parts the parent
  *  guessed at. Naming the author is what buys back the license to push back. */
 const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> = {
+  // Tool mechanics only. What the reviewer should look for is the
+  // user's `reviewPrompt` setting, which arrives in the body above — two
+  // sets of instructions would fight, and a custom prompt should win.
+  'review-request':
+    'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict, a summary and a briefing — that is what sends the review back to the agent that asked, and nothing reaches them until you do. The summary and comments go to that agent; the briefing goes to the user, in the Review tab, so write it for a human who has not read the diff.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.',
+  review:
+    'Address this review. The id in [brackets] after each comment works with the ness-control MCP tools: call `reply_to_comment` to answer a comment or push back on it, and `resolve_comment` once you have fixed it, so the reviewer and the user can see where each one stands in the Review tab. A comment you disagree with deserves a reply rather than a silent change. If you do not have those tools, just address the feedback.',
+  // Static so the parse-side strip can match it exactly; who to report to
+  // is Ness's business, which is why report_progress takes no recipient.
+  'subscription-started':
+    'Another agent is now following this worktree. Keep doing the work you were given — this is not a new task, and you do not need to reply to it now. From here on, call the `report_progress` tool from the ness-control MCP server with a short status update whenever you reach a milestone (a plan settled, a chunk of work committed, a PR opened, tests passing), when you get blocked or need a decision, and when you finish. Ness delivers each report to every subscriber, so do not use send_message for this. Keep reports to a few sentences: what changed, what is next, anything they should know. Ness already tells subscribers about PR, CI and review changes, so do not report those on their own.',
+  'subscription-update':
+    'This is an automatic update about a worktree you subscribed to. Act on it only if it changes what you are doing; otherwise acknowledge it briefly and carry on. Call `get_worktree_status` for the full picture, or `unsubscribe_from_worktree` once you no longer need these.',
+  'pr-update':
+    "This is an automatic update about this worktree's own pull request, from GitHub. If CI is failing, changes were requested, or the branch has merge conflicts, investigate and fix it unless the user has told you otherwise; if you are in the middle of something, finish that first. Anything else is for your information.",
+  'reviewed-pr-update':
+    "This is an automatic update about the pull request you are reviewing, from GitHub — someone else's PR, so it is not yours to fix. New commits mean the author has responded: if your review is still open, re-check what changed. Anything else is for your information.",
   'worktree-kickoff':
     'This brief was written by another agent, not by the user. Treat it as a starting point rather than a spec: verify its claims about the codebase before acting on them, and say so instead of complying if the approach it describes looks wrong.',
   // The one source whose body IS the human's own words — the footer is the
@@ -119,6 +158,14 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
   // the agent can read its own branch from git anyway.
   'worktree-autoname':
     'The message above is the user\'s own kickoff prompt, typed by them. Ness created this worktree from it and guessed the branch name — before you start the work, call the `rename_worktree` tool from the ness-control MCP server once with a better `branchName` (kebab-case, e.g. `fix-login-redirect`) and a short Title Case `alias` for the sidebar (e.g. "Login Redirect"). One call, no need to ask first, then get on with the task. If you do not have that tool, skip this and carry on.'
+}
+
+/** Earlier wordings of a footer. Transcripts on disk still carry them, and
+ *  the card would show the stale footer if parse only knew the current one. */
+const RETIRED_AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string[]>> = {
+  'review-request': [
+    'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.'
+  ]
 }
 
 const AUTOMATION_TAG = 'ness-automated-message'
@@ -157,7 +204,7 @@ function neutralizeNestedTags(body: string): string {
   // Both spellings, because the parser accepts both — defanging only the
   // current one would leave the legacy spelling usable to forge a boundary.
   return body.replace(
-    /<(\/?)((?:ness|harness)-automated-message)/g,
+    /<(\/?)((?:ness|harness)-automated-message|ness-held-notifications)/g,
     '&lt;$1$2'
   )
 }
@@ -204,11 +251,71 @@ export function parseAutomatedMessage(
   let body = text.slice(open[0].length, text.length - close.length)
   // Optional so sentinels written before a source grew its guidance footer
   // still round-trip.
-  const footer = AUTOMATION_GUIDANCE[source]
-  if (footer && body.endsWith(`\n\n${footer}`)) {
-    body = body.slice(0, -(footer.length + 2))
-  }
+  const footers = [AUTOMATION_GUIDANCE[source], ...(RETIRED_AUTOMATION_GUIDANCE[source] ?? [])]
+  const footer = footers.find((f) => f && body.endsWith(`\n\n${f}`))
+  if (footer) body = body.slice(0, -(footer.length + 2))
   return { source, body, ...(from ? { from } : {}) }
+}
+
+const HELD_OPEN = '<ness-held-notifications>\n'
+const HELD_HEADER =
+  'Ness held the notifications below instead of interrupting you, and is delivering them with this turn. Take them into account, but what you are responding to is the message after this block.'
+const HELD_CLOSE = '\n</ness-held-notifications>\n\n'
+
+export interface HeldNotice {
+  source: JsonClaudeAutomationSource
+  from?: string
+  body: string
+}
+
+/** Put held (silent) notifications in front of the turn that releases
+ *  them. One turn on the wire, so the agent reads them in the same request
+ *  as the message that woke it rather than as a turn of their own. */
+export function prependHeldNotices(wires: string[], text: string): string {
+  if (wires.length === 0) return text
+  return `${HELD_OPEN}${HELD_HEADER}\n\n${wires.join('\n\n')}${HELD_CLOSE}${text}`
+}
+
+function splitHeldNotices(text: string): { notices: HeldNotice[]; rest: string } | null {
+  if (!text.startsWith(HELD_OPEN)) return null
+  const end = text.indexOf(HELD_CLOSE)
+  if (end === -1) return null
+  let inner = text.slice(HELD_OPEN.length, end)
+  if (inner.startsWith(HELD_HEADER)) inner = inner.slice(HELD_HEADER.length)
+  const notices: HeldNotice[] = []
+  // Bodies are neutralized against nested close tags, so each close tag
+  // found here really does end one notice.
+  let from = 0
+  while (from < inner.length) {
+    const start = inner.indexOf('<', from)
+    if (start === -1) break
+    const close = inner.indexOf(AUTOMATION_CLOSE, start)
+    if (close === -1) break
+    const chunk = inner.slice(start, close + AUTOMATION_CLOSE.length)
+    const parsed = parseAutomatedMessage(chunk)
+    if (parsed) notices.push(parsed)
+    from = close + AUTOMATION_CLOSE.length
+  }
+  return { notices, rest: text.slice(end + HELD_CLOSE.length) }
+}
+
+/** The slice fields for a user turn, from its wire text: sentinel stripped,
+ *  automation recorded, held notifications split out. Every place that
+ *  turns wire text into a user entry (live send, transcript hydration, both
+ *  providers) goes through this so they can't drift. */
+export function parseUserTurn(text: string): Pick<
+  JsonClaudeChatEntry,
+  'text' | 'automation' | 'automationFrom' | 'heldNotices'
+> {
+  const held = splitHeldNotices(text)
+  const body = held ? held.rest : text
+  const automated = parseAutomatedMessage(body)
+  return {
+    text: automated ? automated.body : body,
+    ...(automated ? { automation: automated.source } : {}),
+    ...(automated?.from ? { automationFrom: automated.from } : {}),
+    ...(held && held.notices.length > 0 ? { heldNotices: held.notices } : {})
+  }
 }
 
 export interface JsonClaudeChatEntry {
@@ -256,6 +363,9 @@ export interface JsonClaudeChatEntry {
   /** For an `automation` whose sender varies — the alias of the worktree
    *  that sent it. Absent for singleton automations like CI. */
   automationFrom?: string
+  /** For kind === 'user'. Silent notifications Ness held for this tab and
+   *  delivered in front of this turn. */
+  heldNotices?: HeldNotice[]
   /** Image attachments sent with this user message. Only the on-disk
    *  path + media type live in the slice — bytes would balloon the
    *  state event payload. The renderer lazy-fetches each path via the
@@ -282,6 +392,7 @@ export interface JsonClaudeChatEntry {
     | 'rate-limit-warning'
     | 'rate-limit-error'
     | 'auth-failure'
+    | 'agent-error'
   /** For kind === 'error'. Human-readable detail (exitReason, rate-limit
    *  retry-at timestamp, original auth error string, etc.). */
   errorMessage?: string
@@ -307,6 +418,10 @@ export interface JsonClaudeChatEntry {
    *  jsonl line carrying this id, which is the natural end of the
    *  assistant's turn. */
   apiMessageId?: string
+  /** Codex turn this entry belongs to. Codex rewinds and forks at turn
+   *  boundaries (thread/revert, thread/fork), so assistant entries carry
+   *  the id of the turn that produced them. */
+  turnId?: string
   /** For errorKind === 'rate-limit-warning' | 'rate-limit-error'.
    *  Structured detail sourced from the SDK's `rate_limit_info`
    *  payload. All fields optional because the wire shape is sparse —
@@ -348,6 +463,9 @@ export interface JsonClaudeBackgroundAgent {
 export interface JsonClaudeSession {
   sessionId: string
   worktreePath: string
+  /** Which agent backs this chat. Missing means Claude — every session
+   *  predating the field was. Fixed for the session's lifetime. */
+  agentKind?: AgentKind
   state: JsonClaudeSessionState
   exitCode: number | null
   exitReason: string | null
@@ -362,9 +480,27 @@ export interface JsonClaudeSession {
    *  flash during the fetch window. The reducer flips this true on
    *  `entriesSeeded`. Server-side it's always true. */
   entriesHydrated: boolean
+  /** True while the provider is still loading this session's history from
+   *  the agent (Codex reads it over app-server after its subprocess is up,
+   *  well after `entriesHydrated` flips). The renderer shows a loading
+   *  state rather than the empty-chat card while it's set. */
+  historyPending?: boolean
   /** Last text of the most recent user submission; used by the renderer to
    *  pair the echo against the user-card it just rendered optimistically. */
   busy: boolean
+  /** When the current (or most recent) turn began. Entries are not
+   *  turn-delimited on their own: a message typed mid-turn becomes an
+   *  ordinary user entry once delivered, so "a later user entry" is not a
+   *  turn boundary.
+   *
+   *  A timestamp, not an entry id, because entries can go away —
+   *  cancelling a queued message, rewinding, reseeding — and an id that
+   *  no longer resolves silently drops the boundary. Stamped by main on
+   *  the `busyChanged` payload, never derived in the reducer: renderers
+   *  often hold no entries for a session whose tab hasn't mounted, so a
+   *  value computed from entries would differ between clients.
+   *  Undefined until the session's first turn starts. */
+  turnStartedAt?: number
   /** --permission-mode flag passed to claude at spawn time. Mid-session
    *  changes are applied via a stdin control_request (subtype
    *  'set_permission_mode') so the in-flight turn is not aborted; the
@@ -381,6 +517,10 @@ export interface JsonClaudeSession {
    *  show the effective model even when no `--model` was passed and the
    *  CLI fell back to its own default. Empty until init lands. */
   currentModel?: string
+  /** Models this session's agent offers, when its provider can list them
+   *  (Codex's model/list depends on the signed-in account). Absent for
+   *  Claude, whose picker uses the static CLAUDE_MODELS list. */
+  availableModels?: Array<{ id: string; displayName: string }>
   /** Audit map of tool calls that were auto-approved by the LLM-based
    *  reviewer (instead of going through the user UI). Keyed by toolUseId
    *  so the per-tool card can render a small "auto-approved" badge.
@@ -446,6 +586,9 @@ export type JsonClaudeEvent =
       payload: {
         sessionId: string
         worktreePath: string
+        /** Omitted for Claude. Ignored when the session already exists —
+         *  a respawn can't change which agent backs it. */
+        agentKind?: AgentKind
         /** Permission mode applied only when this session id has no
          *  prior slice entry (fresh tab). When the session already
          *  exists (resume / re-attach / mode-change respawn), the
@@ -506,7 +649,10 @@ export type JsonClaudeEvent =
     }
   | {
       type: 'jsonClaude/busyChanged'
-      payload: { sessionId: string; busy: boolean }
+      /** `turnStartedAt` accompanies `busy: true` — stamped once in main
+       *  so every client stores the same boundary, including renderers
+       *  that haven't hydrated this session's entries. */
+      payload: { sessionId: string; busy: boolean; turnStartedAt?: number }
     }
   | {
       type: 'jsonClaude/sessionCleared'
@@ -562,6 +708,14 @@ export type JsonClaudeEvent =
   | {
       type: 'jsonClaude/currentModelChanged'
       payload: { sessionId: string; model: string }
+    }
+  | {
+      type: 'jsonClaude/availableModelsChanged'
+      payload: { sessionId: string; models: Array<{ id: string; displayName: string }> }
+    }
+  | {
+      type: 'jsonClaude/historyPendingChanged'
+      payload: { sessionId: string; pending: boolean }
     }
   | {
       type: 'jsonClaude/compactBoundaryReceived'
@@ -767,6 +921,7 @@ export function jsonClaudeReducer(
       // kill+respawn the same way permissionMode does. Reset exit
       // bookkeeping.
       const existing = state.sessions[sessionId]
+      const agentKind = existing ? existing.agentKind : event.payload.agentKind
       return {
         ...state,
         sessions: {
@@ -774,6 +929,7 @@ export function jsonClaudeReducer(
           [sessionId]: {
             sessionId,
             worktreePath,
+            ...(agentKind && agentKind !== 'claude' ? { agentKind } : {}),
             state: 'connecting',
             exitCode: null,
             exitReason: null,
@@ -791,6 +947,7 @@ export function jsonClaudeReducer(
             ...(existing?.currentModel !== undefined
               ? { currentModel: existing.currentModel }
               : {}),
+            ...(existing?.availableModels ? { availableModels: existing.availableModels } : {}),
             autoApprovedDecisions: existing?.autoApprovedDecisions ?? {},
             sessionToolApprovals: existing?.sessionToolApprovals ?? [],
             sessionAllowedDecisions: existing?.sessionAllowedDecisions ?? {},
@@ -942,12 +1099,18 @@ export function jsonClaudeReducer(
     }
     case 'jsonClaude/busyChanged': {
       const session = state.sessions[event.payload.sessionId]
-      if (!session) return state
+      if (!session || session.busy === event.payload.busy) return state
       return {
         ...state,
         sessions: {
           ...state.sessions,
-          [session.sessionId]: { ...session, busy: event.payload.busy }
+          [session.sessionId]: {
+            ...session,
+            busy: event.payload.busy,
+            ...(event.payload.busy && event.payload.turnStartedAt !== undefined
+              ? { turnStartedAt: event.payload.turnStartedAt }
+              : {})
+          }
         }
       }
     }
@@ -1101,6 +1264,31 @@ export function jsonClaudeReducer(
             ...session,
             slashCommands: event.payload.slashCommands
           }
+        }
+      }
+    }
+    case 'jsonClaude/availableModelsChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: { ...session, availableModels: event.payload.models }
+        }
+      }
+    }
+    case 'jsonClaude/historyPendingChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      if (!!session.historyPending === event.payload.pending) return state
+      const { historyPending: _drop, ...rest } = session
+      void _drop
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: event.payload.pending ? { ...rest, historyPending: true } : rest
         }
       }
     }

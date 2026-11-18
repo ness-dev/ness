@@ -43,7 +43,14 @@ slice has:
 
 Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
 `terminals` (which also owns `panes` and `lastActive`), `updater`,
-`repoConfigs`, `permissions`, `copyDrafts`. Adding a new piece of shared state means picking the
+`repoConfigs`, `permissions`, `copyDrafts` (pending `edit_copy` drafts), `subscriptions` (explicit agent→worktree
+follows), `origins` (which Chat tab created a worktree — implicit follows
+are derived from it in `shared/subscribers.ts`, never stored), and
+`notifications` (silent notices held per tab until `ChatRouter.send`
+releases them into its next turn). Every automatic message into an agent
+chat — PR/CI updates, reviews, worktree messages, progress reports,
+kickoff briefs — goes through `NotificationBus` (`src/main/notification-bus.ts`);
+only user-typed turns call `ChatRouter.send` directly. Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end
@@ -521,6 +528,9 @@ hard dependency on `gh`.
   `npm install --legacy-peer-deps` once before building (the `--legacy-peer-deps`
   flag is required because `electron-vite@5` declares a peer range that
   npm's strict resolver rejects against the installed `vite@7`).
+  Use Node 22 (≥22.12): electron-builder's nested `@electron/rebuild` 4
+  requires it for the `postinstall` node-pty rebuild, and CI runs 22. On
+  Node 20 the install still works but prints an `EBADENGINE` warning.
 - **node-pty rebuild** — `node-pty` is a native module compiled against a
   specific Electron version. After running `npm run pack` or `npm run dist*`,
   the postdist hook runs `electron-rebuild -f -w node-pty` so dev mode keeps
@@ -618,6 +628,40 @@ hard dependency on `gh`.
   undocumented `useSystemClaudeForJsonMode: true` setting in
   `config.json` flips json-mode back to PATH `claude` for diagnostics
   / version comparison — no UI, edit the JSON directly.
+- **Claude home is per worktree, not per Ness process.** Folder-scoped
+  env tooling (mise) can set `CLAUDE_CONFIG_DIR` for a directory tree,
+  and a login shell is the only thing that knows the answer. Terminal
+  tabs get it for free via `zsh -ilc`; everything else goes through
+  `src/main/claude-env.ts`, which runs the user's login shell in the
+  worktree once (sentinel-wrapped `env -0`, cached per path, served
+  from cache and re-probed in the background once it's a minute old).
+  The probe deliberately sees only what `zsh -ilc` sees: direnv exports
+  from a prompt/chpwd hook that never fires under `-c`, so it reaches
+  neither terminal tabs nor the probe, and calling `direnv export`
+  would make Ness look in a home terminal-tab claude never writes to.
+  Chat tabs spawn the bundled binary
+  with that captured env, and every `~/.claude/projects` lookup
+  (`--resume` decision, transcripts, context/cost trackers, fork) and
+  the hooks install resolve through `claudeConfigDirFor(cwd)` /
+  `knownClaudeConfigDirs()`. Never hardcode `homedir()/.claude` in main
+  — a worktree whose shell points elsewhere would silently lose resume,
+  status, and cost. The probe is a full shell startup (~1s on a heavy
+  rc file), so it must stay off the hot path: sync readers only read
+  the cache, and async entry points (`startJsonClaudeSession`, the
+  `agent:*` request handlers) await it only when nothing good is cached.
+  Because a chat start can be waiting on a probe after `jsonClaude:start`
+  has returned, anything that reaches a session — send, cancel-queued,
+  interrupt-and-send — goes through `ChatStartGate`
+  (`src/main/chat-start-gate.ts`) so it waits for the start instead of
+  hitting a missing instance and being dropped. Probes run
+  two at a time through a queue — the boot warm-up covers every
+  worktree, and fifty login shells started together all blow the
+  timeout — with a spawn's `resolveShellEnv` jumping ahead of queued
+  warm-ups. A failed probe is never served as an answer: `warmShellEnv`
+  leaves it alone, `resolveShellEnv` retries it. `uninstallHooks` only
+  reaches the homes cached at the time, so revoking consent before the
+  boot warm-up finishes can leave hooks in a custom home; they no-op
+  outside Ness (gated on `HARNESS_TERMINAL_ID`).
 
 ## Workflow conventions
 

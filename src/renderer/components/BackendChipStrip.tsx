@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Laptop, Server, Plus, X, ArrowUp, Loader2 } from 'lucide-react'
+import { Laptop, Layers, Server, Plus, X, ArrowUp, Loader2 } from 'lucide-react'
 import { useBackend } from '../backend'
 import {
   useConnections,
@@ -11,6 +11,7 @@ import {
   reconnectBackend
 } from '../store'
 import { isInFlightPhase } from '../../shared/state/ssh-bootstrap'
+import { setFleetViewMode, useFleetViewMode } from '../fleet-view'
 import { Tooltip } from './Tooltip'
 import type { BackendConnection } from '../types'
 
@@ -34,8 +35,13 @@ export function BackendChipStrip({ onAddBackend }: BackendChipStripProps): JSX.E
   const connections = useConnections()
   const active = useActiveBackend()
   const backend = useBackend()
+  const viewMode = useFleetViewMode()
 
   const handleSelect = useCallback((id: string) => {
+    // Clicking a host chip always lands in single view of that host —
+    // including a click on the already-active host while in merged view,
+    // which is why the early-return is gated on the mode too.
+    setFleetViewMode('single')
     if (id === active.id) return
     getBackendsRegistry().setActive(id)
     void backend.connectionsSetActive(id)
@@ -65,11 +71,26 @@ export function BackendChipStrip({ onAddBackend }: BackendChipStripProps): JSX.E
 
   return (
     <div className="border-t border-border px-2 py-1.5 shrink-0 flex items-center gap-1.5 overflow-x-auto">
+      <Tooltip label="All hosts — one combined list" side="top">
+        <button
+          onClick={() => setFleetViewMode('merged')}
+          className={`shrink-0 h-9 px-2.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer border ${
+            viewMode === 'merged'
+              ? 'bg-surface text-fg-bright border-border-strong'
+              : 'text-dim hover:text-fg hover:bg-surface border-transparent'
+          }`}
+          aria-label="Show all hosts"
+          aria-pressed={viewMode === 'merged'}
+        >
+          <Layers className="icon-sm" />
+          <span className="text-xs font-medium">All</span>
+        </button>
+      </Tooltip>
       {connections.map((conn) => (
         <BackendChip
           key={conn.id}
           connection={conn}
-          isActive={conn.id === active.id}
+          isActive={viewMode === 'single' && conn.id === active.id}
           onSelect={handleSelect}
           onRemove={handleRemove}
         />

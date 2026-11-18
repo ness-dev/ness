@@ -23,6 +23,9 @@ export type WorktreeBase = 'remote' | 'local'
  *  signal is too important to hide. */
 export type SidebarDensity = 'compact' | 'comfy'
 
+/** Which sidebar worktree rows list their tabs as nested child rows. */
+export type SidebarTabsExpansion = 'never' | 'selected' | 'all'
+
 /** Per-item toggles for the sidebar row's detail cluster. Each `true`
  *  means the item shows when it has data to show (e.g. `assignee` only
  *  renders when a PR actually has an assignee). Set to `false` to hide
@@ -82,6 +85,12 @@ export type AgentKindSetting = 'claude' | 'codex' | 'cursor'
 export type BrowserToolsMode = 'view' | 'full'
 
 export type JsonModeChatDensity = 'compact' | 'comfy'
+
+export type JsonModeChatWidth = 'reading' | 'full'
+
+/** Whether a Chat tab's Subagents column starts open or as its composer
+ *  chip. Only the default — a per-session open/close choice still wins. */
+export type SubagentsColumnDefault = 'expanded' | 'collapsed'
 
 /** Five-step UI density. Controls the root `html` font-size so every
  *  `rem`-based unit (and therefore the entire `text-xs` / `text-sm` /
@@ -241,12 +250,38 @@ export function nessieColorById(id: string): NessieColor {
 /** Default kickoff prompt for "Open PR as worktree". Editable globally in
  *  Settings (`prReviewPrompt`) and per-creation in the New Worktree screen. */
 export const DEFAULT_PR_REVIEW_PROMPT =
-  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag. Skip restating what the PR does — focus on what could go wrong or be improved."
+  "Review this PR. Read the diff, then check for correctness issues, design problems, security concerns, and missing edge cases. Cite file paths and line numbers for anything you flag.\n\nStart by explaining it for a reader who hasn't seen the diff: what it does and why, and how it works. Include a diagram for any flow, state or data-shape change — a ```mermaid code block renders as a real diagram here.\n\nThen give your critique, ranked by severity. Keep real blockers (bugs, security, data loss) separate from non-blocking notes, and finish with a recommendation."
 
 /** Primary wake-lock mode. The actual hold = (this mode wants it) OR (the
  *  transient `preventSleepUntil` timer is still live). Single-select; the
  *  timer overlay covers the "also keep awake right now" case. */
 export type PreventSleepMode = 'off' | 'while-agents-running' | 'always'
+
+/** What happens when an agent submits a review: hold it as a draft in the
+ *  Review tab until a human sends it, or deliver it to the author tab
+ *  straight away. Human-sent reviews always go immediately. */
+export type AgentReviewDelivery = 'draft' | 'auto'
+
+/** Which agent a reviewer Chat tab spawns with. 'inherit' means the same
+ *  agent as the tab that asked for the review. */
+export type ReviewAgentChoice = 'inherit' | AgentKindSetting
+
+/** What a reviewer is told to do. The requester's own context is added
+ *  underneath, and the tool mechanics (how to comment, that submit_review
+ *  is what sends it) are appended by Ness and not editable here. */
+export const DEFAULT_REVIEW_PROMPT = `Review this branch the way a careful colleague would, and then make the case for it to the user.
+
+Read the diff first. Leave each concrete issue as an inline comment on the line it belongs to, and keep it specific: what is wrong, why it matters, and what to do instead. Prefer a few substantial points over a long list of nits.
+
+Look for: correctness bugs and unhandled edge cases, design problems, security concerns, error handling, anything that will surprise the next reader, missing test coverage for the behaviour that changed, and code that duplicates something the repo already has. Call out what is done well too, briefly.
+
+Write the briefing for a reader who has not looked at this change yet; it is as important as the comments. Write it so they understand the change fundamentally and can decide whether to merge it without reading the diff first:
+- What it does and why — the problem, then the approach, in plain language.
+- How it works — walk through the moving parts and how they connect. Include a diagram for any flow, state machine, sequence of calls or before/after that changed. A \`\`\`mermaid code block renders as a real diagram in Ness (flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram); quote node labels that contain punctuation. Mark what this change touches with the theme-aware classes \`:::added\`, \`:::changed\`, \`:::removed\` and \`:::focus\` rather than hex colors. A small ASCII sketch is fine for something tiny.
+- Your critique — ranked by severity. Keep real blockers (bugs, data loss, security) clearly apart from non-blocking notes, so the reader can see at a glance what actually stands in the way of merging.
+- Recommendation — merge, merge with follow-ups, or hold, and why in one or two sentences.
+
+Do not change any code — you share this checkout with the author.`
 
 /** Stable keys for each icon in the sidebar's bottom launcher strip. New
  *  entries can be added at the end; renaming an existing key would strand
@@ -319,6 +354,7 @@ export interface SettingsState {
   mergeStrategy: MergeStrategy
   sidebarDensity: SidebarDensity
   sidebarDetails: SidebarDetailPrefsByMode
+  sidebarTabsExpansion: SidebarTabsExpansion
   /** Set once the user dismisses the starter-task cards on the New
    *  worktree screen. One-way — there is no UI to bring them back, which
    *  is the point of a "don't show me this again" affordance. */
@@ -373,6 +409,14 @@ export interface SettingsState {
   /** When true, agents get the `edit_copy` MCP tool and can hand the user a
    *  draft of copy to rewrite before using it. Default off. */
   copyEditingEnabled: boolean
+  /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
+   *  guidance to keep their tab name current. Default ON — unlike the
+   *  experimental toggles this gates a cosmetic, reversible action. Off
+   *  hides the tool and strips the guidance rather than rejecting the
+   *  call, so an agent isn't told about something that will fail. The
+   *  user's own rename (double-click / Cmd+L / context menu) is never
+   *  affected. */
+  agentTabNamingEnabled: boolean
   /** Controls whether new Claude tabs spawn as the terminal-hosted TUI
    *  ('xterm') or the React chat interface ('json'). Internal values are
    *  unchanged; the user-facing label is "Terminal" / "Chat". */
@@ -403,6 +447,13 @@ export interface SettingsState {
    *  radius for newcomers / screen-sharing. Wired via CSS variables on
    *  the chat root, so it's a pure styling switch. */
   jsonModeChatDensity: JsonModeChatDensity
+  /** 'full' (default) lets the chat transcript and composer span the
+   *  whole pane; 'reading' caps them at a comfortable line length,
+   *  centred. */
+  jsonModeChatWidth: JsonModeChatWidth
+  /** How the Subagents column starts in a session the user hasn't opened
+   *  or closed it in. */
+  subagentsColumnDefault: SubagentsColumnDefault
   /** Global UI density. Maps to a root `html` font-size — see SCALES. */
   uiScale: UiScale
   /** Id of the active Nessie colour preset — the app's primary colour.
@@ -418,6 +469,9 @@ export interface SettingsState {
    *  pinned to the top of the viewport instead, and a "Jump to prompt"
    *  button surfaces when the anchor scrolls off the top. */
   autoScrollToBottom: boolean
+  /** When true (default), a finished chat turn folds everything between
+   *  the prompt and the final answer into one summary strip. */
+  collapseFinishedTurns: boolean
   /** Permission mode applied to a freshly-spawned json-mode session.
    *  Existing sessions keep whatever mode they were in (set via the
    *  statusline picker). Default 'acceptEdits' so first-time users
@@ -473,6 +527,18 @@ export interface SettingsState {
    *  lives in the main-process WakeLockController — never in the store.
    *  Default 'off'. */
   preventSleepMode: PreventSleepMode
+  /** Default 'draft'. See AgentReviewDelivery. */
+  agentReviewDelivery: AgentReviewDelivery
+  /** Agent for reviewer tabs. Default 'inherit'. */
+  reviewAgent: ReviewAgentChoice
+  /** Model pin for reviewer tabs, e.g. a stronger model than the author
+   *  runs on. Empty ⇒ that agent's configured default. */
+  reviewModel: string
+  /** Instructions handed to a reviewer. See DEFAULT_REVIEW_PROMPT. */
+  reviewPrompt: string
+  /** Open a reviewer Chat tab automatically when a worktree's PR checks
+   *  go green. Off by default — it spawns an agent on its own. */
+  autoReviewOnGreenCi: boolean
   /** Epoch-ms deadline for the temporary "keep awake for the next hour"
    *  overlay, or null when no timer is running. Shared world state (a
    *  second client sees the countdown) but deliberately NOT persisted to
@@ -515,6 +581,7 @@ export type SettingsEvent =
   | { type: 'settings/worktreeBaseChanged'; payload: WorktreeBase }
   | { type: 'settings/mergeStrategyChanged'; payload: MergeStrategy }
   | { type: 'settings/sidebarDensityChanged'; payload: SidebarDensity }
+  | { type: 'settings/sidebarTabsExpansionChanged'; payload: SidebarTabsExpansion }
   | { type: 'settings/sidebarDetailsChanged'; payload: SidebarDetailPrefsByMode }
   | { type: 'settings/newWorktreeAdvancedOpenChanged'; payload: boolean }
   | { type: 'settings/starterTasksDismissedChanged'; payload: boolean }
@@ -541,16 +608,20 @@ export type SettingsEvent =
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
   | { type: 'settings/copyEditingEnabledChanged'; payload: boolean }
+  | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
   | { type: 'settings/autoApprovePermissionsChanged'; payload: boolean }
   | { type: 'settings/autoApproveSteerInstructionsChanged'; payload: string }
   | { type: 'settings/useSystemClaudeForJsonModeChanged'; payload: boolean }
   | { type: 'settings/jsonModeChatDensityChanged'; payload: JsonModeChatDensity }
+  | { type: 'settings/jsonModeChatWidthChanged'; payload: JsonModeChatWidth }
+  | { type: 'settings/subagentsColumnDefaultChanged'; payload: SubagentsColumnDefault }
   | { type: 'settings/uiScaleChanged'; payload: UiScale }
   | { type: 'settings/nessieColorChanged'; payload: string }
   | { type: 'settings/jsonModeSendOnEnterChanged'; payload: boolean }
   | { type: 'settings/autoScrollToBottomChanged'; payload: boolean }
+  | { type: 'settings/collapseFinishedTurnsChanged'; payload: boolean }
   | {
       type: 'settings/jsonModeDefaultPermissionModeChanged'
       payload: JsonClaudePermissionMode
@@ -565,6 +636,11 @@ export type SettingsEvent =
   | { type: 'settings/announcementsMutedChanged'; payload: boolean }
   | { type: 'settings/showAssignedPRsChanged'; payload: boolean }
   | { type: 'settings/preventSleepModeChanged'; payload: PreventSleepMode }
+  | { type: 'settings/agentReviewDeliveryChanged'; payload: AgentReviewDelivery }
+  | { type: 'settings/reviewAgentChanged'; payload: ReviewAgentChoice }
+  | { type: 'settings/reviewModelChanged'; payload: string }
+  | { type: 'settings/reviewPromptChanged'; payload: string }
+  | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
@@ -596,6 +672,7 @@ export const initialSettings: SettingsState = {
   mergeStrategy: 'squash',
   sidebarDensity: 'comfy',
   sidebarDetails: DEFAULT_SIDEBAR_DETAILS,
+  sidebarTabsExpansion: 'selected',
   newWorktreeAdvancedOpen: false,
   starterTasksDismissed: false,
   claudeModel: null,
@@ -621,16 +698,20 @@ export const initialSettings: SettingsState = {
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
   copyEditingEnabled: false,
+  agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
   autoApprovePermissions: false,
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
+  jsonModeChatWidth: 'full',
+  subagentsColumnDefault: 'expanded',
   uiScale: 'small',
   nessieColor: DEFAULT_NESSIE_COLOR,
   jsonModeSendOnEnter: false,
   autoScrollToBottom: true,
+  collapseFinishedTurns: true,
   jsonModeDefaultPermissionMode: 'acceptEdits',
   jsonModeTranscriptWindow: DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
   autoSleepMinutes: 30,
@@ -642,6 +723,11 @@ export const initialSettings: SettingsState = {
   announcementsMuted: false,
   showAssignedPRs: false,
   preventSleepMode: 'off',
+  agentReviewDelivery: 'draft',
+  reviewAgent: 'inherit',
+  reviewModel: '',
+  reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
   bottomIconOrder: [...BOTTOM_ICON_KEYS]
@@ -682,6 +768,150 @@ function patchOverrides(
   }
   if (map[key] === editorId) return map
   return { ...map, [key]: editorId }
+}
+
+/** Settings that belong to the CLIENT looking at a workspace, not to the
+ *  workspace itself. With multi-backend, every slice hook reads the
+ *  *active* backend's store — so before this list existed, switching to a
+ *  remote backend re-themed and re-scaled the whole window to whatever
+ *  that machine had saved. The remote should never have had its own
+ *  appearance in the first place.
+ *
+ *  The membership test is "who consumes it in main": a field whose only
+ *  main-side reader is `desktop-shell.ts` is about the local Electron
+ *  window (quit confirmation, the auto-updater), and a field with no
+ *  main-side reader at all is pure renderer presentation. Both are
+ *  client-owned. Anything a backend module acts on — `claude-launch`,
+ *  `auto-sleep-monitor`, `pr-poller`, `worktree-subscriptions`, `wake-lock-controller`
+ *  — stays workspace-owned, because the box doing the work is the one
+ *  that has to obey it.
+ *
+ *  Deliberately NOT in this list, despite looking like preferences:
+ *    - `claudeCommand` / `worktreeScripts` / `*EnvVars` / `worktreeBase` /
+ *      `editor` and friends — operational config the remote's own main
+ *      acts on. Reading these locally while the remote kept using its
+ *      own values would trade a visible bug for a silent one. Making
+ *      these client-authoritative needs a push-down to each backend,
+ *      which is a separate change.
+ *    - `hasGithubToken` / `githubAuthSource` / `viewerLogin` /
+ *      `harnessStarred` — not preferences at all, but facts derived from
+ *      whichever token that backend resolved.
+ *    - `wsTransport*` — that backend's own listener config. Overwriting
+ *      it from the client could tear down the connection in use.
+ *    - `dismissedAnnouncementIds` / `announcementsMuted` — entangled
+ *      with the per-backend `announcements` slice they filter; moving
+ *      one without the other just relocates the inconsistency. */
+export const CLIENT_OWNED_SETTING_KEYS = [
+  'themeMode',
+  'themeLight',
+  'themeDark',
+  'customThemes',
+  'hotkeys',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'sidebarDensity',
+  'sidebarDetails',
+  'sidebarTabsExpansion',
+  'starterTasksDismissed',
+  'newWorktreeAdvancedOpen',
+  'autoUpdateEnabled',
+  'warnBeforeQuitting',
+  'openPrInBrowserTab',
+  'terminalPlainClickOpensInApp',
+  'defaultClaudeTabType',
+  'chatPromotionDismissed',
+  'jsonModeChatDensity',
+  'jsonModeChatWidth',
+  'subagentsColumnDefault',
+  'uiScale',
+  'nessieColor',
+  'jsonModeSendOnEnter',
+  'autoScrollToBottom',
+  'collapseFinishedTurns',
+  'jsonModeDefaultPermissionMode',
+  'jsonModeTranscriptWindow',
+  'snoozeDefaultDays',
+  'hiddenBottomIcons',
+  'bottomIconOrder'
+] as const satisfies readonly (keyof SettingsState)[]
+
+/** The `config:*` transport channels that mutate (or probe for) a
+ *  client-owned setting, and therefore have to be answered by the
+ *  client's own backend rather than the active one.
+ *
+ *  This mirrors `CLIENT_OWNED_SETTING_KEYS` and has to stay in step with
+ *  it: reading a field locally while its setter still goes to the active
+ *  backend gives you a control that visibly does nothing. They're
+ *  adjacent here so a new setting is one edit in one file.
+ *
+ *  Includes three channels with no corresponding state field, because
+ *  they act on the client's machine rather than the workspace:
+ *  `openThemesFolder` (reveals a directory in the local file manager),
+ *  `getAvailableThemes` / `getDefaultTerminalFontFamily` (probe what the
+ *  local install can actually render), and `setLastEffectiveAppBg`
+ *  (persisted purely to suppress the local window's startup flash). */
+export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
+  'config:setThemeMode',
+  'config:setThemeLight',
+  'config:setThemeDark',
+  'config:reloadCustomThemes',
+  'config:getAvailableThemes',
+  'config:openThemesFolder',
+  'config:setHotkeys',
+  'config:resetHotkeys',
+  'config:setTerminalFontFamily',
+  'config:getDefaultTerminalFontFamily',
+  'config:setTerminalFontSize',
+  'config:setSidebarDensity',
+  'config:setSidebarDetails',
+  'config:setSidebarTabsExpansion',
+  'config:setStarterTasksDismissed',
+  'config:setNewWorktreeAdvancedOpen',
+  'config:setAutoUpdateEnabled',
+  'config:setWarnBeforeQuitting',
+  'config:setOpenPrInBrowserTab',
+  'config:setTerminalPlainClickOpensInApp',
+  'config:setDefaultClaudeTabType',
+  'config:setChatPromotionDismissed',
+  'config:setJsonModeChatDensity',
+  'config:setJsonModeChatWidth',
+  'config:setSubagentsColumnDefault',
+  'config:setUiScale',
+  'config:setNessieColor',
+  'config:setJsonModeSendOnEnter',
+  'config:setAutoScrollToBottom',
+  'config:setCollapseFinishedTurns',
+  'config:setJsonModeDefaultPermissionMode',
+  'config:setJsonModeTranscriptWindow',
+  'config:setSnoozeDefaultDays',
+  'config:setHiddenBottomIcons',
+  'config:setBottomIconOrder',
+  'config:setLastEffectiveAppBg'
+])
+
+/** Overlay the client's own values for every `CLIENT_OWNED_SETTING_KEYS`
+ *  field onto a backend's settings, so the UI renders with the local
+ *  window's appearance regardless of which backend is active.
+ *
+ *  Returns `backend` unchanged when the two are the same object (the
+ *  single-backend case, and the web client where local *is* the only
+ *  backend) so callers can rely on reference identity. Otherwise the
+ *  result is a fresh object and the caller is responsible for memoizing
+ *  it — `useSyncExternalStore` will spin if `getSnapshot` allocates on
+ *  every read. See `useSettings` in src/renderer/store.ts. */
+export function mergeClientOwnedSettings(
+  client: SettingsState,
+  backend: SettingsState
+): SettingsState {
+  if (client === backend) return backend
+  const merged = { ...backend }
+  for (const key of CLIENT_OWNED_SETTING_KEYS) {
+    // Per-key assignment through a mapped write keeps the union of field
+    // types intact; a generic Object.assign over the subset would widen
+    // every value to `unknown`.
+    ;(merged as Record<string, unknown>)[key] = client[key]
+  }
+  return merged
 }
 
 export function settingsReducer(state: SettingsState, event: SettingsEvent): SettingsState {
@@ -736,6 +966,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, mergeStrategy: event.payload }
     case 'settings/sidebarDensityChanged':
       return { ...state, sidebarDensity: event.payload }
+    case 'settings/sidebarTabsExpansionChanged':
+      return { ...state, sidebarTabsExpansion: event.payload }
     case 'settings/sidebarDetailsChanged':
       return { ...state, sidebarDetails: event.payload }
     case 'settings/newWorktreeAdvancedOpenChanged':
@@ -788,6 +1020,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, worktreeMessagingEnabled: event.payload }
     case 'settings/copyEditingEnabledChanged':
       return { ...state, copyEditingEnabled: event.payload }
+    case 'settings/agentTabNamingEnabledChanged':
+      return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':
       return { ...state, defaultClaudeTabType: event.payload }
     case 'settings/chatPromotionDismissedChanged':
@@ -800,6 +1034,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, useSystemClaudeForJsonMode: event.payload }
     case 'settings/jsonModeChatDensityChanged':
       return { ...state, jsonModeChatDensity: event.payload }
+    case 'settings/jsonModeChatWidthChanged':
+      return { ...state, jsonModeChatWidth: event.payload }
+    case 'settings/subagentsColumnDefaultChanged':
+      return { ...state, subagentsColumnDefault: event.payload }
     case 'settings/uiScaleChanged':
       return { ...state, uiScale: event.payload }
     case 'settings/nessieColorChanged':
@@ -808,6 +1046,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, jsonModeSendOnEnter: event.payload }
     case 'settings/autoScrollToBottomChanged':
       return { ...state, autoScrollToBottom: event.payload }
+    case 'settings/collapseFinishedTurnsChanged':
+      return { ...state, collapseFinishedTurns: event.payload }
     case 'settings/jsonModeDefaultPermissionModeChanged':
       return { ...state, jsonModeDefaultPermissionMode: event.payload }
     case 'settings/jsonModeTranscriptWindowChanged':
@@ -835,6 +1075,20 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/autoReviewOnGreenCiChanged':
+      return state.autoReviewOnGreenCi === event.payload
+        ? state
+        : { ...state, autoReviewOnGreenCi: event.payload }
+    case 'settings/reviewAgentChanged':
+      return state.reviewAgent === event.payload ? state : { ...state, reviewAgent: event.payload }
+    case 'settings/reviewModelChanged':
+      return state.reviewModel === event.payload ? state : { ...state, reviewModel: event.payload }
+    case 'settings/reviewPromptChanged':
+      return state.reviewPrompt === event.payload ? state : { ...state, reviewPrompt: event.payload }
+    case 'settings/agentReviewDeliveryChanged':
+      return state.agentReviewDelivery === event.payload
+        ? state
+        : { ...state, agentReviewDelivery: event.payload }
     case 'settings/preventSleepUntilChanged':
       return { ...state, preventSleepUntil: event.payload }
     case 'settings/hiddenBottomIconsChanged':

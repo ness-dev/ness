@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GitCommitHorizontal } from 'lucide-react'
-import { getBackend } from '../backend'
+import { getBackendFor } from '../backend'
+import { useBackendScope } from '../backend-scope'
 import type { CommitMeta } from '../types'
 
 interface CommitHoverCardProps {
@@ -14,20 +15,29 @@ interface CommitHoverCardProps {
 const CARD_WIDTH = 380
 
 // Process-wide cache so re-hovering the same commit is instant and we never
-// double-fetch. Keyed by worktree + SHA.
+// double-fetch. Keyed by backend + worktree + SHA.
+//
+// The backend has to be in the key, not just the fetch: a worktree path is
+// only unique WITHIN a backend, so two machines checking out the same repo
+// at the same path would otherwise serve each other's commit metadata from
+// this cache.
 const metaCache = new Map<string, CommitMeta | null>()
 const metaInflight = new Map<string, Promise<CommitMeta | null>>()
 
-function cacheKey(cwd: string, sha: string): string {
-  return `${cwd}\x00${sha}`
+function cacheKey(backendId: string | null, cwd: string, sha: string): string {
+  return `${backendId ?? ''}\x00${cwd}\x00${sha}`
 }
 
-function fetchMeta(cwd: string, sha: string): Promise<CommitMeta | null> {
-  const key = cacheKey(cwd, sha)
+function fetchMeta(
+  backendId: string | null,
+  cwd: string,
+  sha: string
+): Promise<CommitMeta | null> {
+  const key = cacheKey(backendId, cwd, sha)
   if (metaCache.has(key)) return Promise.resolve(metaCache.get(key) ?? null)
   const existing = metaInflight.get(key)
   if (existing) return existing
-  const p = getBackend()
+  const p = getBackendFor(backendId)
     .getCommitMeta(cwd, sha)
     .then((m) => {
       metaCache.set(key, m)
@@ -60,7 +70,8 @@ function relativeTime(iso: string): string {
 }
 
 export function CommitHoverCard({ worktreePath, sha, anchor }: CommitHoverCardProps): JSX.Element | null {
-  const key = cacheKey(worktreePath, sha)
+  const backendId = useBackendScope()
+  const key = cacheKey(backendId, worktreePath, sha)
   const [meta, setMeta] = useState<CommitMeta | null | undefined>(() =>
     metaCache.has(key) ? metaCache.get(key) : undefined
   )
@@ -72,13 +83,13 @@ export function CommitHoverCard({ worktreePath, sha, anchor }: CommitHoverCardPr
       return
     }
     setMeta(undefined)
-    void fetchMeta(worktreePath, sha).then((m) => {
+    void fetchMeta(backendId, worktreePath, sha).then((m) => {
       if (!cancelled) setMeta(m)
     })
     return () => {
       cancelled = true
     }
-  }, [key, worktreePath, sha])
+  }, [key, backendId, worktreePath, sha])
 
   // Show nothing until metadata resolves (avoids an empty flickering box) and
   // nothing if the commit couldn't be loaded.

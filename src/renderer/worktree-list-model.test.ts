@@ -426,3 +426,238 @@ describe('pinned rows', () => {
     expect(row.isPinned).toBe(true)
   })
 })
+
+describe('cross-host section merging (folder-name fallback, resolved with no origin)', () => {
+  // Fleet view shows the same repo open on several hosts as ONE section.
+  // Identity is repoKeyFor: the normalized origin URL when a root has one,
+  // folder name when a root has RESOLVED to no origin (null). These cases
+  // pass explicit nulls to exercise the fallback; a missing entry means
+  // "not resolved yet" and never merges — see the last test. The merge is gated on backend ownership: it must never
+  // fire for two same-named checkouts on one host, and never fire at all
+  // when the caller supplies no ownership info (single-backend callers
+  // keep historical behavior).
+  const localRoot = '/Users/mike/dev/ness'
+  const remoteRoot = '/home/mike/code/ness'
+
+  it('merges same-named repos hosted on different backends into one section', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [
+          wt({ path: '/w/local-main', repoRoot: localRoot }),
+          wt({ path: '/w/remote-main', repoRoot: remoteRoot })
+        ]
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+    const section = model.sections[0]
+    expect(section.repoName).toBe('ness')
+    expect(section.repoRoots).toEqual([
+      { backendId: 'local', repoRoot: localRoot },
+      { backendId: 'beta', repoRoot: remoteRoot }
+    ])
+    const paths = section.groups.flatMap((g) => g.rows.map((r) => r.path))
+    expect(paths).toContain('/w/local-main')
+    expect(paths).toContain('/w/remote-main')
+  })
+
+  it('prefers the local backend root as the section primary', () => {
+    // Remote listed FIRST: the primary must still be local's checkout,
+    // since it's the default for new-worktree and open-in-editor.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [remoteRoot, localRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [wt({ path: '/w/a', repoRoot: remoteRoot })]
+      })
+    )
+    expect(model.sections[0].repoRoot).toBe(localRoot)
+  })
+
+  it('never merges two same-named checkouts on the same host', () => {
+    // /a/api and /b/api on one machine are two different repos that
+    // happen to share a folder name.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/a/api', '/b/api'],
+        repoBackendId: { '/a/api': 'local', '/b/api': 'local' },
+        repoRemotes: { '/a/api': null, '/b/api': null },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.repoRoot)).toEqual(['/a/api', '/b/api'])
+  })
+
+  it('does not merge without backend ownership info', () => {
+    // Callers that predate multi-backend pass no repoBackendId; their
+    // behavior must be bit-identical to before the merge existed.
+    const model = buildWorktreeListModel(
+      input({ repoRoots: ['/a/api', '/b/api'], worktrees: [] })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.scope)).toEqual(['/a/api', '/b/api'])
+  })
+
+  it('matches repo keys case-insensitively', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/x/Ness', '/y/ness'],
+        repoBackendId: { '/x/Ness': 'local', '/y/ness': 'beta' },
+        repoRemotes: { '/x/Ness': null, '/y/ness': null },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+  })
+
+  it('keys collapse state on the shared scope, not either root', () => {
+    // Collapsing a merged section must survive which host's root came
+    // first, so the scope is the repo key rather than a path.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [wt({ path: '/w/a', repoRoot: localRoot })],
+        collapsedRepos: { 'repo:folder:ness': true }
+      })
+    )
+    expect(model.sections[0].scope).toBe('repo:folder:ness')
+    expect(model.sections[0].collapsed).toBe(true)
+  })
+
+  it('pools pending creations and assigned PRs from every member root', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [],
+        pendingWorktrees: [
+          { id: 'p1', repoRoot: localRoot, branchName: 'x', status: 'creating' },
+          { id: 'p2', repoRoot: remoteRoot, branchName: 'y', status: 'creating' },
+          { id: 'p3', repoRoot: '/elsewhere/other', branchName: 'z', status: 'creating' }
+        ] as WorktreeListModelInput['pendingWorktrees'],
+        assignedPRsByRepo: {
+          [localRoot]: [assigned({ number: 1, repoRoot: localRoot })],
+          [remoteRoot]: [assigned({ number: 2, repoRoot: remoteRoot })]
+        }
+      })
+    )
+    const section = model.sections.find((s) => s.repoName === 'ness')!
+    expect(section.pending.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
+    const reviewing = section.groups.find((g) => g.key === 'reviewing')
+    expect(reviewing?.phantomPRs.map((p) => p.number).sort()).toEqual([1, 2])
+  })
+})
+
+describe('cross-host section merging by remote URL', () => {
+  const owners = (a: string, b: string) => ({ [a]: 'local', [b]: 'beta' })
+
+  it('merges differently-named folders that share an origin', () => {
+    // The fork-vs-rename case folder matching could never handle:
+    // claude-harness locally, harness on the server, one upstream.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/claude-harness', '/r/harness'],
+        repoBackendId: owners('/l/claude-harness', '/r/harness'),
+        repoRemotes: {
+          '/l/claude-harness': 'github.com/ness-dev/ness',
+          '/r/harness': 'github.com/ness-dev/ness'
+        },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+    expect(model.sections[0].scope).toBe('repo:remote:github.com/ness-dev/ness')
+  })
+
+  it('keeps same-named folders with different origins apart', () => {
+    // Two unrelated `api` repos — the wrong-merge the folder key allowed.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/api', '/r/api'],
+        repoBackendId: owners('/l/api', '/r/api'),
+        repoRemotes: { '/l/api': 'github.com/acme/api', '/r/api': 'github.com/other/api' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+  })
+
+  it('keeps a fork and its upstream apart', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/ness', '/r/ness'],
+        repoBackendId: owners('/l/ness', '/r/ness'),
+        repoRemotes: { '/l/ness': 'github.com/you/ness', '/r/ness': 'github.com/ness-dev/ness' },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+  })
+
+  it('does not merge a remote-bearing root with a remote-less one of the same name', () => {
+    // Different namespaces (remote: vs folder:) by construction.
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/l/ness', '/r/ness'],
+        repoBackendId: owners('/l/ness', '/r/ness'),
+        repoRemotes: { '/l/ness': 'github.com/ness-dev/ness', '/r/ness': null },
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+  })
+})
+
+describe('cross-host section merging with unresolved remotes', () => {
+  it('never merges a root whose remote has not resolved yet', () => {
+    // No entry at all (undefined) — the window between repoRoots landing
+    // and the async origin lookup finishing, or an older harness-server
+    // that never sends repoRemotes. Same folder name on two hosts, but
+    // merging on a guess would bounce sections (and collapse state) on
+    // first paint and silently join unrelated repos. Not merging is the
+    // safe direction; null (resolved, no origin) is what opts into the
+    // folder fallback.
+    const localRoot = '/Users/mike/dev/ness'
+    const remoteRoot = '/home/mike/code/ness'
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: {},
+        worktrees: []
+      })
+    )
+    expect(model.sections).toHaveLength(2)
+    expect(model.sections.map((s) => s.scope)).toEqual([localRoot, remoteRoot])
+  })
+
+  it('merges once both sides resolve to null, but not while one is pending', () => {
+    const a = '/l/ness'
+    const b = '/r/ness'
+    const pendingOne = buildWorktreeListModel(
+      input({
+        repoRoots: [a, b],
+        repoBackendId: { [a]: 'local', [b]: 'beta' },
+        repoRemotes: { [a]: null },
+        worktrees: []
+      })
+    )
+    expect(pendingOne.sections).toHaveLength(2)
+    const bothResolved = buildWorktreeListModel(
+      input({
+        repoRoots: [a, b],
+        repoBackendId: { [a]: 'local', [b]: 'beta' },
+        repoRemotes: { [a]: null, [b]: null },
+        worktrees: []
+      })
+    )
+    expect(bothResolved.sections).toHaveLength(1)
+  })
+})

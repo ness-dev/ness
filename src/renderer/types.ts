@@ -7,6 +7,28 @@ export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 import type { RepoConfig } from '../shared/state/repo-configs'
 export type { RepoConfig }
 
+import type {
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewSide,
+  ReviewAuthor,
+  ReviewRequest,
+  ReviewSubmission,
+  ReviewVerdict
+} from '../shared/state/reviews'
+export type {
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewSide,
+  ReviewAuthor,
+  ReviewRequest,
+  ReviewSubmission,
+  ReviewVerdict
+}
+
+import type { ChatTabInfo } from '../shared/agent-tabs'
+export type { ChatTabInfo }
+
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
 export type { ToolSpec, ToolRunResult }
 
@@ -19,8 +41,13 @@ export type { SessionCostSummary, ClaudeAuthInfo, SubscriptionTier }
 import type { AddRepoResult } from '../shared/repo-pick'
 export type { AddRepoResult }
 
-import type { PreventSleepMode } from '../shared/state/settings'
-export type { PreventSleepMode }
+import type {
+  AgentReviewDelivery,
+  ReviewAgentChoice,
+  PreventSleepMode,
+  SidebarTabsExpansion
+} from '../shared/state/settings'
+export type { AgentReviewDelivery, ReviewAgentChoice, PreventSleepMode }
 
 /** Per-kind dirtiness flags for a worktree. `git` reflects
  *  uncommitted changes; `scratchpad` reflects a non-empty scratchpad
@@ -66,7 +93,8 @@ export interface FileDiffSides {
   modified: string
   originalExists: boolean
   modifiedExists: boolean
-  modifiedBinary: boolean
+  binary: boolean
+  tooLarge: boolean
   error?: string
 }
 
@@ -382,19 +410,28 @@ export interface ElectronAPI {
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
   setCopyEditingEnabled(enabled: boolean): Promise<boolean>
+  setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
   setJsonModeChatDensity(value: 'compact' | 'comfy'): Promise<boolean>
+  setJsonModeChatWidth(value: 'reading' | 'full'): Promise<boolean>
+  setSubagentsColumnDefault(value: 'expanded' | 'collapsed'): Promise<boolean>
   setUiScale(value: 'x-small' | 'small' | 'medium' | 'large' | 'x-large'): Promise<boolean>
   setNessieColor(value: string): Promise<boolean>
   setJsonModeSendOnEnter(enabled: boolean): Promise<boolean>
   setAutoScrollToBottom(enabled: boolean): Promise<boolean>
+  setCollapseFinishedTurns(enabled: boolean): Promise<boolean>
   setJsonModeDefaultPermissionMode(
     value: JsonClaudePermissionMode
   ): Promise<boolean>
   setJsonModeTranscriptWindow(value: number): Promise<boolean>
   setAutoSleepMinutes(value: number): Promise<boolean>
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
+  setAgentReviewDelivery(value: AgentReviewDelivery): Promise<boolean>
+  setAutoReviewOnGreenCi(enabled: boolean): Promise<boolean>
+  setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
+  setReviewModel(value: string): Promise<boolean>
+  setReviewPrompt(prompt: string): Promise<boolean>
   setPreventSleepUntil(value: number | null): Promise<boolean>
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>
   setWarnBeforeQuitting(enabled: boolean): Promise<boolean>
@@ -452,6 +489,7 @@ export interface ElectronAPI {
   setWorktreeBase(mode: 'remote' | 'local'): Promise<boolean>
   setMergeStrategy(strategy: MergeStrategy): Promise<boolean>
   setSidebarDensity(density: SidebarDensity): Promise<boolean>
+  setSidebarTabsExpansion(mode: SidebarTabsExpansion): Promise<boolean>
   setSidebarDetails(prefs: SidebarDetailPrefsByMode): Promise<boolean>
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
@@ -470,10 +508,59 @@ export interface ElectronAPI {
    *  global `notifyChatOnCiFailure` setting again. */
   setCiNotifyOverride(path: string, enabled: boolean | null): Promise<boolean>
   setNotifyChatOnCiFailure(enabled: boolean): Promise<boolean>
+  /** Change how one Chat tab gets a followed worktree's routine updates.
+   *  Shadows an implicit follow with an explicit one. */
+  setSubscriptionMode(
+    worktreePath: string,
+    tabId: string,
+    targetPath: string,
+    mode: 'interrupt' | 'silent'
+  ): Promise<boolean>
+  /** Remove a Chat tab's explicit subscription. False for implicit ones. */
+  unsubscribeTab(worktreePath: string, tabId: string, targetPath: string): Promise<boolean>
+  /** Deliver a Chat tab's held notifications now, as one turn. */
+  deliverHeldNotices(worktreePath: string, tabId: string): Promise<boolean>
+  discardHeldNotices(worktreePath: string, tabId: string): Promise<boolean>
   /** Injects a "resolve this PR's conflicts" turn into the worktree's agent
    *  chat, waking a slept tab if needed. */
   requestMergeConflictFix(worktreePath: string): Promise<MergeConflictFixResult>
   setScratchpadText(worktreePath: string, text: string): Promise<boolean>
+  addReviewComment(
+    worktreePath: string,
+    input: {
+      filePath: string
+      line: number
+      side: ReviewSide
+      body: string
+      view?: { fromCommit?: string; toCommit?: string }
+    }
+  ): Promise<ReviewComment | { error: string }>
+  deleteReviewComment(worktreePath: string, id: string): Promise<boolean>
+  setReviewCommentStatus(
+    worktreePath: string,
+    id: string,
+    status: ReviewCommentStatus
+  ): Promise<boolean>
+  addReviewReply(worktreePath: string, commentId: string, body: string): Promise<boolean>
+  refreshReviewAnchors(worktreePath: string, filePath?: string): Promise<boolean>
+  editReviewComment(worktreePath: string, id: string, body: string): Promise<boolean>
+  listReviewTargets(worktreePath: string): Promise<ChatTabInfo[]>
+  /** Opens a reviewer for this worktree's author Chat tab. */
+  requestAiReview(
+    worktreePath: string
+  ): Promise<{ ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }>
+  editReviewSubmission(
+    worktreePath: string,
+    id: string,
+    summary: string,
+    verdict: ReviewVerdict
+  ): Promise<boolean>
+  deleteReviewSubmission(worktreePath: string, id: string): Promise<boolean>
+  sendReviewSubmission(
+    worktreePath: string,
+    id: string,
+    targetTabId?: string
+  ): Promise<{ ok: true; tabId: string; woke: boolean } | { ok: false; error: string }>
   setAlias(path: string, alias: string): Promise<boolean>
   clearAlias(path: string): Promise<boolean>
   openInEditor(worktreePath: string, filePath?: string): Promise<{ ok: true } | { ok: false; error: string }>
@@ -591,6 +678,8 @@ export interface ElectronAPI {
   onUiScaleDown(callback: () => void): () => void
   onUiScaleReset(callback: () => void): () => void
   onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void
+  onNavigateBack(callback: () => void): () => void
+  onNavigateForward(callback: () => void): () => void
 
   acceptHooks(): Promise<boolean>
   declineHooks(): Promise<boolean>

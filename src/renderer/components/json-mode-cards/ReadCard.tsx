@@ -64,7 +64,6 @@ export function ReadCard({ block, result, autoApproved, sessionAllowed }: ToolCa
       id={block.id}
       name="Read"
       subtitle={`${basename(fp)}${range}`}
-      variant="info"
       icon={ReadIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

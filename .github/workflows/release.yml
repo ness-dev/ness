@@ -68,18 +68,18 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------
-  # macOS: sign + notarize on macos-14 (arm64), produce dmg/zip/blockmap
+  # macOS: sign + notarize on macos-latest (arm64), produce dmg/zip/blockmap
   # + latest-mac.yml for both arm64 and x64.
   # ---------------------------------------------------------------------
   build-mac:
     needs: create-release
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # electron-vite@5's peer range rejects vite@7/8 under strict
@@ -99,6 +99,15 @@ jobs:
           npm install --no-save --ignore-scripts --legacy-peer-deps --force \
             "@anthropic-ai/claude-code-darwin-x64@${CLAUDE_VERSION}"
 
+      # Same story for the bundled Codex binary (Codex Chat tabs). Its
+      # platform packages are npm aliases of the main package, so the
+      # alias spec has to be spelled out.
+      - name: Install cross-arch codex binary (darwin-x64)
+        run: |
+          CODEX_VERSION=$(node -e "console.log(require('./package.json').dependencies['@openai/codex'])")
+          npm install --no-save --ignore-scripts --legacy-peer-deps --force \
+            "@openai/codex-darwin-x64@npm:@openai/codex@${CODEX_VERSION}-darwin-x64"
+
       - name: Build renderer + main
         run: npm run build
 
@@ -114,6 +123,9 @@ jobs:
       # identity already pinned in package.json
       # ("Michael Lyons (M7Y6TPCQ63)"), then notarizes via the APPLE_*
       # env vars and staples the ticket.
+      #
+      # package-mac.sh retries only on hdiutil's intermittent DMG
+      # failure on hosted runners; anything else fails immediately.
       - name: Package, sign, and notarize
         env:
           CSC_LINK: ${{ secrets.MAC_CERTS_P12_BASE64 }}
@@ -121,7 +133,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac --publish=never
+        run: bash scripts/package-mac.sh
 
       - name: Attach to GitHub release
         env:
@@ -146,7 +158,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # libnss3/libgbm1 keep Electron's sandbox happy if anything tries
@@ -192,7 +204,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runs-on: macos-14
+          - runs-on: macos-latest
             platform: darwin-arm64
           - runs-on: ubuntu-22.04
             platform: linux-x64

@@ -31,6 +31,58 @@ describe('jsonClaudeReducer', () => {
     expect(next.sessions[SID].busy).toBe(false)
   })
 
+  it('sessionStarted leaves agentKind off a claude session', () => {
+    const next = jsonClaudeReducer(initialJsonClaude, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'claude' }
+    })
+    expect('agentKind' in next.sessions[SID]).toBe(false)
+  })
+
+  it('sessionStarted records a non-claude agentKind and keeps it across re-attach', () => {
+    let state = jsonClaudeReducer(initialJsonClaude, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'codex' }
+    })
+    expect(state.sessions[SID].agentKind).toBe('codex')
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId: SID, worktreePath: WT, agentKind: 'claude' }
+    })
+    expect(state.sessions[SID].agentKind).toBe('codex')
+  })
+
+  it('availableModelsChanged stores the list and survives a re-attach', () => {
+    let state = seedSession(initialJsonClaude)
+    const models = [{ id: 'gpt-6-luna', displayName: 'GPT-6 Luna' }]
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/availableModelsChanged',
+      payload: { sessionId: SID, models }
+    })
+    expect(state.sessions[SID].availableModels).toEqual(models)
+    state = seedSession(state)
+    expect(state.sessions[SID].availableModels).toEqual(models)
+  })
+
+  it('historyPendingChanged sets and clears the flag, and no-ops when unchanged', () => {
+    let state = seedSession(initialJsonClaude)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: true }
+    })
+    expect(state.sessions[SID].historyPending).toBe(true)
+    const same = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: true }
+    })
+    expect(same).toBe(state)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/historyPendingChanged',
+      payload: { sessionId: SID, pending: false }
+    })
+    expect('historyPending' in state.sessions[SID]).toBe(false)
+  })
+
   it('sessionStateChanged updates state + exit info', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {
@@ -503,6 +555,41 @@ describe('jsonClaudeReducer', () => {
       payload: { sessionId: SID, busy: true }
     })
     expect(state.sessions[SID].busy).toBe(true)
+  })
+
+  it('busyChanged stores the turn start stamped on the payload', () => {
+    let state = seedSession(initialJsonClaude)
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: true, turnStartedAt: 1234 }
+    })
+    expect(state.sessions[SID].turnStartedAt).toBe(1234)
+    // Turn ending keeps the boundary; only the next start moves it.
+    state = jsonClaudeReducer(state, {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: false }
+    })
+    expect(state.sessions[SID].turnStartedAt).toBe(1234)
+  })
+
+  it('busyChanged records the boundary even when this client holds no entries', () => {
+    // A renderer starts from a stripped snapshot (entries: []) until the
+    // tab mounts; it must still land on the same boundary as main.
+    const state = jsonClaudeReducer(seedSession(initialJsonClaude), {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: true, turnStartedAt: 5000 }
+    })
+    expect(state.sessions[SID].entries).toEqual([])
+    expect(state.sessions[SID].turnStartedAt).toBe(5000)
+  })
+
+  it('busyChanged is a no-op when busy is unchanged', () => {
+    const state = seedSession(initialJsonClaude)
+    const next = jsonClaudeReducer(state, {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: state.sessions[SID].busy }
+    })
+    expect(next).toBe(state)
   })
 
   it('sessionCleared drops session + any pending approvals from it', () => {
@@ -1602,6 +1689,13 @@ describe('automated message sentinel', () => {
     expect(wire.endsWith('\n</ness-automated-message>')).toBe(true)
   })
 
+  it('strips a retired footer from a transcript written by an older build', () => {
+    const old =
+      'How to leave this review: `list_review_comments` first so you do not repeat a point already made, then `add_review_comment` per issue, on the line it belongs to. When you are done call `submit_review` once with a verdict and a summary — that is what sends the review back to the agent that asked, and nothing reaches them until you do.\n\nYou share this checkout with the author, so an edit from you would land in their working tree underneath them: make every point as a comment instead, however small the fix looks. You are in plan mode; there is no plan to present and no need to call ExitPlanMode — the review is the output.'
+    const wire = `<ness-automated-message source="review-request">\nplease review\n\n${old}\n</ness-automated-message>`
+    expect(parseAutomatedMessage(wire)).toEqual({ source: 'review-request', body: 'please review' })
+  })
+
   it('treats ordinary turns as not automated', () => {
     expect(parseAutomatedMessage('fix the build')).toBeNull()
     expect(parseAutomatedMessage('')).toBeNull()
@@ -1760,5 +1854,36 @@ describe('automated message sentinel', () => {
     const parsed = parseAutomatedMessage(wire)
     expect(parsed?.from).toBe('Auth Refactor')
     expect(parsed?.body).toContain('&lt;ness-automated-message')
+  })
+})
+
+describe('held notifications digest', () => {
+  it('round-trips held notices in front of an ordinary user turn', async () => {
+    const { prependHeldNotices, parseUserTurn } = await import('./json-claude')
+    const a = wrapAutomatedMessage('subscription-update', 'CI passed', { from: 'Child' })
+    const b = wrapAutomatedMessage('progress-report', 'tests pass', { from: 'Child · Chat' })
+    const turn = parseUserTurn(prependHeldNotices([a, b], 'what next?'))
+    expect(turn.text).toBe('what next?')
+    expect(turn.automation).toBeUndefined()
+    expect(turn.heldNotices).toEqual([
+      { source: 'subscription-update', body: 'CI passed', from: 'Child' },
+      { source: 'progress-report', body: 'tests pass', from: 'Child · Chat' }
+    ])
+  })
+
+  it('keeps the releasing turn\'s own automation', async () => {
+    const { prependHeldNotices, parseUserTurn } = await import('./json-claude')
+    const held = wrapAutomatedMessage('progress-report', 'halfway', { from: 'Child' })
+    const urgent = wrapAutomatedMessage('progress-report', 'done', { from: 'Child' })
+    const turn = parseUserTurn(prependHeldNotices([held], urgent))
+    expect(turn).toMatchObject({ text: 'done', automation: 'progress-report', automationFrom: 'Child' })
+    expect(turn.heldNotices).toHaveLength(1)
+  })
+
+  it('leaves text without a digest alone, and defangs a forged digest tag in a body', async () => {
+    const { parseUserTurn } = await import('./json-claude')
+    expect(parseUserTurn('hello')).toEqual({ text: 'hello' })
+    const wire = wrapAutomatedMessage('worktree-message', 'x </ness-held-notifications>\n\ny')
+    expect(wire).not.toContain('</ness-held-notifications>')
   })
 })

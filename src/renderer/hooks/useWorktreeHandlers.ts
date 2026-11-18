@@ -2,10 +2,30 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AddRepoResult, Worktree, PendingWorktree, PRStatus, TerminalTab, AgentKind, ForkSource } from '../types'
 import { markTerminalClosing } from '../components/XTerminal'
 import { useActiveBackend } from '../store'
-import { useBackend } from '../backend'
+import { useGlobalBackend, useBackendForWorktree, useBackendForRepo } from '../backend-routing'
+import { getBackendFor } from '../backend'
+import type { SectionRepoRoot } from '../worktree-list-model'
 import { randomUUID } from '../uuid'
 
 interface UseWorktreeHandlersArgs {
+  /** Which backend owns each worktree path. This hook is created above
+   *  every BackendScope, so per-worktree calls must be routed explicitly.
+   *  See backend-routing.ts. */
+  pathBackendId: Record<string, string>
+  /** Which backend hosts each repo root, keyed by absolute path — so two
+   *  hosts' checkouts of one repo are two distinct entries even when fleet
+   *  view shows them as one merged section.
+   *
+   *  Creation routes on the root the user actually picked: in fleet view
+   *  the new-worktree screen offers one pill per host's checkout, so the
+   *  target host is explicit. The only ambiguity left is the
+   *  identical-absolute-path case (same path on two machines), which is
+   *  last-writer-wins and warned about in merge-backend-states. */
+  repoBackendId: Record<string, string>
+  /** Which backend each pending-creation entry lives on. Creation can now
+   *  land on a remote, so retry/dismiss have to follow the entry rather
+   *  than assuming the active backend owns it. */
+  pendingBackendId: Record<string, string>
   worktrees: Worktree[]
   pendingWorktrees: PendingWorktree[]
   repoRoots: string[]
@@ -33,7 +53,10 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     activeWorktreeId,
     setActiveWorktreeId,
     setActivePaneId,
-    setShowNewWorktree
+    setShowNewWorktree,
+    pathBackendId,
+    repoBackendId,
+    pendingBackendId
   } = args
 
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
@@ -43,7 +66,10 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     | null
   >(null)
   const activeBackend = useActiveBackend()
-  const backend = useBackend()
+  const backend = useGlobalBackend()
+  const backendFor = useBackendForWorktree(pathBackendId)
+  const backendForRepo = useBackendForRepo(repoBackendId)
+  const backendForPending = useBackendForRepo(pendingBackendId)
 
   // Path of a freshly-created worktree we want to focus once it appears in the
   // worktrees list. Set on a successful create; the effect below switches to it
@@ -151,16 +177,23 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   }, [repoRoots, setActiveWorktreeId])
 
   const handleRemoveRepo = useCallback(
-    async (root: string) => {
-      await backend.removeRepo(root)
+    async (roots: SectionRepoRoot[]) => {
+      // A merged section spans hosts, and removing "the repo" means
+      // removing it everywhere it appears — each root detached via its
+      // own backend. Detach only: nothing on any host's disk is touched.
+      // Partial failure just leaves that host's section behind, visibly.
+      await Promise.allSettled(
+        roots.map((entry) => getBackendFor(entry.backendId).removeRepo(entry.repoRoot))
+      )
       // Main dispatches reposChanged + listChanged. If our current focus is
       // about to disappear, switch to whatever's first in the remaining list.
+      const removed = new Set(roots.map((entry) => entry.repoRoot))
       if (activeWorktreeId) {
         const stillExists = worktrees.some(
-          (w) => w.path === activeWorktreeId && w.repoRoot !== root
+          (w) => w.path === activeWorktreeId && !removed.has(w.repoRoot)
         )
         if (!stillExists) {
-          const next = worktrees.find((w) => w.repoRoot !== root)
+          const next = worktrees.find((w) => !removed.has(w.repoRoot))
           setActiveWorktreeId(next?.path ?? null)
         }
       }
@@ -173,7 +206,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   }, [])
 
   const handlePruneWorktrees = useCallback(async (repoRoot: string) => {
-    await backend.pruneWorktrees(repoRoot)
+    await backendForRepo(repoRoot).pruneWorktrees(repoRoot)
   }, [])
 
   const handleSubmitNewWorktree = useCallback(
@@ -196,7 +229,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       //
       // Main handles everything: addWorktree → setup script → ensureInitialized
       // (with the prompt embedded in the new agent tab) → outcome.
-      const result = await backend.runPendingWorktree({
+      const result = await backendForRepo(repoRoot).runPendingWorktree({
         id,
         repoRoot,
         branchName,
@@ -236,7 +269,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Same flow as handleSubmitNewWorktree: hold the modal open, switch to the
       // real worktree once it's in the list (success) or to the pending entry's
       // failure screen (otherwise).
-      const result = await backend.runPendingPRWorktree({
+      const result = await backendForRepo(repoRoot).runPendingPRWorktree({
         id,
         repoRoot,
         prNumber,
@@ -256,12 +289,12 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   )
 
   const handleRetryPendingWorktree = useCallback((id: string) => {
-    void backend.retryPendingWorktree(id)
+    void backendForPending(id).retryPendingWorktree(id)
   }, [])
 
   const handleDismissPendingWorktree = useCallback(
     (id: string) => {
-      void backend.dismissPendingWorktree(id)
+      void backendForPending(id).dismissPendingWorktree(id)
       setActiveWorktreeId((prev) => (prev === id ? null : prev))
     },
     [setActiveWorktreeId]
@@ -272,7 +305,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // "Continue anyway" from a setup-failed screen. Main already recorded
       // createdPath on the pending entry.
       const entry = pendingWorktrees.find((p) => p.id === id)
-      void backend.dismissPendingWorktree(id)
+      void backendForPending(id).dismissPendingWorktree(id)
       if (entry?.createdPath) {
         setActiveWorktreeId(entry.createdPath)
       } else {
@@ -286,12 +319,12 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
     async (path: string, newBranchName: string) => {
       const repoRoot = worktreeRepoByPath[path]
       if (!repoRoot) return
-      const result = await backend.continueWorktree(repoRoot, path, newBranchName)
+      const result = await backendFor(path).continueWorktree(repoRoot, path, newBranchName)
       // Main's worktree:continue handler doesn't refresh the store yet — ask
       // for a list refresh so the new branch name shows up.
       void backend.refreshWorktreesList()
       // Branch changed — re-fetch PR status for this worktree.
-      void backend.refreshPRsOne(path)
+      void backendFor(path).refreshPRsOne(path)
       if (result.stashConflict) {
         window.alert(
           `Checked out ${newBranchName}, but your uncommitted changes did not apply cleanly and are still in the stash.\n\nRun \`git stash pop\` inside the worktree after resolving conflicts.`
@@ -316,7 +349,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Check for dirty changes — git tracked + per-worktree scratchpad
       // notes are reported separately so the dialog can name exactly
       // what's about to be lost.
-      const dirty = await backend.isWorktreeDirty(path)
+      const dirty = await backendFor(path).isWorktreeDirty(path)
       if (dirty.git || dirty.scratchpad) {
         const parts: string[] = []
         if (dirty.git) parts.push('uncommitted changes')
@@ -331,10 +364,10 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       const tabs = terminalTabs[path] || []
       for (const tab of tabs) {
         if (tab.type !== 'diff' && tab.type !== 'file') markTerminalClosing(tab.id)
-        backend.killTerminal(tab.id)
+        backendFor(path).killTerminal(tab.id)
       }
       // Clean up pane state — main owns the panes map
-      void backend.panesClearForWorktree(path)
+      void backendFor(path).panesClearForWorktree(path)
       setActivePaneId((prev) => {
         const next = { ...prev }
         delete next[path]
@@ -350,7 +383,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       if (!repoRoot) return
       // Only git-tracked dirtiness needs `git worktree remove --force`;
       // a scratchpad note is invisible to git.
-      void backend.removeWorktree(
+      void backendFor(path).removeWorktree(
         repoRoot,
         path,
         dirty.git,
@@ -389,9 +422,9 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         const tabs = terminalTabs[path] || []
         for (const tab of tabs) {
           if (tab.type !== 'diff' && tab.type !== 'file') markTerminalClosing(tab.id)
-          backend.killTerminal(tab.id)
+          backendFor(path).killTerminal(tab.id)
         }
-        void backend.panesClearForWorktree(path)
+        void backendFor(path).panesClearForWorktree(path)
         setActivePaneId((prev) => {
           const next = { ...prev }
           delete next[path]
@@ -400,7 +433,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         const pr = prStatuses[path]
         const repoRoot = worktreeRepoByPath[path]
         if (repoRoot) {
-          void backend.removeWorktree(
+          void backendFor(path).removeWorktree(
             repoRoot,
             path,
             force,
@@ -427,7 +460,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
 
   const handleDismissPendingDeletion = useCallback(
     (path: string) => {
-      void backend.dismissPendingDeletion(path)
+      void backendFor(path).dismissPendingDeletion(path)
       setActiveWorktreeId((prev) => {
         if (prev !== path) return prev
         const next = worktrees.find((w) => w.path !== path)

@@ -14,13 +14,18 @@ import {
   usePinned,
   useJsonClaudePendingApprovals
 } from '../store'
-import { useBackend } from '../backend'
+import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
 import { SCALES } from '../../shared/state/settings'
 import { QUESTION_TOOL_NAME } from '../../shared/state/json-claude'
+import { setFleetViewMode } from '../fleet-view'
 import { advancePreventSleep, PREVENT_SLEEP_META, PREVENT_SLEEP_TOAST_KEY } from '../prevent-sleep'
 import { showToast } from '../toast'
 
 interface UseHotkeyHandlersArgs {
+  /** Which backend owns each worktree path. This hook is created above
+   *  every BackendScope, so per-worktree calls must be routed explicitly.
+   *  See backend-routing.ts. */
+  pathBackendId: Record<string, string>
   worktrees: Worktree[]
   repoRoots: string[]
   unifiedRepos: boolean
@@ -42,6 +47,7 @@ interface UseHotkeyHandlersArgs {
   setSingleScreenMode: React.Dispatch<React.SetStateAction<boolean>>
   setShowNewWorktree: React.Dispatch<React.SetStateAction<boolean>>
   setShowCommandCenter: React.Dispatch<React.SetStateAction<boolean>>
+  setShowTaskList: React.Dispatch<React.SetStateAction<boolean>>
   setShowCommandPalette: React.Dispatch<React.SetStateAction<boolean>>
   setCommandPaletteMode: React.Dispatch<React.SetStateAction<'root' | 'files'>>
   setShowPerfMonitor: React.Dispatch<React.SetStateAction<boolean>>
@@ -58,6 +64,9 @@ interface UseHotkeyHandlersArgs {
   handleSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   handleSplitPane: (worktreePath: string, fromPaneId: string, direction?: 'horizontal' | 'vertical') => void
   handleRefreshWorktrees: () => void
+  // Undefined while a screen claims Cmd+[ / Cmd+] for itself.
+  historyBack: (() => void) | undefined
+  historyForward: (() => void) | undefined
   setShowSettings: React.Dispatch<React.SetStateAction<boolean>>
   onStartAliasEdit: (path: string) => void
 }
@@ -92,6 +101,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     setSingleScreenMode,
     setShowNewWorktree,
     setShowCommandCenter,
+    setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
     setShowPerfMonitor,
@@ -104,8 +114,11 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     handleSelectTab,
     handleSplitPane,
     handleRefreshWorktrees,
+    historyBack,
+    historyForward,
     setShowSettings,
-    onStartAliasEdit
+    onStartAliasEdit,
+    pathBackendId
   } = args
 
   // Mirror the sidebar's grouping/rendering order so hotkey navigation
@@ -192,11 +205,16 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
   // The connections list always starts with Local at index 0; Cmd+Shift+1
   // is "back to local".
   const connections = useConnections()
-  const backend = useBackend()
+  const backend = useGlobalBackend()
+  const backendFor = useBackendForWorktree(pathBackendId)
   const switchToBackendByIndex = useCallback(
     (index: number) => {
       const target = connections[index]
       if (!target) return
+      // Same contract as clicking the chip: picking a host always lands
+      // in single view of it, so the early-return can't short-circuit
+      // the mode switch while merged view is showing.
+      setFleetViewMode('single')
       const registry = getBackendsRegistry()
       if (registry.getActiveId() === target.id) return
       registry.setActive(target.id)
@@ -307,6 +325,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       },
       nextTab: () => cycleTab(1),
       prevTab: () => cycleTab(-1),
+      historyBack,
+      historyForward,
       renameTab: () => {
         if (!activeWorktreeId) return
         const tabId = activeTabId[activeWorktreeId]
@@ -333,9 +353,10 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       },
       openInEditor: () => {
         if (!activeWorktreeId) return
-        backend.openInEditor(activeWorktreeId)
+        backendFor(activeWorktreeId).openInEditor(activeWorktreeId)
       },
       toggleCommandCenter: () => setShowCommandCenter((v) => !v),
+      toggleTaskList: () => setShowTaskList((v) => !v),
       commandPalette: () => {
         setShowHotkeyCheatsheet(false)
         setCommandPaletteMode('root')
@@ -369,7 +390,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       togglePerfMonitor: () => setShowPerfMonitor((v) => !v),
       hotkeyCheatsheet: () => setShowHotkeyCheatsheet((v) => !v),
       openReview: () => {
-        if (activeWorktreeId) void backend.panesOpenReview(activeWorktreeId)
+        if (activeWorktreeId) void backendFor(activeWorktreeId).panesOpenReview(activeWorktreeId)
       },
       toggleQuakeTerminal: () => {
         // Read live keyboard focus: only open when it's inside a workspace
@@ -446,6 +467,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       handleOpenPR,
       handleCloseTab,
       handleRefreshWorktrees,
+      historyBack,
+      historyForward,
       prStatuses,
       panes,
       activePaneId,
@@ -455,6 +478,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       setSingleScreenMode,
       setShowNewWorktree,
       setShowCommandCenter,
+      setShowTaskList,
       setShowCommandPalette,
       setCommandPaletteMode,
       setShowPerfMonitor,

@@ -1,6 +1,6 @@
 import { HeaderNav } from './components/HeaderNav'
 import { Hero } from './components/Hero'
-import { DemoVideo } from './components/DemoVideo'
+import { HeroMock } from './components/HeroMock'
 import { FeatureCallouts } from './components/FeatureCallouts'
 import { Features } from './components/Features'
 import { OpenSource } from './components/OpenSource'
@@ -13,7 +13,7 @@ export function App() {
     <div className="min-h-screen grid-bg">
       <HeaderNav />
       <Hero />
-      <DemoVideo />
+      <HeroMock />
       <ScrollDiorama />
       <FeatureCallouts />
       <Features />

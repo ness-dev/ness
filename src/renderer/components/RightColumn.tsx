@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import type { PRStatus, Worktree, RepoConfig, ToolSpec } from '../types'
 import {
   effectiveHiddenRightPanels,
@@ -19,6 +19,7 @@ import { CostPanel } from './CostPanel'
 import { ContextPanel } from './ContextPanel'
 import { JsonClaudeTodosPanel } from './JsonClaudeTodosPanel'
 import { JsonClaudeAgentsPanel } from './JsonClaudeAgentsPanel'
+import { SubscriptionsPanel } from './SubscriptionsPanel'
 import { ScratchpadPanel } from './ScratchpadPanel'
 import { RightColumnToolbar } from './RightColumnToolbar'
 import { useBackend } from '../backend'
@@ -55,7 +56,9 @@ interface RightColumnProps {
   onBuildCustomTool: (branch: string, prompt: string) => void
 }
 
-export function RightColumn({
+/** Memoized so the sidebar's first-frame highlight render (see
+ *  `sidebarActiveId` in App) can skip it; App keeps its props stable. */
+export const RightColumn = memo(function RightColumn({
   width,
   activeWorktreeId,
   activeRepoRoot,
@@ -163,6 +166,14 @@ export function RightColumn({
         return <JsonClaudeTodosPanel key="todos" focusedTabId={focusedTabId} />
       case 'agents':
         return <JsonClaudeAgentsPanel key="agents" focusedTabId={focusedTabId} />
+      case 'subscriptions':
+        return (
+          <SubscriptionsPanel
+            key="subscriptions"
+            worktreePath={activeWorktreeId}
+            focusedTabId={focusedTabId}
+          />
+        )
       case 'commits':
         return (
           <BranchCommitsPanel
@@ -224,4 +235,4 @@ export function RightColumn({
       {order.map((key) => renderPanel(key))}
     </div>
   )
-}
+})

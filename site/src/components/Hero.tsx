@@ -108,7 +108,7 @@ export function Hero() {
 
       <div className="mt-8 flex justify-center">
         <a
-          href="https://github.com/ness-dev/ness/stargazers"
+          href="https://github.com/ness-dev/ness"
           className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-green-200 border border-brand/40 bg-brand/10 hover:bg-brand/20 hover:border-brand/60 hover:text-green-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 transition-colors"
         >
           <StarIcon />

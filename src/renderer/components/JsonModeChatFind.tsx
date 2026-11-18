@@ -12,6 +12,7 @@ import {
   type RefObject
 } from 'react'
 import { Search, X } from 'lucide-react'
+import { getToolIntent } from './json-mode-cards/tool-display'
 import type {
   JsonClaudeChatEntry,
   JsonClaudeMessageBlock
@@ -74,12 +75,23 @@ interface FindContextValue {
   /** Set of block ids that should render as if expanded regardless of
    *  local state. Grown as the user cycles through collapsed matches. */
   forceOpenIds: ReadonlySet<string>
+  /** Entries holding at least one hit for the active query. A folded
+   *  turn opens while any of its entries is in here, rather than only
+   *  once cycled to: cycling locates the current hit by its index among
+   *  the rendered <mark>s, so a fold hiding earlier hits would shift
+   *  every later one onto the wrong mark. */
+  hitEntryIds: ReadonlySet<string>
 }
+
+// Shared so an idle find (no hits) keeps the context value stable across
+// streaming deltas instead of minting a fresh empty Set per entries change.
+const NO_HIT_ENTRIES: ReadonlySet<string> = new Set()
 
 const FindContext = createContext<FindContextValue>({
   query: '',
   currentHitBlockId: undefined,
-  forceOpenIds: new Set()
+  forceOpenIds: new Set(),
+  hitEntryIds: new Set()
 })
 
 export function useFind(): FindContextValue {
@@ -220,7 +232,7 @@ function getToolUseSegments(
   switch (block.name) {
     case 'Bash':
       return collect(
-        seg(input.description as string | undefined),
+        seg(getToolIntent(block)),
         seg(input.command as string | undefined)
       )
     case 'Read':
@@ -362,6 +374,11 @@ export function useFindController(
   const [forceOpenTick, setForceOpenTick] = useState(0)
 
   const hits = useMemo(() => computeHits(entries, query), [entries, query])
+  const hitEntryIds = useMemo<ReadonlySet<string>>(
+    () =>
+      hits.length === 0 ? NO_HIT_ENTRIES : new Set(hits.map((h) => h.entryId)),
+    [hits]
+  )
 
   // Clamp the index when the hit list shrinks (query change, entries change).
   useEffect(() => {
@@ -452,10 +469,11 @@ export function useFindController(
     return {
       query,
       currentHitBlockId: currentHit?.blockId,
-      forceOpenIds: forceOpenIdsRef.current
+      forceOpenIds: forceOpenIdsRef.current,
+      hitEntryIds
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, currentHit?.blockId, forceOpenTick])
+  }, [query, currentHit?.blockId, forceOpenTick, hitEntryIds])
 
   return {
     isOpen,

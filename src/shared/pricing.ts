@@ -72,7 +72,19 @@ const RATES: Record<string, ModelRate> = {
   // under-report. Accepted over billing $0 for an unpriced model.
   'claude-haiku-5-5': { in: 0.10, out: 0.50 },
   'claude-haiku-4-5': { in: 1, out: 5 },
-  // OpenAI (used by Codex)
+  // OpenAI (used by Codex). Standard tier, short-context rates from
+  // developers.openai.com/api/docs/pricing as of Oct 2026 (the GPT-5.6
+  // Terra/Luna rates reflect the Jul 30 2026 cut). Cached input is 0.10x
+  // input on all of these, which is the default cacheReadMult. Reasoning
+  // tokens bill as output. Each also has a long-context tier at roughly
+  // 2x input / 1.5x output; like Haiku 5.5 above we only carry the base
+  // tier, so very long Codex sessions under-report.
+  'gpt-6-astra': { in: 10, out: 50 },
+  'gpt-6-sol': { in: 2, out: 10 },
+  'gpt-6-luna': { in: 0.10, out: 0.50 },
+  'gpt-5.6-sol': { in: 4, out: 20 },
+  'gpt-5.6-terra': { in: 2, out: 12 },
+  'gpt-5.6-luna': { in: 0.20, out: 1.20 },
   'o3': { in: 10, out: 40, reasoning: 40 },
   'o4-mini': { in: 1.10, out: 4.40, reasoning: 4.40 },
   'gpt-5-codex': { in: 2, out: 8, reasoning: 8 },

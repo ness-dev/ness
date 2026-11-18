@@ -64,9 +64,10 @@ vi.mock('fs', async () => {
 })
 
 import { Store } from './store'
-import { JsonClaudeManager } from './json-claude-manager'
+import { claudeToolIntent, extractAssistantBlocks, JsonClaudeManager } from './json-claude-manager'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import type { ClaudeLaunchSettings } from './claude-launch'
+import { describeChatProviderContract } from './test-support/chat-provider-contract'
 
 describe('JsonClaudeManager', () => {
   beforeEach(() => {
@@ -389,6 +390,28 @@ describe('JsonClaudeManager', () => {
       (store.getSnapshot().state.jsonClaude.sessions[sessionId]?.entries ?? []).filter(
         (e) => e.isQueued
       ).length
+
+    it('stamps turnStartedAt when a turn starts, and a mid-turn send leaves it alone', () => {
+      // Without the stamp, collectAgents falls back to `busy` and agents
+      // from earlier turns read as running again.
+      // Only Date is faked — the manager's own timers stay real. The clock
+      // moves before the interjection so a re-stamp would show up as a
+      // different value rather than coinciding within the same ms.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000)
+        const store = new Store()
+        const sessionId = 'sess-turn-start'
+        const { mgr } = startBusySession(store, sessionId)
+        expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(1_000)
+
+        vi.setSystemTime(2_000)
+        mgr.send(sessionId, 'interjection')
+        expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(1_000)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
 
     it("clears isQueued on the next 'requesting' status, before the turn ends", () => {
       const store = new Store()
@@ -886,5 +909,87 @@ describe('JsonClaudeManager', () => {
       const ids = entries.map((e) => e.entryId)
       expect(new Set(ids).size).toBe(ids.length)
     })
+  })
+})
+
+describeChatProviderContract('claude', () => {
+  spawnedProcs.length = 0
+  spawnCalls.length = 0
+  const store = new Store()
+  const provider = new JsonClaudeManager(store, {
+    getClaudeCommand: () => 'claude',
+    getUseSystemClaude: () => false,
+    getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
+    closeApprovalSession: vi.fn(),
+    cancelApprovalForToolUse: vi.fn(),
+    getClaudeEnvVars: () => ({}),
+    getControlServer: () => null,
+    getControlBridgeScriptPath: () => '/tmp/bridge.js',
+    isHarnessMcpEnabled: () => false,
+    getCallerScope: () => null,
+    getLaunchSettings: () => ({ tuiFullscreen: true })
+  })
+  const proc = (): ReturnType<typeof makeFakeProc> => sessionProcs().at(-1)!
+  const emit = (line: unknown): void => {
+    proc().stdout.emit('data', Buffer.from(JSON.stringify(line) + '\n'))
+  }
+  return {
+    agentKind: 'claude',
+    store,
+    provider,
+    worktreePath: '/tmp/contract-wt',
+    settle: async () => {},
+    receivedUserText: () =>
+      proc()
+        .stdin.write.mock.calls.map(([raw]) => JSON.parse(String(raw)))
+        .filter((f) => f.type === 'user')
+        .map((f) => {
+          const content = f.message.content
+          if (typeof content === 'string') return content
+          return content
+            .filter((b: { type: string }) => b.type === 'text')
+            .map((b: { text: string }) => b.text)
+            .join('')
+        }),
+    replyAndFinish: async (_sid, text) => {
+      emit({ type: 'assistant', message: { id: 'msg_contract', content: [{ type: 'text', text }] } })
+      emit({ type: 'result' })
+    },
+    crash: async () => {
+      proc().emit('exit', 1, null)
+    }
+  }
+})
+
+describe('claudeToolIntent', () => {
+  it('returns the trimmed description for Bash and sub-agent calls', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls', description: ' List files ' })).toBe('List files')
+    expect(claudeToolIntent('Agent', { prompt: 'x', description: 'Find callers' })).toBe('Find callers')
+  })
+
+  it('returns null when the description is missing or blank', () => {
+    expect(claudeToolIntent('Bash', { command: 'ls' })).toBeNull()
+    expect(claudeToolIntent('Bash', { command: 'ls', description: '   ' })).toBeNull()
+    expect(claudeToolIntent('Bash', undefined)).toBeNull()
+  })
+
+  it('ignores tools whose description is not a call explanation', () => {
+    expect(claudeToolIntent('TaskCreate', { description: 'Long task body' })).toBeNull()
+  })
+})
+
+describe('extractAssistantBlocks', () => {
+  it('sets intent on a described Bash tool_use from a raw assistant event', () => {
+    const blocks = extractAssistantBlocks({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } },
+          { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a.ts' } }
+        ]
+      }
+    })
+    expect(blocks[0].intent).toBe('Run tests')
+    expect(blocks[1].intent).toBeUndefined()
   })
 })

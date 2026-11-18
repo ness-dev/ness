@@ -128,10 +128,10 @@ function FileDiffView({
     )
   }
 
-  if (sides.modifiedBinary) {
+  if (sides.binary || sides.tooLarge) {
     return (
       <div className="flex items-center justify-center h-full text-faint text-sm">
-        Binary file — diff not shown.
+        {sides.binary ? 'Binary file — diff not shown.' : 'File too large — diff not shown.'}
       </div>
     )
   }

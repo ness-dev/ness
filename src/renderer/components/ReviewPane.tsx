@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Send, Clipboard, Check, MessageSquare, GitCommitHorizontal, ArrowUp, ChevronDown } from 'lucide-react'
-import type { ChangedFile, BranchCommit } from '../types'
-import type { ReviewComment } from './ReviewFileTree'
+import { Send, Clipboard, Check, MessageSquare, GitCommitHorizontal, ArrowUp, ChevronDown, X } from 'lucide-react'
+import type { ChangedFile, BranchCommit, ReviewComment, ReviewCommentStatus } from '../types'
 import { ReviewFileTree } from './ReviewFileTree'
 import { ReviewDiffPane } from './ReviewDiffPane'
 import { ResizeHandle } from './ResizeHandle'
 import { Tooltip } from './Tooltip'
 import { useBackend } from '../backend'
+import { useReviewComments, useReviewRequests, useReviewSubmissions } from '../store'
+import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
+import { ReviewTimeline } from './ReviewTimeline'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
+import { formatReviewComments } from '../../shared/review-format'
 import { setReviewProgress, clearReviewProgress } from '../review-progress'
 
 interface ReviewPaneProps {
@@ -16,10 +20,8 @@ interface ReviewPaneProps {
   fromCommit?: string
   /** Tip commit of the selection (newest selected). Undefined ⇒ "All commits". */
   toCommit?: string
-  onSendToAgent?: (text: string) => void
+  onSendToAgent?: (text: string, targetTabId?: string) => void
 }
-
-let commentIdCounter = 0
 
 export function ReviewPane({
   tabId,
@@ -33,7 +35,18 @@ export function ReviewPane({
   const [files, setFiles] = useState<ChangedFile[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set())
-  const [comments, setComments] = useState<ReviewComment[]>([])
+  const comments = useReviewComments(worktreePath)
+  const submissions = useReviewSubmissions(worktreePath)
+  const requests = useReviewRequests(worktreePath)
+  const [view, setView] = useState<'diff' | 'reviews'>('diff')
+  // Comment the diff should scroll to, set by clicking one in the
+  // Reviews view. The nonce re-triggers a jump to the same comment.
+  const [focusComment, setFocusComment] = useState<{ id: string; nonce: number } | null>(null)
+  // File of a jump that had to widen the selection to whole-branch,
+  // checked once that file list arrives.
+  const pendingJumpRef = useRef<string | null>(null)
+  // Set when a jumped-to comment's file isn't in the branch diff at all.
+  const [jumpMiss, setJumpMiss] = useState<string | null>(null)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   const [fileTreeWidth, setFileTreeWidth] = useState<number>(240)
   // Hoisted above ReviewDiffPane so the choice persists as the reviewer
@@ -45,7 +58,7 @@ export function ReviewPane({
   const isWholeBranch = !fromCommit && !toCommit
   const isSingleCommit = !!fromCommit && fromCommit === toCommit
 
-  useEffect(() => {
+  const loadCommits = useCallback((): (() => void) => {
     let cancelled = false
     backend
       .getBranchCommits(worktreePath)
@@ -60,6 +73,16 @@ export function ReviewPane({
     }
   }, [worktreePath, backend])
 
+  useEffect(() => loadCommits(), [loadCommits])
+
+  // Refetch on opening Reviews so the timeline shows commits that landed
+  // while the pane was open.
+  const showingReviews = view === 'reviews'
+  useEffect(() => {
+    if (showingReviews) return loadCommits()
+    return undefined
+  }, [showingReviews, loadCommits])
+
   // Refetch the file list whenever the commit selection changes.
   useEffect(() => {
     let cancelled = false
@@ -71,16 +94,20 @@ export function ReviewPane({
     promise
       .then((result) => {
         if (cancelled) return
+        const pending = pendingJumpRef.current
+        if (pending && isWholeBranch) {
+          pendingJumpRef.current = null
+          if (!result.some((f) => f.path === pending)) setJumpMiss(pending)
+        }
         setFiles(result)
         setSelectedFile((prev) => {
           if (prev && result.some((f) => f.path === prev)) return prev
           return result[0]?.path ?? null
         })
-        // The reviewed set / comments belong to the previous file set;
-        // wipe them when the selection changes so progress reflects the
-        // new file set.
+        // The reviewed set belongs to the previous file set; wipe it when
+        // the selection changes so progress reflects the new file set.
+        // Comments live in the reviews slice and survive the switch.
         setReviewedFiles(new Set())
-        setComments([])
       })
       .catch(() => {
         if (!cancelled) setFiles([])
@@ -89,6 +116,12 @@ export function ReviewPane({
       cancelled = true
     }
   }, [worktreePath, backend, isWholeBranch, isSingleCommit, fromCommit, toCommit])
+
+  // Re-anchor against HEAD on open and whenever a file is opened, so
+  // comments follow commits that landed since they were written.
+  useEffect(() => {
+    void backend.refreshReviewAnchors(worktreePath, selectedFile ?? undefined)
+  }, [backend, worktreePath, selectedFile])
 
   // Push "(N/M)" up to the tab strip. Clear on unmount.
   useEffect(() => {
@@ -143,34 +176,57 @@ export function ReviewPane({
   }, [])
 
   const handleAddComment = useCallback(
-    (lineNumber: number, body: string) => {
-      if (!selectedFile) return
-      setComments((prev) => [
-        ...prev,
-        {
-          id: `comment-${++commentIdCounter}`,
-          filePath: selectedFile,
-          lineNumber,
-          body,
-          timestamp: Date.now()
-        }
-      ])
+    async (lineNumber: number, body: string): Promise<string | null> => {
+      if (!selectedFile) return 'No file selected'
+      const res = await backend.addReviewComment(worktreePath, {
+        filePath: selectedFile,
+        line: lineNumber,
+        side: 'new',
+        body,
+        view: isWholeBranch ? undefined : { fromCommit, toCommit }
+      })
+      return 'error' in res ? res.error : null
     },
-    [selectedFile]
+    [backend, worktreePath, selectedFile, isWholeBranch, fromCommit, toCommit]
   )
 
-  const handleDeleteComment = useCallback((id: string) => {
-    setComments((prev) => prev.filter((c) => c.id !== id))
-  }, [])
+  const handleDeleteComment = useCallback(
+    (id: string) => {
+      void backend.deleteReviewComment(worktreePath, id)
+    },
+    [backend, worktreePath]
+  )
 
-  const formatComments = useCallback((): string => {
-    if (comments.length === 0) return ''
-    const lines = ['Review feedback on your changes:', '']
+  const handleEditComment = useCallback(
+    (id: string, body: string) => {
+      void backend.editReviewComment(worktreePath, id, body)
+    },
+    [backend, worktreePath]
+  )
+
+  const handleSetCommentStatus = useCallback(
+    (id: string, status: ReviewCommentStatus) => {
+      void backend.setReviewCommentStatus(worktreePath, id, status)
+    },
+    [backend, worktreePath]
+  )
+
+  const filesInView = useMemo(() => new Set(files.map((f) => f.path)), [files])
+  const { openCount, openElsewhere } = useMemo(() => {
+    let open = 0
+    let elsewhere = 0
     for (const c of comments) {
-      lines.push(`${c.filePath}:${c.lineNumber} — ${c.body}`)
+      if (c.status !== 'open') continue
+      open++
+      if (!filesInView.has(c.filePath)) elsewhere++
     }
-    return lines.join('\n')
-  }, [comments])
+    return { openCount: open, openElsewhere: elsewhere }
+  }, [comments, filesInView])
+
+  const formatComments = useCallback(
+    (): string => formatReviewComments(comments),
+    [comments]
+  )
 
   const handleFileTreeResize = useCallback((delta: number) => {
     setFileTreeWidth((w) => {
@@ -183,11 +239,14 @@ export function ReviewPane({
     })
   }, [])
 
-  const handleSendToAgent = useCallback(() => {
-    const text = formatComments()
-    if (!text || !onSendToAgent) return
-    onSendToAgent(text + '\n')
-  }, [formatComments, onSendToAgent])
+  const handleSendToAgent = useCallback(
+    (targetTabId: string) => {
+      const text = formatComments()
+      if (!text || !onSendToAgent) return
+      onSendToAgent(text + '\n', targetTabId)
+    },
+    [formatComments, onSendToAgent]
+  )
 
   const handleCopyComments = useCallback(() => {
     const text = formatComments()
@@ -240,6 +299,24 @@ export function ReviewPane({
     [commits, selectionIndices, backend, worktreePath, tabId]
   )
 
+  const handleJumpToComment = useCallback(
+    (c: ReviewComment) => {
+      setJumpMiss(null)
+      if (!filesInView.has(c.filePath)) {
+        if (isWholeBranch) {
+          setJumpMiss(c.filePath)
+          return
+        }
+        pendingJumpRef.current = c.filePath
+        void backend.panesSetReviewSelection(worktreePath, tabId, undefined, undefined)
+      }
+      setSelectedFile(c.filePath)
+      setFocusComment((prev) => ({ id: c.id, nonce: (prev?.nonce ?? 0) + 1 }))
+      setView('diff')
+    },
+    [filesInView, isWholeBranch, backend, worktreePath, tabId]
+  )
+
   const allReviewed = files.length > 0 && reviewedFiles.size === files.length
   const progress = files.length > 0 ? reviewedFiles.size / files.length : 0
 
@@ -248,6 +325,25 @@ export function ReviewPane({
       {/* Top controls bar */}
       <div className="shrink-0 border-b border-border bg-panel">
         <div className="h-10 flex items-center gap-3 px-3">
+          <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5 text-xs">
+            {(['diff', 'reviews'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded cursor-pointer transition-colors ${
+                  view === v ? 'bg-panel-raised text-fg-bright' : 'text-faint hover:text-fg'
+                }`}
+              >
+                {v === 'reviews' && (
+                  <ReviewStatusIcon worktreePath={worktreePath} className="icon-xs" hideWhenNone />
+                )}
+                {v === 'diff' ? 'Diff' : `Reviews${submissions.length ? ` (${submissions.length})` : ''}`}
+              </button>
+            ))}
+          </div>
+
+          {view === 'diff' && (
+          <>
           <CommitSelector
             commits={commits}
             isWholeBranch={isWholeBranch}
@@ -262,11 +358,13 @@ export function ReviewPane({
             {totalAdditions > 0 && <span className="text-success">+{totalAdditions}</span>}
             {totalDeletions > 0 && <span className="text-danger">−{totalDeletions}</span>}
           </div>
+          </>
+          )}
 
           <div className="flex-1" />
 
           <div className="flex items-center gap-1.5 text-xs">
-            {allReviewed ? (
+            {view !== 'diff' ? null : allReviewed ? (
               <span className="flex items-center gap-1 text-success font-medium">
                 <Check strokeWidth={2.5} className="icon-xs" />
                 All reviewed
@@ -278,16 +376,27 @@ export function ReviewPane({
             )}
 
             {comments.length > 0 && (
-              <span className="flex items-center gap-1 text-info ml-2">
-                <MessageSquare className="icon-xs" />
-                {comments.length}
-              </span>
+              <Tooltip
+                label={
+                  `${openCount} open of ${comments.length}` +
+                  (openElsewhere > 0 ? ` · ${openElsewhere} open on files outside this selection` : '')
+                }
+              >
+                <span
+                  className={`flex items-center gap-1 ml-2 tabular-nums ${
+                    openCount > 0 ? 'text-info' : 'text-faint'
+                  }`}
+                >
+                  <MessageSquare className="icon-xs" />
+                  {openCount}
+                </span>
+              </Tooltip>
             )}
 
-            <Tooltip label="Copy comments to clipboard">
+            <Tooltip label="Copy open comments to clipboard">
               <button
                 onClick={handleCopyComments}
-                disabled={comments.length === 0}
+                disabled={openCount === 0}
                 className="ml-2 flex items-center gap-1 px-2 py-1 rounded border border-border text-faint hover:text-fg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
               >
                 <Clipboard className="icon-xs" />
@@ -295,19 +404,20 @@ export function ReviewPane({
               </button>
             </Tooltip>
 
-            <Tooltip label="Send all comments to the active agent terminal">
-              <button
-                onClick={handleSendToAgent}
-                disabled={comments.length === 0 || !onSendToAgent}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
-              >
-                <Send className="icon-xs" />
-                Send to Agent
-              </button>
-            </Tooltip>
+            <AgentTabPicker
+              worktreePath={worktreePath}
+              includeTerminals
+              disabled={openCount === 0 || !onSendToAgent}
+              onPick={handleSendToAgent}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-accent text-fg text-xs font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+            >
+              <Send className="icon-xs" />
+              Send to Agent
+            </AgentTabPicker>
           </div>
         </div>
 
+        {view === 'diff' && (
         <div className="h-[2px] bg-border/50 relative">
           <div
             className={`h-full transition-all duration-300 ease-out ${
@@ -316,7 +426,39 @@ export function ReviewPane({
             style={{ width: `${progress * 100}%` }}
           />
         </div>
+        )}
       </div>
+
+      {jumpMiss && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-panel text-xs text-warning">
+          <span className="truncate min-w-0 flex-1">
+            <span className="font-mono">{jumpMiss}</span> is no longer in this branch&apos;s diff,
+            so the comment can&apos;t be shown there.
+          </span>
+          <button
+            onClick={() => setJumpMiss(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-faint hover:text-fg cursor-pointer"
+          >
+            <X className="icon-xs" />
+          </button>
+        </div>
+      )}
+
+      {view === 'reviews' && (
+        <ReviewTimeline
+          worktreePath={worktreePath}
+          requests={requests}
+          submissions={submissions}
+          comments={comments}
+          commits={commits}
+          onJumpToComment={handleJumpToComment}
+        />
+      )}
+      {/* Hidden rather than unmounted while Reviews is showing, so the
+          diff editor keeps its scroll, open composer and loaded file. */}
+      <div className={`flex-1 min-h-0 flex-col ${view === 'diff' ? 'flex' : 'hidden'}`}>
+      <ReviewSubmissionsPanel worktreePath={worktreePath} submissions={submissions} />
 
       <div className="flex flex-1 min-h-0">
         {/* File tree */}
@@ -333,6 +475,7 @@ export function ReviewPane({
             onSelectFile={setSelectedFile}
             onToggleReviewed={handleToggleReviewed}
             onToggleDir={handleToggleDir}
+            active={view === 'diff'}
           />
         </div>
 
@@ -357,10 +500,14 @@ export function ReviewPane({
             }}
             onAddComment={handleAddComment}
             onDeleteComment={handleDeleteComment}
+            onSetCommentStatus={handleSetCommentStatus}
+            onEditComment={handleEditComment}
             wordWrap={wordWrap}
             onWordWrapChange={setWordWrap}
+            focusComment={focusComment}
           />
         </div>
+      </div>
       </div>
     </div>
   )

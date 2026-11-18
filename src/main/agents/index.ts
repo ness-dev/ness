@@ -5,6 +5,8 @@ import * as cursor from './cursor'
 
 export type { AgentKind }
 
+import type { StdioMcpServer } from '../ness-control-mcp'
+
 export interface AgentSpawnOpts {
   command: string
   cwd: string
@@ -16,6 +18,13 @@ export interface AgentSpawnOpts {
   model?: string | null
   systemPrompt?: string
   tuiFullscreen?: boolean
+  /** Codex: launch the TUI with `--no-daemon`. Filled in by the agent's
+   *  own launchExtras, never by shared code. */
+  noDaemon?: boolean
+  /** Ness's ness-control MCP server for this terminal. Agents that read a
+   *  per-terminal MCP config file (Claude, via mcpConfigPath) ignore it;
+   *  agents without one (Codex) inline it into their launch command. */
+  nessMcp?: StdioMcpServer | null
 }
 
 export interface AgentModule {
@@ -26,7 +35,8 @@ export interface AgentModule {
    * assigns its own ID and Ness discovers it from the first hook event. */
   assignsSessionId: boolean
   /** Install status hooks at the agent's user-scope settings file
-   *  (~/.claude/settings.json for Claude, ~/.codex/hooks.json for Codex).
+   *  (settings.json in every Claude home a worktree resolves to — see
+   *  claude-env.ts — or ~/.codex/hooks.json for Codex).
    *  The hook command is gated on $HARNESS_TERMINAL_ID so sessions spawned
    *  outside Ness are untouched. */
   installHooks(): void
@@ -47,6 +57,10 @@ export interface AgentModule {
    *  reset (Claude's `/clear`) hands the conversation a new ID that Ness
    *  would otherwise never see. */
   extractSessionId?(payload: Record<string, unknown>): string | null
+  /** Launch options only the agent knows how to work out — typically by
+   *  probing what the user's installed CLI supports. Cached by the agent;
+   *  shared code just merges the result into buildSpawnArgs' options. */
+  launchExtras?(command: string): Promise<Partial<AgentSpawnOpts>>
 }
 
 const agents: Record<AgentKind, AgentModule> = { claude, codex, cursor }

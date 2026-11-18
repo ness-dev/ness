@@ -139,6 +139,6 @@ export class ElectronServerTransport implements ServerTransport {
       }
       sender.once('destroyed', fire)
     }
-    return { clientId: id }
+    return { clientId: id, via: 'ipc' }
   }
 }

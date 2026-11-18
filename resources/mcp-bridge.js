@@ -324,16 +324,37 @@ const TOOLS = [
     }
   },
   {
+    name: 'set_tab_name',
+    description:
+      "Rename your own tab in Ness. The name replaces the auto-derived label wherever this tab is shown (tab strip, pane header, command palette). Cosmetic only — it touches nothing in git and is not the worktree alias.\n\nThere are no parameters for which tab: you can only name the one you are running in, resolved from the caller. Keep the name a few words at most, Title Case with spaces (\"Agent Tab Rename\", \"Flaky Test Hunt\") — a tab strip is narrow, and a kebab-case slug just repeats the branch name. Names are trimmed and clamped to 32 characters.\n\nSet it once you actually know what the session is about, and re-set it only when the focus genuinely changes. Do not re-send the same name or churn it every turn.\n\nIf the user has renamed this tab by hand, their name is final: the call is refused and `applied` comes back false. Don't retry — ask them to rename it if you think it's wrong.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'The tab name to display. Trimmed and clamped to 32 characters. Must be non-empty — there is no agent-side reset.'
+        }
+      },
+      required: ['name']
+    }
+  },
+  {
     name: 'send_message',
     description:
-      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are; the sender name cannot be set by you.",
+      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
     inputSchema: {
       type: 'object',
       properties: {
         worktree: {
           type: 'string',
           description:
-            'Which worktree to message — a `<repo>/<branch>` handle, its display alias, or its absolute path. A bare branch name works only when it is unique across every open repo, which `main` never is. A `@worktree:<repo>/<branch>` token in the user\'s message is a worktree mention picked from the composer; pass it here as-is (with or without the `worktree:` prefix). Call list_worktrees first if you are unsure what exists.'
+            'Which worktree to message — a `<repo>/<branch>` handle, its display alias, or its absolute path. A bare branch name works only when it is unique across every open repo, which `main` never is. A `@worktree:<repo>/<branch>` token in the user\'s message is a worktree mention picked from the composer; pass it here as-is (with or without the `worktree:` prefix). Call list_worktrees first if you are unsure what exists. Optional when `tab` is set — defaults to your own worktree.'
+        },
+        tab: {
+          type: 'string',
+          description:
+            'Id of one Chat tab to deliver to, from list_tabs. Must be in `worktree` (or your own worktree when that is omitted), and must not be your own tab.'
         },
         message: {
           type: 'string',
@@ -341,7 +362,213 @@ const TOOLS = [
             'What to say. Write it for an agent who has none of your context: state what you did, what you need, and what you want them to do next.'
         }
       },
-      required: ['worktree', 'message']
+      required: ['message']
+    }
+  },
+  {
+    name: 'list_tabs',
+    description:
+      "List the Chat tabs in a worktree — the only tabs that can receive messages and reviews — most recently active first. Each entry has id, label (the name in the tab strip), agentKind, lastActiveAt (epoch ms, 0 if unknown) and asleep. Your own tab is marked `self: true` when it is a Chat tab. Terminal agent tabs are not listed. Defaults to your own worktree. The ids are what send_message's `tab` and submit_review's `tab` take.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description:
+            'Worktree to list — a `<repo>/<branch>` handle, alias, or absolute path. Optional; defaults to your own.'
+        }
+      }
+    }
+  },
+  {
+    name: 'subscribe_to_worktree',
+    description:
+      "Follow another Ness worktree's progress from this Chat tab. Two things happen: (1) Ness tells you automatically when that worktree's pull request changes — opened, new commits pushed, CI passing or failing, approved or changes requested, merge conflicts, merged or closed; (2) the agent working there is told you are following and asked to send you progress reports with report_progress. Updates arrive as turns in this chat, so after subscribing end your turn rather than polling — you will be woken when something urgent happens.\n\n`mode` decides how routine updates reach you. 'interrupt' (default) delivers each one as its own turn, waking this tab. 'silent' holds them and hands them to you with your next turn — the user's next message or the next interrupt — so they don't derail what you're doing. Urgent updates (CI failing, changes requested, conflicts, the PR merging or closing, and progress reports the sender flags urgent) always interrupt.\n\nYou already follow, silently, every worktree you created with create_worktree; subscribe explicitly only to change that to 'interrupt' or to follow a worktree you did not create. Calling it again on the same worktree updates the note and mode. Changing only the mode is silent; passing a new note also re-briefs the agent there, which is how to recover one that seems to have lost track.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description:
+            'Worktree to follow — a `<repo>/<branch>` handle, alias, or absolute path (same forms as send_message).'
+        },
+        note: {
+          type: 'string',
+          description:
+            "Optional: what you are watching for, in a sentence. Passed to the agent there so its progress reports cover what you care about."
+        },
+        mode: {
+          type: 'string',
+          enum: ['interrupt', 'silent'],
+          description: "How routine updates reach you. Defaults to 'interrupt'."
+        }
+      },
+      required: ['worktree']
+    }
+  },
+  {
+    name: 'unsubscribe_from_worktree',
+    description:
+      "Stop following a worktree you subscribed to with subscribe_to_worktree. A worktree you created is followed implicitly for as long as it exists and can't be unsubscribed from; subscribe to it with mode 'silent' instead if its updates are too noisy.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description: 'Worktree to stop following — handle, alias, or absolute path.'
+        }
+      },
+      required: ['worktree']
+    }
+  },
+  {
+    name: 'list_subscriptions',
+    description:
+      "Show which worktrees this tab follows (`following`) and which tabs follow your worktree (`followers`). Each entry has `kind` — 'explicit' (someone called subscribe_to_worktree) or 'implicit' (derived by Ness, e.g. `reason: 'created-worktree'` for the tab that created a worktree, or `'own-worktree'` for your own worktree's PR updates when the user has those turned on) — and `mode` ('interrupt' or 'silent'). If you have followers, keep them posted with report_progress.",
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'report_progress',
+    description:
+      "Send a short progress report to every agent following this worktree — whoever created it, plus anyone who subscribed. You don't pick recipients; Ness delivers to all of them, and tells you if there are none.\n\nReport at real milestones (plan settled, a chunk of work committed, PR opened, tests passing), when you are blocked or need a decision, and when you finish. Keep it to a few sentences: what changed, what's next, anything they need to know. Don't report PR, CI or review changes on their own — Ness already sends those. Pass `urgent: true` only when a follower should act now (you're blocked, need a decision, or are done); otherwise the report reaches followers in whatever mode they chose.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The progress report.' },
+        urgent: {
+          type: 'boolean',
+          description: 'Interrupt every follower, even ones that chose silent updates. Default false.'
+        }
+      },
+      required: ['message']
+    }
+  },
+  {
+    name: 'get_worktree_status',
+    description:
+      "Git and pull request status of one worktree: branch, the PR (number, state, CI result and failing checks, review decision, conflicts), commits on the branch with which are unpushed, uncommitted files, and how many tabs follow it. Defaults to your own worktree. The PR fields are from Ness's last GitHub poll, so they can be a few minutes behind; the git fields are read fresh.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: {
+          type: 'string',
+          description: 'Worktree to inspect — handle, alias, or absolute path. Optional; defaults to your own.'
+        }
+      }
+    }
+  },
+  {
+    name: 'request_review',
+    description:
+      "Ask for a code review of the work you have just finished on this branch. Ness opens a second Chat tab in this worktree whose only job is to review your work, shows the Review tab next to it, and hands it your `context`. The reviewer reads the diff, leaves inline comments, and calls submit_review — which comes back to YOU as a message, because Ness remembers that you are the one who asked.\n\nCall this when a piece of work is complete and you would otherwise hand it to the user: changes are made and verified, and you want them checked before they go further. Say so in your reply, then end your turn — you will be woken when the review arrives, so do not poll or wait. Calling it again later asks the same reviewer for another look, carrying the earlier conversation; use that after you have addressed the first round.\n\nThis is not the way to ask the USER a question — it starts another agent. If you simply want a human to look, say so in your reply instead.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: {
+          type: 'string',
+          description:
+            'What you did and what you want checked, written for a reviewer who has none of your context: the goal, the approach, anything you are unsure about, and how you verified it. Name the areas worth the closest look. Do not paste the diff — the reviewer reads it from the Review tab.'
+        }
+      },
+      required: ['context']
+    }
+  },
+  {
+    name: 'list_review_comments',
+    description:
+      "List the comments in this worktree's Review tab — the code review that the user and reviewer agents leave on this branch's diff. Each entry has id, file, line, side ('new' = the branch's version of the line, 'old' = a line the branch removed), status, author ('User' or the agent tab's name; `mine: true` marks your own), body and replies. Status is 'open', 'resolved', or 'outdated' (the line it was on is gone from HEAD). Lines are re-anchored against HEAD before listing, so they match the code as committed now.\n\nAs the author of the branch, call this to see what feedback is still open. As a reviewer, call it before commenting so you don't repeat a point that's already been made. Scoped to your own worktree.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['open', 'resolved', 'outdated'],
+          description: 'Only return comments with this status.'
+        },
+        file: {
+          type: 'string',
+          description: 'Only return comments on this repo-relative path.'
+        }
+      }
+    }
+  },
+  {
+    name: 'add_review_comment',
+    description:
+      "Leave an inline review comment on one line of this worktree's branch, shown in the Review tab exactly where a human reviewer's comment would appear. `line` is 1-indexed in the file as COMMITTED at HEAD (side 'new', the default) — not the working tree, so check against `git show HEAD:<file>` if there are uncommitted edits. Use side 'old' for a line the branch removed, numbered in the merge-base version. A line outside the file is rejected with the file's length.\n\nOne concrete issue per comment: what is wrong, why it matters, and what to do instead. Comments are attributed to your tab automatically. They are not sent to the author until you call submit_review.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Repo-relative path, e.g. src/main/index.ts.' },
+        line: { type: 'integer', minimum: 1, description: '1-indexed line number on the chosen side.' },
+        side: {
+          type: 'string',
+          enum: ['new', 'old'],
+          description: "'new' (default): the line at HEAD. 'old': a removed line, in the merge-base version."
+        },
+        body: { type: 'string', description: 'The comment. Markdown is fine.' }
+      },
+      required: ['file', 'line', 'body']
+    }
+  },
+  {
+    name: 'reply_to_comment',
+    description:
+      "Reply to a comment in this worktree's Review tab. As the author: answer a question, explain why you disagree, or say what you changed — then resolve_comment if it's addressed. A comment you disagree with deserves a reply, not a silent change or a silent resolve. As a reviewer: follow up on the author's reply. `comment_id` is an id from list_review_comments, or the short id shown in [brackets] after each comment in a delivered review. Replies are attributed to your tab.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        comment_id: { type: 'string', description: 'Full comment id or its [short id].' },
+        body: { type: 'string', description: 'The reply.' }
+      },
+      required: ['comment_id', 'body']
+    }
+  },
+  {
+    name: 'resolve_comment',
+    description:
+      "Mark a comment in this worktree's Review tab resolved, or reopen it with resolved: false. As the author, resolve a comment once you have actually fixed what it asked for — reply instead if you disagree or only partly addressed it. As a reviewer, reopen a comment whose fix doesn't hold up. Accepts the full id or the short [bracketed] id.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        comment_id: { type: 'string', description: 'Full comment id or its [short id].' },
+        resolved: {
+          type: 'boolean',
+          description: 'true (default) to resolve, false to reopen.'
+        }
+      },
+      required: ['comment_id']
+    }
+  },
+  {
+    name: 'submit_review',
+    description:
+      "Finish a review of this worktree's branch: a verdict, a summary, and a briefing, covering every comment of yours that is still open. Leave inline comments with add_review_comment first and put cross-cutting points in the summary. Call it once per review round.\n\nThe summary and comments go to the author agent. The briefing does not: it is shown to the user in the Review tab, above the summary, and is written for a human who has probably not read the change yet.\n\nIf you were opened by `request_review`, the review goes back to the tab that asked for it — you do not need to work out who that is. Otherwise it goes to the most recently active Chat tab other than yours; pass `tab` (from list_tabs) to choose. Terminal tabs cannot receive reviews. Depending on the user's settings it is delivered right away or held as a draft in the Review tab for the user to edit and send; the result says which, and whether delivery failed.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        verdict: {
+          type: 'string',
+          enum: ['approve', 'changes-requested', 'comment'],
+          description:
+            "'approve': good to merge as is. 'changes-requested': something must change first. 'comment': feedback without a decision."
+        },
+        summary: {
+          type: 'string',
+          description:
+            'For the author agent: a short, actionable list of what must change and anything not tied to one line. Do not repeat the briefing — the user reads that, the author reads this.'
+        },
+        briefing: {
+          type: 'string',
+          description:
+            "Markdown for the user, not the author: the case for this change, so they can understand it and decide whether to merge without reading the diff first. Cover what it does and why, how it works (a diagram for any flow, state or data-shape change — a ```mermaid code block renders as a real diagram; mark the nodes this change touches with :::added, :::changed or :::removed, which follow the user's theme), your critique ranked by severity with blockers clearly separated from non-blocking notes, and a closing recommendation. Optional, but leave it out only for a trivial change."
+        },
+        tab: {
+          type: 'string',
+          description: "Id of the author's Chat tab, from list_tabs. Optional."
+        }
+      },
+      required: ['verdict', 'summary']
     }
   },
   {
@@ -692,6 +919,13 @@ const VIEW_BROWSER_TOOLS = new Set([
   'reload_tab',
   'set_tab_viewport'
 ])
+const MESSAGING_TOOLS = new Set([
+  'send_message',
+  'subscribe_to_worktree',
+  'unsubscribe_from_worktree',
+  'list_subscriptions',
+  'report_progress'
+])
 const FULL_CONTROL_BROWSER_TOOLS = new Set([
   'click_tab',
   'type_tab',
@@ -720,6 +954,10 @@ async function getToolPerms() {
   return {
     browser: s.browser || { enabled: true, mode: 'full' },
     messaging: s.messaging || { enabled: false },
+    // Defaults on when /scope can't say, matching the setting's own
+    // default — and matching the browser gates' permissive-on-failure
+    // posture rather than hiding a feature the user has enabled.
+    tabNaming: s.tabNaming || { enabled: true },
     copyEditing: s.copyEditing || { enabled: false }
   }
 }
@@ -740,8 +978,9 @@ async function getRendersMarkdown() {
 
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
-    if (t.name === 'send_message') return perms.messaging.enabled
+    if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
     if (t.name === 'edit_copy') return perms.copyEditing.enabled
+    if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true
@@ -900,24 +1139,197 @@ async function handleToolCall(name, args, signal) {
     })
     return 'Cleared alias for ' + r.worktreePath
   }
+  if (name === 'set_tab_name') {
+    if (!args || typeof args.name !== 'string' || !args.name.trim()) {
+      throw new Error('name is required')
+    }
+    const r = await callControl('POST', '/tab-name', { name: args.name })
+    if (!r.applied) {
+      return (
+        'Tab name NOT changed: the user named this tab themselves, and a user-set name is ' +
+        'final. Do not call set_tab_name again for this tab — ask the user to rename it if ' +
+        'you think it should change.'
+      )
+    }
+    const clampNote = r.clamped
+      ? ' (input was normalized: whitespace trimmed and/or clamped to 32 chars)'
+      : ''
+    return 'Renamed this tab to "' + r.name + '"' + clampNote
+  }
   if (name === 'send_message') {
-    if (!args || typeof args.worktree !== 'string' || !args.worktree.trim()) {
-      throw new Error('worktree is required')
+    const worktree = args && typeof args.worktree === 'string' ? args.worktree.trim() : ''
+    const tab = args && typeof args.tab === 'string' ? args.tab.trim() : ''
+    if (!worktree && !tab) {
+      throw new Error('worktree (or tab) is required')
     }
     if (typeof args.message !== 'string' || !args.message.trim()) {
       throw new Error('message is required')
     }
     const r = await callControl('POST', '/messages', {
-      worktree: args.worktree,
+      worktree: worktree || undefined,
+      tab: tab || undefined,
       message: args.message
     })
     return (
       'Delivered to ' +
       r.worktreePath +
+      (r.tab ? ' (tab ' + r.tab + ')' : '') +
       ', sent as "' +
       r.from +
       '"' +
       (r.woke ? ' (woke its sleeping chat tab)' : '')
+    )
+  }
+  if (name === 'subscribe_to_worktree') {
+    const worktree = args && typeof args.worktree === 'string' ? args.worktree.trim() : ''
+    if (!worktree) throw new Error('worktree is required')
+    if (args.mode !== undefined && args.mode !== 'interrupt' && args.mode !== 'silent') {
+      throw new Error('mode must be "interrupt" or "silent"')
+    }
+    const r = await callControl('POST', '/subscriptions', {
+      worktree,
+      note: typeof args.note === 'string' ? args.note : undefined,
+      mode: args.mode
+    })
+    const verb = r.created ? 'Subscribed to' : 'Updated your subscription to'
+    const told = r.targetNotified
+      ? 'The agent there has been asked to send you progress reports.'
+      : r.targetNotifyError === 'no-chat-tab'
+        ? 'It has no Chat tab, so no agent there was told — you will still get its PR updates.'
+        : 'Its Chat tab could not be woken, so the agent there was not told — you will still get its PR updates. Subscribe again later to re-brief it.'
+    return (
+      verb + ' ' + r.worktree + ' (' + r.mode + '). ' + told +
+      ' End your turn; updates arrive as messages in this chat.'
+    )
+  }
+  if (name === 'unsubscribe_from_worktree') {
+    const worktree = args && typeof args.worktree === 'string' ? args.worktree.trim() : ''
+    if (!worktree) throw new Error('worktree is required')
+    const r = await callControl('DELETE', '/subscriptions', { worktree })
+    return 'Unsubscribed from ' + r.worktreePath + '.'
+  }
+  if (name === 'list_subscriptions') {
+    const r = await callControl('GET', '/subscriptions')
+    return JSON.stringify(r, null, 2)
+  }
+  if (name === 'report_progress') {
+    if (!args || typeof args.message !== 'string' || !args.message.trim()) {
+      throw new Error('message is required')
+    }
+    const r = await callControl('POST', '/progress', {
+      message: args.message,
+      urgent: args.urgent === true
+    })
+    const total = r.delivered.length + r.failed.length
+    if (total === 0) {
+      return 'Nobody is following this worktree, so the report went nowhere. No need to keep reporting unless someone subscribes.'
+    }
+    const held = r.delivered.filter((d) => d.delivery === 'held').length
+    const parts = ['Reported to ' + r.delivered.length + ' of ' + total + ' follower(s)']
+    if (held > 0) parts.push(held + ' held for their next turn')
+    if (r.failed.length > 0) parts.push(r.failed.length + ' could not be reached')
+    return parts.join('; ') + '.'
+  }
+  if (name === 'get_worktree_status') {
+    const q =
+      args && typeof args.worktree === 'string' && args.worktree.trim()
+        ? '?worktree=' + encodeURIComponent(args.worktree.trim())
+        : ''
+    const r = await callControl('GET', '/worktree-status' + q)
+    return JSON.stringify(r, null, 2)
+  }
+  if (name === 'list_tabs') {
+    const q =
+      args && typeof args.worktree === 'string' && args.worktree.trim()
+        ? '?worktree=' + encodeURIComponent(args.worktree.trim())
+        : ''
+    const r = await callControl('GET', '/tabs' + q)
+    return JSON.stringify(r, null, 2)
+  }
+  if (name === 'request_review') {
+    if (!args || typeof args.context !== 'string' || !args.context.trim()) {
+      throw new Error('context is required')
+    }
+    const r = await callControl('POST', '/reviews/request', { context: args.context })
+    const who = r.reused ? 'Asked the existing reviewer' : 'Opened a reviewer Chat tab'
+    return (
+      who +
+      ' (tab ' +
+      r.reviewerTabId +
+      ') to look at this branch. Its review comes back to you as a message when it submits. ' +
+      'End your turn now; you will be woken when it arrives.'
+    )
+  }
+  if (name === 'list_review_comments') {
+    const q = new URLSearchParams()
+    if (args && args.status) q.set('status', String(args.status))
+    if (args && args.file) q.set('file', String(args.file))
+    const qs = q.toString()
+    const r = await callControl('GET', '/reviews/comments' + (qs ? '?' + qs : ''))
+    const comments = (r && r.comments) || []
+    return comments.length ? JSON.stringify(comments, null, 2) : 'No review comments match.'
+  }
+  if (name === 'add_review_comment') {
+    if (!args || typeof args.file !== 'string' || !args.file.trim()) throw new Error('file is required')
+    if (!Number.isInteger(args.line) || args.line < 1) throw new Error('line must be a positive integer')
+    if (typeof args.body !== 'string' || !args.body.trim()) throw new Error('body is required')
+    if (args.side !== undefined && args.side !== 'new' && args.side !== 'old') {
+      throw new Error('side must be "new" or "old"')
+    }
+    const r = await callControl('POST', '/reviews/comments', {
+      file: args.file,
+      line: args.line,
+      side: args.side,
+      body: args.body
+    })
+    const c = r.comment
+    return 'Added comment ' + c.id + ' on ' + c.file + ':' + c.line + (c.side === 'old' ? ' (removed line)' : '')
+  }
+  if (name === 'reply_to_comment') {
+    if (!args || typeof args.comment_id !== 'string' || !args.comment_id.trim()) {
+      throw new Error('comment_id is required')
+    }
+    if (typeof args.body !== 'string' || !args.body.trim()) throw new Error('body is required')
+    const r = await callControl('POST', '/reviews/replies', {
+      commentId: args.comment_id,
+      body: args.body
+    })
+    return 'Replied to ' + r.comment.file + ':' + r.comment.line + ' (' + r.comment.id + ')'
+  }
+  if (name === 'resolve_comment') {
+    if (!args || typeof args.comment_id !== 'string' || !args.comment_id.trim()) {
+      throw new Error('comment_id is required')
+    }
+    const r = await callControl('POST', '/reviews/resolve', {
+      commentId: args.comment_id,
+      resolved: args.resolved !== false
+    })
+    return (r.comment.status === 'resolved' ? 'Resolved ' : 'Reopened ') + r.comment.file + ':' + r.comment.line + ' (' + r.comment.id + ')'
+  }
+  if (name === 'submit_review') {
+    const verdicts = ['approve', 'changes-requested', 'comment']
+    if (!args || !verdicts.includes(args.verdict)) {
+      throw new Error('verdict must be "approve", "changes-requested", or "comment"')
+    }
+    const r = await callControl('POST', '/reviews/submit', {
+      verdict: args.verdict,
+      summary: typeof args.summary === 'string' ? args.summary : '',
+      briefing: typeof args.briefing === 'string' && args.briefing.trim() ? args.briefing : undefined,
+      tab: typeof args.tab === 'string' && args.tab.trim() ? args.tab.trim() : undefined
+    })
+    const what =
+      'Review submitted (' + args.verdict + ', ' + r.commentCount + ' open comment' + (r.commentCount === 1 ? '' : 's') + ')'
+    if (r.delivery && r.delivery.ok) {
+      return what + ' and delivered to tab ' + r.delivery.tabId + (r.delivery.woke ? ' (woke it)' : '') + '.'
+    }
+    if (r.delivery) {
+      return what + ' but NOT delivered: ' + r.delivery.error + '. It is saved in the Review tab as failed, where the user can retry.'
+    }
+    return (
+      what +
+      '. It is held as a draft in the Review tab for the user to check and send' +
+      (r.targetTabId ? ' (to tab ' + r.targetTabId + ')' : ' — there is no other Chat tab to send it to yet') +
+      '. Nothing more to do on your side.'
     )
   }
   if (name === 'list_browser_tabs') {

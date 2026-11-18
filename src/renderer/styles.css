@@ -80,18 +80,19 @@
 
 /* --- JSON-mode chat density tokens ---
  * The chat root carries data-chat-density="compact" | "comfy". Compact
- * (the default) matches the historical Tailwind utility values exactly,
- * so existing users see no change. Comfy bumps font sizes, padding, and
- * corner radius for newcomers / screen-sharing.
+ * is the default. Comfy bumps font sizes, padding, and corner radius for
+ * newcomers / screen-sharing.
  */
 [data-chat-density="compact"] {
   --chat-body-text: 0.875rem;       /* text-sm */
-  --chat-chrome-text: 0.6875rem;    /* text-[11px] */
+  --chat-chrome-text: 0.75rem;      /* text-xs */
   --chat-meta-text: 0.625rem;       /* text-[10px] */
   --chat-chrome-px: 0.5rem;         /* px-2 */
-  --chat-chrome-py: 0.25rem;        /* py-1 */
+  --chat-chrome-py: 0.375rem;       /* py-1.5 */
   --chat-bubble-max: 80%;
   --chat-bubble-radius: 0.375rem;   /* rounded-md */
+  --chat-prompt-radius: 0.75rem;    /* rounded-xl */
+  --chat-column-max: 52rem;
   --chat-tool-name-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 [data-chat-density="comfy"] {
@@ -99,9 +100,11 @@
   --chat-chrome-text: 0.875rem;     /* text-sm */
   --chat-meta-text: 0.75rem;        /* text-xs */
   --chat-chrome-px: 0.75rem;        /* px-3 */
-  --chat-chrome-py: 0.5rem;         /* py-2 */
+  --chat-chrome-py: 0.625rem;       /* py-2.5 */
   --chat-bubble-max: 90%;
   --chat-bubble-radius: 0.5rem;     /* rounded-lg */
+  --chat-prompt-radius: 1rem;       /* rounded-2xl */
+  --chat-column-max: 60rem;
   --chat-tool-name-family: inherit;
 }
 
@@ -408,6 +411,23 @@ mark.find-hit-current {
 }
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* Semantic node classes for mermaid diagrams (`A:::added`). Agents can't
+   see the theme, so instead of picking hex colors they name a meaning and
+   the theme supplies the color. !important because mermaid's own <style>
+   block is scoped by the svg's id and outranks a class selector. */
+.mermaid-diagram { --mm-tone: var(--color-accent); }
+.mermaid-diagram g.added { --mm-tone: var(--color-success); }
+.mermaid-diagram g.changed { --mm-tone: var(--color-warning); }
+.mermaid-diagram g.removed { --mm-tone: var(--color-danger); }
+.mermaid-diagram g.focus { --mm-tone: var(--color-accent); }
+.mermaid-diagram :is(g.added, g.changed, g.removed, g.focus) :is(rect, polygon, circle, ellipse, path) {
+  fill: color-mix(in srgb, var(--mm-tone) 22%, var(--color-panel)) !important;
+  stroke: var(--mm-tone) !important;
+}
+.mermaid-diagram g.removed :is(.nodeLabel, text) {
+  text-decoration: line-through;
 }
 
 /* Markdown rendering for json-claude assistant text. The global preflight

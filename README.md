@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ness-dev/ness/stargazers">
+  <a href="https://github.com/ness-dev/ness">
     <img src="https://img.shields.io/github/stars/ness-dev/ness?style=for-the-badge&logo=github&logoColor=white&color=f59e0b&labelColor=18181b&label=Please%20star%20us%20on%20GitHub" alt="Please star us on GitHub" />
   </a>
   <a href="https://join.slack.com/t/harness-chat/shared_invite/zt-43w6xg34i-mGXrSEKVO0wGC7r_SiePwA">
@@ -48,8 +48,8 @@
 
 Grab the latest release from the [releases page](https://github.com/ness-dev/ness/releases/latest).
 
-- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.17.0-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.17.0/Ness-2.17.0-arm64.dmg)
-- **Intel Mac:** [Ness-2.17.0.dmg](https://github.com/ness-dev/ness/releases/download/v2.17.0/Ness-2.17.0.dmg)
+- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.18.1-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.1/Ness-2.18.1-arm64.dmg)
+- **Intel Mac:** [Ness-2.18.1.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.1/Ness-2.18.1.dmg)
 
 ## Installation
 
@@ -138,6 +138,8 @@ Re-running the install script bumps the version. The server never self-updates. 
 Once `harness-server` is running on a remote machine, you can drive it from your local Electron Ness alongside the local backend. Open the Ness sidebar's backend chip strip (or `File → Add Backend…`), paste the connection link the host's Settings shows (`http://host:port/?token=...`), and click "Test & save". The link's the same one the browser web client uses; Ness parses out the token, validates the connection, and persists the backend.
 
 Once added, the chip appears at the bottom of the sidebar. Click to switch — `Cmd+Shift+1..9` jumps directly to the Nth backend (Local is always 1). Each backend has its own worktrees, terminals, browser tabs, and settings; switching changes which backend's UI is rendered, and inactive backends keep streaming so notifications still work. The connections list is encrypted (tokens in `secrets.enc`) and persists across restarts.
+
+If you're developing remote/multi-backend features rather than using them, `npm run remote:up` runs a server built from your working tree in a container, so you don't need a real remote box — see [Testing a remote backend in Docker](CONTRIBUTING.md#testing-a-remote-backend-in-docker).
 
 ## Uninstallation
 

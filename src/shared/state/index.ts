@@ -145,6 +145,30 @@ import {
   type AliasesEvent,
   type AliasesState
 } from './aliases'
+import {
+  initialReviews,
+  reviewsReducer,
+  type ReviewsEvent,
+  type ReviewsState
+} from './reviews'
+import {
+  initialSubscriptions,
+  subscriptionsReducer,
+  type SubscriptionsEvent,
+  type SubscriptionsState
+} from './subscriptions'
+import {
+  initialOrigins,
+  originsReducer,
+  type OriginsEvent,
+  type OriginsState
+} from './origins'
+import {
+  initialNotifications,
+  notificationsReducer,
+  type NotificationsEvent,
+  type NotificationsState
+} from './notifications'
 
 export type { SettingsState, SettingsEvent }
 export type { UpdaterState, UpdaterEvent, UpdaterStatus } from './updater'
@@ -244,6 +268,25 @@ export type { AssignedPRsState, AssignedPRsEvent, AssignedPR } from './assigned-
 export type { ConfigHealthState, ConfigLoadError } from './config-health'
 export type { AliasesState, AliasesEvent } from './aliases'
 export type {
+  ReviewsState,
+  ReviewsEvent,
+  ReviewComment,
+  ReviewReply,
+  ReviewAuthor,
+  ReviewAnchor,
+  ReviewSide,
+  ReviewCommentStatus,
+  ReviewAnchorUpdate,
+  WorktreeReview
+} from './reviews'
+export type {
+  SubscriptionsState,
+  SubscriptionsEvent,
+  WorktreeSubscription
+} from './subscriptions'
+export type { OriginsState, OriginsEvent, WorktreeOrigin } from './origins'
+export type { NotificationsState, NotificationsEvent, PendingNotice } from './notifications'
+export type {
   PermissionsState,
   PermissionsEvent,
   PermissionRule,
@@ -279,6 +322,10 @@ export interface AppState {
   aliases: AliasesState
   permissions: PermissionsState
   copyDrafts: CopyDraftsState
+  reviews: ReviewsState
+  subscriptions: SubscriptionsState
+  origins: OriginsState
+  notifications: NotificationsState
 }
 
 export type StateEvent =
@@ -304,6 +351,10 @@ export type StateEvent =
   | AliasesEvent
   | PermissionsEvent
   | CopyDraftsEvent
+  | ReviewsEvent
+  | SubscriptionsEvent
+  | OriginsEvent
+  | NotificationsEvent
 
 export const initialState: AppState = {
   settings: initialSettings,
@@ -328,7 +379,11 @@ export const initialState: AppState = {
   configHealth: initialConfigHealth,
   aliases: initialAliases,
   permissions: initialPermissions,
-  copyDrafts: initialCopyDrafts
+  copyDrafts: initialCopyDrafts,
+  reviews: initialReviews,
+  subscriptions: initialSubscriptions,
+  origins: initialOrigins,
+  notifications: initialNotifications
 }
 
 export function rootReducer(state: AppState, event: StateEvent): AppState {
@@ -452,6 +507,30 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       copyDrafts: copyDraftsReducer(state.copyDrafts, event as CopyDraftsEvent)
     }
   }
+  if (event.type.startsWith('reviews/')) {
+    return {
+      ...state,
+      reviews: reviewsReducer(state.reviews, event as ReviewsEvent)
+    }
+  }
+  if (event.type.startsWith('subscriptions/')) {
+    return {
+      ...state,
+      subscriptions: subscriptionsReducer(state.subscriptions, event as SubscriptionsEvent)
+    }
+  }
+  if (event.type.startsWith('origins/')) {
+    return {
+      ...state,
+      origins: originsReducer(state.origins, event as OriginsEvent)
+    }
+  }
+  if (event.type.startsWith('notifications/')) {
+    return {
+      ...state,
+      notifications: notificationsReducer(state.notifications, event as NotificationsEvent)
+    }
+  }
   // configHealth has no events — it's seeded at construction only (see
   // config-health.ts), so there's no reducer branch. The field flows through
   // unchanged via the `...state` spreads above.
@@ -508,7 +587,11 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     configHealth: { ...initialState.configHealth, ...state.configHealth },
     aliases: { ...initialState.aliases, ...state.aliases },
     permissions: { ...initialState.permissions, ...state.permissions },
-    copyDrafts: { ...initialState.copyDrafts, ...state.copyDrafts }
+    copyDrafts: { ...initialState.copyDrafts, ...state.copyDrafts },
+    reviews: { ...initialState.reviews, ...state.reviews },
+    subscriptions: { ...initialState.subscriptions, ...state.subscriptions },
+    origins: { ...initialState.origins, ...state.origins },
+    notifications: { ...initialState.notifications, ...state.notifications }
   }
 }
 

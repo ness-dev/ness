@@ -26,6 +26,51 @@ npm run dev
 
 The `--legacy-peer-deps` flag is required because of an `electron-vite@5` peer range.
 
+## Testing a remote backend in Docker
+
+Remote / multi-backend work (the WebSocket transport, the backend chip strip, the web client, SSH bootstrap) needs a `harness-server` to point at. Rather than deploying to a real box on every change, run one in a container:
+
+```sh
+npm run remote:up
+```
+
+That builds the headless server **from your working tree**, starts it, waits for it to answer, and prints a connect URL. Paste the URL into the sidebar's backend chip strip (`+`) or `File → Add Backend…` and click "Test & save" — or just open it in a browser to get the web client. The port and token are fixed, so the URL is stable across rebuilds and can be bookmarked or handed to an agent:
+
+```
+http://127.0.0.1:37291/?token=ness-dev-token
+```
+
+| Command | What it does |
+|---|---|
+| `npm run remote:up` | Build (cached), start, print the connect URL |
+| `npm run remote:logs` | Follow the server log |
+| `npm run remote:shell` | Shell inside the container |
+| `npm run remote:restart` | Restart the server without rebuilding |
+| `npm run remote:down` | Stop it; volumes (auth, workspace) kept |
+| `npm run remote:reset` | Stop it and discard auth + workspace |
+| `npm run remote:status` / `remote:url` | Is it up / what's the URL |
+
+The iteration loop is `edit → npm run remote:up → reconnect`. The dependency layer is keyed on `package-lock.json`, so a source-only change re-runs just the bundle step.
+
+**Agent auth.** Chat tabs need Claude credentials. `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are passed through from your host environment when set. Otherwise authenticate once inside the container — it persists in a volume across restarts and rebuilds:
+
+```sh
+npm run remote:shell
+claude   # then /login
+```
+
+To share your host credentials instead and skip that entirely, `npm run remote:up -- --host-claude`. Read the warning at the top of `docker/compose.host-claude.yaml` first: it read-write bind-mounts your real `~/.claude.json`, so container agents write into the same session history and MCP config your host Claude Code uses.
+
+**The workspace.** The server needs at least one repo to manage, so the entrypoint seeds a throwaway `sample-app` git repo and registers it as a repo root. Point it at something real with `NESS_CLONE_URL`:
+
+```sh
+NESS_CLONE_URL=https://github.com/ness-dev/ness.git npm run remote:up
+```
+
+**What this does and doesn't cover.** It's a glibc Linux backend running the same `src/main` code a real remote runs, so transport, state-sync, PTY, worktree and agent behaviour are all exercised for real — including the Linux-only paths you can't hit from macOS. It is **not** testing the shipping artifact: the image builds from source rather than installing a release tarball, so the tarball layout, the embedded Node binary and `install-headless.sh` aren't in the loop. For those, run `npm run pack:headless` inside the container (`npm run remote:shell`) and install the result, or lean on the headless smoke test in CI. Browser tabs also need a Chromium the image doesn't ship — set `HARNESS_PLAYWRIGHT_BROWSER` to one you install yourself.
+
+Everything is loopback-only (`127.0.0.1:37291`) because the default token is fixed and well-known. Don't publish the port to a LAN; set `NESS_REMOTE_TOKEN` and bind deliberately if you need to.
+
 ## How to edit code in this codebase
 
 Honestly - every single line of code in this codebase is written by claude. (at least all the lines I wrote). So I highly recommend using claude code to make changes (I keep Ness itself open at all times)

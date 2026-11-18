@@ -1,3 +1,4 @@
+import { getAgentInfo } from '../agent-registry'
 export type PtyStatus = 'idle' | 'processing' | 'waiting' | 'needs-approval'
 
 export interface PendingTool {
@@ -28,6 +29,14 @@ export interface TerminalTab {
    *  with an empty string via terminals/tabRenamed — the reducer drops
    *  the field rather than persisting "". */
   customLabel?: string
+  /** Provenance of the current `customLabel`, present ONLY when an agent
+   *  set it via the set_tab_name MCP tool. The polarity is deliberate:
+   *  a `customLabel` with no source marker means the user typed it, so
+   *  every label persisted before this field existed reads as user-set
+   *  and locks the agent out — the right default, with no migration.
+   *  Clearing the name (the "Reset Name" path) drops both fields, which
+   *  re-opens agent naming. */
+  customLabelSource?: 'agent'
   /** Meaningful for json-claude and shell tabs. 'asleep' means no live
    *  subprocess; the tab still exists in the tree and its session
    *  history (in the jsonClaude slice + on-disk jsonl for json-claude,
@@ -35,7 +44,8 @@ export interface TerminalTab {
    *  hydrate as 'asleep' so app launch doesn't construct an xterm or
    *  spawn a subprocess per tab; they wake on first focus. */
   mode?: 'awake' | 'asleep'
-  /** For agent tabs: which CLI agent this tab runs. */
+  /** For agent and json-claude tabs: which CLI agent this tab runs.
+   *  Missing means Claude. */
   agentKind?: AgentKind
   /** For agent + json-claude tabs: override the model resolved from
    *  settings (claudeModel/codexModel). Set when a worktree was spawned
@@ -52,6 +62,13 @@ export interface TerminalTab {
   commitHash?: string
   /** For agent tabs: UUID passed to the agent CLI so the tab resumes its own session. */
   sessionId?: string
+  /** For a reviewer Chat tab opened by `request_review`: the tab that
+   *  asked for the review. Its submitted review is delivered back there,
+   *  so routing doesn't fall back to guessing the most recent tab. */
+  reviewOf?: string
+  /** For json-claude tabs whose agent assigns its own conversation ids
+   *  (Codex threads): that id. The tab id and sessionId stay Ness's. */
+  providerSessionId?: string
   /** For agent tabs: one-shot kickoff prompt. In-memory only — main strips it before persistence. */
   initialPrompt?: string
   /** For agent tabs: one-shot teleport session id. In-memory only — main strips it before persistence. */
@@ -142,13 +159,29 @@ export function findTabById(
  *  existed, and the default in PanesFSM.addTab. */
 export function isClaudeBackedTab(tab: TerminalTab | null | undefined): boolean {
   if (!tab) return false
-  if (tab.type === 'json-claude') return true
-  return tab.type === 'agent' && (tab.agentKind ?? 'claude') === 'claude'
+  if (tab.type !== 'agent' && tab.type !== 'json-claude') return false
+  return (tab.agentKind ?? 'claude') === 'claude'
 }
 
 export function hasAnyTabs(node: PaneNode): boolean {
   if (node.type === 'leaf') return node.tabs.length > 0
   return hasAnyTabs(node.children[0]) || hasAnyTabs(node.children[1])
+}
+
+/** Maximum stored tab label length (code units). A tab strip is far
+ *  narrower than the sidebar, so this is much tighter than
+ *  ALIAS_MAX_LEN — "a few words", not a sentence. */
+export const TAB_LABEL_MAX_LEN = 32
+
+/** Trim and clamp an agent-supplied tab label to the storage shape.
+ *  Returns `null` for empty-after-trim, which callers should reject
+ *  rather than dispatch — an empty label means "reset", and only the
+ *  user gets to do that. Deliberately NOT applied to the user's typed
+ *  input: the rename UI has always stored whatever was typed, and
+ *  clamping it here would silently change that behavior. */
+export function normalizeTabLabel(input: string): string | null {
+  const trimmed = input.trim().slice(0, TAB_LABEL_MAX_LEN).trim()
+  return trimmed ? trimmed : null
 }
 
 export function mapLeaves(node: PaneNode, fn: (leaf: PaneLeaf) => PaneLeaf): PaneNode {
@@ -307,6 +340,10 @@ export type TerminalsEvent =
       }
     }
   | {
+      type: 'terminals/tabProviderSessionIdChanged'
+      payload: { worktreePath: string; tabId: string; providerSessionId: string }
+    }
+  | {
       type: 'terminals/tabSlept'
       payload: { worktreePath: string; tabId: string }
     }
@@ -316,7 +353,14 @@ export type TerminalsEvent =
     }
   | {
       type: 'terminals/tabRenamed'
-      payload: { worktreePath: string; tabId: string; label: string }
+      payload: {
+        worktreePath: string
+        tabId: string
+        label: string
+        /** Who asked. 'user' always wins and marks the name final;
+         *  'agent' is refused outright once a user-set name exists. */
+        source: 'user' | 'agent'
+      }
     }
   | {
       type: 'terminals/tabModelChanged'
@@ -609,26 +653,65 @@ export function terminalsReducer(
           // --resume picks it up after the swap. Carry it across either
           // way, generating one if the source tab somehow lacked it.
           const sessionId = t.sessionId ?? newId
+          const agentKind = t.agentKind ?? 'claude'
+          // Both branches rebuild the tab from scratch, so anything that
+          // should survive the swap has to be carried explicitly. The
+          // name is one of those: it describes the work, not the tab
+          // type, and silently dropping a user-set one would also
+          // unlock agent naming on the other side.
+          const name = t.customLabel
+            ? {
+                customLabel: t.customLabel,
+                ...(t.customLabelSource ? { customLabelSource: t.customLabelSource } : {})
+              }
+            : {}
           changed = true
           if (newType === 'json-claude') {
+            // An agent that assigns its own ids (Codex) put its own id in
+            // the terminal tab's sessionId; the chat side keeps it as the
+            // provider id so it resumes the same conversation.
+            const ownIds = !getAgentInfo(agentKind).assignsSessionId
             return {
               id: newId,
               type: 'json-claude' as const,
               label: newLabel,
               sessionId,
-              mode: 'awake' as const
+              mode: 'awake' as const,
+              ...name,
+              ...(agentKind !== 'claude' ? { agentKind } : {}),
+              ...(ownIds && t.sessionId ? { providerSessionId: t.sessionId } : {})
             }
           }
           return {
             id: newId,
             type: 'agent' as const,
-            agentKind: 'claude' as const,
+            agentKind,
             label: newLabel,
-            sessionId
+            ...name,
+            sessionId: t.providerSessionId ?? sessionId
           }
         })
         const activeTabId = leaf.activeTabId === tabId ? newId : leaf.activeTabId
         return { ...leaf, tabs, activeTabId }
+      })
+      if (!changed) return state
+      return { ...state, panes: { ...state.panes, [worktreePath]: updated } }
+    }
+    case 'terminals/tabProviderSessionIdChanged': {
+      const { worktreePath, tabId, providerSessionId } = event.payload
+      const tree = state.panes[worktreePath]
+      if (!tree) return state
+      let changed = false
+      const updated = mapLeaves(tree, (leaf) => {
+        const i = leaf.tabs.findIndex((t) => t.id === tabId)
+        if (i === -1 || leaf.tabs[i].providerSessionId === providerSessionId) return leaf
+        changed = true
+        const tabs = [
+          ...leaf.tabs.slice(0, i),
+          { ...leaf.tabs[i], providerSessionId },
+          ...leaf.tabs.slice(i + 1)
+        ]
+        return { ...leaf, tabs }
       })
       if (!changed) return state
       return { ...state, panes: { ...state.panes, [worktreePath]: updated } }
@@ -660,7 +743,7 @@ export function terminalsReducer(
       return { ...state, panes: { ...state.panes, [worktreePath]: updated } }
     }
     case 'terminals/tabRenamed': {
-      const { worktreePath, tabId, label } = event.payload
+      const { worktreePath, tabId, label, source } = event.payload
       const tree = state.panes[worktreePath]
       if (!tree) return state
       const trimmed = label.trim()
@@ -669,27 +752,38 @@ export function terminalsReducer(
         const i = leaf.tabs.findIndex((t) => t.id === tabId)
         if (i === -1) return leaf
         const tab = leaf.tabs[i]
-        const current = tab.customLabel
-        if (trimmed === '') {
-          if (current === undefined) return leaf
-          const { customLabel: _dropped, ...rest } = tab
-          void _dropped
+        const swap = (patched: TerminalTab): PaneLeaf => {
           mutated = true
           return {
             ...leaf,
-            tabs: [...leaf.tabs.slice(0, i), rest as TerminalTab, ...leaf.tabs.slice(i + 1)]
+            tabs: [...leaf.tabs.slice(0, i), patched, ...leaf.tabs.slice(i + 1)]
           }
         }
-        if (current === trimmed) return leaf
-        mutated = true
-        return {
-          ...leaf,
-          tabs: [
-            ...leaf.tabs.slice(0, i),
-            { ...tab, customLabel: trimmed },
-            ...leaf.tabs.slice(i + 1)
-          ]
+        // A name the user typed is final: refuse the agent rather than
+        // let it churn. Absence of the marker is what identifies a
+        // user-set name — see TerminalTab.customLabelSource.
+        if (
+          source === 'agent' &&
+          tab.customLabel !== undefined &&
+          tab.customLabelSource !== 'agent'
+        ) {
+          return leaf
         }
+        if (trimmed === '') {
+          if (tab.customLabel === undefined && tab.customLabelSource === undefined) return leaf
+          const { customLabel: _label, customLabelSource: _source, ...rest } = tab
+          void _label
+          void _source
+          return swap(rest as TerminalTab)
+        }
+        if (source === 'agent') {
+          if (tab.customLabel === trimmed && tab.customLabelSource === 'agent') return leaf
+          return swap({ ...tab, customLabel: trimmed, customLabelSource: 'agent' })
+        }
+        if (tab.customLabel === trimmed && tab.customLabelSource === undefined) return leaf
+        const { customLabelSource: _source, ...rest } = tab
+        void _source
+        return swap({ ...rest, customLabel: trimmed } as TerminalTab)
       })
       if (!mutated) return state
       return { ...state, panes: { ...state.panes, [worktreePath]: updated } }

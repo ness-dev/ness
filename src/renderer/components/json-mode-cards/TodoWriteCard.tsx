@@ -10,7 +10,6 @@ export function TodoWriteCard({ block, autoApproved, sessionAllowed }: ToolCardP
       id={block.id}
       name="TodoWrite"
       subtitle={`${todos.length} item${todos.length === 1 ? '' : 's'}`}
-      variant="info"
       icon={TodoIcon}
       autoApproved={autoApproved}
       sessionAllowed={sessionAllowed}

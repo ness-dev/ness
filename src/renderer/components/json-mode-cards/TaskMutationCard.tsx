@@ -62,7 +62,7 @@ export function TaskMutationCard({
       id={block.id}
       name={isCreate ? 'TaskCreate' : 'TaskUpdate'}
       subtitle={label ? `#${label}` : undefined}
-      variant={result?.isError ? 'warn' : 'info'}
+      isError={result?.isError}
       icon={TodoIcon}
       autoApproved={autoApproved}
       sessionAllowed={sessionAllowed}

@@ -1,15 +1,23 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { Brain } from 'lucide-react'
-import { getToolAction, getToolDisplay, isNessControl } from './index'
+import { getToolAction, getToolDisplay } from './index'
 import {
   buildTimeline,
   summarizeTools,
   type TimelineRow
 } from './tool-timeline'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
+import {
+  CHAT_ROW_CLASS,
+  CHAT_ROW_STYLE,
+  ChatRowChildren,
+  Chevron
+} from './ChatRow'
 
 export interface ToolGroupRow extends TimelineRow {
   node: ReactNode
+  /** See getToolIntent — the provider's label for the call. */
+  toolIntent?: string
   hasPendingApproval?: boolean
 }
 
@@ -23,7 +31,7 @@ const MAX_TIMELINE_STEPS = 14
  *  thumbnails for the steps that produced a screenshot, tool icons for
  *  everything in between — so a browser session reads as
  *  `[shot] click scroll type [shot]` without expanding anything. */
-function ToolTimeline({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
+export function ToolTimeline({ rows }: { rows: TimelineRow[] }): JSX.Element {
   const steps = buildTimeline(rows)
   const shown = steps.slice(0, MAX_TIMELINE_STEPS)
   const moreCount = steps.length - shown.length
@@ -98,11 +106,6 @@ function ToolTimeline({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
 export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   const hasError = rows.some((r) => r.hasError)
   const hasPending = rows.some((r) => r.hasPendingApproval)
-  // Brand styling only fires when an actual ness-control tool is in
-  // the group — thinking rows shouldn't trigger the gold gradient.
-  const anyBrand = rows.some(
-    (r) => !r.isThinking && isNessControl(r.toolName)
-  )
   // Auto-expand only for pending approvals — they need user action.
   // Errors get a header badge but stay collapsed; user can drill in.
   // Screenshots used to force-expand too, which meant any group
@@ -133,16 +136,23 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
   // "N more calls" remainder is vague on its own.
   const showChips = !showTimeline && !allNamed
 
-  const displays = toolRows.map((r) => getToolDisplay(r.toolName))
+  // A chip reads as the model's stated intent when the tool carries one
+  // ("Run typecheck" beats "Bash"); the icon still says which tool.
+  const displays = toolRows.map((r) => {
+    const d = getToolDisplay(r.toolName)
+    return { icon: d.icon, text: r.toolIntent ?? d.compactLabel }
+  })
   const visibleDisplays = displays.slice(0, 6)
   const moreCount = displays.length - 6
   const summary = (
     <>
       {visibleDisplays.map((d, i) => (
         <Fragment key={i}>
-          {i > 0 && <span className="opacity-40">·</span>}
+          {i > 0 && <span className="opacity-40 shrink-0">·</span>}
           {d.icon && <d.icon className="icon-xs shrink-0" />}
-          <span>{d.compactLabel}</span>
+          <span className="truncate shrink-0 max-w-[16rem]" title={d.text}>
+            {d.text}
+          </span>
         </Fragment>
       ))}
       {moreCount > 0 && (
@@ -163,39 +173,24 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
     .join(' · ')
 
   return (
-    <div
-      className={`my-2 border ${anyBrand ? 'border-warning/30' : 'border-border/60'} bg-app/30 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
-    >
-      {anyBrand && <div className="brand-gradient-bg h-0.5" />}
+    <div>
       <button
         type="button"
         onClick={() => setUserChoice(!expanded)}
-        className={`${anyBrand ? 'group' : ''} w-full flex items-center gap-2 cursor-pointer hover:bg-app/60 transition-colors text-left`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {expanded ? '▾' : '▸'}
-        </span>
-        {thinkingCount > 0 && (
-          <Brain className="icon-xs text-muted shrink-0" />
-        )}
-        <span
-          className={`shrink-0 ${anyBrand ? 'brand-gradient-text brand-gradient-flow-text-hover' : 'text-muted'}`}
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          {countLabel}
-        </span>
+        <Chevron open={expanded} />
+        {thinkingCount > 0 && <Brain className="icon-xs shrink-0" />}
+        <span className="shrink-0">{countLabel}</span>
         {/* Stays in the tree even when empty — it's the flex-1 spacer
             that keeps the badges on the right from shifting as chips
             come and go. */}
         <span
-          className="opacity-60 truncate flex-1 min-w-0 flex items-center gap-1.5"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+          className="opacity-70 overflow-hidden whitespace-nowrap flex-1 min-w-0 flex items-center gap-1.5"
+          style={{
+            maskImage: 'linear-gradient(to right, black calc(100% - 2rem), transparent)'
+          }}
         >
           {showChips ? summary : null}
         </span>
@@ -216,13 +211,17 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
           </span>
         )}
       </button>
-      {showTimeline && <ToolTimeline rows={rows} />}
+      {showTimeline && (
+        <div className="pt-1 -mx-2">
+          <ToolTimeline rows={rows} />
+        </div>
+      )}
       {expanded && (
-        <div className="px-2">
+        <ChatRowChildren>
           {rows.map((r) => (
             <div key={r.key}>{r.node}</div>
           ))}
-        </div>
+        </ChatRowChildren>
       )}
     </div>
   )

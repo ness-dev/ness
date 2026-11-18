@@ -13,6 +13,7 @@ import {
 } from '@dnd-kit/core'
 import type { PaneNode, PaneLeaf, PaneSplit, AgentKind } from '../types'
 import { getLeaves, findLeafByTabId } from '../../shared/state/terminals'
+import { supportsChat } from '../../shared/agent-registry'
 import { TerminalPanel } from './TerminalPanel'
 import { XTerminal } from './XTerminal'
 import { DiffView } from './DiffView'
@@ -50,7 +51,7 @@ interface WorkspaceViewProps {
   onRestartAgentTab: (worktreePath: string, tabId: string) => void
   onReorderTabs: (worktreePath: string, paneId: string, fromId: string, toId: string) => void
   onMoveTabToPane: (worktreePath: string, tabId: string, toPaneId: string, toIndex?: number) => void
-  onSendToAgent?: (worktreePath: string, text: string) => void
+  onSendToAgent?: (worktreePath: string, text: string, targetTabId?: string) => void
   /** Leading padding for the leftmost leaf's tab bar so it clears the macOS
    *  traffic lights when no sidebar sits to the left of the workspace. */
   topBarLeadingPx?: number
@@ -585,6 +586,7 @@ function WorkspaceViewInner({
                     sessionId={tab.id}
                     worktreePath={worktreePath}
                     mode={tab.mode ?? 'awake'}
+                    showSubagents={visible && isActiveInPane}
                   />
                 ) : tab.type === 'shell' && (tab.mode ?? 'awake') === 'asleep' ? (
                   // Skip XTerminal entirely while asleep — its mount
@@ -603,7 +605,7 @@ function WorkspaceViewInner({
                     toCommit={tab.reviewToCommit}
                     onSendToAgent={
                       onSendToAgent
-                        ? (text) => onSendToAgent(worktreePath, text)
+                        ? (text, targetTabId) => onSendToAgent(worktreePath, text, targetTabId)
                         : undefined
                     }
                   />
@@ -626,7 +628,7 @@ function WorkspaceViewInner({
                         : undefined
                     }
                     onSwitchToChat={
-                      tab.type === 'agent' && tab.agentKind === 'claude' && onConvertTabType
+                      tab.type === 'agent' && supportsChat(tab.agentKind) && onConvertTabType
                         ? (): void => onConvertTabType(worktreePath, tab.id, 'json-claude')
                         : undefined
                     }

@@ -1,3 +1,5 @@
+// The Claude ChatProvider (see chat-provider.ts).
+//
 // Runs `claude -p --input-format stream-json --output-format stream-json`
 // as a long-lived subprocess per json-claude tab. Mirrors PtyManager's
 // lifecycle shape (create / send / kill / killAll) and dispatches state
@@ -9,18 +11,19 @@
 // MCP server is the bundled out/main/permission-prompt-mcp.js (see
 // ApprovalBridge for the socket side of that).
 //
-// Memory isolation: Claude Code's auto-memory subsystem writes to
-// ~/.claude/projects/<cwd-encoded>/memory/ by default. Running this as a
-// child process would pollute the user's personal memory dir with
-// conversations they didn't have in their "real" Claude Code sessions.
-// We redirect that by setting CLAUDE_CONFIG_DIR to a per-session temp
-// dir so all project-dir-derived reads and writes land there instead.
+// Environment: the bundled binary is spawned without a login shell, so
+// the subprocess env is the one captured from the worktree's shell
+// (claude-env.ts) rather than Ness's own — that is what makes a
+// folder-scoped CLAUDE_CONFIG_DIR (mise) apply to chat tabs the
+// same way it applies to terminal tabs. Transcript paths resolve
+// through the same capture. Auto-memory is disabled per session via
+// CLAUDE_CODE_DISABLE_AUTO_MEMORY so chat tabs don't scribble into the
+// user's project memory.
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
-import { homedir } from 'os'
 import { dirname, join, sep } from 'path'
 import { isPackaged, resolveBundledMcpScript } from './paths'
 import type { Store } from './store'
@@ -31,12 +34,21 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { parseUserTurn } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
+import type {
+  ChatImageInput,
+  ChatProvider,
+  ForkIntoWorktreeParams,
+  ForkOutcome,
+  RewindOutcome
+} from './chat-provider'
+import { nessControlMcpServer } from './ness-control-mcp'
 import { shellQuote } from './shell-quote'
 import { resolveUserShell, loginShellCommandArgs } from './user-shell'
+import { cachedShellEnv, claudeProjectsDirFor } from './claude-env'
 
 interface JsonClaudeInstance {
   proc: ChildProcessWithoutNullStreams
@@ -189,9 +201,7 @@ export function bundledClaudeBinPath(): string {
 
 function transcriptPathFor(sessionId: string, worktreePath: string): string {
   return join(
-    homedir(),
-    '.claude',
-    'projects',
+    claudeProjectsDirFor(worktreePath),
     worktreePath.replace(/[^a-zA-Z0-9]/g, '-'),
     `${sessionId}.jsonl`
   )
@@ -204,17 +214,6 @@ function transcriptPathFor(sessionId: string, worktreePath: string): string {
  *  the caller an empty chat. */
 export function hasForkableTranscript(sessionId: string, worktreePath: string): boolean {
   return existsSync(transcriptPathFor(sessionId, worktreePath))
-}
-
-export interface RewindOutcome {
-  ok: boolean
-  reason?: string
-}
-
-export interface ForkOutcome {
-  ok: boolean
-  newSessionId?: string
-  reason?: string
 }
 
 export interface ForkTranscriptParams {
@@ -335,7 +334,7 @@ export function forkTranscript(params: ForkTranscriptParams): ForkOutcome {
   return { ok: true, newSessionId }
 }
 
-export class JsonClaudeManager {
+export class JsonClaudeManager implements ChatProvider {
   private instances = new Map<string, JsonClaudeInstance>()
   private store: Store
   private opts: JsonClaudeManagerOptions
@@ -361,6 +360,20 @@ export class JsonClaudeManager {
 
   hasSession(sessionId: string): boolean {
     return this.instances.has(sessionId)
+  }
+
+  transcriptPath(sessionId: string, worktreePath: string): string {
+    return transcriptPathFor(sessionId, worktreePath)
+  }
+
+  canForkIntoWorktree(sessionId: string, worktreePath: string): boolean {
+    return hasForkableTranscript(sessionId, worktreePath)
+  }
+
+  /** Copies the transcript into the destination's project dir under a new
+   *  session id; the new tab's `--resume` picks it up from there. */
+  forkIntoWorktree(params: ForkIntoWorktreeParams): ForkOutcome {
+    return forkTranscript(params)
   }
 
   /** Mint the next chat entry id for a session. `kind` distinguishes the
@@ -433,6 +446,14 @@ export class JsonClaudeManager {
         continue
       }
       const type = parsed['type']
+      // When the line was written, not when we replay it — a turn's
+      // elapsed time is read off these, and stamping them all at parse
+      // time made every reloaded turn look instant.
+      const parsedTs =
+        typeof parsed['timestamp'] === 'string'
+          ? Date.parse(parsed['timestamp'] as string)
+          : NaN
+      const lineTs = Number.isFinite(parsedTs) ? parsedTs : Date.now()
       // The session jsonl contains the same user/assistant message
       // shapes the live stream emits, plus internal bookkeeping types
       // (queue-operation, attachment, ai-title, last-prompt) we ignore.
@@ -460,14 +481,12 @@ export class JsonClaudeManager {
           ) {
             continue
           }
-          const automated = parseAutomatedMessage(content)
+          const turn = parseUserTurn(content)
           seededEntries.push({
             kind: 'user',
-            text: automated ? automated.body : content,
-            timestamp: Date.now(),
+            ...turn,
+            timestamp: lineTs,
             entryId: `${sessionId}-seed-u-${counter++}`,
-            ...(automated ? { automation: automated.source } : {}),
-            ...(automated?.from ? { automationFrom: automated.from } : {}),
             ...(transcriptUuid ? { transcriptUuid } : {})
           })
         } else if (Array.isArray(content)) {
@@ -475,7 +494,7 @@ export class JsonClaudeManager {
             seededEntries.push({
               entryId: `${sessionId}-tr-${r.toolUseId}-${seededEntries.length}`,
               kind: 'tool_result',
-              timestamp: Date.now(),
+              timestamp: lineTs,
               ...(transcriptUuid ? { transcriptUuid } : {}),
               blocks: [
                 {
@@ -506,7 +525,7 @@ export class JsonClaudeManager {
         seededEntries.push({
           kind: 'assistant',
           blocks,
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-a-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(apiMessageId ? { apiMessageId } : {}),
@@ -528,14 +547,12 @@ export class JsonClaudeManager {
         if (attachment?.type !== 'queued_command') continue
         const prompt = attachment.prompt
         if (typeof prompt !== 'string' || prompt.length === 0) continue
-        const automated = parseAutomatedMessage(prompt)
+        const turn = parseUserTurn(prompt)
         seededEntries.push({
           kind: 'user',
-          text: automated ? automated.body : prompt,
-          timestamp: Date.now(),
+          ...turn,
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-u-${counter++}`,
-          ...(automated ? { automation: automated.source } : {}),
-          ...(automated?.from ? { automationFrom: automated.from } : {}),
           ...(transcriptUuid ? { transcriptUuid } : {})
         })
       } else if (type === 'system' && parsed['subtype'] === 'compact_boundary') {
@@ -552,7 +569,7 @@ export class JsonClaudeManager {
           typeof meta?.postTokens === 'number' ? meta.postTokens : undefined
         seededEntries.push({
           kind: 'compact',
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-c-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(trigger ? { compactTrigger: trigger } : {}),
@@ -628,26 +645,12 @@ export class JsonClaudeManager {
     if (this.opts.isHarnessMcpEnabled()) {
       const controlInfo = this.opts.getControlServer()
       if (controlInfo) {
-        const scope = this.opts.getCallerScope(sessionId)
-        const controlEnv: Record<string, string> = {
-          ELECTRON_RUN_AS_NODE: '1',
-          HARNESS_PORT: String(controlInfo.port),
-          HARNESS_TOKEN: controlInfo.token,
-          // The bridge keys every control-server call by terminal id —
-          // for json-claude tabs the tab id IS the session id.
-          HARNESS_TERMINAL_ID: sessionId,
-          HARNESS_SESSION_ID: sessionId
-        }
-        if (scope) {
-          controlEnv.HARNESS_WORKTREE_ID = scope.worktreePath
-          controlEnv.HARNESS_REPO_ROOT = scope.repoRoot
-          if (scope.isMain) controlEnv.HARNESS_IS_MAIN = '1'
-        }
-        mcpServers['ness-control'] = {
-          command: process.execPath,
-          args: [this.opts.getControlBridgeScriptPath()],
-          env: controlEnv
-        }
+        mcpServers['ness-control'] = nessControlMcpServer({
+          sessionId,
+          controlServer: controlInfo,
+          bridgeScriptPath: this.opts.getControlBridgeScriptPath(),
+          scope: this.opts.getCallerScope(sessionId)
+        })
       }
     }
     const mcpConfig = { mcpServers }
@@ -699,12 +702,15 @@ export class JsonClaudeManager {
     )
 
     const envVars = this.opts.getClaudeEnvVars() || {}
-    // Build env for the subprocess. We start from process.env, scrub
-    // env vars that the user-scope Ness hooks key off of so the
-    // subprocess's hook firings don't masquerade as the parent agent
-    // tab, then layer on json-claude-specific vars.
+    // Build env for the subprocess. The bundled binary is spawned without
+    // a login shell, so start from the env a shell would produce in this
+    // worktree (folder-scoped CLAUDE_CONFIG_DIR, mise PATH, …) the
+    // way a terminal tab's `zsh -ilc` does — falling back to process.env
+    // when no capture exists yet. Scrub env vars that the user-scope Ness
+    // hooks key off of so the subprocess's hook firings don't masquerade
+    // as the parent agent tab, then layer on json-claude-specific vars.
     const childEnv: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
+    for (const [k, v] of Object.entries(cachedShellEnv(worktreePath) ?? process.env)) {
       if (typeof v === 'string') childEnv[k] = v
     }
     delete childEnv.CLAUDE_HARNESS_ID
@@ -870,7 +876,7 @@ export class JsonClaudeManager {
   send(
     sessionId: string,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const inst = this.instances.get(sessionId)
     if (!inst) return
@@ -908,7 +914,7 @@ export class JsonClaudeManager {
   private writeUserTurn(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     this.appendUserEntry(inst, text, images, {
       entryId: this.nextEntryId(inst.sessionId, 'u')
@@ -923,22 +929,18 @@ export class JsonClaudeManager {
   private appendUserEntry(
     inst: JsonClaudeInstance,
     text: string,
-    images:
-      | Array<{ mediaType: string; data: string; path: string }>
-      | undefined,
+    images: ChatImageInput[] | undefined,
     extra: { entryId: string; isQueued?: boolean }
   ): void {
     const hasImages = !!images && images.length > 0
     // The sentinel is for claude's benefit on the wire; the slice keeps the
     // stripped body plus a flag so the renderer can style the bubble.
-    const automated = parseAutomatedMessage(text)
+    const turn = parseUserTurn(text)
     this.appendEntry(inst, {
       kind: 'user',
-      text: automated ? automated.body : text,
+      ...turn,
       timestamp: Date.now(),
       entryId: extra.entryId,
-      ...(automated ? { automation: automated.source } : {}),
-      ...(automated?.from ? { automationFrom: automated.from } : {}),
       ...(extra.isQueued ? { isQueued: true } : {}),
       ...(hasImages
         ? {
@@ -965,7 +967,7 @@ export class JsonClaudeManager {
   private writeUserStdin(
     inst: JsonClaudeInstance,
     text: string,
-    images?: Array<{ mediaType: string; data: string; path: string }>
+    images?: ChatImageInput[]
   ): void {
     const hasImages = !!images && images.length > 0
     const annotatedText = hasImages
@@ -2123,7 +2125,7 @@ export class JsonClaudeManager {
   private dispatchBusy(sessionId: string, busy: boolean): void {
     this.store.dispatch({
       type: 'jsonClaude/busyChanged',
-      payload: { sessionId, busy }
+      payload: busy ? { sessionId, busy, turnStartedAt: Date.now() } : { sessionId, busy }
     })
   }
 
@@ -2264,7 +2266,24 @@ function streamEventBlockToMessageBlock(
   return null
 }
 
-function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
+// Tools whose `description` input is the model's own one-line account
+// of why it's making the call ("Run the reducer tests"). TaskCreate et
+// al. also take a `description`, but there it's the task body, not an
+// explanation of the call, so they're deliberately left out.
+const INTENT_TOOLS = new Set(['Bash', 'Task', 'Agent'])
+
+export function claudeToolIntent(
+  name: string | undefined,
+  input: Record<string, unknown> | undefined
+): string | null {
+  if (!name || !INTENT_TOOLS.has(name)) return null
+  const raw = input?.description
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageBlock[] {
   const message = ev['message'] as { content?: unknown } | undefined
   const content = message?.content
   if (!Array.isArray(content)) return []
@@ -2284,14 +2303,18 @@ function extractAssistantBlocks(ev: Record<string, unknown>): JsonClaudeMessageB
             : ''
       })
     } else if (t === 'tool_use') {
+      const name = typeof block['name'] === 'string' ? (block['name'] as string) : undefined
+      const input =
+        block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
+          ? (block['input'] as Record<string, unknown>)
+          : undefined
+      const intent = claudeToolIntent(name, input)
       out.push({
         type: 'tool_use',
         id: typeof block['id'] === 'string' ? (block['id'] as string) : undefined,
-        name: typeof block['name'] === 'string' ? (block['name'] as string) : undefined,
-        input:
-          block['input'] && typeof block['input'] === 'object' && !Array.isArray(block['input'])
-            ? (block['input'] as Record<string, unknown>)
-            : undefined
+        name,
+        input,
+        ...(intent ? { intent } : {})
       })
     }
   }

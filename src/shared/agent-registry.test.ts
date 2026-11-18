@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AGENT_REGISTRY,
+  CHAT_AGENT_KINDS,
   CLAUDE_MODELS,
   CLAUDE_MODEL_ALIASES,
   CODEX_MODELS,
-  CURSOR_MODELS
+  CURSOR_MODELS,
+  getChatCapabilities,
+  supportsChat
 } from './agent-registry'
 import { isKnownModel } from './pricing'
 
@@ -114,6 +118,67 @@ describe('CLAUDE_MODELS', () => {
     // because Settings renders a picker for each.
     for (const m of [...CLAUDE_MODELS, ...CODEX_MODELS, ...CURSOR_MODELS]) {
       expect(['alias', 'current', 'legacy']).toContain(m.tier)
+    }
+  })
+})
+
+describe('chat capabilities', () => {
+  it('claude backs chat tabs with every capability', () => {
+    expect(supportsChat('claude')).toBe(true)
+    expect(getChatCapabilities('claude')).toEqual({
+      rewind: true,
+      fork: true,
+      permissionModes: true,
+      slashCommands: true,
+      modelPicker: true,
+      approvalDenyReason: true,
+      approvalEditInput: true
+    })
+  })
+
+  it('treats a missing kind as claude', () => {
+    expect(supportsChat(undefined)).toBe(true)
+    expect(getChatCapabilities(undefined)).toEqual(getChatCapabilities('claude'))
+  })
+
+  it('codex backs chat tabs with rewind and fork but none of the Claude-only approval or mode affordances', () => {
+    expect(supportsChat('codex')).toBe(true)
+    expect(getChatCapabilities('codex')).toEqual({
+      rewind: true,
+      fork: true,
+      permissionModes: false,
+      slashCommands: false,
+      modelPicker: true,
+      approvalDenyReason: false,
+      approvalEditInput: false
+    })
+  })
+
+  it('reports no capabilities for agents without a chat provider', () => {
+    expect(supportsChat('cursor')).toBe(false)
+    expect(Object.values(getChatCapabilities('cursor')).every((v) => v === false)).toBe(true)
+  })
+})
+
+describe('registry invariants a new agent has to satisfy', () => {
+  it('lists each agent once', () => {
+    const kinds = AGENT_REGISTRY.map((a) => a.kind)
+    expect(new Set(kinds).size).toBe(kinds.length)
+  })
+
+  it('keeps CHAT_AGENT_KINDS — the kinds main must register a ChatProvider for — in step with the entries that declare chat', () => {
+    const declared = AGENT_REGISTRY.filter((a) => a.chat).map((a) => a.kind)
+    expect([...CHAT_AGENT_KINDS].sort()).toEqual(declared.sort())
+  })
+
+  it('backs a worktree fork with chat whenever the agent assigns its own session ids', () => {
+    // PanesFSM can only open such a fork in a Chat tab (the forked id can't
+    // be put on a terminal command line), so without chat it would silently
+    // open a fresh terminal conversation instead.
+    for (const agent of AGENT_REGISTRY) {
+      if (agent.supportsConversationFork && !agent.assignsSessionId) {
+        expect(agent.chat, agent.kind).toBeDefined()
+      }
     }
   })
 })
