@@ -110,6 +110,40 @@ function reportPreview(result: string): string {
   return flat.length > REPORT_PREVIEW ? `${flat.slice(0, REPORT_PREVIEW)}…` : flat
 }
 
+/** Keeps a scroll container pinned to its bottom while its content grows,
+ *  until the user scrolls up — and again once they scroll back down.
+ *
+ *  Growth is observed on the content, not inferred from a dep list: a
+ *  card's height changes when it settles, collapses, or streams text, and
+ *  none of that shows up as a new row or step. Scroll anchoring is off on
+ *  the container because the browser's own adjustment fires a scroll
+ *  event that reads as the user leaving the bottom. */
+function useFollowTail(slack: number, enabled = true) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const pinnedRef = useRef(true)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const content = contentRef.current
+    if (!enabled || !el || !content) return
+    const follow = (): void => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight
+    }
+    follow()
+    const ro = new ResizeObserver(follow)
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [enabled])
+  const onScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget
+      pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < slack
+    },
+    [slack]
+  )
+  return { scrollRef, contentRef, onScroll }
+}
+
 interface CardProps {
   agent: AgentSummary
   depth: number
@@ -133,15 +167,8 @@ function AgentCardImpl({
   const running = agent.status === 'running'
   const elapsed = formatElapsed(agentElapsedMs(agent, now))
   const kind = agent.subagentType ?? 'agent'
-  const feedRef = useRef<HTMLDivElement>(null)
-  const pinnedRef = useRef(true)
   const stepCount = agent.steps.length
-
-  useLayoutEffect(() => {
-    const el = feedRef.current
-    if (!el || !pinnedRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [stepCount, running])
+  const tail = useFollowTail(24, running)
 
   const accent = agent.hasPendingApproval
     ? 'border-warning bg-warning/5'
@@ -202,31 +229,30 @@ function AgentCardImpl({
 
         {running && (
           <div
-            ref={feedRef}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-            }}
-            className="max-h-64 overflow-y-auto px-2 pb-1.5 text-xs space-y-0.5"
+            ref={tail.scrollRef}
+            onScroll={tail.onScroll}
+            className="max-h-64 overflow-y-auto [overflow-anchor:none] px-2 pb-1.5 text-xs"
           >
-            {hidden > 0 && (
-              <button
-                type="button"
-                onClick={() => onPeek(agent.toolUseId)}
-                className="text-faint hover:text-fg cursor-pointer px-1"
-              >
-                {hidden} earlier {hidden === 1 ? 'step' : 'steps'} — open history
-              </button>
-            )}
-            {stepCount === 0 && (
-              <div className="text-muted italic px-1">agent is starting…</div>
-            )}
-            {inline.map((step) => (
-              <StepRow key={step.key} step={step} onPeekAgent={onPeek} />
-            ))}
-            <div className="flex items-center gap-2 px-1 py-0.5">
-              <span className="json-claude-spinner shrink-0" />
-              <span className="text-muted italic">working…</span>
+            <div ref={tail.contentRef} className="space-y-0.5">
+              {hidden > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onPeek(agent.toolUseId)}
+                  className="text-faint hover:text-fg cursor-pointer px-1"
+                >
+                  {hidden} earlier {hidden === 1 ? 'step' : 'steps'} — open history
+                </button>
+              )}
+              {stepCount === 0 && (
+                <div className="text-muted italic px-1">agent is starting…</div>
+              )}
+              {inline.map((step) => (
+                <StepRow key={step.key} step={step} onPeekAgent={onPeek} />
+              ))}
+              <div className="flex items-center gap-2 px-1 py-0.5">
+                <span className="json-claude-spinner shrink-0" />
+                <span className="text-muted italic">working…</span>
+              </div>
             </div>
           </div>
         )}
@@ -297,40 +323,29 @@ const AgentFeed = memo(function AgentFeed({
   onToggle: (id: string) => void
   onPeek: (id: string) => void
 }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const pinnedRef = useRef(true)
-  // Follow the tail when a new card lands or a running card grows, but
-  // only while the user is at the bottom — same rule as the chat itself.
-  let liveSteps = 0
-  for (const r of rows) if (r.agent.status === 'running') liveSteps += r.agent.steps.length
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el || !pinnedRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [rows.length, liveSteps])
+  const tail = useFollowTail(32)
 
   return (
     <div
-      ref={ref}
-      onScroll={(e) => {
-        const el = e.currentTarget
-        pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
-      }}
-      className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
+      ref={tail.scrollRef}
+      onScroll={tail.onScroll}
+      className="flex-1 min-h-0 overflow-y-auto [overflow-anchor:none] px-2 py-2"
     >
-      <ul className="space-y-1.5">
-        {rows.map(({ agent, depth }) => (
-          <AgentCard
-            key={agent.toolUseId}
-            agent={agent}
-            depth={depth}
-            now={agent.status === 'running' ? now : 0}
-            expanded={isExpanded(agent.toolUseId)}
-            onToggle={onToggle}
-            onPeek={onPeek}
-          />
-        ))}
-      </ul>
+      <div ref={tail.contentRef}>
+        <ul className="space-y-1.5">
+          {rows.map(({ agent, depth }) => (
+            <AgentCard
+              key={agent.toolUseId}
+              agent={agent}
+              depth={depth}
+              now={agent.status === 'running' ? now : 0}
+              expanded={isExpanded(agent.toolUseId)}
+              onToggle={onToggle}
+              onPeek={onPeek}
+            />
+          ))}
+        </ul>
+      </div>
     </div>
   )
 })
