@@ -5,6 +5,7 @@ import {
   resolveHotkeys,
   isEditableTarget,
   isTypeableBinding,
+  yieldsToEditor,
   GESTURE_ACTIONS
 } from '../hotkeys'
 import type { HotkeyBinding } from '../hotkeys'
@@ -59,6 +60,7 @@ export function useHotkeys(actions: ActionMap, overrides?: Record<string, string
       for (const [action, binding] of Object.entries(bindings)) {
         if (GESTURE_ACTIONS.has(action as Action)) continue
         if (editable && isTypeableBinding(binding)) continue
+        if (target instanceof Element && yieldsToEditor(action as Action, target)) continue
         const handler = handlers[action as Action]
         if (!handler) continue
 

@@ -395,6 +395,14 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
     win.on('resize', saveBounds)
     win.on('move', saveBounds)
 
+    // Mouse drivers like Logi Options+ turn side-button back/forward into
+    // legacy swipe events, which never reach the page as mouse buttons.
+    win.on('swipe', (_event, direction) => {
+      log('nav', `swipe ${direction}`)
+      if (direction === 'left') transport.sendSignal('window:navigateBack')
+      else if (direction === 'right') transport.sendSignal('window:navigateForward')
+    })
+
     // macOS hides the traffic lights in native fullscreen, so the renderer
     // shouldn't reserve the 80px leading clearance for them. Notify on
     // transition and on initial paint so first render matches reality.
