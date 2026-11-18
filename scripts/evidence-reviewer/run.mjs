@@ -23,6 +23,9 @@
 //   EVIDENCE_RUN_BUDGET_USD  default 1. Stop the run (and refuse agent
 //                        proxy calls) once the reviewer plus agents in the
 //                        app have spent this much.
+//   EVIDENCE_AGENT_MAX_REQUESTS  default 80. Hard cap on proxied agent
+//                        calls, so a runaway agent loop is bounded even if
+//                        responses stop reporting cost.
 //
 // Agents running INSIDE the app under test never see the OpenRouter key.
 // They're configured (by the boot script) to call http://127.0.0.1:<port>
@@ -57,6 +60,7 @@ const PER_FILE_DIFF = 12000
 const MIN_EFFORT = 0.5
 const MAX_FINISH_REJECTIONS = 2
 const RUN_BUDGET = Number(process.env.EVIDENCE_RUN_BUDGET_USD || 1)
+const AGENT_MAX_REQUESTS = Number(process.env.EVIDENCE_AGENT_MAX_REQUESTS || 80)
 const AGENT_PROXY_PORT = Number(args['agent-proxy-port'] || 37700)
 const SECRET_RE = /sk-or-v1-[A-Za-z0-9]{16,}/g
 const REPO_DIR = resolve(args['repo-dir'] || process.cwd())
@@ -68,6 +72,7 @@ mkdirSync(OUT, { recursive: true })
 
 const instructions = args.instructions ? readFileSync(args.instructions, 'utf8') : ''
 let agentProxyRequests = 0
+let agentUnpricedRequests = 0
 let agentCost = 0
 const agentProxy = startAgentProxy()
 const pr = JSON.parse(readFileSync(args.pr, 'utf8'))
@@ -191,9 +196,9 @@ const messages = [
 let overBudget = false
 for (let step = 0; step < MAX_STEPS && !result; step++) {
   const remaining = MAX_STEPS - step
-  if (!overBudget && runSpend() > RUN_BUDGET) {
+  if (!overBudget && (runSpend() > RUN_BUDGET || agentProxyRequests >= AGENT_MAX_REQUESTS)) {
     overBudget = true
-    messages.push({ role: 'user', content: `The run's $${RUN_BUDGET} budget is used up. Call finish now with what you have.` })
+    messages.push({ role: 'user', content: `The run's budget is used up ($${RUN_BUDGET} or ${AGENT_MAX_REQUESTS} agent calls). Call finish now with what you have.` })
   }
   if (remaining === 3) {
     messages.push({ role: 'user', content: 'You have 3 steps left. Capture any final evidence and call finish.' })
@@ -253,7 +258,7 @@ agentProxy.closeAllConnections?.()
 agentProxy.close()
 const runCost = runSpend()
 
-writeFileSync(join(OUT, 'result.json'), redact(JSON.stringify({ model: MODEL, usage, runCost, agentCost, agentProxyRequests, plan, result, evidence, transcript }, null, 2)))
+writeFileSync(join(OUT, 'result.json'), redact(JSON.stringify({ model: MODEL, usage, runCost, agentCost, agentProxyRequests, agentUnpricedRequests, plan, result, evidence, transcript }, null, 2)))
 writeFileSync(join(OUT, 'report.md'), redact(renderReport()))
 log(`done: ${result.verdict} (${evidence.length} screenshots, $${usage.cost.toFixed(4)})`)
 
@@ -686,16 +691,19 @@ function renderReport() {
   if (uncited.length) {
     lines.push(`<sub>Uncited screenshots: ${uncited.map((e) => e.id).join(', ')}</sub>`, '')
   }
-  const total = `$${runCost.toFixed(4)} total (reviewer $${usage.cost.toFixed(4)}, agents in app $${agentCost.toFixed(4)} over ${agentProxyRequests} calls)`
+  const unpriced = agentUnpricedRequests ? `, ${agentUnpricedRequests} of ${agentProxyRequests} unpriced` : ''
+  const atLeast = agentUnpricedRequests ? '≥' : ''
+  const total = `${atLeast}$${runCost.toFixed(4)} total (reviewer $${usage.cost.toFixed(4)}, agents in app ${atLeast}$${agentCost.toFixed(4)} over ${agentProxyRequests} calls${unpriced})`
   lines.push(`<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} reviewer tokens · ${total}</sub>`)
   return lines.join('\n')
 }
 
 function startAgentProxy() {
   const server = createServer(async (req, res) => {
-    if (runSpend() > RUN_BUDGET) {
+    const limit = runSpend() > RUN_BUDGET ? `budget of $${RUN_BUDGET}` : agentProxyRequests >= AGENT_MAX_REQUESTS ? `cap of ${AGENT_MAX_REQUESTS} agent calls` : null
+    if (limit) {
       res.writeHead(429, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: `evidence run budget of $${RUN_BUDGET} reached` } }))
+      res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: `evidence run ${limit} reached` } }))
       return
     }
     const body = []
@@ -729,6 +737,7 @@ function startAgentProxy() {
       res.end()
       const costs = [...tail.matchAll(/"cost":\s*([0-9.eE+-]+)/g)].map((m) => Number(m[1])).filter(Number.isFinite)
       if (costs.length) agentCost += costs[costs.length - 1]
+      else agentUnpricedRequests++
     } catch (e) {
       res.writeHead(502, { 'content-type': 'text/plain' })
       res.end(`evidence agent proxy: ${e.message}`)

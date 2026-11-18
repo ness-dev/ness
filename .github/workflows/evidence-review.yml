@@ -34,10 +34,16 @@ name: Evidence review
 #     read a stranger's diff before approving their run.
 #   - Agents running inside Ness (Chat / Claude Code tabs) are driven by a
 #     model that reads untrusted PR text, so they could be talked into
-#     printing secrets onto a screenshot. They never get the key: they call
-#     run.mjs's localhost proxy with a dummy token. Captures that show
+#     printing secrets onto a screenshot. The servers, and every agent and
+#     shell they spawn, run as an unprivileged `evidence` user without sudo
+#     (boot-ness.sh), which can't read run.mjs's environment or the
+#     runner's memory. Agents reach OpenRouter only through run.mjs's
+#     localhost proxy with a dummy token. As backstops, captures showing
 #     anything key-shaped are refused, reports are redacted, and publish
-#     refuses key-shaped text. EVIDENCE_RUN_BUDGET_USD caps a run's spend.
+#     refuses key-shaped text. Those regexes are easy to defeat with an
+#     encoding, so the user boundary is the real control.
+#     EVIDENCE_RUN_BUDGET_USD caps a run's spend and
+#     EVIDENCE_AGENT_MAX_REQUESTS caps agent calls.
 #   - No npm cache: pull_request_target shares main's cache scope, and a
 #     cache saved here would be restored by main's CI and release builds.
 #   - `publish` runs no PR code. It takes the artifact from `review` and is
@@ -145,6 +151,7 @@ jobs:
       # directly, so this step needs no key (see boot-ness.sh).
       - name: Boot apps
         env:
+          EVIDENCE_SANDBOX_USER: evidence
           EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
         run: |
           AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
@@ -184,7 +191,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-logs
-          path: ${{ runner.temp }}/evidence-*/server.log
+          path: ${{ runner.temp }}/evidence-*.log
           if-no-files-found: ignore
 
   # Posts the report, or a crash notice if `review` failed, then fails the
