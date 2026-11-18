@@ -157,6 +157,7 @@ jobs:
             ${BEFORE_URL:+--before "$BEFORE_URL"} \
             --instructions ../reviewer/.github/evidence-reviewer/instructions.md \
             --pr "$RUNNER_TEMP/pr.json" \
+            --ui-paths src/renderer/,src/web-client/ \
             --out "$RUNNER_TEMP/evidence"
 
       - name: Upload evidence

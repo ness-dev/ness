@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Writes the PR context run.mjs needs: { number, title, body, files, diff,
-// baseSha, headSha }. Uses the gh CLI, so it works with GH_TOKEN in CI and
-// with a logged-in gh locally.
+// Writes the PR context run.mjs needs: { number, title, body, files,
+// fileDiffs, baseSha, headSha }. fileDiffs maps each path to its own diff so
+// run.mjs can budget the prompt and fetch the rest on demand. Uses the gh
+// CLI, so it works with GH_TOKEN in CI and with a logged-in gh locally.
 //
 // Usage: node collect-pr.mjs <pr-number> <out.json> [--repo owner/name]
 
@@ -15,13 +16,11 @@ const gh = (...a) => execFileSync('gh', [...a, ...repo], { encoding: 'utf8', max
 const meta = JSON.parse(gh('pr', 'view', num, '--json', 'number,title,body,files,baseRefOid,headRefOid'))
 const NOISE = /(^|\/)(package-lock\.json|.*\.snap|.*\.lock)$|\.(png|jpe?g|gif|webp|ico|icns)$/
 
-const diff = gh('pr', 'diff', num)
-  .split(/(?=^diff --git )/m)
-  .filter((chunk) => {
-    const m = chunk.match(/^diff --git a\/(\S+)/)
-    return !m || !NOISE.test(m[1])
-  })
-  .join('')
+const fileDiffs = {}
+for (const chunk of gh('pr', 'diff', num).split(/(?=^diff --git )/m)) {
+  const m = chunk.match(/^diff --git a\/\S+ b\/(\S+)/)
+  if (m && !NOISE.test(m[1])) fileDiffs[m[1]] = chunk
+}
 
 writeFileSync(
   outFile,
@@ -30,8 +29,8 @@ writeFileSync(
       number: meta.number,
       title: meta.title,
       body: meta.body,
-      files: meta.files.map((f) => `${f.path} (+${f.additions} -${f.deletions})`),
-      diff,
+      files: meta.files.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })),
+      fileDiffs,
       baseSha: meta.baseRefOid,
       headSha: meta.headRefOid
     },

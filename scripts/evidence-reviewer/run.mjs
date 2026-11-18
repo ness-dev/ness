@@ -6,21 +6,25 @@
 // Deliberately app-agnostic. It only knows:
 //   - one or two URLs ("after" = PR head, optionally "before" = PR base)
 //   - a markdown instructions file describing how to use the app
-//   - a PR context file (title, body, diff)
+//   - a PR context file (title, body, per-file diffs)
+//   - optionally, a checkout of the PR head it may read and grep
 // Booting the app, seeding fixtures and publishing the report are the
 // caller's job, so another repo can reuse this by swapping those pieces.
 //
 // Usage:
 //   node run.mjs --after <url> [--before <url>] --instructions <md>
 //                --pr <json> --out <dir>
+//                [--repo-dir <dir>]      PR head checkout (default: cwd)
+//                [--ui-paths a/,b/]      path prefixes whose diffs go first
 // Env:
 //   OPENROUTER_API_KEY   required
 //   EVIDENCE_MODEL       default anthropic/claude-haiku-5.5
 //   EVIDENCE_MAX_STEPS   default 40
 
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 const require = createRequire(resolve(process.cwd(), 'package.json'))
 const { chromium } = require('playwright-core')
@@ -32,6 +36,16 @@ const MAX_STEPS = Number(process.env.EVIDENCE_MAX_STEPS || 40)
 const API_KEY = process.env.OPENROUTER_API_KEY
 const VIEWPORT = { width: 1440, height: 900 }
 const KEEP_IMAGES = 3
+const KEEP_FULL_TOOL_TEXT = 4
+const DIFF_BUDGET = 60000
+const PER_FILE_DIFF = 12000
+// Below this share of the step budget, a finish that leaves claims
+// inconclusive is bounced back once or twice with a nudge to dig deeper.
+// Cheap models otherwise give up after a handful of turns.
+const MIN_EFFORT = 0.5
+const MAX_FINISH_REJECTIONS = 2
+const REPO_DIR = resolve(args['repo-dir'] || process.cwd())
+const UI_PATHS = (args['ui-paths'] || '').split(',').map((s) => s.trim()).filter(Boolean)
 
 if (!API_KEY) fail('OPENROUTER_API_KEY is not set')
 if (!args.after) fail('--after <url> is required')
@@ -62,8 +76,36 @@ const evidence = []
 const transcript = []
 let usage = { prompt: 0, completion: 0, cost: 0 }
 let result = null
+let plan = null
+let finishRejections = 0
+let currentStep = 0
 
 const tools = [
+  tool('plan', 'Record your test plan before touching the app. One entry per user-visible claim.', {
+    claims: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'What the PR says a user will see or be able to do.' },
+          code: { type: 'string', description: 'Files/components that implement it, from the diff.' },
+          how_to_reach: { type: 'string', description: 'Concrete UI path to the state that proves it: what to click, which menu, which tab type, which setting.' },
+          proof: { type: 'string', description: 'What the before and after screenshots should each show.' }
+        },
+        required: ['claim', 'how_to_reach', 'proof']
+      }
+    }
+  }, ['claims']),
+  tool('read_diff', 'Read the full diff of one changed file. Use this for any file whose diff was omitted or truncated in the prompt.', {
+    path: { type: 'string' }
+  }, ['path']),
+  tool('read_file', 'Read a file from the PR head checkout (the "after" code), e.g. to see where a component is mounted or what gates it.', {
+    path: { type: 'string' },
+    start_line: { type: 'integer', description: '1-based, default 1' }
+  }, ['path']),
+  tool('search_code', 'git grep the PR head checkout. Use it to find where a component is rendered, which setting/flag/menu shows it, or the exact UI label text.', {
+    query: { type: 'string', description: 'Fixed string, case-insensitive.' }
+  }, ['query']),
   tool('observe', 'Take a screenshot of an app and list its visible interactive elements with numeric ids.', {
     app: appEnum()
   }, ['app']),
@@ -127,7 +169,9 @@ for (let step = 0; step < MAX_STEPS && !result; step++) {
   if (remaining === 3) {
     messages.push({ role: 'user', content: 'You have 3 steps left. Capture any final evidence and call finish.' })
   }
-  const reply = await chat(messages, remaining === 1 ? { type: 'function', function: { name: 'finish' } } : 'auto')
+  currentStep = step
+  const forced = step === 0 ? 'plan' : remaining === 1 ? 'finish' : null
+  const reply = await chat(messages, forced ? { type: 'function', function: { name: forced } } : 'auto')
   const msg = reply.choices?.[0]?.message
   if (!msg) fail(`no message in response: ${JSON.stringify(reply).slice(0, 500)}`)
   messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls })
@@ -155,6 +199,7 @@ for (let step = 0; step < MAX_STEPS && !result; step++) {
     messages.push({ role: 'tool', tool_call_id: call.id, content: out.text })
     images.push(...(out.images || []))
   }
+  pruneOldToolText()
   if (images.length) {
     pruneOldImages()
     messages.push({
@@ -176,14 +221,26 @@ if (!result) {
 
 await browser.close()
 
-writeFileSync(join(OUT, 'result.json'), JSON.stringify({ model: MODEL, usage, result, evidence, transcript }, null, 2))
+writeFileSync(join(OUT, 'result.json'), JSON.stringify({ model: MODEL, usage, plan, result, evidence, transcript }, null, 2))
 writeFileSync(join(OUT, 'report.md'), renderReport())
 log(`done: ${result.verdict} (${evidence.length} screenshots, $${usage.cost.toFixed(4)})`)
 
 async function runTool(name, input) {
-  if (name === 'finish') {
-    result = input
-    return { text: 'ok' }
+  switch (name) {
+    case 'finish':
+      return tryFinish(input)
+    case 'plan':
+      plan = input.claims || []
+      return { text: `Plan recorded (${plan.length} claims). Now work through it. Read code with search_code/read_file whenever you don't know how to reach a state.` }
+    case 'read_diff': {
+      const d = pr.fileDiffs[input.path]
+      if (!d) return { text: `No diff for "${input.path}". Changed files:\n${pr.files.map((f) => f.path).join('\n')}` }
+      return { text: d.length > 40000 ? d.slice(0, 40000) + '\n…[truncated]' : d }
+    }
+    case 'read_file':
+      return readRepoFile(input.path, input.start_line || 1)
+    case 'search_code':
+      return searchCode(input.query)
   }
   if (input.app === 'both') return runOnBoth(name, input)
   const app = apps[input.app]
@@ -260,27 +317,48 @@ async function runOnBoth(name, input) {
     evidence.push({ id, app: 'both', caption: input.caption, files })
     return { text: `saved before/after pair as ${id}` }
   }
-  const texts = []
+  const texts = {}
   const images = []
   for (const appName of ['before', 'after']) {
     let mapped = { ...input, app: appName }
     if (appName === 'before' && input.id != null) {
       const beforeId = translateId(input.id)
       if (beforeId == null) {
-        texts.push(`[before] no element matching after's [${input.id}]; action skipped. Act on "before" directly with its own ids.`)
+        texts.before = `[before] no element matching after's [${input.id}]; action skipped. Act on "before" directly with its own ids.`
         continue
       }
       mapped.id = beforeId
     }
     try {
       const out = await runTool(name, mapped)
-      texts.push(`[${appName}] ${out.text}`)
+      texts[appName] = `[${appName}] ${out.text}`
       images.push(...(out.images || []))
     } catch (e) {
-      texts.push(`[${appName}] error: ${e.message.split('\n')[0]}`)
+      texts[appName] = `[${appName}] error: ${e.message.split('\n')[0]}`
     }
   }
-  return { text: texts.join('\n\n'), images }
+  if (texts.before?.includes('interactive elements:') && texts.after?.includes('interactive elements:')) {
+    texts.before = texts.before.split('interactive elements:')[0] + elementDiff()
+  }
+  return { text: [texts.after, texts.before].filter(Boolean).join('\n\n'), images }
+}
+
+// The before list is usually near-identical to after's, so only its
+// differences are shown. Ids in "both" actions come from after's list.
+function elementDiff() {
+  const count = (list) => list.reduce((m, e) => m.set(e.key, (m.get(e.key) || 0) + 1), new Map())
+  const before = apps.before.elements || []
+  const after = apps.after.elements || []
+  const afterCounts = count(after)
+  const beforeCounts = count(before)
+  const onlyBefore = before.filter((e) => (afterCounts.get(e.key) || 0) < (beforeCounts.get(e.key) || 0))
+  const onlyAfter = after.filter((e) => (beforeCounts.get(e.key) || 0) < (afterCounts.get(e.key) || 0))
+  if (!onlyBefore.length && !onlyAfter.length) return `interactive elements: same ${before.length} as after.`
+  return [
+    `interactive elements: ${before.length}, same as after except:`,
+    ...onlyBefore.slice(0, 30).map((e) => `  only in before: ${e.line}`),
+    ...onlyAfter.slice(0, 30).map((e) => `  only in after:  ${e.line.replace(/^\[\d+\] /, '')}`)
+  ].join('\n')
 }
 
 function translateId(afterId) {
@@ -290,6 +368,74 @@ function translateId(afterId) {
   const rank = after.filter((e) => e.key === target.key && e.id < afterId).length
   const matches = (apps.before.elements || []).filter((e) => e.key === target.key)
   return matches[rank]?.id ?? null
+}
+
+function tryFinish(input) {
+  const claims = input.claims || []
+  const weak = claims.filter((c) => c.status === 'inconclusive')
+  const gaveUp = ['inconclusive', 'not_visual'].includes(input.verdict) || weak.length > 0
+  const early = currentStep < MAX_STEPS * MIN_EFFORT
+  if (gaveUp && early && finishRejections < MAX_FINISH_REJECTIONS) {
+    finishRejections++
+    const left = MAX_STEPS - currentStep - 1
+    return {
+      text: `Not finished: you have ${left} turns left and ${weak.length || 'some'} claim(s) are still inconclusive${weak.length ? `:\n${weak.map((c) => `- ${c.claim}`).join('\n')}` : ''}.
+Before giving up on a claim, try a different route:
+- search_code for the component or its label to find where it renders and what gates it (settings, menus, panel visibility, tab type, feature flags)
+- read_diff / read_file the UI files involved
+- look for menus, context menus (right-click), settings sections, or hidden panels that reveal it
+- if a state needs data the fixture lacks, show the closest reachable state (the empty state, the toggle, the menu entry) and capture that
+Call finish again only when every claim has evidence or you have tried at least two concrete routes for it.`
+    }
+  }
+  result = input
+  return { text: 'ok' }
+}
+
+function readRepoFile(path, startLine) {
+  const full = resolve(REPO_DIR, path)
+  const rel = relative(REPO_DIR, full)
+  if (rel.startsWith('..') || rel.startsWith('/') || rel.split('/').includes('.git')) return { text: 'path must be inside the repo' }
+  let text
+  try {
+    text = readFileSync(full, 'utf8')
+  } catch (e) {
+    return { text: `cannot read ${path}: ${e.code || e.message}` }
+  }
+  const lines = text.split('\n')
+  const from = Math.max(1, startLine)
+  const chunk = lines.slice(from - 1, from - 1 + 400)
+  const body = chunk.map((l, i) => `${from + i}: ${l}`).join('\n')
+  const more = from - 1 + 400 < lines.length ? `\n…[${lines.length} lines total; pass start_line=${from + 400} for more]` : ''
+  return { text: body.slice(0, 30000) + more }
+}
+
+function searchCode(query) {
+  try {
+    const out = execFileSync(
+      'git',
+      ['grep', '-n', '-I', '-i', '-F', '--max-count', '5', '-e', query, '--', '.', ':!package-lock.json', ':!*.lock', ':!*.test.*'],
+      { cwd: REPO_DIR, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }
+    )
+    const lines = out.split('\n').filter(Boolean)
+    return { text: lines.slice(0, 60).map((l) => l.slice(0, 240)).join('\n') + (lines.length > 60 ? `\n…[${lines.length - 60} more]` : '') }
+  } catch (e) {
+    return { text: e.status === 1 ? 'no matches' : `search failed: ${e.message.split('\n')[0]}` }
+  }
+}
+
+// Element lists dominate the context. Only the most recent few tool results
+// keep theirs; older ones shrink to a stub (ids are stale by then anyway).
+function pruneOldToolText() {
+  let seen = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role !== 'tool') continue
+    seen++
+    if (seen > KEEP_FULL_TOOL_TEXT && typeof m.content === 'string' && m.content.includes('interactive elements:')) {
+      m.content = m.content.split('interactive elements:')[0] + '[old element list elided; ids are stale, observe again]'
+    }
+  }
 }
 
 async function settleAndObserve(app) {
@@ -372,44 +518,69 @@ async function chat(msgs, toolChoice) {
 }
 
 function systemPrompt() {
-  const appsLine = appNames.includes('before')
+  const both = appNames.includes('before')
+  const appsLine = both
     ? 'Two copies of the app are running side by side: "before" is built from the PR base branch, "after" is built from the PR head. Both are seeded with identical fixture data.'
     : 'One copy of the app is running: "after", built from the PR head.'
-  return `You are an evidence-gathering QA reviewer for a pull request. You do not review code style. Your only job is to PROVE, using screenshots of the running app, whether the user-visible behaviour the PR claims actually works.
+  return `You are an evidence-gathering QA reviewer for a pull request. You do not review code style. Your job is to PROVE, using screenshots of the running app, whether the user-visible behaviour the PR claims actually works. The PR author is relying on you to find the feature and show it, so be persistent and resourceful: a reviewer who reports "couldn't find it" after a few clicks has failed.
 
 ${appsLine}
 
-Method:
-1. Read the PR description and diff. List the concrete, user-visible claims it makes (what should look or behave differently). If the change has no user-visible surface (pure refactor, CI, docs, tests), say so and finish with verdict "not_visual" after at most a quick sanity check.
-2. For each claim, decide what screen state would prove it and drive the app there.${appNames.includes('before') ? `
-3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's list (before's matching element is found by role + name). Once both apps show the state that demonstrates a claim, call capture_evidence with app "both" to save a side-by-side pair. If the two apps diverge (for example the new UI only exists in after), act on each app on its own to line them up again, then capture with "both". Capture a single app only when a comparison is meaningless.` : `
-3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
-4. Be skeptical. If the UI does not show what the PR claims, that is a finding: capture it and mark the claim refuted. If you cannot reach the relevant state, mark it inconclusive and say why. Never mark a claim verified without a capture that shows it.
-5. Prefer clicking by element id from observe. Re-observe after anything that changes the screen. Use find_text to confirm text exists.
-6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically ("Screenshot of app").
-7. Finish with the finish tool. Cite evidence ids (E1, E2, …) per claim.
+You can also read the PR head's code: read_diff (any changed file), read_file and search_code (the whole repo). Use them freely. They are the fastest way to learn where a feature renders and how to reach it.
 
-You have at most ${MAX_STEPS} tool-calling turns. Several tool calls per turn are allowed.
+Method:
+1. PLAN FIRST. Your first call is plan. For each user-visible claim, name the component(s) from the diff, the concrete click path to the state that proves it, and what before and after should show. If a component's diff isn't in the prompt, read_diff it. If you don't know how a component is reached (which menu, setting, tab type, panel, flag), search_code for where it is rendered or imported before guessing in the UI.
+2. Work through the plan claim by claim. Drive the app to the state, observe, adjust.${both ? `
+3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's element list. For before, you see only the elements that differ from after, and "only in after" lines are often the new UI the PR adds. Once both apps show the state that demonstrates a claim, call capture_evidence with app "both". If the apps diverge (the new UI only exists in after), act on each app separately to line them up again, then capture with "both".` : `
+3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
+4. When a route fails, try another. Things that hide UI: panel-visibility menus, collapsed sections, settings pages that need scrolling, context menus (right-click), hover-only controls, specific tab types, empty states. If the fixture can't produce the full state (it needs a live agent, a GitHub PR, …), capture the closest reachable state that still shows the change: the new toggle, menu entry, empty panel, or label. That is real evidence.
+5. Be skeptical. If the UI does not do what the PR claims, capture it and mark the claim refuted. Mark a claim inconclusive only after at least two concrete routes failed, and say which. Never mark a claim verified without a capture that shows it. find_text only proves the text is in the DOM, so scroll it into view and capture.
+6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically.
+7. Pure refactors, CI, docs or test-only PRs: verdict "not_visual" after a quick sanity check. If any UI file changed, the PR is visual.
+8. Finish with the finish tool, citing evidence ids (E1, E2, …) per claim.
+
+You have ${MAX_STEPS} tool-calling turns; use them. Several tool calls per turn are allowed and encouraged.
 
 # How to use this app
 ${instructions}`
 }
 
+// UI files first (the agent's job is the UI), then other source, then
+// tests and docs, each capped so one huge file can't eat the budget.
+// Everything that doesn't fit is listed and reachable with read_diff.
 function prPrompt() {
-  const diff = pr.diff.length > 60000 ? pr.diff.slice(0, 60000) + '\n…[diff truncated]' : pr.diff
+  const isUi = (p) => UI_PATHS.some((prefix) => p.startsWith(prefix))
+  const isAux = (p) => /\.test\.|__tests__|\.md$|^\.github\//.test(p)
+  const rank = (p) => (isAux(p) ? 2 : isUi(p) ? 0 : 1)
+  const files = [...pr.files].sort((a, b) => rank(a.path) - rank(b.path))
+  let used = 0
+  const shown = []
+  const omitted = []
+  for (const f of files) {
+    const d = pr.fileDiffs[f.path]
+    if (!d) continue
+    const clipped = d.length > PER_FILE_DIFF ? d.slice(0, PER_FILE_DIFF) + `\n…[${f.path} truncated, read_diff for the rest]\n` : d
+    if (used + clipped.length > DIFF_BUDGET) {
+      omitted.push(f)
+      continue
+    }
+    used += clipped.length
+    shown.push(clipped)
+  }
+  const fileLine = (f) => `${f.path} (+${f.additions} -${f.deletions})${isUi(f.path) ? ' [UI]' : ''}`
   return `# PR #${pr.number}: ${pr.title}
 
 ${pr.body || '(no description)'}
 
 ## Changed files
-${pr.files.join('\n')}
+${files.map(fileLine).join('\n')}
 
 ## Diff
 \`\`\`diff
-${diff}
+${shown.join('')}
 \`\`\`
-
-Start by listing the claims you intend to verify, then observe the app.`
+${omitted.length ? `\nNot shown above (use read_diff): ${omitted.map((f) => f.path).join(', ')}\n` : ''}
+Start with plan.`
 }
 
 function renderReport() {
@@ -427,6 +598,11 @@ function renderReport() {
       lines.push(`| ${icon[c.status] || '❔'} | ${cell(c.claim)} | ${ev} | ${cell(c.notes || '')} |`)
     }
     lines.push('')
+  }
+  if (plan?.length) {
+    lines.push('<details><summary>Test plan</summary>', '')
+    for (const p of plan) lines.push(`- **${p.claim}**: ${p.how_to_reach}${p.proof ? ` → ${p.proof}` : ''}`)
+    lines.push('', '</details>', '')
   }
   for (const e of evidence) {
     lines.push(`### ${e.id}`, '', e.caption, '')
