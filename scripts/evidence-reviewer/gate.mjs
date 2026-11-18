@@ -2,7 +2,7 @@
 // Decides whether an evidence-review run should spend anything, before any
 // PR code is checked out or any npm install / model call happens. Reads the
 // triggering event, resolves the PR number and the head SHA to review, and
-// writes `run`, `pr`, `sha` (and `reason`) to $GITHUB_OUTPUT.
+// writes `run`, `pr`, `sha`, `same_repo` (and `reason`) to $GITHUB_OUTPUT.
 //
 // Skips when the PR touches nothing under the UI paths, and, for a
 // checkbox re-run (issue_comment edited), unless the edit ticked the
@@ -34,6 +34,8 @@ export const rerunTicked = (fromBody, toBody) => box(fromBody) === 'unchecked' &
 
 export const canWrite = (perm) =>
   ['admin', 'write'].includes(perm?.permission) || ['admin', 'maintain', 'write'].includes(perm?.role_name)
+
+export const isSameRepo = (pr, repo) => pr?.head?.repo?.full_name === repo
 
 export const touchesUi = (files, prefixes = UI_PATHS) =>
   files.some((f) => prefixes.some((p) => f.startsWith(p)))
@@ -87,12 +89,10 @@ function main() {
 
   // pull_request_target pins to the push that queued the run, so approving
   // it approves exactly that commit. Other triggers review the current head.
-  const sha =
-    eventName === 'pull_request_target'
-      ? event.pull_request.head.sha
-      : JSON.parse(gh(`repos/${repo}/pulls/${pr}`)).head.sha
+  const prData = eventName === 'pull_request_target' ? event.pull_request : JSON.parse(gh(`repos/${repo}/pulls/${pr}`))
+  const sha = prData.head.sha
   if (!/^[0-9a-f]{40}$/.test(sha)) return skip(`bad head SHA ${JSON.stringify(sha)}`)
-  out({ run: 'true', pr, sha, reason: 'ok' })
+  out({ run: 'true', pr, sha, same_repo: isSameRepo(prData, repo), reason: 'ok' })
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main()

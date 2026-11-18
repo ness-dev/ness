@@ -31,8 +31,11 @@ name: Evidence review
 #   - Even then it needs approval unless the person who triggered it (the
 #     PR opener, or whoever ticked the box) is on the allowlist in the
 #     EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
-#       - allowlisted → `evidence-review-auto` environment, no reviewers,
-#         runs immediately.
+#       - allowlisted, on a same-repo PR or a dispatch →
+#         `evidence-review-auto` environment, no reviewers, runs
+#         immediately. Fork PRs never qualify: ticking the box on one would
+#         otherwise auto-approve whatever the contributor pushed since the
+#         maintainer last read the diff.
 #       - everyone else → `evidence-review` environment, which has required
 #         reviewers. The run waits at "Waiting for review" until a reviewer
 #         clicks Review deployments → Approve and deploy on the run (in the
@@ -78,6 +81,9 @@ name: Evidence review
 #     EVIDENCE_AGENT_MAX_REQUESTS caps agent calls.
 #   - No npm cache: pull_request_target shares main's cache scope, and a
 #     cache saved here would be restored by main's CI and release builds.
+#     The PR's code can still write cache entries itself with the runner's
+#     cache token (see "Checkout PR head"), so approving a fork run trusts
+#     it with that cache too.
 #   - `publish` runs no PR code. It takes the artifact from `review` and is
 #     the only job with write permissions (assets branch + PR comment).
 #
@@ -133,6 +139,7 @@ jobs:
       run: ${{ steps.gate.outputs.run }}
       pr: ${{ steps.gate.outputs.pr }}
       sha: ${{ steps.gate.outputs.sha }}
+      same_repo: ${{ steps.gate.outputs.same_repo }}
     steps:
       - name: Checkout reviewer
         uses: actions/checkout@v4
@@ -156,6 +163,7 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     environment: >-
       ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
+          && (github.event_name == 'workflow_dispatch' || needs.gate.outputs.same_repo == 'true')
           && 'evidence-review-auto' || 'evidence-review' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -190,8 +198,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           # Running fork code under pull_request_target is the point of this
-          # workflow. The risk is contained by approval/allowlist gating, a
-          # read-only token here, and a publish job that runs no PR code.
+          # workflow. The risk is contained by approval gating, a read-only
+          # token here, and a publish job that runs no PR code. What none of
+          # those contain: this job runs in main's cache scope, and the PR's
+          # code can use the runner's cache token to write entries that
+          # main's CI and release builds restore. Approving a fork run trusts
+          # its code with the release pipeline's cache, not just the key.
           allow-unsafe-pr-checkout: true
 
       - name: Collect PR context
