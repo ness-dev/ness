@@ -94,7 +94,7 @@ const tools = [
     app: appEnum(),
     query: { type: 'string' }
   }, ['app', 'query']),
-  tool('capture_evidence', 'Save the current screenshot of an app as evidence for the report. Call this whenever the screen proves or disproves a claim. Returns an evidence id.', {
+  tool('capture_evidence', 'Save the current screenshot as evidence for the report. With app "both" it saves a before/after pair shown side by side. Call this whenever the screen proves or disproves a claim. Returns an evidence id.', {
     app: appEnum(),
     caption: { type: 'string', description: 'What this screenshot shows and why it matters, one sentence.' }
   }, ['app', 'caption']),
@@ -153,7 +153,7 @@ for (let step = 0; step < MAX_STEPS && !result; step++) {
     }
     transcript.push({ step, tool: call.function.name, input, result: out.text.slice(0, 500) })
     messages.push({ role: 'tool', tool_call_id: call.id, content: out.text })
-    if (out.image) images.push(out.image)
+    images.push(...(out.images || []))
   }
   if (images.length) {
     pruneOldImages()
@@ -161,7 +161,10 @@ for (let step = 0; step < MAX_STEPS && !result; step++) {
       role: 'user',
       content: [
         { type: 'text', text: 'Screenshot(s) from the tool call(s) above:' },
-        ...images.map((b64) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
+        ...images.flatMap(({ label, b64 }) => [
+          { type: 'text', text: `${label}:` },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+        ])
       ]
     })
   }
@@ -182,8 +185,9 @@ async function runTool(name, input) {
     result = input
     return { text: 'ok' }
   }
+  if (input.app === 'both') return runOnBoth(name, input)
   const app = apps[input.app]
-  if (!app) return { text: `unknown app "${input.app}". Available: ${appNames.join(', ')}` }
+  if (!app) return { text: `unknown app "${input.app}". Available: ${appSelectors().join(', ')}` }
   const { page } = app
 
   switch (name) {
@@ -232,12 +236,60 @@ async function runTool(name, input) {
       const id = `E${evidence.length + 1}`
       const file = `${id}-${input.app}.png`
       await page.screenshot({ path: join(OUT, file) })
-      evidence.push({ id, app: input.app, caption: input.caption, file })
+      evidence.push({ id, app: input.app, caption: input.caption, files: { [input.app]: file } })
       return { text: `saved as ${id}` }
     }
     default:
       return { text: `unknown tool ${name}` }
   }
+}
+
+// "both" runs the same action on before and after so the two stay in the
+// same UI state, which is what makes a captured pair a fair comparison.
+// Element ids come from the after app's last observe; the before app
+// clicks whichever of its own elements has the same role + name (and the
+// same rank among duplicates), since ids are assigned per page.
+async function runOnBoth(name, input) {
+  if (name === 'capture_evidence') {
+    const id = `E${evidence.length + 1}`
+    const files = {}
+    for (const appName of ['before', 'after']) {
+      files[appName] = `${id}-${appName}.png`
+      await apps[appName].page.screenshot({ path: join(OUT, files[appName]) })
+    }
+    evidence.push({ id, app: 'both', caption: input.caption, files })
+    return { text: `saved before/after pair as ${id}` }
+  }
+  const texts = []
+  const images = []
+  for (const appName of ['before', 'after']) {
+    let mapped = { ...input, app: appName }
+    if (appName === 'before' && input.id != null) {
+      const beforeId = translateId(input.id)
+      if (beforeId == null) {
+        texts.push(`[before] no element matching after's [${input.id}]; action skipped. Act on "before" directly with its own ids.`)
+        continue
+      }
+      mapped.id = beforeId
+    }
+    try {
+      const out = await runTool(name, mapped)
+      texts.push(`[${appName}] ${out.text}`)
+      images.push(...(out.images || []))
+    } catch (e) {
+      texts.push(`[${appName}] error: ${e.message.split('\n')[0]}`)
+    }
+  }
+  return { text: texts.join('\n\n'), images }
+}
+
+function translateId(afterId) {
+  const after = apps.after.elements || []
+  const target = after.find((e) => e.id === afterId)
+  if (!target) return null
+  const rank = after.filter((e) => e.key === target.key && e.id < afterId).length
+  const matches = (apps.before.elements || []).filter((e) => e.key === target.key)
+  return matches[rank]?.id ?? null
 }
 
 async function settleAndObserve(app) {
@@ -264,21 +316,22 @@ async function observe(app) {
       const role = el.getAttribute('role') || el.tagName.toLowerCase()
       const id = ++n
       el.setAttribute('data-ev-id', String(id))
-      out.push(`[${id}] ${role} "${name}" @(${Math.round(r.x + r.width / 2)},${Math.round(r.y + r.height / 2)})`)
+      out.push({ id, key: `${role}|${name}`, line: `[${id}] ${role} "${name}" @(${Math.round(r.x + r.width / 2)},${Math.round(r.y + r.height / 2)})` })
       if (n >= 150) break
     }
     return out
   })
+  app.elements = clickables
   const shot = await app.page.screenshot({ type: 'jpeg', quality: 60 })
   const errors = app.consoleErrors.splice(0)
   const text = [
-    `app=${Object.keys(apps).find((k) => apps[k] === app)} viewport=${VIEWPORT.width}x${VIEWPORT.height}`,
+    `app=${appNameOf(app)} viewport=${VIEWPORT.width}x${VIEWPORT.height}`,
     errors.length ? `console errors since last observe:\n${errors.slice(-5).join('\n')}` : '',
-    `interactive elements:\n${clickables.join('\n')}`
+    `interactive elements:\n${clickables.map((c) => c.line).join('\n')}`
   ]
     .filter(Boolean)
     .join('\n')
-  return { text, image: shot.toString('base64') }
+  return { text, images: [{ label: appNameOf(app), b64: shot.toString('base64') }] }
 }
 
 function pruneOldImages() {
@@ -328,11 +381,13 @@ ${appsLine}
 
 Method:
 1. Read the PR description and diff. List the concrete, user-visible claims it makes (what should look or behave differently). If the change has no user-visible surface (pure refactor, CI, docs, tests), say so and finish with verdict "not_visual" after at most a quick sanity check.
-2. For each claim, decide what screen state would prove it, navigate there in "after", and call capture_evidence. When "before" exists and the claim is a change, capture the same state in "before" too so the difference is visible.
-3. Be skeptical. If the UI does not show what the PR claims, that is a finding: capture it and mark the claim refuted. If you cannot reach the relevant state, mark it inconclusive and say why. Never mark a claim verified without a screenshot you captured that shows it.
-4. Prefer clicking by element id from observe. Re-observe after anything that changes the screen. Use find_text to confirm text exists.
-5. Keep captions specific ("Sidebar row for feature/login now shows a +12 -3 diff badge"), not generic ("Screenshot of app").
-6. Finish with the finish tool. Cite evidence ids (E1, E2, …) per claim.
+2. For each claim, decide what screen state would prove it and drive the app there.${appNames.includes('before') ? `
+3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's list (before's matching element is found by role + name). Once both apps show the state that demonstrates a claim, call capture_evidence with app "both" to save a side-by-side pair. If the two apps diverge (for example the new UI only exists in after), act on each app on its own to line them up again, then capture with "both". Capture a single app only when a comparison is meaningless.` : `
+3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
+4. Be skeptical. If the UI does not show what the PR claims, that is a finding: capture it and mark the claim refuted. If you cannot reach the relevant state, mark it inconclusive and say why. Never mark a claim verified without a capture that shows it.
+5. Prefer clicking by element id from observe. Re-observe after anything that changes the screen. Use find_text to confirm text exists.
+6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically ("Screenshot of app").
+7. Finish with the finish tool. Cite evidence ids (E1, E2, …) per claim.
 
 You have at most ${MAX_STEPS} tool-calling turns. Several tool calls per turn are allowed.
 
@@ -359,7 +414,6 @@ Start by listing the claims you intend to verify, then observe the app.`
 
 function renderReport() {
   const icon = { verified: '✅', partially_verified: '🟡', refuted: '❌', inconclusive: '❔', not_visual: '➖', not_testable: '➖' }
-  const byId = Object.fromEntries(evidence.map((e) => [e.id, e]))
   const lines = [
     `## ${icon[result.verdict] || '❔'} Evidence review: ${result.verdict.replace('_', ' ')}`,
     '',
@@ -375,10 +429,21 @@ function renderReport() {
     lines.push('')
   }
   for (const e of evidence) {
-    lines.push(`### ${e.id} · \`${e.app}\``, '', e.caption, '', `![${e.id}](./${e.file})`, '')
+    lines.push(`### ${e.id}`, '', e.caption, '')
+    if (e.files.before && e.files.after) {
+      lines.push(
+        '| Before | After |',
+        '|---|---|',
+        `| ![${e.id} before](./${e.files.before}) | ![${e.id} after](./${e.files.after}) |`,
+        ''
+      )
+    } else {
+      const [app, file] = Object.entries(e.files)[0]
+      lines.push(`**${app}**`, '', `![${e.id} ${app}](./${file})`, '')
+    }
   }
   const uncited = evidence.filter((e) => !(result.claims || []).some((c) => (c.evidence || []).includes(e.id)))
-  if (uncited.length && Object.keys(byId).length) {
+  if (uncited.length) {
     lines.push(`<sub>Uncited screenshots: ${uncited.map((e) => e.id).join(', ')}</sub>`, '')
   }
   lines.push(
@@ -395,8 +460,16 @@ function tool(name, description, properties, required) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } }
 }
 
+function appSelectors() {
+  return appNames.length > 1 ? ['both', ...appNames] : appNames
+}
+
 function appEnum() {
-  return { type: 'string', enum: appNames }
+  return { type: 'string', enum: appSelectors() }
+}
+
+function appNameOf(app) {
+  return Object.keys(apps).find((k) => apps[k] === app)
 }
 
 function parseArgs(argv) {
