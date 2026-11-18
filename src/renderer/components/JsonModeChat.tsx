@@ -990,24 +990,17 @@ function AutomatedTurnCard({
   return (
     <div className="flex justify-end">
       <div
-        className={`group border overflow-hidden ${
-          brand ? 'border-warning/40 bg-panel' : 'border-warning/40 bg-warning/5'
-        } ${isQueued ? 'opacity-70' : ''}`}
+        className={`group overflow-hidden ${brand ? 'bg-panel' : 'bg-warning/5'} ${
+          isQueued ? 'opacity-70' : ''
+        }`}
         style={{
           maxWidth: 'var(--chat-bubble-max)',
-          borderRadius: 'var(--chat-bubble-radius)'
+          borderRadius: 'var(--chat-prompt-radius)'
         }}
       >
-        {brand && <div className="brand-gradient-bg h-0.5" />}
         <div
-          className={`flex items-center gap-2 border-b ${
-            brand ? 'bg-app/40 border-border' : 'bg-warning/10 border-warning/30'
-          }`}
-          style={{
-            paddingInline: 'var(--chat-chrome-px)',
-            paddingBlock: 'var(--chat-chrome-py)',
-            fontSize: 'var(--chat-chrome-text)'
-          }}
+          className="flex items-center gap-2 px-4 pt-2.5"
+          style={{ fontSize: 'var(--chat-chrome-text)' }}
         >
           <Icon className={brand ? 'icon-sm shrink-0' : 'icon-xs shrink-0 text-warning'} />
           <span
@@ -1041,7 +1034,7 @@ function AutomatedTurnCard({
           )}
         </div>
         <div
-          className="px-3 py-2 whitespace-pre-wrap break-words"
+          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
           style={{ fontSize: 'var(--chat-body-text)' }}
         >
           <HighlightedText text={text} />
@@ -1059,15 +1052,13 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
   return (
     <div className="flex justify-end">
       <div
-        className="border border-border bg-panel overflow-hidden"
-        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-bubble-radius)' }}
+        className="bg-panel overflow-hidden"
+        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-prompt-radius)' }}
       >
         <button
           onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center gap-2 text-left cursor-pointer hover:bg-app/40"
+          className="w-full flex items-center gap-2 text-left cursor-pointer px-4 py-2.5 text-muted hover:text-fg transition-colors"
           style={{
-            paddingInline: 'var(--chat-chrome-px)',
-            paddingBlock: 'var(--chat-chrome-py)',
             fontSize: 'var(--chat-chrome-text)'
           }}
           aria-expanded={open}
@@ -1083,9 +1074,9 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
           <span className="text-muted truncate">delivered with this turn</span>
         </button>
         {open && (
-          <div className="border-t border-border divide-y divide-border">
+          <div className="px-4 pb-2.5 space-y-3">
             {notices.map((n, i) => (
-              <div key={i} className="px-3 py-2" style={{ fontSize: 'var(--chat-body-text)' }}>
+              <div key={i} style={{ fontSize: 'var(--chat-body-text)' }}>
                 <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
                   {automationLabel(n.source, n.from).label}
                 </div>
@@ -1168,10 +1159,10 @@ function renderEntries(
         node: queued ? (
           <div className="flex justify-end">
             <div
-              className="bg-accent/10 border border-dashed border-accent/40 pl-3 pr-1 py-2 opacity-70 flex items-start gap-2"
+              className="bg-accent/5 pl-4 pr-1.5 py-2.5 opacity-70 flex items-start gap-2"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)'
+                borderRadius: 'var(--chat-prompt-radius)'
               }}
             >
               <div
@@ -1201,10 +1192,10 @@ function renderEntries(
         ) : (
           <div className="flex justify-end">
             <div
-              className="bg-accent/15 border border-accent/30 px-3 py-2 whitespace-pre-wrap break-words"
+              className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)',
+                borderRadius: 'var(--chat-prompt-radius)',
                 fontSize: 'var(--chat-body-text)'
               }}
             >
