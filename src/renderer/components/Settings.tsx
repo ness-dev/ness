@@ -453,6 +453,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     wsTransportHost,
     defaultClaudeTabType,
     jsonModeChatDensity,
+    subagentsColumnDefault,
     uiScale,
     nessieColor,
     jsonModeSendOnEnter,
@@ -2575,6 +2576,45 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       }`}
                     >
                       Comfy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Subagents column
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    How the column of running sub-agents starts beside a
+                    chat. Opening or closing it in a chat is remembered for
+                    that chat.
+                  </div>
+                  <div className="inline-flex rounded border border-border-strong overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setSubagentsColumnDefault('expanded')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors ${
+                        subagentsColumnDefault === 'expanded'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Expanded
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setSubagentsColumnDefault('collapsed')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors border-l border-border-strong ${
+                        subagentsColumnDefault === 'collapsed'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Collapsed
                     </button>
                   </div>
                 </div>

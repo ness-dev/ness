@@ -294,6 +294,8 @@ export function buildInitialAppState(
       autoApproveSteerInstructions: config.autoApproveSteerInstructions || '',
       useSystemClaudeForJsonMode: config.useSystemClaudeForJsonMode === true,
       jsonModeChatDensity: config.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact',
+      subagentsColumnDefault:
+        config.subagentsColumnDefault === 'collapsed' ? 'collapsed' : 'expanded',
       uiScale:
         config.uiScale === 'x-small' ||
         config.uiScale === 'medium' ||

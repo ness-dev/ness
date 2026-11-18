@@ -315,6 +315,8 @@ export function buildBackend(
       reqConfig('config:setChatPromotionDismissed', value),
     setJsonModeChatDensity: (value: 'compact' | 'comfy') =>
       reqConfig('config:setJsonModeChatDensity', value),
+    setSubagentsColumnDefault: (value: 'expanded' | 'collapsed') =>
+      reqConfig('config:setSubagentsColumnDefault', value),
     setUiScale: (value: 'x-small' | 'small' | 'medium' | 'large' | 'x-large') =>
       reqConfig('config:setUiScale', value),
     setNessieColor: (value: string) => reqConfig('config:setNessieColor', value),

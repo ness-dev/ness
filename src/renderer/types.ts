@@ -413,6 +413,7 @@ export interface ElectronAPI {
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
   setJsonModeChatDensity(value: 'compact' | 'comfy'): Promise<boolean>
+  setSubagentsColumnDefault(value: 'expanded' | 'collapsed'): Promise<boolean>
   setUiScale(value: 'x-small' | 'small' | 'medium' | 'large' | 'x-large'): Promise<boolean>
   setNessieColor(value: string): Promise<boolean>
   setJsonModeSendOnEnter(enabled: boolean): Promise<boolean>

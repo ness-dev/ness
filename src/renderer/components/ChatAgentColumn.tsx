@@ -14,11 +14,13 @@ import { AgentStepLine } from './AgentStepLine'
 import { useLiveClock } from './JsonClaudeAgentsPanel'
 import { ResizeHandle } from './ResizeHandle'
 import { useSessionAgents } from '../hooks/useSessionAgents'
+import { useSettings } from '../store'
+import { isColumnOpen, parseColumnChoices, withColumnChoice } from './subagent-column-open'
 import { getCardOverrides, setCardOverride } from './subagent-card-overrides'
 import { fingerprint, flattenRows, type Row } from './agent-column-rows'
 
 const WIDTH_KEY = 'harness:agentColumnWidth'
-const CLOSED_KEY = 'harness:agentColumnClosed'
+const CHOICES_KEY = 'harness:subagentsColumnOpen'
 const DEFAULT_WIDTH = 360
 const MIN_WIDTH = 240
 const MAX_WIDTH = 720
@@ -29,28 +31,10 @@ const INLINE_STEPS = 40
 const TEXT_PREVIEW = 600
 const DEFAULT_SUBAGENT_TYPE = 'general-purpose'
 const REPORT_LIMIT = 3000
-/** Closed-column choices are remembered per session; this bounds the
- *  list so it can't grow without limit across months of sessions. */
-const CLOSED_CAP = 200
 
 function readWidth(): number {
   const saved = Number(localStorage.getItem(WIDTH_KEY))
   return saved >= MIN_WIDTH && saved <= MAX_WIDTH ? saved : DEFAULT_WIDTH
-}
-
-function readClosed(): string[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? '[]')
-    return Array.isArray(raw) ? raw.filter((x) => typeof x === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function writeClosed(sessionId: string, closed: boolean): void {
-  const rest = readClosed().filter((id) => id !== sessionId)
-  const next = closed ? [...rest, sessionId].slice(-CLOSED_CAP) : rest
-  localStorage.setItem(CLOSED_KEY, JSON.stringify(next))
 }
 
 /** One step, memoized on its content. A running agent's steps are new
@@ -352,7 +336,11 @@ function ChatAgentColumnLive({
   chipSlot: HTMLElement | null
 }): JSX.Element | null {
   const { agents, running } = useSessionAgents(sessionId)
-  const [closed, setClosed] = useState(() => readClosed().includes(sessionId))
+  const { subagentsColumnDefault } = useSettings()
+  const [choices, setChoices] = useState(() =>
+    parseColumnChoices(localStorage.getItem(CHOICES_KEY))
+  )
+  const closed = !isColumnOpen(choices, sessionId, subagentsColumnDefault)
   const [width, setWidth] = useState(readWidth)
   // Explicit user choices only. A card defaults open while it's running
   // and closed once it settles, so this records overrides rather than the
@@ -385,8 +373,15 @@ function ChatAgentColumnLive({
   )
   const setColumnClosed = useCallback(
     (v: boolean) => {
-      setClosed(v)
-      writeClosed(sessionId, v)
+      // Re-read so a choice made in another chat since this one mounted
+      // isn't overwritten with this component's stale copy.
+      const next = withColumnChoice(
+        parseColumnChoices(localStorage.getItem(CHOICES_KEY)),
+        sessionId,
+        !v
+      )
+      localStorage.setItem(CHOICES_KEY, JSON.stringify(next))
+      setChoices(next)
     },
     [sessionId]
   )

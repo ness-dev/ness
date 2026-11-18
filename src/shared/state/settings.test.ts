@@ -685,6 +685,20 @@ describe('settingsReducer', () => {
     expect(compact.jsonModeChatDensity).toBe('compact')
   })
 
+  it('subagentsColumnDefaultChanged switches between expanded and collapsed', () => {
+    expect(initialSettings.subagentsColumnDefault).toBe('expanded')
+    const collapsed = apply(initialSettings, {
+      type: 'settings/subagentsColumnDefaultChanged',
+      payload: 'collapsed'
+    })
+    expect(collapsed.subagentsColumnDefault).toBe('collapsed')
+    const expanded = apply(collapsed, {
+      type: 'settings/subagentsColumnDefaultChanged',
+      payload: 'expanded'
+    })
+    expect(expanded.subagentsColumnDefault).toBe('expanded')
+  })
+
   it('uiScaleChanged walks through every step', () => {
     expect(initialSettings.uiScale).toBe('small')
     const medium = apply(initialSettings, {
