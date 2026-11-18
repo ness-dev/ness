@@ -65,7 +65,7 @@ import { sweepWorktreeTrashOnBoot } from './worktree-trash'
 import { PanesFSM } from './panes-fsm'
 import { treeToPersistedNode } from './pane-persistence'
 import { ActivityDeriver } from './activity-deriver'
-import { CiNotifier } from './ci-notifier'
+import { NotificationBus } from './notification-bus'
 import {
   SubscriptionNotifier,
   buildWorktreeDetail,
@@ -179,12 +179,7 @@ import { listConfiguredHosts } from './ssh-config'
 import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
-import {
-  deliverToTab,
-  deliverToWorktreeChat,
-  describeWorktree,
-  resolveWorktreeQuery
-} from './chat-delivery'
+import { describeWorktree, resolveWorktreeQuery } from './chat-delivery'
 import { listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
 import {
@@ -1095,10 +1090,11 @@ const panesFSM = new PanesFSM(store, {
   clearJsonClaudeSession: (sessionId) =>
     store.dispatch({ type: 'jsonClaude/sessionCleared', payload: { sessionId } }),
   startJsonClaudeWithPrompt: (sessionId, worktreePath, initialPrompt) => {
-    void startJsonClaudeSession(sessionId, worktreePath).then((running) => {
-      if (running && initialPrompt) chatRouter.send(sessionId, initialPrompt)
-    })
+    if (initialPrompt) notificationBus.startWithPrompt(sessionId, worktreePath, initialPrompt)
+    else void startJsonClaudeSession(sessionId, worktreePath)
   },
+  onTabClosed: (tabId) =>
+    store.dispatch({ type: 'notifications/drained', payload: { tabIds: [tabId] } }),
   startJsonClaude: (sessionId, worktreePath) => {
     void startJsonClaudeSession(sessionId, worktreePath)
   }
@@ -1360,8 +1356,8 @@ store.subscribe((event) => {
 
 const activityDeriver = new ActivityDeriver(store)
 
-// How anything in main reaches a worktree's agent chat. Shared by the CI
-// notifier and the send_message MCP tool so both route (and wake) alike.
+// The primitives for reaching a worktree's agent chat. Only the
+// notification bus below uses them directly.
 const chatDeliveryDeps = {
   send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
@@ -1370,16 +1366,20 @@ const chatDeliveryDeps = {
   respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)
 }
 
-// Injects a "CI is failing" message into a worktree's agent chat when its
-// PR checks go red. Kept out of PRPoller so the poller stays ignorant of
-// chat sessions.
-const ciNotifier = new CiNotifier(store, chatDeliveryDeps)
+// Every automatic message into an agent chat goes through this one bus —
+// PR/CI updates, reviews, worktree messages, progress reports, conflict
+// hand-offs, kickoff briefs. It picks the tab, interrupts or holds, wakes
+// as needed, and logs each one under [notify]. See notification-bus.ts.
+const notificationBus = new NotificationBus(store, chatDeliveryDeps, startJsonClaudeSession)
 
-// Tells tabs that follow a worktree (explicitly, or implicitly because they
-// created it) when its PR changes. Same delivery path as the CI notifier.
+
+// Every GitHub notification to an agent: a worktree's own agent hearing
+// about its PR (gated by the CI-notify setting, via the own-worktree rule
+// in shared/subscribers.ts) and tabs following the worktree from elsewhere.
+// Kept out of PRPoller so the poller stays ignorant of chat sessions.
 const subscriptionNotifier = new SubscriptionNotifier(
   store,
-  chatDeliveryDeps,
+  notificationBus,
   () => config.worktreeMessagingEnabled === true
 )
 
@@ -1398,8 +1398,7 @@ const reviewServiceDeps: ReviewServiceDeps = {
       prompt: s.reviewPrompt || DEFAULT_REVIEW_PROMPT
     }
   },
-  deliver: (worktreePath, tabId, message) =>
-    deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+  deliver: (worktreePath, tabId, message) => notificationBus.toTab(worktreePath, tabId, message)
 }
 
 // Step 3's counterpart to request_review: when a worktree's PR checks go
@@ -1663,9 +1662,23 @@ store.subscribe((event) => {
 
 // A removed worktree takes its subscriptions (either end) and its origin
 // with it, so nothing follows — or is followed from — a path that's gone.
+// Prunes only paths that LEFT the list: a just-created worktree's origin is
+// recorded before the path joins the list, and a listChanged in that window
+// must not read it as deleted. The first list after boot reconciles against
+// whatever was persisted, since there's no earlier list to diff.
+let lastWorktreePaths: Set<string> | null = null
 store.subscribe((event) => {
   if (event.type !== 'worktrees/listChanged') return
-  pruneForRemovedWorktrees(store)
+  const state = store.getSnapshot().state
+  const live = new Set(state.worktrees.list.map((w) => w.path))
+  const before =
+    lastWorktreePaths ??
+    new Set([
+      ...state.subscriptions.list.flatMap((s) => [s.subscriberPath, s.targetPath]),
+      ...Object.entries(state.origins.byPath).flatMap(([p, o]) => [p, o.creatorPath])
+    ])
+  lastWorktreePaths = live
+  pruneForRemovedWorktrees(store, new Set([...before].filter((p) => !live.has(p))))
 })
 
 // Same for CI-notify overrides — a removed worktree's override would
@@ -2385,12 +2398,7 @@ function registerIpcHandlers(): void {
       const state = store.getSnapshot().state
       const pr = state.prs.byPath[worktreePath]
       if (!pr) return { ok: false, error: 'No PR for this branch' }
-      const result = deliverToWorktreeChat(
-        state,
-        chatDeliveryDeps,
-        worktreePath,
-        buildMergeConflictMessage(pr)
-      )
+      const result = notificationBus.toWorktree(worktreePath, buildMergeConflictMessage(pr))
       if (!result.ok) {
         return {
           ok: false,
@@ -5495,7 +5503,6 @@ async function runBoot(): Promise<void> {
   // and writes recordActivity + lastActive without renderer involvement.
   activityDeriver.start()
 
-  ciNotifier.start()
   subscriptionNotifier.start()
 
   reviewSpawner.start()
@@ -5658,19 +5665,13 @@ async function runBoot(): Promise<void> {
         resolveWorktreeQuery(store.getSnapshot().state, query),
       describe: (worktreePath) =>
         describeWorktree(store.getSnapshot().state, worktreePath),
-      send: (worktreePath, message) =>
-        deliverToWorktreeChat(
-          store.getSnapshot().state,
-          chatDeliveryDeps,
-          worktreePath,
-          message
-        ),
+      send: (worktreePath, message) => notificationBus.toWorktree(worktreePath, message),
       sendToTab: (worktreePath, tabId, message) =>
-        deliverToTab(store.getSnapshot().state, chatDeliveryDeps, worktreePath, tabId, message)
+        notificationBus.toTab(worktreePath, tabId, message)
     },
     subscriptions: {
       subscribe: (caller, targetPath, opts) =>
-        subscribeToWorktree(store, chatDeliveryDeps, {
+        subscribeToWorktree(store, notificationBus, {
           subscriberPath: caller.worktreePath,
           subscriberTabId: caller.tabId,
           targetPath,
@@ -5686,7 +5687,7 @@ async function runBoot(): Promise<void> {
         }
       },
       reportProgress: (caller, message, urgent) =>
-        reportProgress(store, chatDeliveryDeps, caller.worktreePath, caller.tabId, message, urgent),
+        reportProgress(store, notificationBus, caller.worktreePath, caller.tabId, message, urgent),
       recordOrigin: (worktreePath, creator) => recordWorktreeOrigin(store, worktreePath, creator)
     },
     getWorktreeDetail: (worktreePath) =>

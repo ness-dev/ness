@@ -47,7 +47,10 @@ Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
 follows), `origins` (which Chat tab created a worktree — implicit follows
 are derived from it in `shared/subscribers.ts`, never stored), and
 `notifications` (silent notices held per tab until `ChatRouter.send`
-releases them into its next turn). Adding a new piece of shared state means picking the
+releases them into its next turn). Every automatic message into an agent
+chat — PR/CI updates, reviews, worktree messages, progress reports,
+kickoff briefs — goes through `NotificationBus` (`src/main/notification-bus.ts`);
+only user-typed turns call `ChatRouter.send` directly. Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end

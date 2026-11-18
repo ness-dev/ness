@@ -1309,7 +1309,7 @@ async function handleRequest(
       if (outcome === 'implicit') {
         return sendJson(res, 409, {
           error:
-            'that subscription is implicit — you follow this worktree because you created it, and it lasts as long as the worktree does. To get its updates quietly instead, call subscribe_to_worktree with mode "silent".'
+            'that subscription is implicit — Ness derives it because you created this worktree, and it lasts as long as the worktree does. To get its updates quietly instead, call subscribe_to_worktree with mode "silent".'
         })
       }
       return sendJson(res, 200, { worktreePath: resolved.path, removed: true })

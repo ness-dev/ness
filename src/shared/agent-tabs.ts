@@ -82,3 +82,10 @@ export function listChatTabs(state: AppState, worktreePath: string): ChatTabInfo
   out.sort((a, b) => b.lastActiveAt - a.lastActiveAt || a.order - b.order)
   return out.map(({ order: _order, ...info }) => info)
 }
+
+/** The worktree's author tab: its most recently active Chat tab that is
+ *  not itself a reviewer. Where Ness sends anything addressed to "the agent
+ *  working on this worktree". */
+export function pickAuthorTab(state: AppState, worktreePath: string): string | null {
+  return listChatTabs(state, worktreePath).find((t) => !t.reviewOf)?.id ?? null
+}

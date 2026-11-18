@@ -162,6 +162,8 @@ const subscriptions = {
         kind: 'implicit',
         reason: 'created-worktree',
         mode: 'silent',
+        topics: ['pr', 'progress'],
+        needsMessaging: true,
         since: 1
       }
     ],

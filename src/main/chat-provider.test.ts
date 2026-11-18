@@ -149,3 +149,23 @@ describe('ChatRouter held notifications', () => {
     expect((claude.send as ReturnType<typeof vi.fn>).mock.calls[1][1]).toBe('again')
   })
 })
+
+describe('ChatRouter held notifications while busy', () => {
+  it('keeps held notices out of a queued turn', async () => {
+    const { wrapAutomatedMessage } = await import('../shared/state/json-claude')
+    const store = new Store(initialState)
+    const claude = fakeProvider()
+    const router = new ChatRouter(store, { claude, codex: fakeProvider() })
+    startSession(store, 's1')
+    store.dispatch({ type: 'jsonClaude/busyChanged', payload: { sessionId: 's1', busy: true } })
+    const wire = wrapAutomatedMessage('subscription-update', 'x', { from: 'C' })
+    store.dispatch({
+      type: 'notifications/queued',
+      payload: { tabId: 's1', notice: { id: 'n', source: 'subscription-update', wire, queuedAt: 0 } }
+    })
+    expect(store.getSnapshot().state.jsonClaude.sessions['s1']?.busy).toBe(true)
+    router.send('s1', 'queued msg')
+    expect((claude.send as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('queued msg')
+    expect(store.getSnapshot().state.notifications.pendingByTab['s1']).toHaveLength(1)
+  })
+})

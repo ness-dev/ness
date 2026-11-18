@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 vi.mock('./debug', () => ({ log: () => {} }))
 
 import { Store } from './store'
+import { NotificationBus } from './notification-bus'
 import {
   SubscriptionNotifier,
   describePrChanges,
@@ -79,12 +80,11 @@ function setup(over: Partial<AppState> = {}) {
   const send = vi.fn<(sessionId: string, text: string) => void>()
   store.dispatch({ type: 'jsonClaude/sessionStarted', payload: { sessionId: PARENT_TAB, worktreePath: PARENT } })
   store.dispatch({ type: 'jsonClaude/sessionStarted', payload: { sessionId: CHILD_TAB, worktreePath: CHILD } })
-  const delivery = {
-    send,
-    hasSession: (id: string) => live.has(id),
-    wake: () => {},
-    respawn: () => {}
-  }
+  const delivery = new NotificationBus(
+    store,
+    { send, hasSession: (id: string) => live.has(id), wake: () => {}, respawn: () => {} },
+    async () => true
+  )
   return { store, send, delivery }
 }
 
@@ -107,7 +107,7 @@ describe('describePrChanges', () => {
     })
     expect(describePrChanges(pr(), next)).toEqual([
       { text: 'New commit pushed (bbbbbbb)', urgent: false },
-      { text: 'CI failing (build)', urgent: true }
+      { text: 'CI failing\n  - build', urgent: true, ciKey: 'bbbbbbb2:failure' }
     ])
   })
 
@@ -168,7 +168,7 @@ describe('implicit subscriptions', () => {
     const { store } = setup()
     recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
     store.dispatch({ type: 'worktrees/listChanged', payload: [worktree(PARENT, 'parent')] })
-    pruneForRemovedWorktrees(store)
+    pruneForRemovedWorktrees(store, new Set([CHILD]))
     expect(subscribersOf(store.getSnapshot().state, CHILD)).toEqual([])
   })
 })
@@ -277,5 +277,145 @@ describe('SubscriptionNotifier', () => {
     expect(send).not.toHaveBeenCalled()
     expect(store.getSnapshot().state.notifications.pendingByTab).toEqual({})
     notifier.stop()
+  })
+})
+
+describe('review follow-ups', () => {
+  it('a closed creator tab stops following, with nothing to clean up', () => {
+    const { store, send, delivery } = setup()
+    recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
+    store.dispatch({
+      type: 'terminals/panesForWorktreeChanged',
+      payload: { worktreePath: PARENT, panes: { type: 'leaf', id: 'p', tabs: [], activeTabId: '' } }
+    })
+    const r = reportProgress(store, delivery, CHILD, CHILD_TAB, 'hi', false)
+    expect(r).toEqual({ delivered: [], failed: [] })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('changing only the mode does not re-brief the target agent', () => {
+    const { store, send, delivery } = setup()
+    const sub = { subscriberPath: PARENT, subscriberTabId: PARENT_TAB, targetPath: CHILD, note: 'n' }
+    subscribeToWorktree(store, delivery, sub)
+    expect(send).toHaveBeenCalledTimes(1)
+    const r = subscribeToWorktree(store, delivery, { ...sub, mode: 'silent' })
+    expect(r).toMatchObject({ created: false, mode: 'silent', targetNotified: false })
+    expect(send).toHaveBeenCalledTimes(1)
+    subscribeToWorktree(store, delivery, { ...sub, note: 'new note', mode: 'silent' })
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('subscribing to a worktree you already follow implicitly does not re-brief it', () => {
+    const { store, send, delivery } = setup()
+    recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
+    subscribeToWorktree(store, delivery, {
+      subscriberPath: PARENT,
+      subscriberTabId: PARENT_TAB,
+      targetPath: CHILD,
+      mode: 'interrupt'
+    })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('prune only touches the paths it is told left the list', () => {
+    const { store } = setup()
+    recordWorktreeOrigin(store, '/wt/brand-new', { worktreePath: PARENT, tabId: PARENT_TAB })
+    pruneForRemovedWorktrees(store, new Set(['/wt/something-else']))
+    expect(store.getSnapshot().state.origins.byPath['/wt/brand-new']).toBeDefined()
+  })
+
+  it('unsubscribe → PR changes → resubscribe stays quiet', async () => {
+    const { store, send, delivery } = setup()
+    const notifier = new SubscriptionNotifier(store, delivery, () => true)
+    notifier.start()
+    const sub = { subscriberPath: PARENT, subscriberTabId: PARENT_TAB, targetPath: CHILD }
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    subscribeToWorktree(store, delivery, sub)
+    unsubscribeFromWorktree(store, PARENT_TAB, CHILD)
+    store.dispatch({
+      type: 'prs/bulkStatusChanged',
+      payload: { [CHILD]: pr({ headSha: 'ccccccc3', checksOverall: 'success', reviewDecision: 'approved' }) }
+    })
+    await flush()
+    send.mockClear()
+    subscribeToWorktree(store, delivery, sub)
+    send.mockClear()
+    store.dispatch({
+      type: 'prs/bulkStatusChanged',
+      payload: { [CHILD]: pr({ headSha: 'ccccccc3', checksOverall: 'success', reviewDecision: 'approved' }) }
+    })
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+    notifier.stop()
+  })
+})
+
+describe('own-worktree PR notifications', () => {
+  function withCiNotify(on: boolean) {
+    const s = setup({
+      settings: { ...initialState.settings, notifyChatOnCiFailure: on }
+    })
+    return s
+  }
+
+  it('a CI failure on its own PR interrupts the worktree agent with a pr-update', async () => {
+    const { store, send, delivery } = withCiNotify(true)
+    const notifier = new SubscriptionNotifier(store, delivery, () => false)
+    notifier.start()
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    store.dispatch({
+      type: 'prs/statusChanged',
+      payload: {
+        path: CHILD,
+        status: pr({
+          checksOverall: 'failure',
+          checks: [{ name: 'build', state: 'failure', description: 'tsc', detailsUrl: 'https://ci/1' }]
+        })
+      }
+    })
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    const [tab, wire] = send.mock.calls[0]
+    expect(tab).toBe(CHILD_TAB)
+    const parsed = parseAutomatedMessage(wire)
+    expect(parsed?.source).toBe('pr-update')
+    expect(parsed?.body).toContain('Your PR #7')
+    expect(parsed?.body).toContain('build: tsc — https://ci/1')
+    notifier.stop()
+  })
+
+  it('reports a flapping check once per commit', async () => {
+    const { store, send, delivery } = withCiNotify(true)
+    const notifier = new SubscriptionNotifier(store, delivery, () => false)
+    notifier.start()
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    for (const checksOverall of ['failure', 'pending', 'failure'] as const) {
+      store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: pr({ checksOverall }) } })
+    }
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    notifier.stop()
+  })
+
+  it('holds routine updates for its next turn and says nothing when the setting is off', async () => {
+    const on = withCiNotify(true)
+    const notifier = new SubscriptionNotifier(on.store, on.delivery, () => false)
+    notifier.start()
+    on.store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    on.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: pr({ checksOverall: 'success' }) } })
+    await flush()
+    expect(on.send).not.toHaveBeenCalled()
+    expect(on.store.getSnapshot().state.notifications.pendingByTab[CHILD_TAB]).toHaveLength(1)
+    notifier.stop()
+
+    const off = withCiNotify(false)
+    const n2 = new SubscriptionNotifier(off.store, off.delivery, () => false)
+    n2.start()
+    off.store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    off.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: pr({ checksOverall: 'failure' }) } })
+    await flush()
+    expect(off.send).not.toHaveBeenCalled()
+    expect(off.store.getSnapshot().state.notifications.pendingByTab).toEqual({})
+    n2.stop()
   })
 })

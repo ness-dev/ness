@@ -3,19 +3,16 @@ import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
 import type { PRStatus } from '../shared/state/prs'
 import { findSubscription, type NotifyMode } from '../shared/state/subscriptions'
+import { wrapAutomatedMessage } from '../shared/state/json-claude'
+import { listChatTabs } from '../shared/agent-tabs'
 import {
-  wrapAutomatedMessage,
-  type JsonClaudeAutomationSource
-} from '../shared/state/json-claude'
-import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
-import { followedTargets, subscribersOf, type Subscriber } from '../shared/subscribers'
-import {
-  deliverToTab,
-  deliverToWorktreeChat,
-  describeWorktree,
-  type ChatDeliveryDeps,
-  type TabDeliveryFailure
-} from './chat-delivery'
+  followedTargets,
+  subscribersOf,
+  type Subscriber,
+  type SubscriptionTopic
+} from '../shared/subscribers'
+import { describeWorktree, type TabDeliveryFailure } from './chat-delivery'
+import type { NotificationBus } from './notification-bus'
 import { log } from './debug'
 
 const MAX_LISTED_CHECKS = 5
@@ -38,63 +35,25 @@ function senderName(store: Store, worktreePath: string, tabId: string): string {
   return label ? `${name} · ${label}` : name
 }
 
-export type NotifyResult =
-  | { ok: true; delivery: 'interrupt'; woke: boolean }
-  | { ok: true; delivery: 'held' }
-  | { ok: false; reason: TabDeliveryFailure }
-
-/** Deliver one automated message to one Chat tab, as an interrupt (its own
- *  turn, waking the tab) or held silently for the tab's next turn.
- *
- *  An interrupt spawns a subprocess when the tab is asleep — never call
- *  this from inside a store listener. */
-export function notifyTab(
-  store: Store,
-  delivery: ChatDeliveryDeps,
-  target: { worktreePath: string; tabId: string },
-  message: { source: JsonClaudeAutomationSource; from?: string; wire: string },
-  mode: NotifyMode
-): NotifyResult {
-  const state = store.getSnapshot().state
-  if (mode === 'interrupt') {
-    const r = deliverToTab(state, delivery, target.worktreePath, target.tabId, message.wire)
-    return r.ok ? { ok: true, delivery: 'interrupt', woke: r.woke } : r
-  }
-  const tab = findTabInWorktree(state, target.worktreePath, target.tabId)
-  if (!tab) return { ok: false, reason: 'no-tab' }
-  if (tab.type === 'agent') return { ok: false, reason: 'terminal-unsupported' }
-  if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
-  store.dispatch({
-    type: 'notifications/queued',
-    payload: {
-      tabId: target.tabId,
-      notice: {
-        id: randomUUID(),
-        source: message.source,
-        ...(message.from ? { from: message.from } : {}),
-        wire: message.wire,
-        queuedAt: Date.now()
-      }
-    }
-  })
-  return { ok: true, delivery: 'held' }
-}
-
 export type SubscribeResult = {
   created: boolean
   mode: NotifyMode
-  /** Whether the target worktree's agent was told it is being followed. */
+  /** Whether the target worktree's agent was told about this follower on
+   *  this call. False with no error when there was nothing new to tell. */
   targetNotified: boolean
   targetNotifyError?: 'no-chat-tab' | 'wake-failed'
 }
 
-/** Subscribe one Chat tab to another worktree, and tell the target's agent
- *  it now has an audience. Re-subscribing refreshes the note and mode and
- *  re-sends the briefing, which is how a subscriber recovers a target agent
- *  that lost the thread (new tab, compacted context). */
+/** Subscribe one Chat tab to another worktree.
+ *
+ *  The target's agent is briefed when that tells it something new: a new
+ *  follower, or a changed note. A call that only changes `mode` — the
+ *  documented way to quiet a worktree you follow — must not interrupt the
+ *  agent there, and neither does subscribing to a worktree you already
+ *  follow implicitly, whose agent was told in its kickoff brief. */
 export function subscribeToWorktree(
   store: Store,
-  delivery: ChatDeliveryDeps,
+  bus: NotificationBus,
   params: {
     subscriberPath: string
     subscriberTabId: string
@@ -105,11 +64,11 @@ export function subscribeToWorktree(
 ): SubscribeResult {
   const note = params.note?.trim() || undefined
   const mode = params.mode ?? 'interrupt'
-  const existing = findSubscription(
-    store.getSnapshot().state.subscriptions,
-    params.subscriberTabId,
-    params.targetPath
-  )
+  const before = store.getSnapshot().state
+  const existing = findSubscription(before.subscriptions, params.subscriberTabId, params.targetPath)
+  const alreadyFollowing =
+    existing ??
+    subscribersOf(before, params.targetPath).find((s) => s.subscriberTabId === params.subscriberTabId)
   store.dispatch({
     type: 'subscriptions/added',
     payload: {
@@ -123,20 +82,17 @@ export function subscribeToWorktree(
     }
   })
 
+  const rebrief = !alreadyFollowing || (note !== undefined && note !== alreadyFollowing.note)
+  if (!rebrief) {
+    log('subscriptions', `${params.subscriberTabId} -> ${params.targetPath} updated (mode=${mode}), no re-brief`)
+    return { created: !existing, mode, targetNotified: false }
+  }
   const from = senderName(store, params.subscriberPath, params.subscriberTabId)
   const lines = [`${from} subscribed to progress reports from this worktree.`]
   if (note) lines.push('', `What they are watching for: ${note}`)
-  const message = wrapAutomatedMessage('subscription-started', lines.join('\n'), { from })
-  const result = deliverToWorktreeChat(
-    store.getSnapshot().state,
-    delivery,
+  const result = bus.toWorktree(
     params.targetPath,
-    message
-  )
-  log(
-    'subscriptions',
-    `${params.subscriberTabId}@${params.subscriberPath} -> ${params.targetPath} ` +
-      `(${existing ? 'refreshed' : 'new'}, mode=${mode}, notified=${result.ok ? 'yes' : result.reason})`
+    wrapAutomatedMessage('subscription-started', lines.join('\n'), { from })
   )
   return {
     created: !existing,
@@ -193,25 +149,36 @@ export interface FanOutResult {
   failed: Array<{ worktreePath: string; tabId: string; reason: TabDeliveryFailure }>
 }
 
-/** Deliver one message to every subscriber of `targetPath`, each in its
- *  own mode unless `urgent` forces an interrupt. Explicit subscriptions
- *  whose tab is gone for good are dropped; implicit ones have nothing
- *  stored to drop, and simply stop resolving once their source fact goes. */
+
+/** Deliver to every subscriber of `targetPath` that hears about `topic`,
+ *  each in its own mode unless `urgent` forces an interrupt. `message` is
+ *  built per subscriber, because a worktree's own agent and an agent
+ *  following it from elsewhere need the same news phrased differently.
+ *  Explicit subscriptions whose tab is gone for good are dropped; implicit
+ *  ones whose tab is gone already stopped resolving in subscribersOf. */
 function fanOut(
   store: Store,
-  delivery: ChatDeliveryDeps,
+  bus: NotificationBus,
   targetPath: string,
-  message: { source: JsonClaudeAutomationSource; from?: string; wire: string },
-  urgent: boolean
+  opts: {
+    topic: SubscriptionTopic
+    urgent: boolean
+    messagingEnabled: boolean
+    /** Wire text for one subscriber. */
+    message: (sub: Subscriber) => string
+  }
 ): FanOutResult {
   const result: FanOutResult = { delivered: [], failed: [] }
   const dead: string[] = []
-  const subs: Subscriber[] = subscribersOf(store.getSnapshot().state, targetPath)
+  const subs = subscribersOf(store.getSnapshot().state, targetPath, opts.topic).filter(
+    (s) => opts.messagingEnabled || !s.needsMessaging
+  )
   for (const sub of subs) {
     const target = { worktreePath: sub.subscriberPath, tabId: sub.subscriberTabId }
-    const r = notifyTab(store, delivery, target, message, urgent ? 'interrupt' : sub.mode)
+    const mode = opts.urgent ? 'interrupt' : sub.mode
+    const r = bus.toTab(target.worktreePath, target.tabId, opts.message(sub), mode)
     if (r.ok) {
-      result.delivered.push({ ...target, delivery: r.delivery })
+      result.delivered.push({ ...target, delivery: r.held ? 'held' : 'interrupt' })
       continue
     }
     result.failed.push({ ...target, reason: r.reason })
@@ -227,7 +194,7 @@ function fanOut(
 /** A progress report from an agent in `fromPath` to everyone following it. */
 export function reportProgress(
   store: Store,
-  delivery: ChatDeliveryDeps,
+  bus: NotificationBus,
   fromPath: string,
   fromTabId: string,
   message: string,
@@ -235,19 +202,31 @@ export function reportProgress(
 ): FanOutResult {
   const from = senderName(store, fromPath, fromTabId)
   const wire = wrapAutomatedMessage('progress-report', message, { from })
-  return fanOut(store, delivery, fromPath, { source: 'progress-report', from, wire }, urgent)
+  return fanOut(store, bus, fromPath, {
+    topic: 'progress',
+    urgent,
+    // The endpoint that calls this is already gated on messaging.
+    messagingEnabled: true,
+    message: () => wire
+  })
 }
 
-/** Remove explicit subscriptions and origins whose worktrees are gone. */
-export function pruneForRemovedWorktrees(store: Store): void {
+/** Remove explicit subscriptions and origins that involve `removed`
+ *  worktree paths. Takes the paths that left the list rather than diffing
+ *  against the current list, so a worktree created moments ago — whose
+ *  origin is recorded before it shows up in the list — isn't mistaken for
+ *  one that was deleted. */
+export function pruneForRemovedWorktrees(store: Store, removed: ReadonlySet<string>): void {
+  if (removed.size === 0) return
   const state = store.getSnapshot().state
-  const live = new Set(state.worktrees.list.map((w) => w.path))
   const dead = state.subscriptions.list
-    .filter((s) => !live.has(s.subscriberPath) || !live.has(s.targetPath))
+    .filter((s) => removed.has(s.subscriberPath) || removed.has(s.targetPath))
     .map((s) => s.id)
   if (dead.length > 0) store.dispatch({ type: 'subscriptions/removed', payload: { ids: dead } })
-  for (const path of Object.keys(state.origins.byPath)) {
-    if (!live.has(path)) store.dispatch({ type: 'origins/cleared', payload: path })
+  for (const [path, origin] of Object.entries(state.origins.byPath)) {
+    if (removed.has(path) || removed.has(origin.creatorPath)) {
+      store.dispatch({ type: 'origins/cleared', payload: path })
+    }
   }
 }
 
@@ -256,18 +235,32 @@ export interface PrChange {
   /** Something the subscriber likely needs to act on now. Forces an
    *  interrupt even for a silent subscription. */
   urgent: boolean
+  /** Set on a CI result: `<headSha>:<result>`. A check that flaps
+   *  (failure → pending → failure on a re-run of the same commit) is one
+   *  result, so the notifier reports each key once. */
+  ciKey?: string
 }
 
 function shortSha(sha: string | undefined): string {
   return sha ? sha.slice(0, 7) : ''
 }
 
+/** One indented line per failing check, with its description and log
+ *  link, so the agent can go straight to the failure. */
 function failingChecks(pr: PRStatus): string {
   const failing = pr.checks.filter((c) => c.state === 'failure' || c.state === 'error')
-  if (failing.length === 0) return ''
-  const names = failing.slice(0, MAX_LISTED_CHECKS).map((c) => c.name)
-  const more = failing.length > MAX_LISTED_CHECKS ? `, +${failing.length - MAX_LISTED_CHECKS} more` : ''
-  return ` (${names.join(', ')}${more})`
+  const lines = failing.slice(0, MAX_LISTED_CHECKS).map((c) => {
+    const detail = c.description?.trim()
+    return `  - ${c.name}${detail ? `: ${detail}` : ''}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`
+  })
+  if (failing.length > MAX_LISTED_CHECKS) {
+    lines.push(`  - …and ${failing.length - MAX_LISTED_CHECKS} more`)
+  }
+  return lines.length > 0 ? `\n${lines.join('\n')}` : ''
+}
+
+function ciKey(pr: PRStatus): string {
+  return `${pr.headSha || `pr-${pr.number}`}:${pr.checksOverall}`
 }
 
 function latestChangeRequester(pr: PRStatus): string | undefined {
@@ -299,9 +292,9 @@ export function describePrChanges(
   if (newCommit) out.push({ text: `New commit pushed (${shortSha(next.headSha)})`, urgent: false })
   const checksMoved = prev.checksOverall !== next.checksOverall || newCommit
   if (checksMoved && next.checksOverall === 'failure') {
-    out.push({ text: `CI failing${failingChecks(next)}`, urgent: true })
+    out.push({ text: `CI failing${failingChecks(next)}`, urgent: true, ciKey: ciKey(next) })
   } else if (checksMoved && next.checksOverall === 'success') {
-    out.push({ text: 'CI passed', urgent: false })
+    out.push({ text: 'CI passed', urgent: false, ciKey: ciKey(next) })
   }
   if (prev.reviewDecision !== next.reviewDecision) {
     if (next.reviewDecision === 'approved') out.push({ text: 'PR approved', urgent: false })
@@ -320,7 +313,8 @@ export function describePrChanges(
   return out
 }
 
-/** Exported for tests. */
+/** The update as an agent following the worktree from elsewhere reads it.
+ *  Exported for tests. */
 export function buildSubscriptionUpdate(
   targetName: string,
   pr: PRStatus,
@@ -334,29 +328,55 @@ export function buildSubscriptionUpdate(
   ].join('\n')
 }
 
-/** Tells subscribers when a followed worktree's PR changes: opened, new
- *  commits, CI result, review decision, conflicts, merge/close.
+/** The update as the worktree's own agent reads it — its own PR.
+ *  Exported for tests. */
+export function buildOwnPrUpdate(pr: PRStatus, changes: PrChange[]): string {
+  return [
+    `Your PR #${pr.number} "${pr.title}" (${pr.branch}):`,
+    ...changes.map((c) => `- ${c.text}`),
+    '',
+    pr.url
+  ].join('\n')
+}
+
+/** Every GitHub notification to an agent goes through here: a worktree's
+ *  own agent hearing about its PR, and agents following it from elsewhere.
+ *  Reports PR opened, new commits, CI results, review decisions, conflicts
+ *  and merge/close.
  *
- *  Keeps the last PR status it saw per followed target and diffs against
- *  it, so a re-poll that changes nothing says nothing. A target with no
- *  cached status is baselined rather than reported, which keeps boot and
- *  a fresh subscription quiet until something actually moves. The cache
- *  is of PR state, not of who's subscribed — that is re-derived per
- *  delivery from subscribersOf. */
+ *  Keeps the last PR status seen for every path — references, so it's
+ *  cheap — and diffs against it, so a re-poll that changes nothing says
+ *  nothing and a path that only starts being followed later already has a
+ *  baseline. A path's first observation is a baseline rather than news,
+ *  which keeps boot quiet. Who hears about a change is re-derived per
+ *  delivery from subscribersOf; nothing here caches subscriptions. */
 export class SubscriptionNotifier {
   private last = new Map<string, PRStatus | null>()
+  /** Last CI result reported per path, so a flapping check is reported
+   *  once per commit. */
+  private reportedCi = new Map<string, string>()
   private unsubscribe: (() => void) | null = null
 
   constructor(
     private store: Store,
-    private delivery: ChatDeliveryDeps,
-    /** Re-read per update so the messaging toggle takes effect live. */
-    private isEnabled: () => boolean
+    private bus: NotificationBus,
+    /** Re-read per update so the messaging toggle takes effect live. Only
+     *  gates agent-to-agent subscribers; a worktree's own agent has its own
+     *  setting, applied by the subscription rule. */
+    private messagingEnabled: () => boolean
   ) {}
 
   start(): void {
     if (this.unsubscribe) return
-    for (const target of followedTargets(this.store.getSnapshot().state)) this.baseline(target)
+    const byPath = this.store.getSnapshot().state.prs.byPath
+    for (const [path, status] of Object.entries(byPath)) {
+      this.last.set(path, status ?? null)
+      // An already-red PR at boot isn't news; claim its result so the
+      // next poll of the same commit stays quiet.
+      if (status && (status.checksOverall === 'failure' || status.checksOverall === 'success')) {
+        this.reportedCi.set(path, ciKey(status))
+      }
+    }
     this.unsubscribe = this.store.subscribe((event) => this.onEvent(event))
   }
 
@@ -365,61 +385,61 @@ export class SubscriptionNotifier {
     this.unsubscribe = null
   }
 
-  private baseline(target: string): void {
-    if (this.last.has(target)) return
-    const byPath = this.store.getSnapshot().state.prs.byPath
-    // Absent from byPath means "not polled yet": leave it uncached so the
-    // first poll becomes the baseline instead of reading as "PR opened".
-    if (target in byPath) this.last.set(target, byPath[target] ?? null)
-  }
-
   private onEvent(event: StateEvent): void {
-    switch (event.type) {
-      case 'subscriptions/added':
-        this.baseline(event.payload.targetPath)
-        return
-      case 'origins/recorded':
-        this.baseline(event.payload.path)
-        return
-      case 'prs/statusChanged': {
-        const { path, status } = event.payload
-        if (followedTargets(this.store.getSnapshot().state).has(path)) this.consider(path, status)
-        else this.last.delete(path)
-        return
+    if (event.type === 'prs/statusChanged') {
+      const followed = followedTargets(this.store.getSnapshot().state)
+      this.consider(event.payload.path, event.payload.status, followed)
+      return
+    }
+    if (event.type === 'prs/bulkStatusChanged') {
+      // Sweeping the payload is inherent to this event — it replaces
+      // prs.byPath wholesale — and PR polls are minutes apart. Only
+      // followed paths are diffed; the rest just update the baseline.
+      const followed = followedTargets(this.store.getSnapshot().state)
+      for (const path of Object.keys(event.payload)) {
+        this.consider(path, event.payload[path] ?? null, followed)
       }
-      case 'prs/bulkStatusChanged':
-        // Only followed targets are diffed — a handful at most — so this
-        // never sweeps the whole PR map.
-        for (const target of followedTargets(this.store.getSnapshot().state)) {
-          if (target in event.payload) this.consider(target, event.payload[target] ?? null)
+      for (const path of [...this.last.keys()]) {
+        if (!(path in event.payload)) {
+          this.last.delete(path)
+          this.reportedCi.delete(path)
         }
-        return
+      }
     }
   }
 
-  private consider(target: string, next: PRStatus | null): void {
-    const prev = this.last.has(target) ? this.last.get(target) : undefined
-    this.last.set(target, next)
-    const changes = describePrChanges(prev, next)
-    if (changes.length === 0 || !next || !this.isEnabled()) return
-    setImmediate(() => this.deliver(target, next, changes))
+  private consider(path: string, next: PRStatus | null, followed: Set<string>): void {
+    const prev = this.last.has(path) ? this.last.get(path) : undefined
+    this.last.set(path, next)
+    if (!followed.has(path) || !next) return
+    const changes = describePrChanges(prev, next).filter((c) => {
+      if (!c.ciKey) return true
+      if (this.reportedCi.get(path) === c.ciKey) return false
+      this.reportedCi.set(path, c.ciKey)
+      return true
+    })
+    if (changes.length === 0) return
+    setImmediate(() => this.deliver(path, next, changes))
   }
 
   private deliver(target: string, pr: PRStatus, changes: PrChange[]): void {
     const targetName = describeWorktree(this.store.getSnapshot().state, target)
-    const body = buildSubscriptionUpdate(targetName, pr, changes)
-    const wire = wrapAutomatedMessage('subscription-update', body, { from: targetName })
     const urgent = changes.some((c) => c.urgent)
-    const result = fanOut(
-      this.store,
-      this.delivery,
-      target,
-      { source: 'subscription-update', from: targetName, wire },
-      urgent
+    const own = wrapAutomatedMessage('pr-update', buildOwnPrUpdate(pr, changes))
+    const other = wrapAutomatedMessage(
+      'subscription-update',
+      buildSubscriptionUpdate(targetName, pr, changes),
+      { from: targetName }
     )
+    const result = fanOut(this.store, this.bus, target, {
+      topic: 'pr',
+      urgent,
+      messagingEnabled: this.messagingEnabled(),
+      message: (sub) => (sub.subscriberPath === target ? own : other)
+    })
     log(
       'subscriptions',
-      `update ${target}: ${changes.map((c) => c.text).join('; ')} urgent=${urgent} ` +
+      `update ${target}: ${changes.map((c) => c.text.split('\n')[0]).join('; ')} urgent=${urgent} ` +
         `-> delivered=${result.delivered.length} failed=${result.failed.length}`
     )
   }

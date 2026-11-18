@@ -936,6 +936,9 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'pr-update') {
+    return { label: 'Ness · PR update', note: "this worktree's pull request", brand: false }
+  }
   if (source === 'progress-report') {
     return {
       label: from ? `Progress Report · from ${from}` : 'Progress Report',

@@ -104,6 +104,7 @@ export type JsonClaudeAutomationSource =
   | 'subscription-started'
   | 'subscription-update'
   | 'progress-report'
+  | 'pr-update'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
@@ -115,7 +116,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
   'review-request',
   'subscription-started',
   'subscription-update',
-  'progress-report'
+  'progress-report',
+  'pr-update'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on
@@ -137,6 +139,8 @@ const AUTOMATION_GUIDANCE: Partial<Record<JsonClaudeAutomationSource, string>> =
     'Another agent is now following this worktree. Keep doing the work you were given — this is not a new task, and you do not need to reply to it now. From here on, call the `report_progress` tool from the ness-control MCP server with a short status update whenever you reach a milestone (a plan settled, a chunk of work committed, a PR opened, tests passing), when you get blocked or need a decision, and when you finish. Ness delivers each report to every subscriber, so do not use send_message for this. Keep reports to a few sentences: what changed, what is next, anything they should know. Ness already tells subscribers about PR, CI and review changes, so do not report those on their own.',
   'subscription-update':
     'This is an automatic update about a worktree you subscribed to. Act on it only if it changes what you are doing; otherwise acknowledge it briefly and carry on. Call `get_worktree_status` for the full picture, or `unsubscribe_from_worktree` once you no longer need these.',
+  'pr-update':
+    "This is an automatic update about this worktree's own pull request, from GitHub. If CI is failing, changes were requested, or the branch has merge conflicts, investigate and fix it unless the user has told you otherwise; if you are in the middle of something, finish that first. Anything else is for your information.",
   'worktree-kickoff':
     'This brief was written by another agent, not by the user. Treat it as a starting point rather than a spec: verify its claims about the codebase before acting on them, and say so instead of complying if the approach it describes looks wrong.',
   // The one source whose body IS the human's own words — the footer is the
