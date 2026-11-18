@@ -10,6 +10,10 @@
 # report links them by raw URL. Each run posts a new comment, so an
 # approved run shows up (and notifies) at the bottom of the PR. Earlier
 # reports, found by the marker below, are collapsed as outdated.
+#
+# Every comment ends with an unchecked "Re-run" task box. Ticking it fires
+# the workflow's issue_comment trigger; gate.mjs matches the marker and the
+# box's exact label, so keep both in sync with it.
 
 set -euo pipefail
 
@@ -55,6 +59,8 @@ BODY="$(mktemp)"
 {
   echo "$MARKER"
   sed -E "s#\]\(\./([^)]+\.png)\)#]($RAW/\1)#g" "$OUT/report.md"
+  echo
+  echo "- [ ] Re-run evidence review on the latest push"
   echo
   echo "<sub>Automated evidence review of \`${REVIEWED_SHA:-unknown}\` · [run log + transcript]($RUN_URL)</sub>"
 } > "$BODY"

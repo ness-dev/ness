@@ -4,26 +4,58 @@ name: Evidence review
 # PR's base and head builds side by side, captures screenshots that prove
 # (or disprove) what the PR claims, and posts them as a PR comment.
 #
-# Every run costs OpenRouter credit, so it needs approval unless the person
-# who triggered it (the pusher, or the PR opener) is on the allowlist in the
-# EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
-#   - allowlisted → `evidence-review-auto` environment, no reviewers, runs
-#     immediately.
-#   - everyone else → `evidence-review` environment, which has required
-#     reviewers. The run waits at "Waiting for review" until a reviewer
-#     clicks Review deployments → Approve and deploy in the PR's checks.
-#     Unapproved runs cost nothing, and a newer push cancels the older
-#     pending one.
+# Every run costs OpenRouter credit, so runs are rationed:
+#   - It runs automatically once per PR, not per push: on `opened`,
+#     `reopened` and `ready_for_review`, and never for drafts. Later pushes
+#     don't re-run it (`synchronize` used to, at ~$0.12 a push).
+#   - A `gate` job (scripts/evidence-reviewer/gate.mjs) runs first with a
+#     read-only token and no PR code. It lists the PR's files through the API
+#     and skips the run when nothing under src/renderer/ or src/web-client/
+#     changed, so CI- or script-only PRs cost nothing, post nothing, and stay
+#     green. It also resolves the PR number and the head SHA to review.
+#   - To re-run on a newer push, tick "Re-run evidence review on the latest
+#     push" in the bot's PR comment. That edit fires `issue_comment`, and
+#     the gate only lets it through when the comment is on a PR, was written
+#     by github-actions[bot] and starts with the `<!-- evidence-reviewer -->`
+#     marker, this edit took the box from unchecked to checked
+#     (`changes.body.from` vs the new body), the sender isn't a bot, and the
+#     sender has write, maintain or admin on the repo (collaborator
+#     permission API; GitHub already only lets writers tick someone else's
+#     box, this is belt and braces). The UI-path skip still applies; drafts
+#     are allowed, since someone asked. A re-run reviews the PR's head at
+#     the time of the tick. Its result posts a fresh comment with the box
+#     unchecked again; comments written with GITHUB_TOKEN don't trigger
+#     workflows, so that can't loop, and the bot-sender check is the
+#     backstop. A re-run runs on `main`'s commit, so its pass/fail shows in
+#     the Actions tab, not in the PR's checks; the comment is the result.
+#   - Even then it needs approval unless the person who triggered it (the
+#     PR opener, or whoever ticked the box) is on the allowlist in the
+#     EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
+#       - allowlisted → `evidence-review-auto` environment, no reviewers,
+#         runs immediately.
+#       - everyone else → `evidence-review` environment, which has required
+#         reviewers. The run waits at "Waiting for review" until a reviewer
+#         clicks Review deployments → Approve and deploy on the run (in the
+#         PR's checks, or the Actions tab for a checkbox re-run).
+#         Unapproved runs cost nothing, and a newer run for the same PR
+#         cancels the older pending one.
 # OPENROUTER_API_KEY is an environment secret, so both environments need
 # their own copy.
 #
-# Triggers. Every PR, fork or not, uses `pull_request_target`, so the
-# workflow always comes from `main` and a PR can't edit its own gate. Both
-# environments only allow deployments from `main` (Settings → Environments
-# → Deployment branches), so a workflow on any other branch can't reach
-# them or their key. workflow_dispatch therefore only works when run
-# from `main`. To try changes to this workflow before merging, temporarily
-# add the branch to the environments' allowed list.
+# Triggers. Every PR, fork or not, uses `pull_request_target`, and the
+# re-run box uses `issue_comment`; both always run the workflow from
+# `main`, so a PR can't edit its own gate. Both environments only allow
+# deployments from `main` (Settings → Environments → Deployment branches),
+# so a workflow on any other branch can't reach them or their key.
+# workflow_dispatch therefore only works when run from `main`; it skips
+# the draft check but not the UI-path one. To try changes to this workflow
+# before merging, temporarily add the branch to the environments' allowed
+# list.
+#
+# Every comment edit in the repo starts this workflow. The `gate` job's
+# `if` drops anything that isn't an edit of a bot comment on a PR without
+# booting a runner, and the concurrency group gives such edits a group of
+# their own so they can't cancel a review in progress.
 #
 # PRs mean running untrusted code next to a secret, so the work is split:
 #   - `review` builds and runs the PR's code and calls OpenRouter. Its token
@@ -50,6 +82,7 @@ name: Evidence review
 #     the only job with write permissions (assets branch + PR comment).
 #
 # Pieces, so this can be lifted into other repos:
+#   scripts/evidence-reviewer/gate.mjs      skip / re-run checkbox gate
 #   scripts/evidence-reviewer/run.mjs       generic agent (URL in, report out)
 #   scripts/evidence-reviewer/boot-ness.sh  app-specific boot + fixture seed
 #   .github/evidence-reviewer/instructions.md  app-specific usage guide
@@ -57,7 +90,9 @@ name: Evidence review
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [edited]
   workflow_dispatch:
     inputs:
       pr:
@@ -68,13 +103,57 @@ on:
         required: false
 
 concurrency:
-  group: evidence-review-${{ github.event.pull_request.number || inputs.pr }}
+  group: >-
+    evidence-review-${{
+      (github.event_name != 'issue_comment'
+        || (github.event.comment.user.login == 'github-actions[bot]'
+            && startsWith(github.event.comment.body, '<!-- evidence-reviewer -->')
+            && contains(github.event.comment.body, '- [x] Re-run evidence review')))
+      && (github.event.pull_request.number || github.event.issue.number || inputs.pr)
+      || format('ignored-{0}', github.run_id) }}
   cancel-in-progress: true
 
 permissions: {}
 
 jobs:
+  gate:
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false)
+      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.login == 'github-actions[bot]'
+          && github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+      pr: ${{ steps.gate.outputs.pr }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/evidence-reviewer
+
+      - name: Gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          node scripts/evidence-reviewer/gate.mjs
+          echo "### Evidence review gate" >> "$GITHUB_STEP_SUMMARY"
+          grep '^reason=' "$GITHUB_OUTPUT" | cut -d= -f2- >> "$GITHUB_STEP_SUMMARY"
+
   review:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     environment: >-
       ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
           && 'evidence-review-auto' || 'evidence-review' }}
@@ -84,7 +163,7 @@ jobs:
       contents: read
       pull-requests: read
     env:
-      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      PR: ${{ needs.gate.outputs.pr }}
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
     steps:
@@ -103,9 +182,10 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          # Pin to the push that queued this run, so approving it approves
-          # exactly that commit.
-          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr) }}
+          # Pinned by the gate: the push that queued a PR-event run, or the
+          # head at gate time for a re-run or dispatch, so approving a run
+          # approves exactly that commit.
+          ref: ${{ needs.gate.outputs.sha }}
           path: after
           fetch-depth: 0
           persist-credentials: false
@@ -197,10 +277,11 @@ jobs:
 
   # Posts the report, or a crash notice if `review` failed, then fails the
   # check when any claim was refuted. Cancelled runs (superseded by a newer
-  # push) and runs that never started (approval rejected) post nothing and
-  # leave publish green; review's own red is the signal there.
+  # run for the same PR), runs the gate skipped, and runs that never started
+  # (approval rejected) post nothing and leave publish green; review's own
+  # red is the signal there.
   publish:
-    needs: review
+    needs: [gate, review]
     if: always() && (needs.review.result == 'success' || needs.review.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
@@ -208,7 +289,7 @@ jobs:
       pull-requests: write
       actions: read
     env:
-      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      PR: ${{ needs.gate.outputs.pr }}
       GH_TOKEN: ${{ github.token }}
       EVIDENCE: ${{ github.workspace }}/evidence-out
     steps:
