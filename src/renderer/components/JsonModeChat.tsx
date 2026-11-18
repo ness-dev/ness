@@ -23,7 +23,6 @@ import {
   Bot,
   Brain,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   Square,
   Terminal,
@@ -55,6 +54,13 @@ import {
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TurnGroup } from './json-mode-cards/TurnGroup'
+import {
+  CHAT_ROW_CLASS,
+  CHAT_ROW_HIT_CLASS,
+  CHAT_ROW_STYLE,
+  ChatRowChildren,
+  Chevron
+} from './json-mode-cards/ChatRow'
 import {
   foldFinishedTurns,
   getEditedPaths,
@@ -486,60 +492,41 @@ function ThinkingCard({
   const forceOpen = find.forceOpenIds.has(blockId)
   const isOpen = expanded || forceOpen
   const isCurrentHit = find.currentHitBlockId === blockId
-  const charCount = text.length
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-1 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-border/40'} bg-app/30 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 hover:bg-app/50 cursor-pointer text-left transition-colors"
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
-        <Brain className="icon-xs text-muted shrink-0" />
-        <span
-          className="text-muted shrink-0"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          {isPartial ? 'Thinking' : 'Thought'}
-        </span>
+        <Chevron open={isOpen} />
+        <Brain className="icon-xs shrink-0" />
+        <span className="shrink-0">{isPartial ? 'Thinking' : 'Thought'}</span>
         {isPartial && (
           <span
             className="json-claude-spinner shrink-0"
             aria-label="thinking"
           />
         )}
-        {charCount > 0 && (
-          <span
-            className="text-muted/60 shrink-0"
-            style={{ fontSize: 'var(--chat-meta-text)' }}
-          >
-            · {charCount} chars
-          </span>
-        )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 border-t border-border/30 markdown italic text-muted text-xs leading-relaxed">
-          {text ? (
-            <MarkdownWithFind>{text}</MarkdownWithFind>
-          ) : !isPartial ? (
-            // Claude Code can return signed-but-empty thinking blocks
-            // (the API tier elides plaintext but keeps a signature so
-            // the model can verify its prior reasoning on the next
-            // turn). Surface that explicitly instead of an empty card.
-            <span className="opacity-70">(hidden)</span>
-          ) : null}
-        </div>
+        <ChatRowChildren>
+          <div className="py-1 markdown italic text-muted text-xs leading-relaxed">
+            {text ? (
+              <MarkdownWithFind>{text}</MarkdownWithFind>
+            ) : !isPartial ? (
+              // Claude Code can return signed-but-empty thinking blocks
+              // (the API tier elides plaintext but keeps a signature so
+              // the model can verify its prior reasoning on the next
+              // turn). Surface that explicitly instead of an empty card.
+              <span className="opacity-70">(hidden)</span>
+            ) : null}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
@@ -572,35 +559,21 @@ function CompactCard({
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-2 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-info/40'} bg-info/5 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className={`w-full flex items-center gap-2 ${
-          isOpen ? 'border-b border-info/30' : ''
-        } bg-info/10 hover:bg-info/15 cursor-pointer transition-colors text-left`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-info/70 text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
+        <Chevron open={isOpen} />
         <Layers className="icon-xs text-info shrink-0" />
-        <span
-          className="font-semibold shrink-0 text-info"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          Compact
-        </span>
-        <span className="opacity-70 truncate flex-1 min-w-0">{subtitle}</span>
+        <span className="font-medium shrink-0 text-info">Compact</span>
+        <span className="truncate flex-1 min-w-0">{subtitle}</span>
         {triggerLabel && (
           <span
-            className="uppercase tracking-wide text-info/80 bg-info/10 border border-info/30 rounded px-1 py-0.5 shrink-0"
+            className="uppercase tracking-wide opacity-70 shrink-0"
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             {triggerLabel}
@@ -608,24 +581,26 @@ function CompactCard({
         )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 text-xs text-muted space-y-1">
-          <div>
-            <HighlightedText text={COMPACT_BODY_TEXT} />
-          </div>
-          {(typeof preTokens === 'number' ||
-            typeof postTokens === 'number') && (
-            <div className="font-mono text-xs text-faint">
-              {typeof preTokens === 'number' && (
-                <span>before: {preTokens.toLocaleString()} tokens</span>
-              )}
-              {typeof preTokens === 'number' &&
-                typeof postTokens === 'number' && <span> · </span>}
-              {typeof postTokens === 'number' && (
-                <span>after: {postTokens.toLocaleString()} tokens</span>
-              )}
+        <ChatRowChildren>
+          <div className="py-1 text-xs text-muted space-y-1">
+            <div>
+              <HighlightedText text={COMPACT_BODY_TEXT} />
             </div>
-          )}
-        </div>
+            {(typeof preTokens === 'number' ||
+              typeof postTokens === 'number') && (
+              <div className="font-mono text-xs text-faint">
+                {typeof preTokens === 'number' && (
+                  <span>before: {preTokens.toLocaleString()} tokens</span>
+                )}
+                {typeof preTokens === 'number' &&
+                  typeof postTokens === 'number' && <span> · </span>}
+                {typeof postTokens === 'number' && (
+                  <span>after: {postTokens.toLocaleString()} tokens</span>
+                )}
+              </div>
+            )}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
@@ -1016,24 +991,17 @@ function AutomatedTurnCard({
   return (
     <div className="flex justify-end">
       <div
-        className={`group border overflow-hidden ${
-          brand ? 'border-warning/40 bg-panel' : 'border-warning/40 bg-warning/5'
-        } ${isQueued ? 'opacity-70' : ''}`}
+        className={`group overflow-hidden ${brand ? 'bg-panel' : 'bg-warning/5'} ${
+          isQueued ? 'opacity-70' : ''
+        }`}
         style={{
           maxWidth: 'var(--chat-bubble-max)',
-          borderRadius: 'var(--chat-bubble-radius)'
+          borderRadius: 'var(--chat-prompt-radius)'
         }}
       >
-        {brand && <div className="brand-gradient-bg h-0.5" />}
         <div
-          className={`flex items-center gap-2 border-b ${
-            brand ? 'bg-app/40 border-border' : 'bg-warning/10 border-warning/30'
-          }`}
-          style={{
-            paddingInline: 'var(--chat-chrome-px)',
-            paddingBlock: 'var(--chat-chrome-py)',
-            fontSize: 'var(--chat-chrome-text)'
-          }}
+          className="flex items-center gap-2 px-4 pt-2.5"
+          style={{ fontSize: 'var(--chat-chrome-text)' }}
         >
           <Icon className={brand ? 'icon-sm shrink-0' : 'icon-xs shrink-0 text-warning'} />
           <span
@@ -1067,7 +1035,7 @@ function AutomatedTurnCard({
           )}
         </div>
         <div
-          className="px-3 py-2 whitespace-pre-wrap break-words"
+          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
           style={{ fontSize: 'var(--chat-body-text)' }}
         >
           <HighlightedText text={text} />
@@ -1085,24 +1053,18 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
   return (
     <div className="flex justify-end">
       <div
-        className="border border-border bg-panel overflow-hidden"
-        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-bubble-radius)' }}
+        className="bg-panel overflow-hidden"
+        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-prompt-radius)' }}
       >
         <button
           onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center gap-2 text-left cursor-pointer hover:bg-app/40"
+          className="w-full flex items-center gap-2 text-left cursor-pointer px-4 py-2.5 text-muted hover:text-fg transition-colors"
           style={{
-            paddingInline: 'var(--chat-chrome-px)',
-            paddingBlock: 'var(--chat-chrome-py)',
             fontSize: 'var(--chat-chrome-text)'
           }}
           aria-expanded={open}
         >
-          {open ? (
-            <ChevronDown className="icon-xs shrink-0 text-muted" />
-          ) : (
-            <ChevronRight className="icon-xs shrink-0 text-muted" />
-          )}
+          <Chevron open={open} />
           <NessIcon className="icon-sm shrink-0" />
           <span
             className="font-semibold shrink-0 brand-gradient-text"
@@ -1113,9 +1075,9 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
           <span className="text-muted truncate">delivered with this turn</span>
         </button>
         {open && (
-          <div className="border-t border-border divide-y divide-border">
+          <div className="px-4 pb-2.5 space-y-3">
             {notices.map((n, i) => (
-              <div key={i} className="px-3 py-2" style={{ fontSize: 'var(--chat-body-text)' }}>
+              <div key={i} style={{ fontSize: 'var(--chat-body-text)' }}>
                 <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
                   {automationLabel(n.source, n.from).label}
                 </div>
@@ -1198,10 +1160,10 @@ function renderEntries(
         node: queued ? (
           <div className="flex justify-end">
             <div
-              className="bg-accent/10 border border-dashed border-accent/40 pl-3 pr-1 py-2 opacity-70 flex items-start gap-2"
+              className="bg-accent/5 pl-4 pr-1.5 py-2.5 opacity-70 flex items-start gap-2"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)'
+                borderRadius: 'var(--chat-prompt-radius)'
               }}
             >
               <div
@@ -1231,10 +1193,10 @@ function renderEntries(
         ) : (
           <div className="flex justify-end">
             <div
-              className="bg-accent/15 border border-accent/30 px-3 py-2 whitespace-pre-wrap break-words"
+              className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)',
+                borderRadius: 'var(--chat-prompt-radius)',
                 fontSize: 'var(--chat-body-text)'
               }}
             >
@@ -1453,7 +1415,6 @@ function renderEntries(
                     id={block.id}
                     name={block.name || 'tool'}
                     subtitle="preparing call…"
-                    variant="info"
                   >
                     <div className="px-2 py-1.5 text-xs text-muted italic flex items-center gap-2">
                       <span className="json-claude-cursor" />
@@ -1579,6 +1540,7 @@ export function JsonModeChat({
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
   const {
     jsonModeChatDensity: density,
+    jsonModeChatWidth,
     jsonModeSendOnEnter: sendOnEnter,
     autoScrollToBottom,
     collapseFinishedTurns,
@@ -2965,6 +2927,12 @@ export function JsonModeChat({
           ? 'bg-danger'
           : 'bg-faint'
 
+  // Applied separately to the transcript, the auto-allow strip and the
+  // composer so they share one centred column while each scrolls or
+  // resizes on its own.
+  const columnClass =
+    jsonModeChatWidth === 'reading' ? 'w-full max-w-[var(--chat-column-max)] mx-auto' : ''
+
   return (
     <div
       ref={outerDivRef}
@@ -3163,7 +3131,7 @@ export function JsonModeChat({
                 </div>
               ) : null
             ) : (
-            <div className="px-4 py-3 space-y-3">
+            <div className={`px-6 py-5 space-y-4 ${columnClass}`}>
               {hiddenEntryCount > 0 && (
                 <div className="flex items-center justify-center gap-2 pb-1">
                   <button
@@ -3263,7 +3231,7 @@ export function JsonModeChat({
         />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
-        <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
+        <div className={`shrink-0 px-6 pt-1 flex items-center gap-2 text-xs text-muted ${columnClass}`}>
           <span className="opacity-70">auto-allowing:</span>
           <span className="font-mono truncate">
             {session.sessionToolApprovals.join(', ')}
@@ -3287,7 +3255,7 @@ export function JsonModeChat({
           onDoubleClick={resetComposerHeight}
           title="Drag to resize the prompt · double-click to reset"
         />
-        <div className="p-2">
+        <div className={`px-4 pt-2 pb-3 ${columnClass}`}>
         <div className="relative rounded-md border border-border bg-panel focus-within:border-accent transition-colors">
           {mentionItems.length > 0 && (
             <JsonModeMentionPopover

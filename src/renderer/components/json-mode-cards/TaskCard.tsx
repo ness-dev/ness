@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { trunc, type ToolCardProps } from './index'
+import { CHAT_ROW_CLASS, CHAT_ROW_STYLE, ChatRowChildren, Chevron } from './ChatRow'
 import { isLaunchStub } from '../../../shared/state/json-claude-agents'
 
 export interface TaskCardProps extends ToolCardProps {
@@ -110,51 +111,40 @@ export function TaskCard({
         .join(' · ')
     : ''
 
+  const badgeClass = 'uppercase tracking-wide opacity-70 shrink-0'
   return (
-    <div
-      className={`my-2 border ${isError ? 'border-danger/50' : 'border-border/60'} bg-app/30 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
-    >
+    <div>
       <button
         type="button"
         onClick={() => {
           userOverrodeRef.current = true
           setExpanded((v) => !v)
         }}
-        className="w-full flex items-center gap-2 cursor-pointer hover:bg-app/60 transition-colors text-left"
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {expanded ? '▾' : '▸'}
-        </span>
-        <Sparkles className="icon-xs text-muted shrink-0" />
+        <Chevron open={expanded} />
+        <Sparkles className="icon-xs shrink-0" />
         <span
-          className="text-muted shrink-0"
+          className={`font-medium shrink-0 ${isError ? 'text-danger' : 'text-fg'}`}
           style={{ fontFamily: 'var(--chat-tool-name-family)' }}
         >
           Task
         </span>
-        <span
-          className="opacity-60 truncate flex-1 min-w-0"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
+        <span className="truncate flex-1 min-w-0">
           {trunc(description, 120)}
         </span>
         {isBackground && backgroundAgent && (
           <span
             title={`background agent ${backgroundAgent.agentId}`}
-            className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+            className={badgeClass}
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             background
           </span>
         )}
         <span
-          className="text-muted/70 shrink-0"
+          className="opacity-70 shrink-0"
           style={{ fontSize: 'var(--chat-meta-text)' }}
         >
           {usageLabel || countLabel}
@@ -162,7 +152,7 @@ export function TaskCard({
         {autoApproved && (
           <span
             title={`auto-approved by ${autoApproved.model} · ${autoApproved.reason}`}
-            className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+            className={badgeClass}
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             auto · haiku
@@ -175,7 +165,7 @@ export function TaskCard({
                 ? `allowed by saved rule · ${sessionAllowed.rule}`
                 : `allowed by session policy · ${sessionAllowed.toolName}`
             }
-            className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+            className={badgeClass}
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             {sessionAllowed.rule ? 'always' : 'session'}
@@ -205,7 +195,7 @@ export function TaskCard({
         )}
       </button>
       {expanded && (
-        <div className="px-2">
+        <ChatRowChildren>
           {subAgentChildCount === 0 ? (
             <div className="px-1 py-2 text-xs text-muted italic">
               {taskInFlight
@@ -226,7 +216,7 @@ export function TaskCard({
               {trunc(answer.content, 3000)}
             </pre>
           )}
-        </div>
+        </ChatRowChildren>
       )}
     </div>
   )

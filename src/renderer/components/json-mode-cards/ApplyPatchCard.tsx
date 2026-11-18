@@ -55,7 +55,6 @@ export function ApplyPatchCard({ block, result, autoApproved, sessionAllowed }: 
       id={block.id}
       name="Edit"
       subtitle={subtitle}
-      variant="warn"
       icon={EditIcon}
       isError={result?.isError}
       autoApproved={autoApproved}
