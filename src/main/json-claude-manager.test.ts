@@ -394,16 +394,23 @@ describe('JsonClaudeManager', () => {
     it('stamps turnStartedAt when a turn starts, and a mid-turn send leaves it alone', () => {
       // Without the stamp, collectAgents falls back to `busy` and agents
       // from earlier turns read as running again.
-      const store = new Store()
-      const sessionId = 'sess-turn-start'
-      const { mgr } = startBusySession(store, sessionId)
-      const startedAt = store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt
-      expect(typeof startedAt).toBe('number')
+      // Only Date is faked — the manager's own timers stay real. The clock
+      // moves before the interjection so a re-stamp would show up as a
+      // different value rather than coinciding within the same ms.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000)
+        const store = new Store()
+        const sessionId = 'sess-turn-start'
+        const { mgr } = startBusySession(store, sessionId)
+        expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(1_000)
 
-      mgr.send(sessionId, 'interjection')
-      expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(
-        startedAt
-      )
+        vi.setSystemTime(2_000)
+        mgr.send(sessionId, 'interjection')
+        expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(1_000)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it("clears isQueued on the next 'requesting' status, before the turn ends", () => {
