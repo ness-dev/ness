@@ -161,8 +161,6 @@ function fromExplicit(s: AppState['subscriptions']['list'][number]): Subscriber 
   }
 }
 
-/** Everyone following `targetPath`, optionally only those who hear about
- *  `topic`. */
 /** Explicit subscriptions never target their own worktree — both entry
  *  points refuse it, and this drops any that got stored anyway, since one
  *  would shadow the own-worktree rule. */
@@ -170,6 +168,8 @@ function explicitList(state: AppState): AppState['subscriptions']['list'] {
   return state.subscriptions.list.filter((s) => s.subscriberPath !== s.targetPath)
 }
 
+/** Everyone following `targetPath`, optionally only those who hear about
+ *  `topic`. */
 export function subscribersOf(
   state: AppState,
   targetPath: string,
