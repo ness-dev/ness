@@ -4,13 +4,12 @@ name: Evidence review
 # PR's base and head builds side by side, captures screenshots that prove
 # (or disprove) what the PR claims, and posts them as a PR comment.
 #
-# Every run costs OpenRouter credit, so each one needs a maintainer's
-# approval:
-#   - a maintainer/admin adds the `evidence-review` label. The label is
-#     removed as soon as the run starts, so it's a one-shot approval: new
-#     pushes don't re-run until someone re-applies it. A label added by
-#     anyone below maintain is removed and ignored.
-#   - or a maintainer/admin uses Actions → Evidence review → Run workflow.
+# Every run costs OpenRouter credit, so the job runs in the
+# `evidence-review` environment, which has required reviewers. Each push to
+# a PR queues a run that waits at "Waiting for review" until a reviewer
+# clicks Review deployments → Approve and deploy in the PR's checks.
+# Unapproved runs cost nothing, and a newer push cancels the older pending
+# one. Reviewers live in Settings → Environments → evidence-review.
 #
 # Uses `pull_request`, not `pull_request_target`: the PR's own code is built
 # and run here, so fork PRs get no secrets and are skipped. Same-repo PRs
@@ -24,7 +23,7 @@ name: Evidence review
 
 on:
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr:
@@ -41,34 +40,13 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 jobs:
-  approve:
+  review:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.label.name == 'evidence-review' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      APPROVER: ${{ github.event.sender.login || github.actor }}
-    steps:
-      - name: Consume the approval label
-        if: github.event_name == 'pull_request'
-        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/${{ github.event.pull_request.number }}/labels/evidence-review" || true
-
-      - name: Require maintain or admin
-        run: |
-          ROLE=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$APPROVER/permission" --jq .role_name)
-          echo "$APPROVER has role: $ROLE"
-          case "$ROLE" in
-            admin|maintain) ;;
-            *) echo "::error::Evidence review must be approved by a maintainer or admin ($APPROVER is $ROLE)."; exit 1 ;;
-          esac
-
-  review:
-    needs: approve
+      github.event.pull_request.head.repo.full_name == github.repository
+    environment: evidence-review
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -89,8 +67,8 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          # Pin to the commit the maintainer approved, not whatever is pushed
-          # between the label and this step.
+          # Pin to the push that queued this run, so approving it approves
+          # exactly that commit.
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr) }}
           path: after
           fetch-depth: 0
