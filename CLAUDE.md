@@ -45,7 +45,9 @@ slice has:
 There is one slice per file in `src/shared/state/`; `index.ts` composes
 them into the root reducer. (`terminals` also owns `panes` and
 `lastActive`; implicit worktree follows are derived from `origins` in
-`shared/subscribers.ts`, never stored.) Adding a new piece of shared state means picking the
+`shared/subscribers.ts`, never stored. `configHealth` is seeded at
+construction only and has no events or reducer — don't add dummy ones.)
+Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 Every automatic message into an agent chat — PR/CI updates, reviews,
@@ -56,20 +58,22 @@ call `ChatRouter.send` directly.
 ### How a state mutation flows end-to-end
 
 1. **Renderer**: user clicks something. The handler calls a thin backend
-   method like `useBackend().setThemeLight('solarized')`, which
-   `src/renderer/build-backend.ts` turns into a request on the active
-   backend's transport.
+   method like `useBackend().setThemeLight('solarized-light')`, which
+   `src/renderer/build-backend.ts` turns into a request on a transport.
+   Most methods use `req` (the active backend); client-owned settings
+   like this one use `reqConfig`, which routes channels listed in
+   `CLIENT_OWNED_CONFIG_CHANNELS` to the local backend instead.
 2. **Main / request handler**: the `transport.onRequest(...)` handler in
    `src/main/index.ts` does the side effect (validation, writing to disk,
    etc.) and **dispatches a typed event** through the store:
-   `store.dispatch({type: 'settings/themeLightChanged', payload: 'solarized'})`.
+   `store.dispatch({type: 'settings/themeLightChanged', payload: 'solarized-light'})`.
 3. **Main / store**: `src/main/store.ts` runs the dispatched event
    through the shared `rootReducer`, updates its in-memory `AppState`,
    bumps a monotonic `seq`, and notifies subscribers.
 4. **Main / transport**: `transport-electron.ts` and
    `transport-websocket.ts` each subscribe to the store and forward every
-   event as `state:event` to their clients (`BrowserWindow`s / WS
-   connections).
+   event to their clients (`state:event` IPC to `BrowserWindow`s, a
+   `{t: 'state'}` frame to WS connections).
 5. **Renderer / client store**: `src/renderer/store.ts` wires each
    backend transport's `onStateEvent` to that backend's client store,
    which applies the **same** shared `rootReducer` to its local mirror
@@ -167,7 +171,9 @@ free. Pattern is the same for every slice:
 4. **Expose in the backend + types**:
    - `src/renderer/build-backend.ts`: `setX: (v) => req('myslice:setX', v)`
      (use `reqConfig` for settings channels, `reqLocal` for things only
-     the local Electron owns)
+     the local Electron owns; a client-owned setting also needs its
+     channel in `CLIENT_OWNED_CONFIG_CHANNELS` and its key in
+     `CLIENT_OWNED_SETTING_KEYS`)
    - `src/renderer/types.ts`: add to `ElectronAPI` interface
 5. **Add a reducer test** in `src/shared/state/<slice>.test.ts` (one
    test per new event variant)
@@ -271,7 +277,7 @@ const theme = settings.theme
 // Mutate — fire-and-forget request. The store dispatches and the read
 // above re-renders automatically.
 const backend = useBackend()
-void backend.setThemeLight('solarized')
+void backend.setThemeLight('solarized-light')
 ```
 
 The renderer **never holds a local copy of shared state**. There's no
@@ -288,7 +294,7 @@ A `useSettings().theme` read traces through:
 1. `App.tsx` calls the hook
 2. `src/renderer/store.ts` defines the hook (`useAppState((s) => s.settings)`)
 3. `useSyncExternalStore` reads from the client mirror in `store.ts`
-4. The mirror was populated by a `state:event` transport message
+4. The mirror was populated by a state event from the transport
 5. Main dispatched that event from a `transport.onRequest` handler in `main/index.ts`
 6. The handler ran the reducer in `src/shared/state/settings.ts`
 
