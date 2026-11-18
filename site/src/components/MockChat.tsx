@@ -1,11 +1,23 @@
 import type { ComponentType, ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Brain, FilePen, FileText, ListChecks, Search, Sparkles, Square, Terminal } from 'lucide-react'
+import {
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  FilePen,
+  FileText,
+  ListChecks,
+  Search,
+  Sparkles,
+  Square,
+  Terminal
+} from 'lucide-react'
 
 /** A replica of Ness's Chat mode (`JsonModeChat`) for the marketing
- * diorama — the transcript of user bubbles, assistant markdown, collapsible
- * tool cards and the approval card, plus the composer underneath. Styling
- * reads the same `--chat-*` density tokens the real chat does. */
+ * diorama — borderless prompt bubbles, assistant markdown, the flat
+ * chevron rows tool calls and finished turns fold into, and the approval
+ * card, plus the composer underneath. Styling reads the same `--chat-*`
+ * density tokens the real chat does. */
 
 export interface MockDiffLine {
   kind: 'ctx' | 'add' | 'remove'
@@ -19,10 +31,27 @@ export interface MockTodo {
   text: string
 }
 
+/** A collapsed tool call. Bash carries the model's stated `intent`, which
+ * the real chat shows in place of the bare tool name. */
+export interface MockToolCall {
+  tool: 'Read' | 'Grep' | 'Bash'
+  label: string
+}
+
 /** One worktree's conversation. Assistant text marks inline code with
  * backticks, the way the real chat's markdown would. */
 export interface MockTranscript {
+  /** An earlier, finished turn: its work folds behind a summary strip
+   * above the final answer. */
+  earlier: {
+    prompt: string
+    duration: string
+    toolCount: number
+    filesEdited: number
+    answer: string
+  }
   prompt: string
+  tools: MockToolCall[]
   explanation: string
   edit: { path: string; lines: MockDiffLine[] }
   /** While working: the todo list plus the turn still streaming in. */
@@ -43,17 +72,14 @@ export function MockChat({
       <div className="relative flex-1 min-h-0 flex flex-col">
         {transcript ? (
           <div className="flex-1 overflow-hidden flex flex-col justify-end">
-            <div className="px-4 py-3 space-y-3">
+            <div className="px-6 py-5 space-y-4">
+              <UserBubble>{transcript.earlier.prompt}</UserBubble>
+              <TurnFold {...transcript.earlier} />
+              <AssistantText text={transcript.earlier.answer} />
+
               <UserBubble>{transcript.prompt}</UserBubble>
 
-              <ToolGroup
-                label="1 thought · 3 tool calls"
-                chips={[
-                  { icon: FileText, label: 'Read' },
-                  { icon: Search, label: 'Grep' },
-                  { icon: FileText, label: 'Read' }
-                ]}
-              />
+              <ToolGroup thoughts={1} tools={transcript.tools} />
 
               <AssistantText text={transcript.explanation} />
 
@@ -77,7 +103,7 @@ export function MockChat({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.25 }}
-                    className="space-y-3"
+                    className="space-y-4"
                   >
                     <TodoCard todos={transcript.working.todos} />
                     <AssistantText text={transcript.working.streaming} partial />
@@ -123,10 +149,10 @@ function UserBubble({ children }: { children: ReactNode }) {
   return (
     <div className="flex justify-end">
       <div
-        className="bg-accent/15 border border-accent/30 px-3 py-2 whitespace-pre-wrap break-words"
+        className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
         style={{
           maxWidth: 'var(--chat-bubble-max)',
-          borderRadius: 'var(--chat-bubble-radius)',
+          borderRadius: 'var(--chat-prompt-radius)',
           fontSize: 'var(--chat-body-text)'
         }}
       >
@@ -147,83 +173,118 @@ function AssistantText({ text, partial }: { text: string; partial?: boolean }) {
   )
 }
 
-/** Consecutive tool calls fold into one collapsed row with a count label
- * and a strip of per-tool chips. */
-function ToolGroup({
-  label,
-  chips
-}: {
-  label: string
-  chips: { icon: ComponentType<{ className?: string }>; label: string }[]
-}) {
+function Chevron({ open }: { open: boolean }) {
+  const Icon = open ? ChevronDown : ChevronRight
+  return <Icon className="w-3 h-3 shrink-0" aria-hidden />
+}
+
+/** The flat, borderless row every transcript disclosure shares — muted,
+ * no box, chevron first. */
+function ChatRow({ children }: { children: ReactNode }) {
   return (
     <div
-      className="my-2 border border-border/60 bg-app/30 overflow-hidden"
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className="w-full flex items-center gap-2 text-left text-muted"
+      style={{ paddingBlock: 'var(--chat-chrome-py)', fontSize: 'var(--chat-chrome-text)' }}
     >
-      <div
-        className="w-full flex items-center gap-2 text-left"
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
-      >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">▸</span>
-        <Brain size={12} className="text-muted shrink-0" />
-        <span className="shrink-0 text-muted font-mono">{label}</span>
-        <span className="opacity-60 truncate flex-1 min-w-0 flex items-center gap-1.5 font-mono">
-          {chips.map((c, i) => (
-            <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <span className="opacity-40">·</span>}
-              <c.icon className="shrink-0 w-3 h-3" />
-              <span>{c.label}</span>
-            </span>
-          ))}
-        </span>
-      </div>
+      {children}
     </div>
   )
 }
 
+/** A finished turn's work, folded into one line above its final answer. */
+function TurnFold({
+  duration,
+  toolCount,
+  filesEdited
+}: Pick<MockTranscript['earlier'], 'duration' | 'toolCount' | 'filesEdited'>) {
+  const parts = [`Worked for ${duration}`, `${toolCount} tool${toolCount === 1 ? '' : 's'}`]
+  if (filesEdited > 0) parts.push(`${filesEdited} file${filesEdited === 1 ? '' : 's'} edited`)
+  return (
+    <div
+      className="w-full flex items-center gap-2 text-left text-muted"
+      style={{ fontSize: 'var(--chat-chrome-text)' }}
+    >
+      <Chevron open={false} />
+      <span className="shrink-0">{parts.join(' · ')}</span>
+    </div>
+  )
+}
+
+const TOOL_ICONS: Record<MockToolCall['tool'], ComponentType<{ className?: string }>> = {
+  Read: FileText,
+  Grep: Search,
+  Bash: Terminal
+}
+
+/** Consecutive tool calls fold into one collapsed row: a count label, then
+ * a chip per call naming what it was for. */
+function ToolGroup({ thoughts, tools }: { thoughts: number; tools: MockToolCall[] }) {
+  const label = [
+    thoughts > 0 ? `${thoughts} thought${thoughts === 1 ? '' : 's'}` : '',
+    `${tools.length} tool call${tools.length === 1 ? '' : 's'}`
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <ChatRow>
+      <Chevron open={false} />
+      {thoughts > 0 && <Brain className="w-3 h-3 shrink-0" />}
+      <span className="shrink-0">{label}</span>
+      <span
+        className="opacity-70 overflow-hidden whitespace-nowrap flex-1 min-w-0 flex items-center gap-1.5"
+        style={{ maskImage: 'linear-gradient(to right, black calc(100% - 2rem), transparent)' }}
+      >
+        {tools.map((t, i) => {
+          const Icon = TOOL_ICONS[t.tool]
+          return (
+            <span key={i} className="flex items-center gap-1.5 shrink-0">
+              {i > 0 && <span className="opacity-40">·</span>}
+              <Icon className="shrink-0 w-3 h-3" />
+              <span className="truncate max-w-[16rem]">{t.label}</span>
+            </span>
+          )
+        })}
+      </span>
+    </ChatRow>
+  )
+}
+
+/** One tool call: a flat row, and when open, its body on a soft panel
+ * fill so code still stands apart from prose. */
 function ToolCard({
   name,
   subtitle,
   icon: Icon,
-  variant = 'info',
   open = true,
   children
 }: {
   name: string
   subtitle: string
   icon: ComponentType<{ className?: string }>
-  variant?: 'info' | 'warn'
   open?: boolean
   children?: ReactNode
 }) {
   return (
-    <div
-      className={`my-2 border bg-panel overflow-hidden ${
-        variant === 'warn' ? 'border-warning/30' : 'border-border'
-      }`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
-    >
-      <div
-        className={`w-full flex items-center gap-2 bg-app/40 text-left ${
-          open ? 'border-b border-border' : ''
-        }`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
-      >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">{open ? '▾' : '▸'}</span>
-        <Icon className="shrink-0 w-3.5 h-3.5" />
-        <span className="font-semibold shrink-0 text-accent font-mono">{name}</span>
-        <span className="opacity-70 truncate flex-1 min-w-0">{subtitle}</span>
-      </div>
-      {open && children}
+    <div>
+      <ChatRow>
+        <Chevron open={open} />
+        <Icon className="shrink-0 w-3 h-3" />
+        <span
+          className="font-medium shrink-0 text-fg"
+          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+        >
+          {name}
+        </span>
+        <span className="truncate flex-1 min-w-0">{subtitle}</span>
+      </ChatRow>
+      {open && (
+        <div
+          className="mt-0.5 mb-2 bg-panel overflow-hidden"
+          style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -240,10 +301,9 @@ function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
       name="Edit"
       subtitle={`${edit.path.split('/').pop()} (${diffSummary(edit.lines)})`}
       icon={FilePen}
-      variant="warn"
     >
       <div className="px-2 py-1 text-xs text-muted truncate font-mono">{edit.path}</div>
-      <div className="text-xs font-mono bg-app/40">
+      <div className="text-xs font-mono pb-1">
         {edit.lines.map((ln, i) => {
           const bg =
             ln.kind === 'add' ? 'bg-success/10' : ln.kind === 'remove' ? 'bg-danger/10' : ''
@@ -272,30 +332,17 @@ function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
   )
 }
 
+/** Collapsed, like every tool call in the real chat until clicked — the
+ * live list itself lives in the right column's Todos panel. */
 function TodoCard({ todos }: { todos: MockTodo[] }) {
+  const done = todos.filter((t) => t.status === 'completed').length
   return (
-    <ToolCard name="TodoWrite" subtitle={`${todos.length} items`} icon={ListChecks}>
-      <ul className="px-3 py-2 text-xs space-y-1">
-        {todos.map((t) => (
-          <li key={t.text} className="flex items-baseline gap-2">
-            <span
-              className={
-                t.status === 'completed'
-                  ? 'text-success'
-                  : t.status === 'in_progress'
-                    ? 'text-warning'
-                    : 'text-faint'
-              }
-            >
-              {t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '◐' : '☐'}
-            </span>
-            <span className={t.status === 'completed' ? 'line-through opacity-60' : ''}>
-              {t.text}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </ToolCard>
+    <ToolCard
+      name="TodoWrite"
+      subtitle={`${done}/${todos.length} done`}
+      icon={ListChecks}
+      open={false}
+    />
   )
 }
 
@@ -349,7 +396,7 @@ function Composer({ busy }: { busy: boolean }) {
   return (
     <div className="shrink-0">
       <div className="h-px shrink-0 bg-border-strong" />
-      <div className="p-2">
+      <div className="px-4 pt-2 pb-3">
         <div className="relative rounded-md border border-border bg-panel">
           <div className="block w-full px-2.5 pt-2 pb-1 text-sm text-faint min-h-[60px]">
             Message Claude — ⌘+Enter to send
@@ -369,7 +416,7 @@ function Composer({ busy }: { busy: boolean }) {
                 interrupt
               </span>
             )}
-            <span className="px-2.5 py-0.5 bg-accent text-white rounded text-xs font-medium">
+            <span className="px-2.5 py-0.5 bg-accent text-white rounded text-xs font-medium opacity-40">
               Send<span className="opacity-60 ml-1">⌘↵</span>
             </span>
           </div>
