@@ -206,6 +206,8 @@ jobs:
           git -C after worktree add -q --detach "$GITHUB_WORKSPACE/before" "$MERGE_BASE"
           echo "sha=$(git -C after rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      # No `cache: 'npm'`: pull_request_target runs in main's cache scope, so
+      # a cache saved here would be restored by main's CI and release builds.
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
