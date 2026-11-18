@@ -20,6 +20,7 @@ import { DiffView } from './DiffView'
 import { FileView } from './FileView'
 import { BrowserPanel } from './BrowserPanel'
 import { JsonModeChat } from './JsonModeChat'
+import { ChatAgentColumn } from './ChatAgentColumn'
 import { ReviewPane } from './ReviewPane'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useBackend } from '../backend'
@@ -581,11 +582,19 @@ function WorkspaceViewInner({
                     initialUrl={tab.url || 'about:blank'}
                   />
                 ) : tab.type === 'json-claude' ? (
-                  <JsonModeChat
-                    sessionId={tab.id}
-                    worktreePath={worktreePath}
-                    mode={tab.mode ?? 'awake'}
-                  />
+                  <div className="absolute inset-0 flex">
+                    <div className="relative flex-1 min-w-0">
+                      <JsonModeChat
+                        sessionId={tab.id}
+                        worktreePath={worktreePath}
+                        mode={tab.mode ?? 'awake'}
+                      />
+                    </div>
+                    <ChatAgentColumn
+                      sessionId={tab.id}
+                      active={visible && isActiveInPane && (tab.mode ?? 'awake') === 'awake'}
+                    />
+                  </div>
                 ) : tab.type === 'shell' && (tab.mode ?? 'awake') === 'asleep' ? (
                   // Skip XTerminal entirely while asleep — its mount
                   // path constructs an xterm.js Terminal, loads a stack

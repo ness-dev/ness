@@ -26,7 +26,7 @@ const SETTLED_PREVIEW = 5
  *  that changes without a state event, so they get a single shared tick
  *  rather than a timer per row — and it only runs while something is
  *  actually running. 1s because these are second-granularity labels. */
-function useLiveClock(active: boolean): number {
+export function useLiveClock(active: boolean): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active) return
