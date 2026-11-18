@@ -3,12 +3,13 @@
 #
 # Usage: publish.sh <out-dir> <pr-number>
 # Env:   GH_TOKEN (contents:write + pull-requests:write), GITHUB_REPOSITORY,
-#        GITHUB_RUN_ID, GITHUB_SERVER_URL
+#        GITHUB_RUN_ID, GITHUB_SERVER_URL, REVIEWED_SHA (optional)
 #
 # PR comments can't embed uploaded images through the API, so screenshots
 # are committed to an orphan `evidence-reviewer-assets` branch and the
-# report links them by raw URL. One comment per PR, edited in place on
-# re-runs (found by the marker below).
+# report links them by raw URL. Each run posts a new comment, so an
+# approved run shows up (and notifies) at the bottom of the PR. Earlier
+# reports, found by the marker below, are collapsed as outdated.
 
 set -euo pipefail
 
@@ -48,16 +49,14 @@ BODY="$(mktemp)"
   echo "$MARKER"
   sed -E "s#\]\(\./([^)]+\.png)\)#]($RAW/\1)#g" "$OUT/report.md"
   echo
-  echo "<sub>Automated evidence review · [run log + transcript]($RUN_URL) · re-run with the \`evidence-review\` workflow</sub>"
+  echo "<sub>Automated evidence review of \`${REVIEWED_SHA:-unknown}\` · [run log + transcript]($RUN_URL)</sub>"
 } > "$BODY"
 [ -n "${GITHUB_STEP_SUMMARY:-}" ] && cat "$BODY" >> "$GITHUB_STEP_SUMMARY"
 
-EXISTING="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-  --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -1)"
-if [ -n "$EXISTING" ]; then
-  gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" -F body=@"$BODY" >/dev/null
-  echo "updated comment $EXISTING"
-else
-  gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$BODY" >/dev/null
-  echo "posted new comment"
-fi
+PREVIOUS="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+  --jq ".[] | select(.body | startswith(\"$MARKER\")) | .node_id")"
+gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$BODY" --jq .html_url
+for node in $PREVIOUS; do
+  gh api graphql -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }' \
+    -f id="$node" >/dev/null || echo "could not collapse $node"
+done
