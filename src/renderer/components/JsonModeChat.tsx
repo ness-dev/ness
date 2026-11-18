@@ -967,7 +967,18 @@ function automationLabel(
       brand: false
     }
   }
-  return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
+  if (source === 'review-request') {
+    return {
+      label: from ? `Review Request · from ${from}` : 'Review Request',
+      note: 'this agent is reviewing the branch',
+      brand: true
+    }
+  }
+  if (source === 'ci-failure') {
+    return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
+  }
+  const unhandled: never = source
+  return { label: `Ness · ${unhandled}`, note: 'sent automatically', brand: false }
 }
 
 /** A user turn Ness injected on the human's behalf. Sits on the user
