@@ -189,6 +189,9 @@ jobs:
           path: after
           fetch-depth: 0
           persist-credentials: false
+          # Running fork code under pull_request_target is the point of this
+          # workflow. The risk is contained by approval/allowlist gating, a
+          # read-only token here, and a publish job that runs no PR code.
           allow-unsafe-pr-checkout: true
 
       - name: Collect PR context
