@@ -1,0 +1,206 @@
+name: Evidence review
+
+# Experimental: a cheap vision model drives the headless web client of the
+# PR's base and head builds side by side, captures screenshots that prove
+# (or disprove) what the PR claims, and posts them as a PR comment.
+#
+# Every run costs OpenRouter credit, so it needs approval unless the person
+# who triggered it (the pusher, or the PR opener) is on the allowlist in the
+# EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
+#   - allowlisted → `evidence-review-auto` environment, no reviewers, runs
+#     immediately.
+#   - everyone else → `evidence-review` environment, which has required
+#     reviewers. The run waits at "Waiting for review" until a reviewer
+#     clicks Review deployments → Approve and deploy in the PR's checks.
+#     Unapproved runs cost nothing, and a newer push cancels the older
+#     pending one.
+# OPENROUTER_API_KEY is an environment secret, so both environments need
+# their own copy.
+#
+# Triggers. Every PR, fork or not, uses `pull_request_target`, so the
+# workflow always comes from `main` and a PR can't edit its own gate. Both
+# environments only allow deployments from `main` (Settings → Environments
+# → Deployment branches), so a workflow on any other branch can't reach
+# them or their key. workflow_dispatch therefore only works when run
+# from `main`. To try changes to this workflow before merging, temporarily
+# add the branch to the environments' allowed list.
+#
+# PRs mean running untrusted code next to a secret, so the work is split:
+#   - `review` builds and runs the PR's code and calls OpenRouter. Its token
+#     is read-only, and nothing in it can write to the repo. The PR's code
+#     shares the runner with the agent, so it CAN read OPENROUTER_API_KEY.
+#     Use a key with a low spend cap, and read a stranger's diff before
+#     approving their run.
+#   - `publish` runs no PR code. It takes the artifact from `review` and is
+#     the only job with write permissions (assets branch + PR comment).
+#
+# Pieces, so this can be lifted into other repos:
+#   scripts/evidence-reviewer/run.mjs       generic agent (URL in, report out)
+#   scripts/evidence-reviewer/boot-ness.sh  app-specific boot + fixture seed
+#   .github/evidence-reviewer/instructions.md  app-specific usage guide
+#   scripts/evidence-reviewer/publish.sh    screenshots branch + PR comment
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number
+        required: true
+      model:
+        description: OpenRouter model id (blank = repo default)
+        required: false
+
+concurrency:
+  group: evidence-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    environment: >-
+      ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
+          && 'evidence-review-auto' || 'evidence-review' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      # The reviewer itself always comes from the workflow's own commit on
+      # main, never from the PR's code.
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: reviewer
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/evidence-reviewer
+            .github/evidence-reviewer
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          # Pin to the push that queued this run, so approving it approves
+          # exactly that commit.
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr) }}
+          path: after
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Collect PR context
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node reviewer/scripts/evidence-reviewer/collect-pr.mjs "$PR" "$RUNNER_TEMP/pr.json" --repo "$GITHUB_REPOSITORY"
+          BASE_SHA=$(jq -r .baseSha "$RUNNER_TEMP/pr.json")
+          git -C after fetch -q "https://github.com/$GITHUB_REPOSITORY.git" "$BASE_SHA"
+          MERGE_BASE=$(git -C after merge-base HEAD "$BASE_SHA")
+          git -C after worktree add -q --detach "$GITHUB_WORKSPACE/before" "$MERGE_BASE"
+          echo "sha=$(git -C after rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: after/package-lock.json
+
+      - name: Install + build (after)
+        working-directory: after
+        run: |
+          npm install --legacy-peer-deps
+          npm run build:headless
+
+      # Reuse the head's node_modules when the lockfile didn't change, which
+      # is most PRs. A base that fails to build just means no "before" app.
+      - name: Install + build (before)
+        id: before
+        continue-on-error: true
+        working-directory: before
+        run: |
+          if cmp -s package-lock.json ../after/package-lock.json; then
+            ln -s ../after/node_modules node_modules
+          else
+            npm install --legacy-peer-deps
+          fi
+          npm run build:headless
+
+      - name: Boot apps
+        run: |
+          AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
+          echo "AFTER_URL=$AFTER_URL" >> "$GITHUB_ENV"
+          if [ "${{ steps.before.outcome }}" = "success" ]; then
+            BEFORE_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh before 37602 before) || true
+            echo "BEFORE_URL=$BEFORE_URL" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run evidence agent
+        working-directory: after
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EVIDENCE_MODEL: ${{ inputs.model || vars.EVIDENCE_MODEL || 'anthropic/claude-haiku-5.5' }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::Set OPENROUTER_API_KEY as a secret on this run's environment."
+            exit 1
+          fi
+          node ../reviewer/scripts/evidence-reviewer/run.mjs \
+            --after "$AFTER_URL" \
+            ${BEFORE_URL:+--before "$BEFORE_URL"} \
+            --instructions ../reviewer/.github/evidence-reviewer/instructions.md \
+            --pr "$RUNNER_TEMP/pr.json" \
+            --out "$RUNNER_TEMP/evidence"
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: ${{ runner.temp }}/evidence-*/server.log
+          if-no-files-found: ignore
+
+  publish:
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/evidence-reviewer
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence
+
+      # The artifact was produced next to untrusted code: only its PNGs and
+      # report.md are used, and the SHA is validated before it's interpolated.
+      - name: Publish to PR
+        env:
+          REVIEWED_SHA: ${{ needs.review.outputs.sha }}
+        run: |
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || REVIEWED_SHA=unknown
+          export REVIEWED_SHA
+          bash scripts/evidence-reviewer/publish.sh "$RUNNER_TEMP/evidence" "$PR"
