@@ -29,7 +29,7 @@ The repo has no GitHub remote, so PR badges, CI status and "Request AI review" h
 
 ## Things that do NOT work in CI
 
-- **Claude Code / Codex sessions**: there is no `claude` binary and no auth. A "Claude Code" terminal tab may show an error or an empty terminal, and a Chat tab can't get a response. Don't treat that as a regression caused by the PR unless the PR touches that path.
+- **Claude Code / Codex sessions**: there is no `claude` binary and no auth. A "Claude Code" terminal tab shows `claude: command not found` and a "Claude Code exited. Start a new session" card. A Chat tab can't get a response. The right column shows "Connect a GitHub token" under Pull Request. All of that is expected. Don't treat that as a regression caused by the PR unless the PR touches that path.
 - GitHub data: PR status, checks, merge buttons, and AI review requests.
 - Native desktop features: menu bar, dock, OS notifications, "Open in editor", and Electron browser panes.
 
