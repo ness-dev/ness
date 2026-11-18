@@ -316,6 +316,8 @@ export interface Config {
   // historical look). 'comfy' bumps font sizes, padding, and corner
   // radius for newcomers / screen-sharing.
   jsonModeChatDensity?: 'compact' | 'comfy'
+  // How a Chat tab's Subagents column starts. Undefined = 'expanded'.
+  subagentsColumnDefault?: 'expanded' | 'collapsed'
   // Global UI density. Undefined = 'small' (the historical look at 16px
   // root font-size). 'x-small' = 14px, 'medium' = 18px, 'large' = 20px,
   // 'x-large' = 22px.

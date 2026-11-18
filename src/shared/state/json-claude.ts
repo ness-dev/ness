@@ -399,6 +399,19 @@ export interface JsonClaudeSession {
   /** Last text of the most recent user submission; used by the renderer to
    *  pair the echo against the user-card it just rendered optimistically. */
   busy: boolean
+  /** When the current (or most recent) turn began. Entries are not
+   *  turn-delimited on their own: a message typed mid-turn becomes an
+   *  ordinary user entry once delivered, so "a later user entry" is not a
+   *  turn boundary.
+   *
+   *  A timestamp, not an entry id, because entries can go away —
+   *  cancelling a queued message, rewinding, reseeding — and an id that
+   *  no longer resolves silently drops the boundary. Stamped by main on
+   *  the `busyChanged` payload, never derived in the reducer: renderers
+   *  often hold no entries for a session whose tab hasn't mounted, so a
+   *  value computed from entries would differ between clients.
+   *  Undefined until the session's first turn starts. */
+  turnStartedAt?: number
   /** --permission-mode flag passed to claude at spawn time. Mid-session
    *  changes are applied via a stdin control_request (subtype
    *  'set_permission_mode') so the in-flight turn is not aborted; the
@@ -547,7 +560,10 @@ export type JsonClaudeEvent =
     }
   | {
       type: 'jsonClaude/busyChanged'
-      payload: { sessionId: string; busy: boolean }
+      /** `turnStartedAt` accompanies `busy: true` — stamped once in main
+       *  so every client stores the same boundary, including renderers
+       *  that haven't hydrated this session's entries. */
+      payload: { sessionId: string; busy: boolean; turnStartedAt?: number }
     }
   | {
       type: 'jsonClaude/sessionCleared'
@@ -994,12 +1010,18 @@ export function jsonClaudeReducer(
     }
     case 'jsonClaude/busyChanged': {
       const session = state.sessions[event.payload.sessionId]
-      if (!session) return state
+      if (!session || session.busy === event.payload.busy) return state
       return {
         ...state,
         sessions: {
           ...state.sessions,
-          [session.sessionId]: { ...session, busy: event.payload.busy }
+          [session.sessionId]: {
+            ...session,
+            busy: event.payload.busy,
+            ...(event.payload.busy && event.payload.turnStartedAt !== undefined
+              ? { turnStartedAt: event.payload.turnStartedAt }
+              : {})
+          }
         }
       }
     }

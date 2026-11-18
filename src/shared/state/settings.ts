@@ -86,6 +86,10 @@ export type BrowserToolsMode = 'view' | 'full'
 
 export type JsonModeChatDensity = 'compact' | 'comfy'
 
+/** Whether a Chat tab's Subagents column starts open or as its composer
+ *  chip. Only the default — a per-session open/close choice still wins. */
+export type SubagentsColumnDefault = 'expanded' | 'collapsed'
+
 /** Five-step UI density. Controls the root `html` font-size so every
  *  `rem`-based unit (and therefore the entire `text-xs` / `text-sm` /
  *  `text-base` / `text-lg` scale and every `w-N` / `h-N` icon) shifts
@@ -438,6 +442,9 @@ export interface SettingsState {
    *  radius for newcomers / screen-sharing. Wired via CSS variables on
    *  the chat root, so it's a pure styling switch. */
   jsonModeChatDensity: JsonModeChatDensity
+  /** How the Subagents column starts in a session the user hasn't opened
+   *  or closed it in. */
+  subagentsColumnDefault: SubagentsColumnDefault
   /** Global UI density. Maps to a root `html` font-size — see SCALES. */
   uiScale: UiScale
   /** Id of the active Nessie colour preset — the app's primary colour.
@@ -595,6 +602,7 @@ export type SettingsEvent =
   | { type: 'settings/autoApproveSteerInstructionsChanged'; payload: string }
   | { type: 'settings/useSystemClaudeForJsonModeChanged'; payload: boolean }
   | { type: 'settings/jsonModeChatDensityChanged'; payload: JsonModeChatDensity }
+  | { type: 'settings/subagentsColumnDefaultChanged'; payload: SubagentsColumnDefault }
   | { type: 'settings/uiScaleChanged'; payload: UiScale }
   | { type: 'settings/nessieColorChanged'; payload: string }
   | { type: 'settings/jsonModeSendOnEnterChanged'; payload: boolean }
@@ -681,6 +689,7 @@ export const initialSettings: SettingsState = {
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
+  subagentsColumnDefault: 'expanded',
   uiScale: 'small',
   nessieColor: DEFAULT_NESSIE_COLOR,
   jsonModeSendOnEnter: false,
@@ -794,6 +803,7 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'defaultClaudeTabType',
   'chatPromotionDismissed',
   'jsonModeChatDensity',
+  'subagentsColumnDefault',
   'uiScale',
   'nessieColor',
   'jsonModeSendOnEnter',
@@ -844,6 +854,7 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setDefaultClaudeTabType',
   'config:setChatPromotionDismissed',
   'config:setJsonModeChatDensity',
+  'config:setSubagentsColumnDefault',
   'config:setUiScale',
   'config:setNessieColor',
   'config:setJsonModeSendOnEnter',
@@ -999,6 +1010,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, useSystemClaudeForJsonMode: event.payload }
     case 'settings/jsonModeChatDensityChanged':
       return { ...state, jsonModeChatDensity: event.payload }
+    case 'settings/subagentsColumnDefaultChanged':
+      return { ...state, subagentsColumnDefault: event.payload }
     case 'settings/uiScaleChanged':
       return { ...state, uiScale: event.payload }
     case 'settings/nessieColorChanged':

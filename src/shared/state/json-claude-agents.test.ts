@@ -124,6 +124,67 @@ describe('collectAgents', () => {
     expect(agents[0].status).toBe('interrupted')
   })
 
+  it('carries the launch prompt alongside the short description', () => {
+    const e = launch('t1', 'Audit auth')
+    e.blocks![0].input = { description: 'Audit auth', prompt: 'Read src/auth and list risks.' }
+    const [agent] = collectAgents(session([e]))
+    expect(agent.description).toBe('Audit auth')
+    expect(agent.prompt).toBe('Read src/auth and list risks.')
+  })
+
+  it('keeps an unrecorded agent from an earlier turn interrupted when a new turn starts', () => {
+    const userTurn: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 5000,
+      text: 'next'
+    }
+    const agents = collectAgents(
+      session(
+        [launch('t1', 'Old turn', { at: 1000 }), userTurn, launch('t2', 'This turn', { at: 6000 })],
+        { turnStartedAt: 5000 }
+      )
+    )
+    const byId = Object.fromEntries(agents.map((a) => [a.toolUseId, a.status]))
+    expect(byId).toEqual({ t1: 'interrupted', t2: 'running' })
+  })
+
+  it('keeps an agent running when a mid-turn message is delivered after its launch', () => {
+    // Delivered interjection: isQueued has already cleared, but the turn
+    // that launched t1 is still the current one.
+    const interjection: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 5000,
+      text: 'also check X'
+    }
+    const agents = collectAgents(
+      session(
+        [
+          { entryId: 'u1', kind: 'user', timestamp: 1, text: 'go' },
+          launch('t1', 'Current', { at: 1000 }),
+          interjection
+        ],
+        { turnStartedAt: 1 }
+      )
+    )
+    expect(agents[0].status).toBe('running')
+  })
+
+  it('holds the boundary when the entry it was taken from has been removed', () => {
+    // Cancelled queued message / rewind / reseed: the entry that stamped
+    // the boundary is gone, but earlier-turn agents must stay settled.
+    const agents = collectAgents(
+      session([launch('t1', 'Old turn', { at: 1000 })], { turnStartedAt: 5000 })
+    )
+    expect(agents[0].status).toBe('interrupted')
+  })
+
+  it('falls back to busy when no turn has started since the session loaded', () => {
+    const agents = collectAgents(session([launch('t1', 'Seeded')]))
+    expect(agents[0].status).toBe('running')
+  })
+
   it('matches the legacy Task tool name as well as Agent', () => {
     const agents = collectAgents(
       session([launch('t1', 'Legacy', { name: 'Task' })])

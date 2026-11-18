@@ -585,6 +585,7 @@ function WorkspaceViewInner({
                     sessionId={tab.id}
                     worktreePath={worktreePath}
                     mode={tab.mode ?? 'awake'}
+                    showSubagents={visible && isActiveInPane}
                   />
                 ) : tab.type === 'shell' && (tab.mode ?? 'awake') === 'asleep' ? (
                   // Skip XTerminal entirely while asleep — its mount

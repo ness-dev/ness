@@ -4451,6 +4451,24 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest(
+    'config:setSubagentsColumnDefault',
+    (_ctx, value: 'expanded' | 'collapsed') => {
+      const next: 'expanded' | 'collapsed' = value === 'collapsed' ? 'collapsed' : 'expanded'
+      if (next === 'expanded') {
+        delete config.subagentsColumnDefault
+      } else {
+        config.subagentsColumnDefault = 'collapsed'
+      }
+      saveConfig(config)
+      store.dispatch({
+        type: 'settings/subagentsColumnDefaultChanged',
+        payload: next
+      })
+      return true
+    }
+  )
+
+  transport.onRequest(
     'config:setJsonModeChatDensity',
     (_ctx, value: 'compact' | 'comfy') => {
       const next: 'compact' | 'comfy' = value === 'comfy' ? 'comfy' : 'compact'
