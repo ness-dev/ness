@@ -1,0 +1,144 @@
+name: Evidence review
+
+# Experimental: a cheap vision model drives the headless web client of the
+# PR's base and head builds side by side, captures screenshots that prove
+# (or disprove) what the PR claims, and posts them as a PR comment.
+#
+# Opt-in per PR, since every run costs OpenRouter credit:
+#   - add the `evidence-review` label (re-runs on each push while labelled), or
+#   - Actions → Evidence review → Run workflow with a PR number.
+#
+# Uses `pull_request`, not `pull_request_target`: the PR's own code is built
+# and run here, so fork PRs get no secrets and are skipped. Same-repo PRs
+# only.
+#
+# Pieces, so this can be lifted into other repos:
+#   scripts/evidence-reviewer/run.mjs       generic agent (URL in, report out)
+#   scripts/evidence-reviewer/boot-ness.sh  app-specific boot + fixture seed
+#   .github/evidence-reviewer/instructions.md  app-specific usage guide
+#   scripts/evidence-reviewer/publish.sh    screenshots branch + PR comment
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number
+        required: true
+      model:
+        description: OpenRouter model id (blank = repo default)
+        required: false
+
+concurrency:
+  group: evidence-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'evidence-review') &&
+       (github.event.action == 'synchronize' || github.event.label.name == 'evidence-review'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The reviewer itself always comes from the workflow's own commit, so a
+      # PR branched before the reviewer existed can still be reviewed.
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: reviewer
+          sparse-checkout: |
+            scripts/evidence-reviewer
+            .github/evidence-reviewer
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ env.PR }}/head
+          path: after
+          fetch-depth: 0
+
+      - name: Collect PR context
+        run: |
+          node reviewer/scripts/evidence-reviewer/collect-pr.mjs "$PR" "$RUNNER_TEMP/pr.json" --repo "$GITHUB_REPOSITORY"
+          BASE_SHA=$(jq -r .baseSha "$RUNNER_TEMP/pr.json")
+          git -C after fetch -q origin "$BASE_SHA"
+          MERGE_BASE=$(git -C after merge-base HEAD "$BASE_SHA")
+          echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
+          git -C after worktree add -q --detach "$GITHUB_WORKSPACE/before" "$MERGE_BASE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: after/package-lock.json
+
+      - name: Install + build (after)
+        working-directory: after
+        run: |
+          npm install --legacy-peer-deps
+          npm run build:headless
+
+      # Reuse the head's node_modules when the lockfile didn't change, which
+      # is most PRs. A base that fails to build just means no "before" app.
+      - name: Install + build (before)
+        id: before
+        continue-on-error: true
+        working-directory: before
+        run: |
+          if cmp -s package-lock.json ../after/package-lock.json; then
+            ln -s ../after/node_modules node_modules
+          else
+            npm install --legacy-peer-deps
+          fi
+          npm run build:headless
+
+      - name: Boot apps
+        run: |
+          AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
+          echo "AFTER_URL=$AFTER_URL" >> "$GITHUB_ENV"
+          if [ "${{ steps.before.outcome }}" = "success" ]; then
+            BEFORE_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh before 37602 before) || true
+            echo "BEFORE_URL=$BEFORE_URL" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run evidence agent
+        working-directory: after
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EVIDENCE_MODEL: ${{ inputs.model || vars.EVIDENCE_MODEL || 'anthropic/claude-haiku-5.5' }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::Set the OPENROUTER_API_KEY repository secret to run the evidence reviewer."
+            exit 1
+          fi
+          node ../reviewer/scripts/evidence-reviewer/run.mjs \
+            --after "$AFTER_URL" \
+            ${BEFORE_URL:+--before "$BEFORE_URL"} \
+            --instructions ../reviewer/.github/evidence-reviewer/instructions.md \
+            --pr "$RUNNER_TEMP/pr.json" \
+            --out "$RUNNER_TEMP/evidence"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-pr-${{ env.PR }}
+          path: |
+            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/evidence-*/server.log
+          if-no-files-found: ignore
+
+      - name: Publish to PR
+        run: bash reviewer/scripts/evidence-reviewer/publish.sh "$RUNNER_TEMP/evidence" "$PR"
