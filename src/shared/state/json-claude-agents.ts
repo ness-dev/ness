@@ -93,8 +93,6 @@ interface LaunchSite {
   /** The launching entry's own parentToolUseId — i.e. the agent that
    *  made this call, or undefined for the main session. */
   launchedBy?: string
-  /** Index of the launching entry in `session.entries`. */
-  entryIndex: number
 }
 
 /** Claude Code runs EVERY sub-agent detached: the Agent tool_result
@@ -173,22 +171,7 @@ export function collectAgents(
     { content: string; isError: boolean }
   >()
 
-  // Anything launched at or before this index belongs to a turn that has
-  // already ended. It comes from the reducer rather than from scanning for
-  // user entries: a message typed mid-turn is an ordinary user entry once
-  // delivered, so it can't mark a boundary.
-  let previousTurnEnd = -1
-  if (session.turnStartEntryId) {
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].entryId === session.turnStartEntryId) {
-        previousTurnEnd = i
-        break
-      }
-    }
-  }
-
-  for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
-    const entry = entries[entryIndex]
+  for (const entry of entries) {
     const pid = entry.parentToolUseId
     if (pid) {
       const list = childEntriesByParent.get(pid)
@@ -216,8 +199,7 @@ export function collectAgents(
         model: str(b.input?.model),
         requestedBackground: b.input?.run_in_background === true,
         startedAt: entry.timestamp,
-        ...(pid ? { launchedBy: pid } : {}),
-        entryIndex
+        ...(pid ? { launchedBy: pid } : {})
       }
       launches.push(site)
       launchById.set(site.toolUseId, site)
@@ -331,7 +313,10 @@ export function collectAgents(
       completedAt = childEntries.length
         ? childEntries[childEntries.length - 1].timestamp
         : undefined
-    } else if (site.entryIndex <= previousTurnEnd) {
+    } else if (
+      session.turnStartedAt !== undefined &&
+      site.startedAt <= session.turnStartedAt
+    ) {
       // No lifecycle record, no result, and launched before the current
       // turn began — a transcript-seeded agent from an earlier turn.
       // `busy` describes the current turn, so reading it here resurrected

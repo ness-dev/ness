@@ -557,7 +557,7 @@ describe('jsonClaudeReducer', () => {
     expect(state.sessions[SID].busy).toBe(true)
   })
 
-  it('busyChanged records the last entry as the turn boundary when a turn starts', () => {
+  it('busyChanged records the last entry\'s timestamp as the turn boundary when a turn starts', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {
       type: 'jsonClaude/entryAppended',
@@ -567,7 +567,7 @@ describe('jsonClaudeReducer', () => {
       type: 'jsonClaude/busyChanged',
       payload: { sessionId: SID, busy: true }
     })
-    expect(state.sessions[SID].turnStartEntryId).toBe('u1')
+    expect(state.sessions[SID].turnStartedAt).toBe(1)
     state = jsonClaudeReducer(state, {
       type: 'jsonClaude/entryAppended',
       payload: { sessionId: SID, entry: { entryId: 'a1', kind: 'assistant', timestamp: 2 } }
@@ -577,7 +577,7 @@ describe('jsonClaudeReducer', () => {
       type: 'jsonClaude/busyChanged',
       payload: { sessionId: SID, busy: false }
     })
-    expect(state.sessions[SID].turnStartEntryId).toBe('u1')
+    expect(state.sessions[SID].turnStartedAt).toBe(1)
   })
 
   it('busyChanged is a no-op when busy is unchanged', () => {

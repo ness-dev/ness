@@ -140,9 +140,10 @@ describe('collectAgents', () => {
       text: 'next'
     }
     const agents = collectAgents(
-      session([launch('t1', 'Old turn'), userTurn, launch('t2', 'This turn')], {
-        turnStartEntryId: 'u2'
-      })
+      session(
+        [launch('t1', 'Old turn', { at: 1000 }), userTurn, launch('t2', 'This turn', { at: 6000 })],
+        { turnStartedAt: 5000 }
+      )
     )
     const byId = Object.fromEntries(agents.map((a) => [a.toolUseId, a.status]))
     expect(byId).toEqual({ t1: 'interrupted', t2: 'running' })
@@ -158,11 +159,25 @@ describe('collectAgents', () => {
       text: 'also check X'
     }
     const agents = collectAgents(
-      session([{ entryId: 'u1', kind: 'user', timestamp: 1, text: 'go' }, launch('t1', 'Current'), interjection], {
-        turnStartEntryId: 'u1'
-      })
+      session(
+        [
+          { entryId: 'u1', kind: 'user', timestamp: 1, text: 'go' },
+          launch('t1', 'Current', { at: 1000 }),
+          interjection
+        ],
+        { turnStartedAt: 1 }
+      )
     )
     expect(agents[0].status).toBe('running')
+  })
+
+  it('holds the boundary when the entry it was taken from has been removed', () => {
+    // Cancelled queued message / rewind / reseed: the entry that stamped
+    // the boundary is gone, but earlier-turn agents must stay settled.
+    const agents = collectAgents(
+      session([launch('t1', 'Old turn', { at: 1000 })], { turnStartedAt: 5000 })
+    )
+    expect(agents[0].status).toBe('interrupted')
   })
 
   it('falls back to busy when no turn has started since the session loaded', () => {
