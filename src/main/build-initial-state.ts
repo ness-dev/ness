@@ -23,6 +23,9 @@ import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
 import { initialPermissions } from '../shared/state/permissions'
+import { initialSubscriptions, type WorktreeSubscription } from '../shared/state/subscriptions'
+import { initialOrigins, type WorktreeOrigin } from '../shared/state/origins'
+import { initialNotifications } from '../shared/state/notifications'
 import {
   initialReviews,
   type ReviewAuthor,
@@ -104,6 +107,37 @@ function flattenScratchpadNotes(
     if (!byPath) continue
     for (const [worktreePath, text] of Object.entries(byPath)) {
       if (typeof text === 'string' && text !== '') out[worktreePath] = text
+    }
+  }
+  return out
+}
+
+function isStoredSubscription(s: unknown): s is WorktreeSubscription {
+  if (!s || typeof s !== 'object') return false
+  const o = s as Record<string, unknown>
+  return (
+    typeof o.id === 'string' &&
+    typeof o.subscriberPath === 'string' &&
+    typeof o.subscriberTabId === 'string' &&
+    typeof o.targetPath === 'string' &&
+    typeof o.createdAt === 'number' &&
+    (o.note === undefined || typeof o.note === 'string') &&
+    (o.mode === undefined || o.mode === 'interrupt' || o.mode === 'silent')
+  )
+}
+
+function sanitizeOrigins(raw: unknown): Record<string, WorktreeOrigin> {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, WorktreeOrigin> = {}
+  for (const [path, o] of Object.entries(raw as Record<string, unknown>)) {
+    if (!o || typeof o !== 'object') continue
+    const r = o as Record<string, unknown>
+    if (
+      typeof r.creatorPath === 'string' &&
+      typeof r.creatorTabId === 'string' &&
+      typeof r.createdAt === 'number'
+    ) {
+      out[path] = { creatorPath: r.creatorPath, creatorTabId: r.creatorTabId, createdAt: r.createdAt }
     }
   }
   return out
@@ -231,6 +265,13 @@ export function buildInitialAppState(
       ? { rules: sanitizePermissionRules(config.permissionRules) }
       : initialPermissions,
     reviews: config.reviews ? { byPath: sanitizeReviews(config.reviews) } : initialReviews,
+    subscriptions: Array.isArray(config.worktreeSubscriptions)
+      ? { list: config.worktreeSubscriptions.filter(isStoredSubscription) }
+      : initialSubscriptions,
+    origins: config.worktreeOrigins
+      ? { byPath: sanitizeOrigins(config.worktreeOrigins) }
+      : initialOrigins,
+    notifications: initialNotifications,
     settings: {
       ...initialSettings,
       themeMode:

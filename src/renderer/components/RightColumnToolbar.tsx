@@ -12,6 +12,7 @@ const LABELS: Record<BuiltinRightPanelKey, string> = {
   pr: 'PR Status',
   todos: 'Todos',
   agents: 'Agents',
+  subscriptions: 'Subscriptions',
   commits: 'Branch Commits',
   changedFiles: 'Changed Files',
   allFiles: 'All Files',

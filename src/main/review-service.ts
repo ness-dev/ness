@@ -216,13 +216,10 @@ export function sendReviewSubmission(
   return record({ ok: true, tabId: result.tabId, woke: result.woke })
 }
 
-/** The tab a review is for when nobody asked by hand: the most recently
- *  active Chat tab that isn't itself a reviewer. Chat only, since the
- *  finished review has to be delivered back to it. Shared by the CI-green
- *  spawner and the "Request AI review" button so both pick the same tab. */
-export function pickAuthorTab(state: AppState, worktreePath: string): string | null {
-  return listChatTabs(state, worktreePath).find((t) => !t.reviewOf)?.id ?? null
-}
+/** Shared by the CI-green spawner and the "Request AI review" button so both
+ *  pick the same tab; lives in shared/agent-tabs.ts because the
+ *  own-worktree subscription rule resolves the same tab. */
+export { pickAuthorTab } from '../shared/agent-tabs'
 
 /** Context for a review the user asked for from the PR panel. The
  *  reviewer has no requester prose to go on, so it gets the PR instead. */
