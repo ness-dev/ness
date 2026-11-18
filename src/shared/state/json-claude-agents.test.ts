@@ -124,6 +124,32 @@ describe('collectAgents', () => {
     expect(agents[0].status).toBe('interrupted')
   })
 
+  it('keeps an unrecorded agent from an earlier turn interrupted when a new turn starts', () => {
+    const userTurn: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 5000,
+      text: 'next'
+    }
+    const agents = collectAgents(
+      session([launch('t1', 'Old turn'), userTurn, launch('t2', 'This turn')])
+    )
+    const byId = Object.fromEntries(agents.map((a) => [a.toolUseId, a.status]))
+    expect(byId).toEqual({ t1: 'interrupted', t2: 'running' })
+  })
+
+  it('does not count a queued message as a new turn', () => {
+    const queued: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 5000,
+      text: 'later',
+      isQueued: true
+    }
+    const agents = collectAgents(session([launch('t1', 'Current'), queued]))
+    expect(agents[0].status).toBe('running')
+  })
+
   it('matches the legacy Task tool name as well as Agent', () => {
     const agents = collectAgents(
       session([launch('t1', 'Legacy', { name: 'Task' })])

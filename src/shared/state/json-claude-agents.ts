@@ -89,6 +89,8 @@ interface LaunchSite {
   /** The launching entry's own parentToolUseId — i.e. the agent that
    *  made this call, or undefined for the main session. */
   launchedBy?: string
+  /** Index of the launching entry in `session.entries`. */
+  entryIndex: number
 }
 
 /** Claude Code runs EVERY sub-agent detached: the Agent tool_result
@@ -167,7 +169,19 @@ export function collectAgents(
     { content: string; isError: boolean }
   >()
 
-  for (const entry of entries) {
+  // A later user turn means the turn that launched an agent is over.
+  // Queued messages don't count: they're typed mid-turn and haven't been
+  // delivered yet.
+  let lastUserTurn = -1
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].kind === 'user' && !entries[i].isQueued) {
+      lastUserTurn = i
+      break
+    }
+  }
+
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+    const entry = entries[entryIndex]
     const pid = entry.parentToolUseId
     if (pid) {
       const list = childEntriesByParent.get(pid)
@@ -194,7 +208,8 @@ export function collectAgents(
         model: str(b.input?.model),
         requestedBackground: b.input?.run_in_background === true,
         startedAt: entry.timestamp,
-        ...(pid ? { launchedBy: pid } : {})
+        ...(pid ? { launchedBy: pid } : {}),
+        entryIndex
       }
       launches.push(site)
       launchById.set(site.toolUseId, site)
@@ -308,6 +323,12 @@ export function collectAgents(
       completedAt = childEntries.length
         ? childEntries[childEntries.length - 1].timestamp
         : undefined
+    } else if (site.entryIndex < lastUserTurn) {
+      // No lifecycle record, no result, and the user has spoken since —
+      // a transcript-seeded launch from an earlier turn. `busy` describes
+      // the current turn, so reading it here resurrected every such agent
+      // as running whenever a new turn started.
+      status = 'interrupted'
     } else {
       status = session.busy ? 'running' : 'interrupted'
     }
