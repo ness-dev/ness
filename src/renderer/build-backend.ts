@@ -309,6 +309,8 @@ export function buildBackend(
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
     setAgentTabNamingEnabled: (enabled: boolean) =>
       reqConfig('config:setAgentTabNamingEnabled', enabled),
+    setCopyEditingEnabled: (enabled: boolean) =>
+      reqConfig('config:setCopyEditingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>
       reqConfig('config:setDefaultClaudeTabType', value),
     setChatPromotionDismissed: (value: boolean) =>
@@ -725,6 +727,11 @@ export function buildBackend(
         interrupt?: boolean
       }
     ) => req('jsonClaude:resolveApproval', requestId, result),
+    resolveCopyDraft: (
+      id: string,
+      outcome: { kind: 'submitted'; text: string; note?: string } | { kind: 'dismissed'; note?: string }
+    ) => req('copyDrafts:resolve', id, outcome),
+    clearWithdrawnCopyDraft: (id: string) => req('copyDrafts:clearWithdrawn', id),
     rerunJsonClaudeAutoApprovalReview: (requestId: string) =>
       req('jsonClaude:rerunAutoApprovalReview', requestId),
     startJsonClaude: (id: string, cwd: string) => req('jsonClaude:start', id, cwd),

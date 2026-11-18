@@ -20,6 +20,7 @@ import { DiffView } from './DiffView'
 import { FileView } from './FileView'
 import { BrowserPanel } from './BrowserPanel'
 import { JsonModeChat } from './JsonModeChat'
+import { CopyDraftOverlay } from './CopyDraftOverlay'
 import { ReviewPane } from './ReviewPane'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useBackend } from '../backend'
@@ -633,6 +634,7 @@ function WorkspaceViewInner({
                     }
                   />
                 )}
+                {tab.type === 'agent' && <CopyDraftOverlay terminalId={tab.id} />}
               </ErrorBoundary>
             </div>,
             slot,

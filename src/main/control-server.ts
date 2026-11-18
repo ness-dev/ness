@@ -22,6 +22,7 @@ import type { NotifyMode } from '../shared/state/subscriptions'
 import type { Subscriber } from '../shared/subscribers'
 import type { FanOutResult, SubscribeResult, UnsubscribeResult } from './worktree-subscriptions'
 import type { CaptureResult } from './browser-manager-types'
+import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
@@ -195,6 +196,14 @@ export interface ReviewQueries {
   ) => { ok: true; reviewerTabId: string; reused: boolean } | { ok: false; error: string }
 }
 
+export interface CopyDraftQueries {
+  /** Whether the edit_copy setting is on. Re-read per request so a toggle
+   * takes effect without restarting the bridge. */
+  isEnabled: () => boolean
+  request: (input: CopyDraftInput) => { id: string; result: Promise<CopyDraftOutcome> }
+  cancel: (id: string) => void
+}
+
 /** Scope derived from the caller's terminal id on every request. The
  * source of truth — env vars injected into the MCP bridge can go stale
  * (teleport sessions, deleted worktrees), so each tool call re-resolves. */
@@ -262,6 +271,7 @@ export interface ControlServerDeps {
   /** Chat tabs of a worktree, most recently active first — the only tabs
    *  reviews and tab messages can be delivered to. */
   listChatTabs: (worktreePath: string) => ChatTabInfo[]
+  copyDrafts: CopyDraftQueries
   /** Trim + 80-char clamp + dispatch. Matches the aliases:set IPC handler.
    * Empty-after-trim routes to clearAlias — never stores an empty alias. */
   setAlias: (worktreePath: string, alias: string) => void
@@ -1316,6 +1326,50 @@ async function handleRequest(
     }
   }
 
+  // edit_copy — hand a draft to the human and hold this response open until
+  // they submit or dismiss it. Closing the connection (bridge timeout, agent
+  // interrupt, process exit) withdraws the draft from the UI.
+  if (req.method === 'POST' && path === '/copy-drafts') {
+    if (!deps.copyDrafts.isEnabled()) {
+      return sendJson(res, 403, {
+        error: 'copy editing is disabled in Ness settings (Settings → Experimental → Copy editing)'
+      })
+    }
+    const { scope, terminalId } = resolveScope(req, deps)
+    if (!terminalId) {
+      return sendJson(res, 400, { error: 'X-Harness-Terminal-Id header required' })
+    }
+    if (!scope) {
+      return sendJson(res, 404, {
+        error: 'caller terminal is not associated with a worktree'
+      })
+    }
+    const body = await readJson(req)
+    const draft = typeof body.draft === 'string' ? body.draft : ''
+    if (!draft.trim()) return sendJson(res, 400, { error: 'draft required' })
+    const optional = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.trim() ? v.trim() : undefined
+
+    const { id, result } = deps.copyDrafts.request({
+      terminalId,
+      worktreePath: scope.worktreePath,
+      draft,
+      title: optional(body.title),
+      context: optional(body.context)
+    })
+    const onClose = (): void => {
+      if (!res.writableEnded) deps.copyDrafts.cancel(id)
+    }
+    res.on('close', onClose)
+    const outcome = await result
+    res.off('close', onClose)
+    if (res.destroyed) return
+    if (outcome.kind === 'cancelled') {
+      return sendJson(res, 409, { error: 'the draft was withdrawn before the user answered' })
+    }
+    return sendJson(res, 200, outcome)
+  }
+
   // /scope — returns the caller's current scope. The MCP bridge calls this
   // once at startup so it can adapt tool descriptions (e.g. signalling
   // "create_worktree defaults to this repo" for feature callers) and filter
@@ -1330,7 +1384,8 @@ async function handleRequest(
       browser: deps.getBrowserPerms(),
       conversationFork: { enabled: deps.getConversationForkEnabled() },
       messaging: { enabled: deps.messaging.isEnabled() },
-      tabNaming: { enabled: deps.getAgentTabNamingEnabled() }
+      tabNaming: { enabled: deps.getAgentTabNamingEnabled() },
+      copyEditing: { enabled: deps.copyDrafts.isEnabled() }
     })
   }
 

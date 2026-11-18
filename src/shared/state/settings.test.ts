@@ -588,6 +588,20 @@ describe('settingsReducer', () => {
     expect(off.worktreeMessagingEnabled).toBe(false)
   })
 
+  it('copyEditingEnabledChanged toggles flag, defaulting off', () => {
+    expect(initialSettings.copyEditingEnabled).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/copyEditingEnabledChanged',
+      payload: true
+    })
+    expect(on.copyEditingEnabled).toBe(true)
+    const off = apply(on, {
+      type: 'settings/copyEditingEnabledChanged',
+      payload: false
+    })
+    expect(off.copyEditingEnabled).toBe(false)
+  })
+
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
     expect(initialSettings.agentTabNamingEnabled).toBe(true)
     const off = apply(initialSettings, {

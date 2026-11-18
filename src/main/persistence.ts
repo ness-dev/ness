@@ -286,6 +286,9 @@ export interface Config {
   // endpoint accepts calls, letting an agent write into another worktree's
   // chat. Default off (undefined treated as false).
   worktreeMessagingEnabled?: boolean
+  // When true, the edit_copy MCP tool is advertised and the /copy-drafts
+  // endpoint accepts calls. Default off (undefined treated as false).
+  copyEditingEnabled?: boolean
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */
   agentTabNamingEnabled?: boolean

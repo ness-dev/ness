@@ -188,6 +188,21 @@ describe('ApprovalBridge — persistent allowlist', () => {
     })
     expect(res).toBeNull()
   })
+
+  it('always allows edit_copy without a grant or a card', async () => {
+    // The tool itself is the human prompt; approving it first would ask twice.
+    const h = await harness([])
+    const res = await h.send({
+      id: 'req-7',
+      tool_name: 'mcp__ness-control__edit_copy',
+      input: { draft: 'hello' },
+      tool_use_id: 'tu-7'
+    })
+    expect(res).toMatchObject({
+      result: { behavior: 'allow', updatedInput: { draft: 'hello' } }
+    })
+    expect(h.store.getSnapshot().state.jsonClaude.pendingApprovals['req-7']).toBeUndefined()
+  })
 })
 
 describe('ApprovalBridge — abandoned tool calls', () => {

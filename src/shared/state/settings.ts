@@ -406,6 +406,9 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default off. */
   worktreeMessagingEnabled: boolean
+  /** When true, agents get the `edit_copy` MCP tool and can hand the user a
+   *  draft of copy to rewrite before using it. Default off. */
+  copyEditingEnabled: boolean
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — unlike the
    *  experimental toggles this gates a cosmetic, reversible action. Off
@@ -604,6 +607,7 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/copyEditingEnabledChanged'; payload: boolean }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -693,6 +697,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: false,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
+  copyEditingEnabled: false,
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1013,6 +1018,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/copyEditingEnabledChanged':
+      return { ...state, copyEditingEnabled: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

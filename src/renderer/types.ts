@@ -409,6 +409,7 @@ export interface ElectronAPI {
   setBrowserToolsMode(mode: 'view' | 'full'): Promise<boolean>
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
+  setCopyEditingEnabled(enabled: boolean): Promise<boolean>
   setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
@@ -747,6 +748,17 @@ export interface ElectronAPI {
     }
   ): Promise<boolean>
   rerunJsonClaudeAutoApprovalReview(requestId: string): Promise<boolean>
+
+  /** Answer an agent's `edit_copy` call. False when the draft is already
+   *  gone (answered elsewhere, or the agent stopped waiting). */
+  resolveCopyDraft(
+    id: string,
+    outcome:
+      | { kind: 'submitted'; text: string; note?: string }
+      | { kind: 'dismissed'; note?: string }
+  ): Promise<boolean>
+  /** Close the "the agent stopped waiting" notice for a withdrawn draft. */
+  clearWithdrawnCopyDraft(id: string): Promise<boolean>
   startJsonClaude(id: string, cwd: string): Promise<boolean>
   sendJsonClaudeMessage(
     id: string,

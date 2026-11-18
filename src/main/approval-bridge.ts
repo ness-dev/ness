@@ -28,6 +28,7 @@ import { join } from 'node:path'
 import { mkdtempSync, existsSync, unlinkSync } from 'node:fs'
 import type { Store } from './store'
 import {
+  EDIT_COPY_TOOL_NAME,
   QUESTION_TOOL_NAME,
   type JsonClaudePendingApproval
 } from '../shared/state/json-claude'
@@ -393,6 +394,11 @@ export class ApprovalBridge {
     // response itself, so it must always reach a human — see
     // QUESTION_TOOL_NAME. Bail out above both auto-resolve paths.
     const isQuestion = basePayload.toolName === QUESTION_TOOL_NAME
+
+    if (basePayload.toolName === EDIT_COPY_TOOL_NAME) {
+      respond({ behavior: 'allow', updatedInput: basePayload.input })
+      return
+    }
 
     // Two explicit-user-grant paths, both checked before the LLM
     // auto-reviewer because a grant the user made by hand is cheaper and

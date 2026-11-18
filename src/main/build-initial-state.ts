@@ -23,6 +23,7 @@ import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
 import { initialAliases } from '../shared/state/aliases'
 import { initialPermissions } from '../shared/state/permissions'
+import { initialCopyDrafts } from '../shared/state/copy-drafts'
 import { initialSubscriptions, type WorktreeSubscription } from '../shared/state/subscriptions'
 import { initialOrigins, type WorktreeOrigin } from '../shared/state/origins'
 import { initialNotifications } from '../shared/state/notifications'
@@ -264,6 +265,7 @@ export function buildInitialAppState(
     permissions: config.permissionRules
       ? { rules: sanitizePermissionRules(config.permissionRules) }
       : initialPermissions,
+    copyDrafts: initialCopyDrafts,
     reviews: config.reviews ? { byPath: sanitizeReviews(config.reviews) } : initialReviews,
     subscriptions: Array.isArray(config.worktreeSubscriptions)
       ? { list: config.worktreeSubscriptions.filter(isStoredSubscription) }
@@ -328,6 +330,7 @@ export function buildInitialAppState(
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
       conversationForkEnabled: config.conversationForkEnabled === true,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
+      copyEditingEnabled: config.copyEditingEnabled === true,
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,
