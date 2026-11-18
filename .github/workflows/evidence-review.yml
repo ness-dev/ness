@@ -28,9 +28,18 @@ name: Evidence review
 # PRs mean running untrusted code next to a secret, so the work is split:
 #   - `review` builds and runs the PR's code and calls OpenRouter. Its token
 #     is read-only, and nothing in it can write to the repo. The PR's code
-#     shares the runner with the agent, so it CAN read OPENROUTER_API_KEY.
-#     Use a key with a low spend cap, and read a stranger's diff before
-#     approving their run.
+#     shares the runner with the agent, and runner code has root and can
+#     read any secret the job uses from the runner's memory, so it CAN read
+#     OPENROUTER_API_KEY. Use a dedicated key with a low credit limit, and
+#     read a stranger's diff before approving their run.
+#   - Agents running inside Ness (Chat / Claude Code tabs) are driven by a
+#     model that reads untrusted PR text, so they could be talked into
+#     printing secrets onto a screenshot. They never get the key: they call
+#     run.mjs's localhost proxy with a dummy token. Captures that show
+#     anything key-shaped are refused, reports are redacted, and publish
+#     refuses key-shaped text. EVIDENCE_RUN_BUDGET_USD caps a run's spend.
+#   - No npm cache: pull_request_target shares main's cache scope, and a
+#     cache saved here would be restored by main's CI and release builds.
 #   - `publish` runs no PR code. It takes the artifact from `review` and is
 #     the only job with write permissions (assets branch + PR comment).
 #
@@ -94,6 +103,7 @@ jobs:
           path: after
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Collect PR context
         id: sha
@@ -110,8 +120,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: after/package-lock.json
 
       - name: Install + build (after)
         working-directory: after
@@ -133,11 +141,10 @@ jobs:
           fi
           npm run build:headless
 
-      # The key goes into the servers' isolated ~/.claude/settings.json so
-      # agents inside Ness can run (see boot-ness.sh).
+      # Agents inside Ness talk to run.mjs's local proxy, never to OpenRouter
+      # directly, so this step needs no key (see boot-ness.sh).
       - name: Boot apps
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
         run: |
           AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
@@ -152,6 +159,7 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           EVIDENCE_MODEL: ${{ inputs.model || vars.EVIDENCE_MODEL || 'anthropic/claude-haiku-5.5' }}
+          EVIDENCE_RUN_BUDGET_USD: ${{ vars.EVIDENCE_RUN_BUDGET_USD || '1' }}
         run: |
           if [ -z "$OPENROUTER_API_KEY" ]; then
             echo "::error::Set OPENROUTER_API_KEY as a secret on this run's environment."

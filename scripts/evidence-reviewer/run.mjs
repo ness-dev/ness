@@ -20,8 +20,20 @@
 //   OPENROUTER_API_KEY   required
 //   EVIDENCE_MODEL       default anthropic/claude-haiku-5.5
 //   EVIDENCE_MAX_STEPS   default 40
+//   EVIDENCE_RUN_BUDGET_USD  default 1. Stop the run (and refuse agent
+//                        proxy calls) once the reviewer plus agents in the
+//                        app have spent this much.
+//
+// Agents running INSIDE the app under test never see the OpenRouter key.
+// They're configured (by the boot script) to call http://127.0.0.1:<port>
+// with a dummy token, and this process forwards those requests to
+// OpenRouter's Anthropic-compatible endpoint with the real key added. A
+// prompt-injected agent that dumps its own config or env therefore has
+// nothing to leak into a screenshot. Captures and reports are also
+// scrubbed for anything key-shaped as a backstop.
 
 import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -44,6 +56,9 @@ const PER_FILE_DIFF = 12000
 // Cheap models otherwise give up after a handful of turns.
 const MIN_EFFORT = 0.5
 const MAX_FINISH_REJECTIONS = 2
+const RUN_BUDGET = Number(process.env.EVIDENCE_RUN_BUDGET_USD || 1)
+const AGENT_PROXY_PORT = Number(args['agent-proxy-port'] || 37700)
+const SECRET_RE = /sk-or-v1-[A-Za-z0-9]{16,}/g
 const REPO_DIR = resolve(args['repo-dir'] || process.cwd())
 const UI_PATHS = (args['ui-paths'] || '').split(',').map((s) => s.trim()).filter(Boolean)
 
@@ -52,6 +67,9 @@ if (!args.after) fail('--after <url> is required')
 mkdirSync(OUT, { recursive: true })
 
 const instructions = args.instructions ? readFileSync(args.instructions, 'utf8') : ''
+let agentProxyRequests = 0
+let agentCost = 0
+const agentProxy = startAgentProxy()
 const pr = JSON.parse(readFileSync(args.pr, 'utf8'))
 
 const browser = await chromium.launch({
@@ -133,7 +151,7 @@ const tools = [
     dy: { type: 'number' },
     id: { type: 'integer' }
   }, ['app', 'dy']),
-  tool('wait_for_text', 'Wait until text appears in an app (case-insensitive), e.g. an agent reply in a Chat tab. Returns as soon as it shows up, or after timeout_s, then observes.', {
+  tool('wait_for_text', 'Wait until NEW occurrences of text appear in an app (case-insensitive), e.g. an agent reply. Counts occurrences already on screen when called and waits for the count to rise, so a prompt that contains the word doesn\'t count. Call it right after sending. Returns as soon as it rises, or after timeout_s, then observes.', {
     app: appEnum(),
     text: { type: 'string' },
     timeout_s: { type: 'number', description: 'Default 30, max 120.' }
@@ -170,13 +188,18 @@ const messages = [
   { role: 'user', content: prPrompt() }
 ]
 
+let overBudget = false
 for (let step = 0; step < MAX_STEPS && !result; step++) {
   const remaining = MAX_STEPS - step
+  if (!overBudget && runSpend() > RUN_BUDGET) {
+    overBudget = true
+    messages.push({ role: 'user', content: `The run's $${RUN_BUDGET} budget is used up. Call finish now with what you have.` })
+  }
   if (remaining === 3) {
     messages.push({ role: 'user', content: 'You have 3 steps left. Capture any final evidence and call finish.' })
   }
   currentStep = step
-  const forced = step === 0 ? 'plan' : remaining === 1 ? 'finish' : null
+  const forced = step === 0 ? 'plan' : remaining === 1 || overBudget ? 'finish' : null
   const reply = await chat(messages, forced ? { type: 'function', function: { name: forced } } : 'auto')
   const msg = reply.choices?.[0]?.message
   if (!msg) fail(`no message in response: ${JSON.stringify(reply).slice(0, 500)}`)
@@ -226,9 +249,12 @@ if (!result) {
 }
 
 await browser.close()
+agentProxy.closeAllConnections?.()
+agentProxy.close()
+const runCost = runSpend()
 
-writeFileSync(join(OUT, 'result.json'), JSON.stringify({ model: MODEL, usage, plan, result, evidence, transcript }, null, 2))
-writeFileSync(join(OUT, 'report.md'), renderReport())
+writeFileSync(join(OUT, 'result.json'), redact(JSON.stringify({ model: MODEL, usage, runCost, agentCost, agentProxyRequests, plan, result, evidence, transcript }, null, 2)))
+writeFileSync(join(OUT, 'report.md'), redact(renderReport()))
 log(`done: ${result.verdict} (${evidence.length} screenshots, $${usage.cost.toFixed(4)})`)
 
 async function runTool(name, input) {
@@ -262,9 +288,12 @@ async function runTool(name, input) {
         const opts = { button: input.button || 'left', timeout: 3000, modifiers: input.modifiers }
         input.double ? await loc.dblclick(opts) : await loc.click(opts)
       } else if (input.x != null && input.y != null) {
-        for (const m of input.modifiers || []) await page.keyboard.down(m)
-        await page.mouse.click(input.x, input.y, { button: input.button || 'left', clickCount: input.double ? 2 : 1 })
-        for (const m of input.modifiers || []) await page.keyboard.up(m)
+        try {
+          for (const m of input.modifiers || []) await page.keyboard.down(m)
+          await page.mouse.click(input.x, input.y, { button: input.button || 'left', clickCount: input.double ? 2 : 1 })
+        } finally {
+          for (const m of input.modifiers || []) await page.keyboard.up(m)
+        }
       } else return { text: 'click needs id or x+y' }
       return settleAndObserve(app)
     }
@@ -284,8 +313,14 @@ async function runTool(name, input) {
       return settleAndObserve(app)
     case 'wait_for_text': {
       const timeout = Math.min(120, input.timeout_s || 30) * 1000
+      const occurrences = (t) => document.body.innerText.toLowerCase().split(t.toLowerCase()).length - 1
+      const baseline = await page.evaluate(occurrences, input.text)
       const found = await page
-        .waitForFunction((t) => document.body.innerText.toLowerCase().includes(t.toLowerCase()), input.text, { timeout, polling: 500 })
+        .waitForFunction(
+          ([t, n]) => document.body.innerText.toLowerCase().split(t.toLowerCase()).length - 1 > n,
+          [input.text, baseline],
+          { timeout, polling: 500 }
+        )
         .then(() => true, () => false)
       const out = await settleAndObserve(app)
       return { ...out, text: `${found ? 'appeared' : `not seen after ${timeout / 1000}s`}: "${input.text}"\n${out.text}` }
@@ -306,6 +341,7 @@ async function runTool(name, input) {
       return { text: snippets.length ? snippets.map((s) => `… ${s} …`).join('\n') : 'no matches' }
     }
     case 'capture_evidence': {
+      if (await showsSecret(page)) return { text: 'refused: the screen contains an API key. Clear or close it, then capture again.' }
       const id = `E${evidence.length + 1}`
       const file = `${id}-${input.app}.png`
       await page.screenshot({ path: join(OUT, file) })
@@ -324,6 +360,9 @@ async function runTool(name, input) {
 // same rank among duplicates), since ids are assigned per page.
 async function runOnBoth(name, input) {
   if (name === 'capture_evidence') {
+    for (const appName of ['before', 'after']) {
+      if (await showsSecret(apps[appName].page)) return { text: `refused: the ${appName} screen contains an API key. Clear or close it, then capture again.` }
+    }
     const id = `E${evidence.length + 1}`
     const files = {}
     for (const appName of ['before', 'after']) {
@@ -647,10 +686,69 @@ function renderReport() {
   if (uncited.length) {
     lines.push(`<sub>Uncited screenshots: ${uncited.map((e) => e.id).join(', ')}</sub>`, '')
   }
-  lines.push(
-    `<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} tokens · $${usage.cost.toFixed(4)}</sub>`
-  )
+  const total = `$${runCost.toFixed(4)} total (reviewer $${usage.cost.toFixed(4)}, agents in app $${agentCost.toFixed(4)} over ${agentProxyRequests} calls)`
+  lines.push(`<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} reviewer tokens · ${total}</sub>`)
   return lines.join('\n')
+}
+
+function startAgentProxy() {
+  const server = createServer(async (req, res) => {
+    if (runSpend() > RUN_BUDGET) {
+      res.writeHead(429, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: `evidence run budget of $${RUN_BUDGET} reached` } }))
+      return
+    }
+    const body = []
+    for await (const chunk of req) body.push(chunk)
+    const headers = {}
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (!['host', 'authorization', 'x-api-key', 'content-length', 'connection', 'accept-encoding'].includes(k)) headers[k] = v
+    }
+    headers.authorization = `Bearer ${API_KEY}`
+    agentProxyRequests++
+    try {
+      const upstream = await fetch(`https://openrouter.ai/api${req.url}`, {
+        method: req.method,
+        headers,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(body)
+      })
+      const out = {}
+      upstream.headers.forEach((v, k) => {
+        if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) out[k] = v
+      })
+      res.writeHead(upstream.status, out)
+      // OpenRouter reports each response's cost in its usage block (the
+      // final SSE event when streaming); the last one seen is the total.
+      let tail = ''
+      if (upstream.body) {
+        for await (const chunk of upstream.body) {
+          res.write(chunk)
+          tail = (tail + Buffer.from(chunk).toString('utf8')).slice(-4000)
+        }
+      }
+      res.end()
+      const costs = [...tail.matchAll(/"cost":\s*([0-9.eE+-]+)/g)].map((m) => Number(m[1])).filter(Number.isFinite)
+      if (costs.length) agentCost += costs[costs.length - 1]
+    } catch (e) {
+      res.writeHead(502, { 'content-type': 'text/plain' })
+      res.end(`evidence agent proxy: ${e.message}`)
+    }
+  })
+  server.listen(AGENT_PROXY_PORT, '127.0.0.1')
+  return server
+}
+
+function runSpend() {
+  return usage.cost + agentCost
+}
+
+async function showsSecret(page) {
+  const text = await page.evaluate(() => document.body.innerText).catch(() => '')
+  return text.includes(API_KEY) || new RegExp(SECRET_RE.source).test(text)
+}
+
+function redact(text) {
+  return text.split(API_KEY).join('[REDACTED]').replace(SECRET_RE, '[REDACTED]')
 }
 
 function isUi(path) {

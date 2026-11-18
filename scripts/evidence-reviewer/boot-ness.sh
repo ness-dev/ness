@@ -12,11 +12,13 @@
 # Everything app-specific lives here and in .github/evidence-reviewer/;
 # scripts/evidence-reviewer/run.mjs only ever sees a URL.
 #
-# When OPENROUTER_API_KEY is set, agents inside Ness work too: the server
-# gets an isolated $HOME whose ~/.claude/settings.json points Claude Code at
-# OpenRouter's Anthropic-compatible endpoint, with every model alias mapped
-# to EVIDENCE_AGENT_MODEL. Chat tabs (bundled binary) and Claude Code
-# terminal tabs (PATH claude, the same bundled binary here) both read it.
+# Agents inside Ness work too: the server gets an isolated $HOME whose
+# ~/.claude/settings.json points Claude Code at run.mjs's local proxy
+# (127.0.0.1:$EVIDENCE_AGENT_PROXY_PORT) with a dummy token and every model
+# alias mapped to EVIDENCE_AGENT_MODEL. The proxy adds the real OpenRouter
+# key, so nothing an agent here can read (config, env, files) contains it.
+# Chat tabs (bundled binary) and Claude Code terminal tabs (PATH claude,
+# the same bundled binary here) both read this config.
 
 set -euo pipefail
 
@@ -65,12 +67,11 @@ EOF
 
 SERVER_HOME="$TMP/home"
 mkdir -p "$SERVER_HOME/.claude"
-if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-  MODEL="${EVIDENCE_AGENT_MODEL:-anthropic/claude-haiku-5.5}"
-  jq -n --arg key "$OPENROUTER_API_KEY" --arg model "$MODEL" '{
+MODEL="${EVIDENCE_AGENT_MODEL:-anthropic/claude-haiku-5.5}"
+jq -n --arg port "${EVIDENCE_AGENT_PROXY_PORT:-37700}" --arg model "$MODEL" '{
     env: {
-      ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
-      ANTHROPIC_AUTH_TOKEN: $key,
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:\($port)",
+      ANTHROPIC_AUTH_TOKEN: "evidence-proxy",
       ANTHROPIC_API_KEY: "",
       ANTHROPIC_MODEL: $model,
       ANTHROPIC_DEFAULT_OPUS_MODEL: $model,
@@ -82,7 +83,6 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
       DISABLE_AUTOUPDATER: "1"
     }
   }' > "$SERVER_HOME/.claude/settings.json"
-fi
 # Skip Claude Code's first-run theme picker and folder-trust prompt, which
 # would otherwise be the first thing every terminal tab shows.
 jq -n --args '{

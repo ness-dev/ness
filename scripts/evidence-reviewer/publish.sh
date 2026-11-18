@@ -43,6 +43,13 @@ if [ ${#PNGS[@]} -gt 0 ]; then
   done
 fi
 
+# Last line of defence: run.mjs refuses to capture a screen showing a key
+# and redacts its output, but nothing key-shaped gets published regardless.
+if grep -qE 'sk-or-v1-[A-Za-z0-9]{16,}' "$OUT/report.md"; then
+  echo "::error::report.md contains something that looks like an OpenRouter key; not publishing."
+  exit 1
+fi
+
 RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 BODY="$(mktemp)"
 {
