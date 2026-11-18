@@ -140,21 +140,33 @@ describe('collectAgents', () => {
       text: 'next'
     }
     const agents = collectAgents(
-      session([launch('t1', 'Old turn'), userTurn, launch('t2', 'This turn')])
+      session([launch('t1', 'Old turn'), userTurn, launch('t2', 'This turn')], {
+        turnStartEntryId: 'u2'
+      })
     )
     const byId = Object.fromEntries(agents.map((a) => [a.toolUseId, a.status]))
     expect(byId).toEqual({ t1: 'interrupted', t2: 'running' })
   })
 
-  it('does not count a queued message as a new turn', () => {
-    const queued: JsonClaudeChatEntry = {
+  it('keeps an agent running when a mid-turn message is delivered after its launch', () => {
+    // Delivered interjection: isQueued has already cleared, but the turn
+    // that launched t1 is still the current one.
+    const interjection: JsonClaudeChatEntry = {
       entryId: 'u2',
       kind: 'user',
       timestamp: 5000,
-      text: 'later',
-      isQueued: true
+      text: 'also check X'
     }
-    const agents = collectAgents(session([launch('t1', 'Current'), queued]))
+    const agents = collectAgents(
+      session([{ entryId: 'u1', kind: 'user', timestamp: 1, text: 'go' }, launch('t1', 'Current'), interjection], {
+        turnStartEntryId: 'u1'
+      })
+    )
+    expect(agents[0].status).toBe('running')
+  })
+
+  it('falls back to busy when no turn has started since the session loaded', () => {
+    const agents = collectAgents(session([launch('t1', 'Seeded')]))
     expect(agents[0].status).toBe('running')
   })
 

@@ -173,14 +173,17 @@ export function collectAgents(
     { content: string; isError: boolean }
   >()
 
-  // A later user turn means the turn that launched an agent is over.
-  // Queued messages don't count: they're typed mid-turn and haven't been
-  // delivered yet.
-  let lastUserTurn = -1
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].kind === 'user' && !entries[i].isQueued) {
-      lastUserTurn = i
-      break
+  // Anything launched at or before this index belongs to a turn that has
+  // already ended. It comes from the reducer rather than from scanning for
+  // user entries: a message typed mid-turn is an ordinary user entry once
+  // delivered, so it can't mark a boundary.
+  let previousTurnEnd = -1
+  if (session.turnStartEntryId) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].entryId === session.turnStartEntryId) {
+        previousTurnEnd = i
+        break
+      }
     }
   }
 
@@ -328,11 +331,11 @@ export function collectAgents(
       completedAt = childEntries.length
         ? childEntries[childEntries.length - 1].timestamp
         : undefined
-    } else if (site.entryIndex < lastUserTurn) {
-      // No lifecycle record, no result, and the user has spoken since —
-      // a transcript-seeded launch from an earlier turn. `busy` describes
-      // the current turn, so reading it here resurrected every such agent
-      // as running whenever a new turn started.
+    } else if (site.entryIndex <= previousTurnEnd) {
+      // No lifecycle record, no result, and launched before the current
+      // turn began — a transcript-seeded agent from an earlier turn.
+      // `busy` describes the current turn, so reading it here resurrected
+      // every such agent as running whenever a new turn started.
       status = 'interrupted'
     } else {
       status = session.busy ? 'running' : 'interrupted'
