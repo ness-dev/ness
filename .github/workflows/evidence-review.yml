@@ -173,15 +173,21 @@ jobs:
           path: ${{ runner.temp }}/evidence-*/server.log
           if-no-files-found: ignore
 
+  # Posts the report, or a crash notice if `review` failed, then fails the
+  # check when any claim was refuted. Cancelled runs (superseded by a newer
+  # push) and runs that never started (approval rejected) post nothing.
   publish:
     needs: review
+    if: always() && (needs.review.result == 'success' || needs.review.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
+      actions: read
     env:
       PR: ${{ github.event.pull_request.number || inputs.pr }}
       GH_TOKEN: ${{ github.token }}
+      EVIDENCE: ${{ github.workspace }}/evidence-out
     steps:
       - name: Checkout reviewer
         uses: actions/checkout@v4
@@ -191,16 +197,54 @@ jobs:
           sparse-checkout: scripts/evidence-reviewer
 
       - uses: actions/download-artifact@v4
+        if: needs.review.result == 'success'
         with:
           name: evidence
-          path: ${{ runner.temp }}/evidence
+          path: ${{ env.EVIDENCE }}
+
+      - name: Write crash report
+        id: crash
+        if: needs.review.result == 'failure'
+        run: |
+          FAILED_STEP=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+            --jq '.jobs[] | select(.name == "review") | .steps[] | select(.conclusion == "failure") | .name' | head -1)
+          if [ -z "$FAILED_STEP" ]; then
+            echo "review never ran a step (approval rejected?); nothing to report"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$EVIDENCE"
+          {
+            echo "## 💥 Evidence review crashed"
+            echo
+            echo "The reviewer failed at **${FAILED_STEP}** before it could reach a verdict, so this PR has no evidence either way. The run log below has the details; re-run the job once it's fixed."
+          } > "$EVIDENCE/report.md"
 
       # The artifact was produced next to untrusted code: only its PNGs and
       # report.md are used, and the SHA is validated before it's interpolated.
       - name: Publish to PR
+        if: steps.crash.outputs.skip != 'true'
         env:
           REVIEWED_SHA: ${{ needs.review.outputs.sha }}
         run: |
           [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || REVIEWED_SHA=unknown
           export REVIEWED_SHA
-          bash scripts/evidence-reviewer/publish.sh "$RUNNER_TEMP/evidence" "$PR"
+          bash scripts/evidence-reviewer/publish.sh "$EVIDENCE" "$PR"
+
+      # inconclusive stays green: a cheap model failing to reach a screen is
+      # too common to block on. A refuted claim means the screenshots show
+      # the feature not doing what the PR says.
+      - name: Check verdict
+        run: |
+          if [ "${{ needs.review.result }}" = "failure" ]; then
+            echo "::error::Evidence review crashed; see the review job log."
+            exit 1
+          fi
+          REFUTED=$(jq -r '[.result.claims[]? | select(.status == "refuted") | .claim] | join("\n")' "$EVIDENCE/result.json")
+          VERDICT=$(jq -r '.result.verdict' "$EVIDENCE/result.json")
+          echo "verdict: $VERDICT"
+          if [ "$VERDICT" = "refuted" ] || [ -n "$REFUTED" ]; then
+            echo "::error::Evidence review refuted the PR's claims. See the PR comment for screenshots."
+            printf '%s\n' "$REFUTED" | sed 's/^/  ✗ /'
+            exit 1
+          fi
