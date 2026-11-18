@@ -484,6 +484,9 @@ describe('mcp-bridge edit_copy', () => {
       params: { requestId: 2 }
     })
     await bridge.next()
+    for (let i = 0; i < 200 && !closed; i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
     expect(closed).toBe(true)
   })
 })
