@@ -68,12 +68,12 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------
-  # macOS: sign + notarize on macos-14 (arm64), produce dmg/zip/blockmap
+  # macOS: sign + notarize on macos-latest (arm64), produce dmg/zip/blockmap
   # + latest-mac.yml for both arm64 and x64.
   # ---------------------------------------------------------------------
   build-mac:
     needs: create-release
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -123,6 +123,9 @@ jobs:
       # identity already pinned in package.json
       # ("Michael Lyons (M7Y6TPCQ63)"), then notarizes via the APPLE_*
       # env vars and staples the ticket.
+      #
+      # package-mac.sh retries only on hdiutil's intermittent DMG
+      # failure on hosted runners; anything else fails immediately.
       - name: Package, sign, and notarize
         env:
           CSC_LINK: ${{ secrets.MAC_CERTS_P12_BASE64 }}
@@ -130,7 +133,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac --publish=never
+        run: bash scripts/package-mac.sh
 
       - name: Attach to GitHub release
         env:
@@ -201,7 +204,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runs-on: macos-14
+          - runs-on: macos-latest
             platform: darwin-arm64
           - runs-on: ubuntu-22.04
             platform: linux-x64
