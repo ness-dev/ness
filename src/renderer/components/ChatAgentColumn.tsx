@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, PanelRightClose, Sparkles } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { PanelRightClose, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import {
   useJsonClaudePendingApprovals,
@@ -26,12 +27,13 @@ const CLOSED_KEY = 'harness:agentColumnClosed'
 const DEFAULT_WIDTH = 360
 const MIN_WIDTH = 240
 const MAX_WIDTH = 720
-/** Steps a running card renders inline. The rest are one click away in
- *  the peek — an agent can make hundreds of calls, and a card that
- *  mounts all of them makes every poll pay for the whole history. */
+/** Steps a card renders inline. The rest are one click away in the peek
+ *  — an agent can make hundreds of calls, and a card that mounts all of
+ *  them makes every poll pay for the whole history. */
 const INLINE_STEPS = 40
 const TEXT_PREVIEW = 600
-const REPORT_PREVIEW = 220
+const DEFAULT_SUBAGENT_TYPE = 'general-purpose'
+const REPORT_LIMIT = 3000
 /** Closed-column choices are remembered per session; this bounds the
  *  list so it can't grow without limit across months of sessions. */
 const CLOSED_CAP = 200
@@ -105,11 +107,6 @@ const StepRow = memo(
     a.step.childAgentToolUseId === b.step.childAgentToolUseId
 )
 
-function reportPreview(result: string): string {
-  const flat = result.replace(/[#*`>_]+/g, '').replace(/\s+/g, ' ').trim()
-  return flat.length > REPORT_PREVIEW ? `${flat.slice(0, REPORT_PREVIEW)}…` : flat
-}
-
 /** Keeps a scroll container pinned to its bottom while its content grows,
  *  until the user scrolls up — and again once they scroll back down.
  *
@@ -152,10 +149,13 @@ interface CardProps {
    *  label that can't change. */
   now: number
   expanded: boolean
-  onToggle: (id: string) => void
+  onToggle: (id: string, expanded: boolean) => void
   onPeek: (id: string) => void
 }
 
+/** Chrome matches TaskCard — same border, radius, header padding and
+ *  type scale — so an agent reads the same here as it does inline in the
+ *  transcript. */
 function AgentCardImpl({
   agent,
   depth,
@@ -165,128 +165,113 @@ function AgentCardImpl({
   onPeek
 }: CardProps): JSX.Element {
   const running = agent.status === 'running'
-  const elapsed = formatElapsed(agentElapsedMs(agent, now))
-  const kind = agent.subagentType ?? 'agent'
+  const failed = agent.status === 'failed' || !!agent.resultIsError
   const stepCount = agent.steps.length
-  const tail = useFollowTail(24, running)
-
-  const accent = agent.hasPendingApproval
-    ? 'border-warning bg-warning/5'
-    : running
-      ? 'border-success bg-success/5'
-      : 'border-border/60 opacity-60 hover:opacity-100'
-
+  const tail = useFollowTail(24, expanded && running)
+  const meta = [
+    `${agent.toolCount} ${agent.toolCount === 1 ? 'tool' : 'tools'}`,
+    formatElapsed(agentElapsedMs(agent, now))
+  ].join(' · ')
   const hidden = Math.max(0, stepCount - INLINE_STEPS)
   const inline = hidden ? agent.steps.slice(-INLINE_STEPS) : agent.steps
 
   return (
     <li style={{ marginLeft: `${Math.min(depth, 4) * 0.75}rem` }}>
       <div
-        className={`border-l-2 rounded-r transition-opacity ${accent} ${
-          depth > 0 ? 'ml-1' : ''
+        className={`border ${failed ? 'border-danger/50' : 'border-border/60'} bg-app/30 overflow-hidden transition-opacity ${
+          running || agent.hasPendingApproval ? '' : 'opacity-60 hover:opacity-100'
         }`}
+        style={{ borderRadius: 'var(--chat-bubble-radius)' }}
       >
         <button
           type="button"
-          onClick={() => (running ? onPeek(agent.toolUseId) : onToggle(agent.toolUseId))}
-          title={running ? 'Click to open its full history' : expanded ? 'Collapse' : 'Expand'}
-          className="flex w-full min-w-0 items-center gap-1.5 px-2 pt-1.5 pb-1 text-left cursor-pointer"
+          onClick={() => onToggle(agent.toolUseId, !expanded)}
+          title={`${agent.description}\n${agentStatusLabel(agent)}`}
+          className="w-full flex items-center gap-2 cursor-pointer hover:bg-app/60 transition-colors text-left"
+          style={{
+            paddingInline: 'var(--chat-chrome-px)',
+            paddingBlock: 'var(--chat-chrome-py)',
+            fontSize: 'var(--chat-chrome-text)'
+          }}
         >
-          {!running && (
-            <ChevronRight
-              className={`icon-2xs text-faint shrink-0 transition-transform ${
-                expanded ? 'rotate-90' : ''
-              }`}
-            />
+          <span className="text-muted text-xs w-2 shrink-0 select-none">
+            {expanded ? '▾' : '▸'}
+          </span>
+          <Sparkles className="icon-xs text-muted shrink-0" />
+          {/* The default type is most of a narrow header's width and says
+              nothing — only a specialised agent earns the label. */}
+          {agent.subagentType && agent.subagentType !== DEFAULT_SUBAGENT_TYPE && (
+            <span
+              className="text-muted shrink-0"
+              style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+            >
+              {agent.subagentType}
+            </span>
           )}
-          <AgentStatusDot agent={agent} />
           <span
-            className={`truncate flex-1 min-w-0 text-xs ${
-              running ? 'text-fg-bright' : 'text-fg'
-            }`}
+            className="opacity-60 truncate flex-1 min-w-0"
+            style={{ fontFamily: 'var(--chat-tool-name-family)' }}
           >
             {agent.description}
           </span>
           {agent.isBackground && (
             <span
               title="detached — runs past the end of the turn"
-              className="text-faint uppercase tracking-wide shrink-0 text-xs"
+              className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+              style={{ fontSize: 'var(--chat-meta-text)' }}
             >
-              bg
+              background
             </span>
           )}
-          <span className="text-faint tabular-nums shrink-0 text-xs">{elapsed}</span>
-        </button>
-        <div className="flex items-center gap-2 px-2 pb-1 text-xs text-faint min-w-0">
-          <span className="truncate">{kind}</span>
-          <span className="tabular-nums shrink-0">
-            {agent.toolCount} {agent.toolCount === 1 ? 'tool' : 'tools'}
-          </span>
-          {!running && (
-            <span className="shrink-0">{agentStatusLabel(agent)}</span>
-          )}
-        </div>
-
-        {running && (
-          <div
-            ref={tail.scrollRef}
-            onScroll={tail.onScroll}
-            className="max-h-64 overflow-y-auto [overflow-anchor:none] px-2 pb-1.5 text-xs"
+          <span
+            className="text-muted/70 shrink-0 tabular-nums"
+            style={{ fontSize: 'var(--chat-meta-text)' }}
           >
-            <div ref={tail.contentRef} className="space-y-0.5">
-              {hidden > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onPeek(agent.toolUseId)}
-                  className="text-faint hover:text-fg cursor-pointer px-1"
-                >
-                  {hidden} earlier {hidden === 1 ? 'step' : 'steps'} — open history
-                </button>
-              )}
-              {stepCount === 0 && (
-                <div className="text-muted italic px-1">agent is starting…</div>
-              )}
-              {inline.map((step) => (
-                <StepRow key={step.key} step={step} onPeekAgent={onPeek} />
-              ))}
-              <div className="flex items-center gap-2 px-1 py-0.5">
-                <span className="json-claude-spinner shrink-0" />
-                <span className="text-muted italic">working…</span>
+            {meta}
+          </span>
+          <AgentStatusDot agent={agent} />
+        </button>
+
+        {expanded && (
+          <div className="px-2 pb-1">
+            <div
+              ref={tail.scrollRef}
+              onScroll={tail.onScroll}
+              className={`overflow-y-auto [overflow-anchor:none] text-xs ${
+                running ? 'max-h-64' : 'max-h-48'
+              }`}
+            >
+              <div ref={tail.contentRef} className="space-y-0.5 py-1">
+                {hidden > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onPeek(agent.toolUseId)}
+                    className="text-faint hover:text-fg cursor-pointer px-1"
+                  >
+                    {hidden} earlier {hidden === 1 ? 'step' : 'steps'} — open history
+                  </button>
+                )}
+                {stepCount === 0 && (
+                  <div className="px-1 text-muted italic">
+                    {running ? 'sub-agent is starting…' : 'no sub-agent activity recorded'}
+                  </div>
+                )}
+                {inline.map((step) => (
+                  <StepRow key={step.key} step={step} onPeekAgent={onPeek} />
+                ))}
               </div>
             </div>
-          </div>
-        )}
-
-        {!running && !expanded && agent.result && (
-          <div
-            className={`px-2 pb-1.5 text-xs line-clamp-2 ${
-              agent.resultIsError ? 'text-danger' : 'text-muted'
-            }`}
-          >
-            {reportPreview(agent.result)}
-          </div>
-        )}
-
-        {!running && expanded && (
-          <div className="px-2 pb-2 text-xs">
-            {agent.result ? (
-              <div
-                className={`markdown max-h-96 overflow-y-auto ${
-                  agent.resultIsError ? 'text-danger' : ''
+            {agent.result && !running && (
+              <pre
+                className={`my-1 px-2 py-1 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-auto rounded bg-app/40 ${
+                  agent.resultIsError ? 'text-danger' : 'opacity-80'
                 }`}
               >
-                <ReactMarkdown>{agent.result}</ReactMarkdown>
-              </div>
-            ) : (
-              <div className="text-muted italic">no report</div>
+                {agent.result.length > REPORT_LIMIT
+                  ? `${agent.result.slice(0, REPORT_LIMIT)}…`
+                  : agent.result}
+              </pre>
             )}
-            <button
-              type="button"
-              onClick={() => onPeek(agent.toolUseId)}
-              className="mt-1 text-faint hover:text-fg cursor-pointer"
-            >
-              open history ({stepCount} {stepCount === 1 ? 'step' : 'steps'})
-            </button>
           </div>
         )}
       </div>
@@ -319,8 +304,8 @@ const AgentFeed = memo(function AgentFeed({
 }: {
   rows: readonly Row[]
   now: number
-  isExpanded: (id: string) => boolean
-  onToggle: (id: string) => void
+  isExpanded: (agent: AgentSummary) => boolean
+  onToggle: (id: string, expanded: boolean) => void
   onPeek: (id: string) => void
 }): JSX.Element {
   const tail = useFollowTail(32)
@@ -339,7 +324,7 @@ const AgentFeed = memo(function AgentFeed({
               agent={agent}
               depth={depth}
               now={agent.status === 'running' ? now : 0}
-              expanded={isExpanded(agent.toolUseId)}
+              expanded={isExpanded(agent)}
               onToggle={onToggle}
               onPeek={onPeek}
             />
@@ -350,12 +335,23 @@ const AgentFeed = memo(function AgentFeed({
   )
 })
 
-function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element | null {
+function ChatAgentColumnLive({
+  sessionId,
+  chipSlot
+}: {
+  sessionId: string
+  chipSlot: HTMLElement | null
+}): JSX.Element | null {
   const session = useJsonClaudeSession(sessionId)
   const pendingApprovals = useJsonClaudePendingApprovals()
   const [closed, setClosed] = useState(() => readClosed().includes(sessionId))
   const [width, setWidth] = useState(readWidth)
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  // Explicit user choices only. A card defaults open while it's running
+  // and closed once it settles, so this records overrides rather than the
+  // state — otherwise a card would stay open after its agent finished.
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map()
+  )
   const [peekId, setPeekId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -389,17 +385,16 @@ function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element 
   const rows = useMemo(() => flattenRows(agents), [agents])
   const running = countRunningAgents(agents)
   runningRef.current = running
-  const now = useLiveClock(running > 0)
+  const now = useLiveClock(!closed && running > 0)
 
-  const isExpanded = useCallback((id: string) => expanded.has(id), [expanded])
+  const isExpanded = useCallback(
+    (a: AgentSummary) =>
+      overrides.get(a.toolUseId) ?? (a.status === 'running' || a.hasPendingApproval),
+    [overrides]
+  )
   const onToggle = useCallback(
-    (id: string) =>
-      setExpanded((cur) => {
-        const next = new Set(cur)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-        return next
-      }),
+    (id: string, next: boolean) =>
+      setOverrides((cur) => new Map(cur).set(id, next)),
     []
   )
   const setColumnClosed = useCallback(
@@ -422,6 +417,7 @@ function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element 
 
   if (agents.length === 0) return null
 
+  const status = running > 0 ? `${running} running` : `${agents.length} done`
   const peek = peeked && (
     <AgentPeek
       agent={peeked}
@@ -432,17 +428,29 @@ function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element 
   )
 
   if (closed) {
+    // Collapsed into the composer's status row, beside the session state
+    // and permission-mode chips — the column's footprint goes back to the
+    // transcript, and the way back sits where the eye already is.
     return (
       <>
-        <button
-          type="button"
-          onClick={() => setColumnClosed(false)}
-          title={`Show agents (${running > 0 ? `${running} running` : `${agents.length} done`})`}
-          className="shrink-0 flex flex-col items-center gap-1.5 w-7 py-2 border-l border-border-strong bg-panel text-muted hover:text-fg-bright cursor-pointer"
-        >
-          <Sparkles className={`icon-sm ${running > 0 ? 'text-success' : ''}`} />
-          <span className="text-xs tabular-nums">{running > 0 ? running : agents.length}</span>
-        </button>
+        {chipSlot &&
+          createPortal(
+            <button
+              type="button"
+              onClick={() => setColumnClosed(false)}
+              title="Show subagents"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-xs text-muted hover:text-fg-bright cursor-pointer"
+            >
+              {running > 0 ? (
+                <span className="json-claude-spinner shrink-0" />
+              ) : (
+                <Sparkles className="icon-2xs shrink-0" />
+              )}
+              <span>subagents</span>
+              <span className="tabular-nums opacity-70">{status}</span>
+            </button>,
+            chipSlot
+          )}
         {peek}
       </>
     )
@@ -452,21 +460,20 @@ function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element 
     <>
       <ResizeHandle onDelta={onResize} onDoubleClick={() => setWidth(DEFAULT_WIDTH)} />
       <div
-        className="shrink-0 flex flex-col min-h-0 bg-panel"
+        className="shrink-0 flex flex-col min-h-0"
         style={{ width }}
-        data-agent-column
+        data-subagents-column
       >
         <div className="flex items-center gap-2 px-3 h-8 shrink-0 border-b border-border/60">
-          <Sparkles className="icon-sm text-muted shrink-0" />
-          <span className="text-xs text-fg-bright flex-1">Agents</span>
-          <span className={`text-xs tabular-nums ${running > 0 ? 'text-success' : 'text-faint'}`}>
-            {running > 0 ? `${running} running` : `${agents.length} done`}
+          <span className="text-xs uppercase tracking-wide text-muted flex-1">
+            Subagents
           </span>
+          <span className="text-xs tabular-nums text-faint">{status}</span>
           <button
             type="button"
             onClick={() => setColumnClosed(true)}
-            aria-label="Hide agents column"
-            title="Hide agents column"
+            aria-label="Hide subagents"
+            title="Hide subagents"
             className="p-0.5 text-muted hover:text-fg-bright cursor-pointer"
           >
             <PanelRightClose className="icon-sm" />
@@ -485,17 +492,24 @@ function ChatAgentColumnLive({ sessionId }: { sessionId: string }): JSX.Element 
   )
 }
 
-/** Live sub-agent feed beside a Chat tab: `| chat | agents |`. Mounts
- *  nothing until the session has launched an agent, and nothing at all
- *  while the tab is hidden — a backgrounded tab would otherwise keep the
- *  revision poll and the clock running for a column nobody can see. */
+/** Live subagent feed beside a Chat tab's transcript. Mounts nothing
+ *  until the session has launched an agent, and nothing at all while the
+ *  tab is hidden — a backgrounded tab would otherwise keep the revision
+ *  poll and the clock running for a column nobody can see.
+ *
+ *  `chipSlot` is an element in the composer's status row; the collapsed
+ *  column portals its reopen chip there. Portaling rather than lifting
+ *  the agent list into JsonModeChat keeps the revision poll and the clock
+ *  from re-rendering the whole chat. */
 export function ChatAgentColumn({
   sessionId,
-  active
+  active,
+  chipSlot
 }: {
   sessionId: string
   active: boolean
+  chipSlot: HTMLElement | null
 }): JSX.Element | null {
   if (!active) return null
-  return <ChatAgentColumnLive sessionId={sessionId} />
+  return <ChatAgentColumnLive sessionId={sessionId} chipSlot={chipSlot} />
 }

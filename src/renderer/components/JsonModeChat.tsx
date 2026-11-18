@@ -38,6 +38,7 @@ import {
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
@@ -409,6 +410,9 @@ interface JsonModeChatProps {
    *  the tab explicitly via panes:wakeTab (right-click menu or first
    *  selection). Defaults to 'awake' for back-compat callers. */
   mode?: 'awake' | 'asleep'
+  /** Mount the subagents column beside the transcript. Only the tab on
+   *  screen should — the column polls while agents run. */
+  showSubagents?: boolean
 }
 
 // All per-tool card components live in src/renderer/components/json-mode-cards/
@@ -1426,7 +1430,13 @@ function anchorTopPadding(): number {
   return 0.75 * parseFloat(getComputedStyle(document.documentElement).fontSize)
 }
 
-export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonModeChatProps): JSX.Element {
+export function JsonModeChat({
+  sessionId,
+  worktreePath,
+  mode = 'awake',
+  showSubagents = false
+}: JsonModeChatProps): JSX.Element {
+  const [subagentChipSlot, setSubagentChipSlot] = useState<HTMLSpanElement | null>(null)
   const backend = useBackend()
   const session = useJsonClaudeSession(sessionId)
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
@@ -2897,7 +2907,8 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           </Tooltip>
         </div>
       )}
-      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex">
+      <div className="relative flex-1 min-w-0 flex flex-col">
         <div className="absolute top-2 left-2 z-30 pointer-events-auto">
           <FindOverlay controller={find} inputRef={findInputRef} />
         </div>
@@ -3078,6 +3089,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
             <span>Jump to prompt</span>
           </button>
         )}
+      </div>
+      <ChatAgentColumn
+        sessionId={sessionId}
+        active={showSubagents && mode === 'awake'}
+        chipSlot={subagentChipSlot}
+      />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
         <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
@@ -3286,6 +3303,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 {modeBadgeLabel}
               </button>
             )}
+            <span ref={setSubagentChipSlot} className="contents" />
             <div className="flex-1" />
             {busy && (
               <button
