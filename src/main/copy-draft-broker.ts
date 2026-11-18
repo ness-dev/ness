@@ -11,6 +11,10 @@
 // the human answers (the tool is still finishing; PostToolUse follows). A
 // withdrawal goes to waiting instead: it's usually an Esc in the TUI, which
 // ends the turn without another hook event to correct the dot.
+//
+// Withdrawn drafts only outlive their tab long enough to be noticed: a tab
+// closing is itself a withdrawal (the bridge dies with it), and nothing would
+// ever render that notice, so it's dropped on the spot or once panes change.
 
 import { randomUUID } from 'crypto'
 import type { Store } from './store'
@@ -27,10 +31,30 @@ export type CopyDraftInput = Omit<CopyDraftRequest, 'id' | 'timestamp'>
 export class CopyDraftBroker {
   private waiters = new Map<string, (outcome: CopyDraftOutcome) => void>()
 
+  private unsubscribe: (() => void) | null = null
+
   constructor(
     private store: Store,
-    private isChatSession: (terminalId: string) => boolean
+    private isChatSession: (terminalId: string) => boolean,
+    private tabExists: (terminalId: string) => boolean
   ) {}
+
+  start(): void {
+    if (this.unsubscribe) return
+    this.unsubscribe = this.store.subscribe((event) => {
+      if (!event.type.startsWith('terminals/panes')) return
+      // Sweeping is fine here: withdrawn holds a handful of entries at most,
+      // and pane events are user-paced, not streaming.
+      for (const req of Object.values(this.store.getSnapshot().state.copyDrafts.withdrawn)) {
+        if (!this.tabExists(req.terminalId)) this.clearWithdrawn(req.id)
+      }
+    })
+  }
+
+  stop(): void {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+  }
 
   request(input: CopyDraftInput): { id: string; result: Promise<CopyDraftOutcome> } {
     const id = randomUUID()
@@ -81,7 +105,7 @@ export class CopyDraftBroker {
     const req = this.store.getSnapshot().state.copyDrafts.pending[id]
     if (!waiter || !req) return false
     this.waiters.delete(id)
-    const withdrawn = outcome.kind === 'cancelled'
+    const withdrawn = outcome.kind === 'cancelled' && this.tabExists(req.terminalId)
     this.store.dispatch({
       type: withdrawn ? 'copyDrafts/withdrawn' : 'copyDrafts/resolved',
       payload: { id, terminalId: req.terminalId }

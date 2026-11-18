@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, PenLine } from 'lucide-react'
 import type { CopyDraftRequest } from '../../shared/state/copy-drafts'
 import { useCopyDraftForTerminal, useWithdrawnCopyDraftForTerminal } from '../store'
@@ -39,7 +39,7 @@ function CopyDraftEditor({
   draft: CopyDraftRequest
   docked: boolean
   withdrawn: boolean
-}): JSX.Element {
+}): JSX.Element | null {
   const backend = useBackend()
   const saved = inProgress.get(draft.id)
   const [text, setTextState] = useState(saved?.text ?? draft.draft)
@@ -48,6 +48,15 @@ function CopyDraftEditor({
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
   const edited = text !== draft.draft
+  // A withdrawn draft nobody touched has nothing to rescue — usually the user
+  // pressed Stop on purpose — so skip the notice rather than make them close it.
+  const nothingToSave = withdrawn && !edited && !note.trim()
+
+  useEffect(() => {
+    if (!nothingToSave) return
+    inProgress.delete(draft.id)
+    void backend.clearWithdrawnCopyDraft(draft.id)
+  }, [nothingToSave, draft.id, backend])
 
   function remember(next: { text: string; note: string }): void {
     inProgress.set(draft.id, next)
@@ -97,6 +106,8 @@ function CopyDraftEditor({
       {withdrawn && <span className="text-xs text-muted shrink-0">· not sent</span>}
     </>
   )
+
+  if (nothingToSave) return null
 
   if (docked && collapsed) {
     return (

@@ -481,7 +481,8 @@ const approvalBridge = new ApprovalBridge(store, {
 })
 const copyDraftBroker = new CopyDraftBroker(
   store,
-  (terminalId) => terminalId in store.getSnapshot().state.jsonClaude.sessions
+  (terminalId) => terminalId in store.getSnapshot().state.jsonClaude.sessions,
+  (terminalId) => findTabById(store.getSnapshot().state.terminals.panes, terminalId) !== null
 )
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
@@ -901,6 +902,7 @@ store.subscribe((event) => {
 // Lives in its own module — see src/main/json-claude-status-deriver.ts.
 const jsonClaudeStatusDeriver = new JsonClaudeStatusDeriver(store)
 jsonClaudeStatusDeriver.start()
+copyDraftBroker.start()
 
 /** Resolve the GitHub login of whoever owns the configured token, and
  *  dispatch it so the sidebar can route PRs they didn't author into the

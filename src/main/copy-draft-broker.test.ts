@@ -8,10 +8,20 @@ import { Store } from './store'
 import { CopyDraftBroker } from './copy-draft-broker'
 import { initialState } from '../shared/state'
 
-function setup(chatSessions: string[] = []): { store: Store; broker: CopyDraftBroker } {
+function setup(chatSessions: string[] = []): {
+  store: Store
+  broker: CopyDraftBroker
+  openTabs: Set<string>
+} {
   const store = new Store(initialState)
-  const broker = new CopyDraftBroker(store, (id) => chatSessions.includes(id))
-  return { store, broker }
+  const openTabs = new Set(['term-1'])
+  const broker = new CopyDraftBroker(
+    store,
+    (id) => chatSessions.includes(id),
+    (id) => openTabs.has(id)
+  )
+  broker.start()
+  return { store, broker, openTabs }
 }
 
 const input = { terminalId: 'term-1', worktreePath: '/wt', draft: 'Get started now!', title: 'Headline' }
@@ -46,6 +56,26 @@ describe('CopyDraftBroker', () => {
     expect(broker.clearWithdrawn(id)).toBe(true)
     expect(drafts().withdrawn[id]).toBeUndefined()
     expect(broker.clearWithdrawn(id)).toBe(false)
+  })
+
+  it('drops the draft outright when its tab closed, since nobody would see the notice', () => {
+    const { store, broker, openTabs } = setup()
+    const { id } = broker.request(input)
+    openTabs.delete('term-1')
+    broker.cancel(id)
+    expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeUndefined()
+    expect(store.getSnapshot().state.copyDrafts.pending[id]).toBeUndefined()
+  })
+
+  it('clears a withdrawn draft once its tab is closed', () => {
+    const { store, broker, openTabs } = setup()
+    const { id } = broker.request(input)
+    broker.cancel(id)
+    expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeDefined()
+
+    openTabs.delete('term-1')
+    store.dispatch({ type: 'terminals/panesForWorktreeCleared', payload: '/wt' })
+    expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeUndefined()
   })
 
   it('hands a Terminal tab back to waiting, not processing, when the agent stops waiting', () => {
