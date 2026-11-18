@@ -10,7 +10,6 @@ export function WriteCard({ block, result, autoApproved, sessionAllowed }: ToolC
       id={block.id}
       name="Write"
       subtitle={basename(fp)}
-      variant="warn"
       icon={WriteIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

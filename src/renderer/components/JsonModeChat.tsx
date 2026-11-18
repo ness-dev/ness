@@ -38,6 +38,7 @@ import {
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
@@ -52,6 +53,19 @@ import {
 } from './json-mode-cards'
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
+import { TurnGroup } from './json-mode-cards/TurnGroup'
+import {
+  CHAT_ROW_CLASS,
+  CHAT_ROW_HIT_CLASS,
+  CHAT_ROW_STYLE,
+  ChatRowChildren,
+  Chevron
+} from './json-mode-cards/ChatRow'
+import {
+  foldFinishedTurns,
+  getEditedPaths,
+  type TurnSummary
+} from './json-mode-cards/turn-collapse'
 import { TaskCard } from './json-mode-cards/TaskCard'
 import { buildChildrenMap, isSubAgentToolName } from './json-mode-cards/grouping'
 import { JsonModeMentionPopover, type MentionPopoverItem } from './JsonModeMentionPopover'
@@ -81,6 +95,7 @@ import {
 } from '../../shared/chat-image-src'
 import {
   QUESTION_TOOL_NAME,
+  type HeldNotice,
   type JsonClaudeAutomationSource,
   type JsonClaudeBackgroundAgent,
   type JsonClaudeChatEntry,
@@ -409,6 +424,9 @@ interface JsonModeChatProps {
    *  the tab explicitly via panes:wakeTab (right-click menu or first
    *  selection). Defaults to 'awake' for back-compat callers. */
   mode?: 'awake' | 'asleep'
+  /** Mount the subagents column beside the transcript. Only the tab on
+   *  screen should — the column polls while agents run. */
+  showSubagents?: boolean
 }
 
 // All per-tool card components live in src/renderer/components/json-mode-cards/
@@ -439,6 +457,12 @@ interface RenderedRow {
    *  agent work between user-facing replies), but ToolGroup counts it
    *  separately in the header. */
   isThinking?: boolean
+  /** Fields read by foldFinishedTurns — see TurnRow. */
+  timestamp?: number
+  isTurnStart?: boolean
+  isTurnError?: boolean
+  editedPaths?: string[]
+  coveredEntryIds?: string[]
 }
 
 function ThinkingCard({
@@ -468,60 +492,41 @@ function ThinkingCard({
   const forceOpen = find.forceOpenIds.has(blockId)
   const isOpen = expanded || forceOpen
   const isCurrentHit = find.currentHitBlockId === blockId
-  const charCount = text.length
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-1 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-border/40'} bg-app/30 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 hover:bg-app/50 cursor-pointer text-left transition-colors"
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
-        <Brain className="icon-xs text-muted shrink-0" />
-        <span
-          className="text-muted shrink-0"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          {isPartial ? 'Thinking' : 'Thought'}
-        </span>
+        <Chevron open={isOpen} />
+        <Brain className="icon-xs shrink-0" />
+        <span className="shrink-0">{isPartial ? 'Thinking' : 'Thought'}</span>
         {isPartial && (
           <span
             className="json-claude-spinner shrink-0"
             aria-label="thinking"
           />
         )}
-        {charCount > 0 && (
-          <span
-            className="text-muted/60 shrink-0"
-            style={{ fontSize: 'var(--chat-meta-text)' }}
-          >
-            · {charCount} chars
-          </span>
-        )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 border-t border-border/30 markdown italic text-muted text-xs leading-relaxed">
-          {text ? (
-            <MarkdownWithFind>{text}</MarkdownWithFind>
-          ) : !isPartial ? (
-            // Claude Code can return signed-but-empty thinking blocks
-            // (the API tier elides plaintext but keeps a signature so
-            // the model can verify its prior reasoning on the next
-            // turn). Surface that explicitly instead of an empty card.
-            <span className="opacity-70">(hidden)</span>
-          ) : null}
-        </div>
+        <ChatRowChildren>
+          <div className="py-1 markdown italic text-muted text-xs leading-relaxed">
+            {text ? (
+              <MarkdownWithFind>{text}</MarkdownWithFind>
+            ) : !isPartial ? (
+              // Claude Code can return signed-but-empty thinking blocks
+              // (the API tier elides plaintext but keeps a signature so
+              // the model can verify its prior reasoning on the next
+              // turn). Surface that explicitly instead of an empty card.
+              <span className="opacity-70">(hidden)</span>
+            ) : null}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
@@ -554,35 +559,21 @@ function CompactCard({
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-2 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-info/40'} bg-info/5 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className={`w-full flex items-center gap-2 ${
-          isOpen ? 'border-b border-info/30' : ''
-        } bg-info/10 hover:bg-info/15 cursor-pointer transition-colors text-left`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-info/70 text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
+        <Chevron open={isOpen} />
         <Layers className="icon-xs text-info shrink-0" />
-        <span
-          className="font-semibold shrink-0 text-info"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          Compact
-        </span>
-        <span className="opacity-70 truncate flex-1 min-w-0">{subtitle}</span>
+        <span className="font-medium shrink-0 text-info">Compact</span>
+        <span className="truncate flex-1 min-w-0">{subtitle}</span>
         {triggerLabel && (
           <span
-            className="uppercase tracking-wide text-info/80 bg-info/10 border border-info/30 rounded px-1 py-0.5 shrink-0"
+            className="uppercase tracking-wide opacity-70 shrink-0"
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             {triggerLabel}
@@ -590,24 +581,26 @@ function CompactCard({
         )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 text-xs text-muted space-y-1">
-          <div>
-            <HighlightedText text={COMPACT_BODY_TEXT} />
-          </div>
-          {(typeof preTokens === 'number' ||
-            typeof postTokens === 'number') && (
-            <div className="font-mono text-xs text-faint">
-              {typeof preTokens === 'number' && (
-                <span>before: {preTokens.toLocaleString()} tokens</span>
-              )}
-              {typeof preTokens === 'number' &&
-                typeof postTokens === 'number' && <span> · </span>}
-              {typeof postTokens === 'number' && (
-                <span>after: {postTokens.toLocaleString()} tokens</span>
-              )}
+        <ChatRowChildren>
+          <div className="py-1 text-xs text-muted space-y-1">
+            <div>
+              <HighlightedText text={COMPACT_BODY_TEXT} />
             </div>
-          )}
-        </div>
+            {(typeof preTokens === 'number' ||
+              typeof postTokens === 'number') && (
+              <div className="font-mono text-xs text-faint">
+                {typeof preTokens === 'number' && (
+                  <span>before: {preTokens.toLocaleString()} tokens</span>
+                )}
+                {typeof preTokens === 'number' &&
+                  typeof postTokens === 'number' && <span> · </span>}
+                {typeof postTokens === 'number' && (
+                  <span>after: {postTokens.toLocaleString()} tokens</span>
+                )}
+              </div>
+            )}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
@@ -916,6 +909,33 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'subscription-started') {
+    return {
+      label: from ? `New Follower · ${from}` : 'New Follower',
+      note: 'another agent now follows this worktree',
+      brand: true
+    }
+  }
+  if (source === 'subscription-update') {
+    return {
+      label: from ? `Worktree Update · ${from}` : 'Worktree Update',
+      note: 'a worktree you follow changed',
+      brand: true
+    }
+  }
+  if (source === 'reviewed-pr-update') {
+    return { label: 'Ness · Reviewed PR update', note: 'the PR you are reviewing', brand: false }
+  }
+  if (source === 'pr-update') {
+    return { label: 'Ness · PR update', note: "this worktree's pull request", brand: false }
+  }
+  if (source === 'progress-report') {
+    return {
+      label: from ? `Progress Report · from ${from}` : 'Progress Report',
+      note: 'from a worktree you follow',
+      brand: true
+    }
+  }
   if (source === 'review') {
     return {
       label: from ? `Code Review · from ${from}` : 'Code Review',
@@ -971,24 +991,17 @@ function AutomatedTurnCard({
   return (
     <div className="flex justify-end">
       <div
-        className={`group border overflow-hidden ${
-          brand ? 'border-warning/40 bg-panel' : 'border-warning/40 bg-warning/5'
-        } ${isQueued ? 'opacity-70' : ''}`}
+        className={`group overflow-hidden ${brand ? 'bg-panel' : 'bg-warning/5'} ${
+          isQueued ? 'opacity-70' : ''
+        }`}
         style={{
           maxWidth: 'var(--chat-bubble-max)',
-          borderRadius: 'var(--chat-bubble-radius)'
+          borderRadius: 'var(--chat-prompt-radius)'
         }}
       >
-        {brand && <div className="brand-gradient-bg h-0.5" />}
         <div
-          className={`flex items-center gap-2 border-b ${
-            brand ? 'bg-app/40 border-border' : 'bg-warning/10 border-warning/30'
-          }`}
-          style={{
-            paddingInline: 'var(--chat-chrome-px)',
-            paddingBlock: 'var(--chat-chrome-py)',
-            fontSize: 'var(--chat-chrome-text)'
-          }}
+          className="flex items-center gap-2 px-4 pt-2.5"
+          style={{ fontSize: 'var(--chat-chrome-text)' }}
         >
           <Icon className={brand ? 'icon-sm shrink-0' : 'icon-xs shrink-0 text-warning'} />
           <span
@@ -1022,7 +1035,7 @@ function AutomatedTurnCard({
           )}
         </div>
         <div
-          className="px-3 py-2 whitespace-pre-wrap break-words"
+          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
           style={{ fontSize: 'var(--chat-body-text)' }}
         >
           <HighlightedText text={text} />
@@ -1032,8 +1045,58 @@ function AutomatedTurnCard({
   )
 }
 
+/** Silent notifications Ness held for this tab and released with the turn
+ *  below. Collapsed by default: they were deliberately not worth an
+ *  interrupt, so they shouldn't shout in the transcript either. */
+function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex justify-end">
+      <div
+        className="bg-panel overflow-hidden"
+        style={{ maxWidth: 'var(--chat-bubble-max)', borderRadius: 'var(--chat-prompt-radius)' }}
+      >
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center gap-2 text-left cursor-pointer px-4 py-2.5 text-muted hover:text-fg transition-colors"
+          style={{
+            fontSize: 'var(--chat-chrome-text)'
+          }}
+          aria-expanded={open}
+        >
+          <Chevron open={open} />
+          <NessIcon className="icon-sm shrink-0" />
+          <span
+            className="font-semibold shrink-0 brand-gradient-text"
+            style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+          >
+            {notices.length === 1 ? '1 held notification' : `${notices.length} held notifications`}
+          </span>
+          <span className="text-muted truncate">delivered with this turn</span>
+        </button>
+        {open && (
+          <div className="px-4 pb-2.5 space-y-3">
+            {notices.map((n, i) => (
+              <div key={i} style={{ fontSize: 'var(--chat-body-text)' }}>
+                <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
+                  {automationLabel(n.source, n.from).label}
+                </div>
+                <div className="whitespace-pre-wrap break-words">
+                  <HighlightedText text={n.body} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface RenderContext {
   resultsByToolUseId: Map<string, ToolResultView>
+  /** tool_use id → the tool_result entry that carried its output. */
+  resultEntryIdByToolUseId: Map<string, string>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
   approvalCard: (toolUseId: string | undefined) => ReactNode
   pendingToolUseIds: Set<string>
@@ -1061,11 +1124,20 @@ function renderEntries(
 ): RenderedRow[] {
   const rows: RenderedRow[] = []
   for (const entry of entries) {
+    if (entry.kind === 'user' && entry.heldNotices && entry.heldNotices.length > 0) {
+      rows.push({
+        key: `${entry.entryId}-held`,
+        entryId: entry.entryId,
+        type: 'text',
+        node: <HeldNoticesCard notices={entry.heldNotices} />
+      })
+    }
     if (entry.kind === 'user' && entry.automation) {
       rows.push({
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnStart: !entry.isQueued,
         node: (
           <AutomatedTurnCard
             source={entry.automation}
@@ -1084,13 +1156,14 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnStart: !queued,
         node: queued ? (
           <div className="flex justify-end">
             <div
-              className="bg-accent/10 border border-dashed border-accent/40 pl-3 pr-1 py-2 opacity-70 flex items-start gap-2"
+              className="bg-accent/5 pl-4 pr-1.5 py-2.5 opacity-70 flex items-start gap-2"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)'
+                borderRadius: 'var(--chat-prompt-radius)'
               }}
             >
               <div
@@ -1120,10 +1193,10 @@ function renderEntries(
         ) : (
           <div className="flex justify-end">
             <div
-              className="bg-accent/15 border border-accent/30 px-3 py-2 whitespace-pre-wrap break-words"
+              className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
-                borderRadius: 'var(--chat-bubble-radius)',
+                borderRadius: 'var(--chat-prompt-radius)',
                 fontSize: 'var(--chat-body-text)'
               }}
             >
@@ -1174,6 +1247,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnError: true,
         node: (
           <SubprocessExitCard
             message={entry.errorMessage ?? defaultMsg}
@@ -1190,6 +1264,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: (
           <AuthFailureCard
             message={entry.errorMessage}
@@ -1219,6 +1294,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: <AgentErrorCard message={entry.errorMessage ?? 'The agent reported an error'} />
       })
       continue
@@ -1228,6 +1304,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: (
           <RateLimitErrorCard
             message={entry.errorMessage ?? 'Rate limit reached'}
@@ -1296,6 +1373,10 @@ function renderEntries(
           let subAgentBody: ReactNode = null
           let subAgentChildCount = 0
           let subAgentDescendantHasPendingApproval = false
+          const resultEntryId = block.id
+            ? ctx.resultEntryIdByToolUseId.get(block.id)
+            : undefined
+          const coveredEntryIds = resultEntryId ? [resultEntryId] : []
           if (isSubAgentToolName(block.name) && block.id) {
             const childEntries =
               ctx.childrenByParentToolUseId.get(block.id) ?? []
@@ -1305,6 +1386,10 @@ function renderEntries(
               subAgentDescendantHasPendingApproval = childRows.some(
                 (r) => r.hasPendingApproval
               )
+              for (const c of childEntries) coveredEntryIds.push(c.entryId)
+              for (const r of childRows) {
+                coveredEntryIds.push(...(r.coveredEntryIds ?? []))
+              }
               subAgentBody = renderGroupedItems(
                 groupConsecutiveToolRows(childRows)
               )
@@ -1318,6 +1403,8 @@ function renderEntries(
             toolIntent: getToolIntent(block) ?? undefined,
             hasError: !!result?.isError,
             images: result?.images,
+            editedPaths: getEditedPaths(block.name, block.input),
+            ...(coveredEntryIds.length > 0 ? { coveredEntryIds } : {}),
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,
@@ -1328,7 +1415,6 @@ function renderEntries(
                     id={block.id}
                     name={block.name || 'tool'}
                     subtitle="preparing call…"
-                    variant="info"
                   >
                     <div className="px-2 py-1.5 text-xs text-muted italic flex items-center gap-2">
                       <span className="json-claude-cursor" />
@@ -1363,6 +1449,10 @@ function renderEntries(
     }
     // tool_result entries are folded into their tool_use cards above.
   }
+  const timestampById = new Map(entries.map((e) => [e.entryId, e.timestamp]))
+  for (const r of rows) {
+    if (r.entryId) r.timestamp = timestampById.get(r.entryId)
+  }
   return rows
 }
 
@@ -1371,6 +1461,18 @@ interface GroupedItem {
   key: string
   rows: RenderedRow[]
 }
+
+/** A top-level transcript item: a row or tool group, or a finished turn
+ *  folded behind its summary strip. */
+type DisplayItem =
+  | GroupedItem
+  | {
+      kind: 'turn'
+      key: string
+      rows: RenderedRow[]
+      summary: TurnSummary
+      items: GroupedItem[]
+    }
 
 function groupConsecutiveToolRows(rows: RenderedRow[]): GroupedItem[] {
   const out: GroupedItem[] = []
@@ -1426,14 +1528,22 @@ function anchorTopPadding(): number {
   return 0.75 * parseFloat(getComputedStyle(document.documentElement).fontSize)
 }
 
-export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonModeChatProps): JSX.Element {
+export function JsonModeChat({
+  sessionId,
+  worktreePath,
+  mode = 'awake',
+  showSubagents = false
+}: JsonModeChatProps): JSX.Element {
+  const [subagentChipSlot, setSubagentChipSlot] = useState<HTMLSpanElement | null>(null)
   const backend = useBackend()
   const session = useJsonClaudeSession(sessionId)
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
   const {
     jsonModeChatDensity: density,
+    jsonModeChatWidth,
     jsonModeSendOnEnter: sendOnEnter,
     autoScrollToBottom,
+    collapseFinishedTurns,
     jsonModeTranscriptWindow,
     defaultClaudeTabType,
     conversationForkEnabled,
@@ -1984,10 +2094,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     // entries array (results live in top-level tool_result entries
     // even when their corresponding tool_use was a sub-agent's call).
     const resultsByToolUseId = new Map<string, ToolResultView>()
+    const resultEntryIdByToolUseId = new Map<string, string>()
     for (const entry of deferredEntries) {
       if (entry.kind !== 'tool_result' || !entry.blocks) continue
       for (const b of entry.blocks) {
         if (b.type === 'tool_result' && b.toolUseId) {
+          resultEntryIdByToolUseId.set(b.toolUseId, entry.entryId)
           resultsByToolUseId.set(b.toolUseId, {
             content: b.content || '',
             isError: !!b.isError,
@@ -2024,6 +2136,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
       hiddenEntryCount: windowStart,
       rows: renderEntries(windowedEntries, {
         resultsByToolUseId,
+        resultEntryIdByToolUseId,
         childrenByParentToolUseId,
         backgroundAgents,
         approvalCard: renderApprovalForToolUseId,
@@ -2071,10 +2184,30 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     session?.state
   ])
 
-  const groupedItems = useMemo(() => groupConsecutiveToolRows(rows), [rows])
+  const sessionBusy = !!session?.busy
+  const turnStartedAt = session?.turnStartedAt
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    if (!collapseFinishedTurns) return groupConsecutiveToolRows(rows)
+    return foldFinishedTurns(rows, {
+      busy: sessionBusy,
+      turnStartedAt
+    }).flatMap((item): DisplayItem[] =>
+      item.kind === 'rows'
+        ? groupConsecutiveToolRows(item.rows)
+        : [
+            {
+              kind: 'turn',
+              key: item.key,
+              rows: item.rows,
+              summary: item.summary,
+              items: groupConsecutiveToolRows(item.rows)
+            }
+          ]
+    )
+  }, [rows, collapseFinishedTurns, sessionBusy, turnStartedAt])
 
   // The anchor for "pin prompt to top" mode is the most recent non-queued
-  // user entry. Derived from `entries` (not `groupedItems`) so the id is
+  // user entry. Derived from `entries` (not `displayItems`) so the id is
   // stable across group-shape changes (e.g. tool_use turns that resolve to
   // a single group after streaming completes).
   const lastUserEntryId = useMemo<string | null>(() => {
@@ -2166,6 +2299,32 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
     },
     [rewindDisabledReason, forkDisabledReason]
   )
+  // Rewind is only meaningful on assistant rows — right-clicking a user
+  // bubble or any other kind of row falls through to the browser default.
+  // For ToolGroup the target is the first tool's parent assistant entry,
+  // which is exactly the entry to rewind to. Rows inside an expanded
+  // TurnGroup go through here too, so each keeps its own menu.
+  const renderTranscriptItem = (g: GroupedItem): JSX.Element => {
+    const targetEntryId = g.rows[0]?.entryId
+    const targetEntry = targetEntryId
+      ? entries[entryIndexById.get(targetEntryId) ?? -1]
+      : undefined
+    const onContextMenu =
+      hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
+        ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
+        : undefined
+    const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
+    const anchorRef = isAnchor
+      ? (el: HTMLDivElement | null): void => {
+          anchorPromptRef.current = el
+        }
+      : undefined
+    return (
+      <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
+        {g.kind === 'single' ? g.rows[0].node : <ToolGroup rows={g.rows} />}
+      </div>
+    )
+  }
   const performRewind = useCallback(
     async (entryId: string) => {
       setRewindMenu(null)
@@ -2768,6 +2927,12 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           ? 'bg-danger'
           : 'bg-faint'
 
+  // Applied separately to the transcript, the auto-allow strip and the
+  // composer so they share one centred column while each scrolls or
+  // resizes on its own.
+  const columnClass =
+    jsonModeChatWidth === 'reading' ? 'w-full max-w-[var(--chat-column-max)] mx-auto' : ''
+
   return (
     <div
       ref={outerDivRef}
@@ -2897,190 +3062,176 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           </Tooltip>
         </div>
       )}
-      <div className="relative flex-1 min-h-0 flex flex-col">
-        <div className="absolute top-2 left-2 z-30 pointer-events-auto">
-          <FindOverlay controller={find} inputRef={findInputRef} />
-        </div>
-        <FindContext.Provider value={find.contextValue}>
-        <div
-          ref={scrollRef}
-          onScroll={onScroll}
-          tabIndex={0}
-          onKeyDown={(e) => {
-            // Escape parks focus here so bare-key hotkeys work; Enter puts
-            // it back in the composer. Guarded to the container itself so
-            // Enter on a focused button inside the transcript (Allow, Deny,
-            // a collapsed card) still activates that button.
-            if (e.key === 'Enter' && e.target === e.currentTarget) {
-              e.preventDefault()
-              textareaRef.current?.focus()
-            }
-          }}
-          // focus-visible, not focus: a click into the transcript to scroll
-          // or select text shouldn't draw a ring, but arriving here from
-          // Escape should — that's the moment the user needs to see that
-          // the composer no longer has the keystroke.
-          className="flex-1 overflow-y-auto overflow-x-hidden outline-none focus-visible:ring-1 focus-visible:ring-accent/40 focus-visible:ring-inset"
-          style={{ overflowAnchor: 'none' }}
-        >
-          {/* Stable wrapper so the auto-scroll ResizeObserver (mounted once
-              with empty deps) always has a firstElementChild to observe.
-              Without it, a fresh chat mounts with entriesHydrated=false and
-              the empty-state ternary returns null, leaving the scroll
-              container childless — the RO is never attached and streaming
-              tokens after entries hydrate don't snap to bottom. */}
-          <div className="min-h-full flex flex-col">
-          {entries.length === 0 && orphanApprovals.length === 0 && !busy ? (
-            // Empty-state is only safe to show once we've confirmed there's
-            // nothing to display. The wire snapshot ships entries stripped
-            // (entriesHydrated=false) and the lazy-fetch above seeds them
-            // shortly after mount — rendering the bright sparkle card in
-            // that window flashes loudly on tabs that actually have history.
-            // Render blank during the fetch; a spinner's appear-then-
-            // disappear would itself be a flash. A provider that loads
-            // history from the agent (Codex) takes seconds rather than a
-            // frame, so that case does get a quiet loading line.
-            historyPending ? (
-              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
-                <Loader2 className="icon-xs animate-spin" />
-                Loading conversation…
-              </div>
-            ) : entriesHydrated ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
-                <div className="relative mb-6">
-                  <div
-                    className="absolute inset-0 rounded-full blur-2xl opacity-30 brand-gradient-bg"
-                    aria-hidden
-                  />
-                  <div className="relative w-16 h-16 rounded-full brand-gradient-bg flex items-center justify-center shadow-lg">
-                    <Sparkles className="w-[1.625rem] h-[1.625rem] text-white" />
+      <div className="flex-1 min-h-0 flex">
+        <div className="relative flex-1 min-w-0 flex flex-col">
+          <div className="absolute top-2 left-2 z-30 pointer-events-auto">
+            <FindOverlay controller={find} inputRef={findInputRef} />
+          </div>
+          <FindContext.Provider value={find.contextValue}>
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              // Escape parks focus here so bare-key hotkeys work; Enter puts
+              // it back in the composer. Guarded to the container itself so
+              // Enter on a focused button inside the transcript (Allow, Deny,
+              // a collapsed card) still activates that button.
+              if (e.key === 'Enter' && e.target === e.currentTarget) {
+                e.preventDefault()
+                textareaRef.current?.focus()
+              }
+            }}
+            // focus-visible, not focus: a click into the transcript to scroll
+            // or select text shouldn't draw a ring, but arriving here from
+            // Escape should — that's the moment the user needs to see that
+            // the composer no longer has the keystroke.
+            className="flex-1 overflow-y-auto overflow-x-hidden outline-none focus-visible:ring-1 focus-visible:ring-accent/40 focus-visible:ring-inset"
+            style={{ overflowAnchor: 'none' }}
+          >
+            {/* Stable wrapper so the auto-scroll ResizeObserver (mounted once
+                with empty deps) always has a firstElementChild to observe.
+                Without it, a fresh chat mounts with entriesHydrated=false and
+                the empty-state ternary returns null, leaving the scroll
+                container childless — the RO is never attached and streaming
+                tokens after entries hydrate don't snap to bottom. */}
+            <div className="min-h-full flex flex-col">
+            {entries.length === 0 && orphanApprovals.length === 0 && !busy ? (
+              // Empty-state is only safe to show once we've confirmed there's
+              // nothing to display. The wire snapshot ships entries stripped
+              // (entriesHydrated=false) and the lazy-fetch above seeds them
+              // shortly after mount — rendering the bright sparkle card in
+              // that window flashes loudly on tabs that actually have history.
+              // Render blank during the fetch; a spinner's appear-then-
+              // disappear would itself be a flash. A provider that loads
+              // history from the agent (Codex) takes seconds rather than a
+              // frame, so that case does get a quiet loading line.
+              historyPending ? (
+                <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
+                  <Loader2 className="icon-xs animate-spin" />
+                  Loading conversation…
+                </div>
+              ) : entriesHydrated ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
+                  <div className="relative mb-6">
+                    <div
+                      className="absolute inset-0 rounded-full blur-2xl opacity-30 brand-gradient-bg"
+                      aria-hidden
+                    />
+                    <div className="relative w-16 h-16 rounded-full brand-gradient-bg flex items-center justify-center shadow-lg">
+                      <Sparkles className="w-[1.625rem] h-[1.625rem] text-white" />
+                    </div>
                   </div>
+                  <h2 className="text-lg font-semibold brand-gradient-text">
+                    What are we going to build today?
+                  </h2>
+                  <p className="mt-2 text-xs text-muted">
+                    Send a message to get started.
+                  </p>
                 </div>
-                <h2 className="text-lg font-semibold brand-gradient-text">
-                  What are we going to build today?
-                </h2>
-                <p className="mt-2 text-xs text-muted">
-                  Send a message to get started.
-                </p>
-              </div>
-            ) : null
-          ) : (
-          <div className="px-4 py-3 space-y-3">
-            {hiddenEntryCount > 0 && (
-              <div className="flex items-center justify-center gap-2 pb-1">
-                <button
-                  onClick={() => showEarlierEntries(windowStep)}
-                  className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
-                >
-                  Show {Math.min(hiddenEntryCount, windowStep)} earlier{' '}
-                  {Math.min(hiddenEntryCount, windowStep) === 1
-                    ? 'message'
-                    : 'messages'}
-                </button>
-                {hiddenEntryCount > windowStep && (
+              ) : null
+            ) : (
+            <div className={`px-6 py-5 space-y-4 ${columnClass}`}>
+              {hiddenEntryCount > 0 && (
+                <div className="flex items-center justify-center gap-2 pb-1">
                   <button
-                    onClick={() => showEarlierEntries(hiddenEntryCount)}
-                    className="text-xs text-muted hover:text-fg cursor-pointer"
+                    onClick={() => showEarlierEntries(windowStep)}
+                    className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
                   >
-                    Show all ({hiddenEntryCount})
+                    Show {Math.min(hiddenEntryCount, windowStep)} earlier{' '}
+                    {Math.min(hiddenEntryCount, windowStep) === 1
+                      ? 'message'
+                      : 'messages'}
                   </button>
-                )}
-              </div>
+                  {hiddenEntryCount > windowStep && (
+                    <button
+                      onClick={() => showEarlierEntries(hiddenEntryCount)}
+                      className="text-xs text-muted hover:text-fg cursor-pointer"
+                    >
+                      Show all ({hiddenEntryCount})
+                    </button>
+                  )}
+                </div>
+              )}
+              {displayItems.map((d) =>
+                d.kind === 'turn' ? (
+                  <TurnGroup key={d.key} rows={d.rows} summary={d.summary}>
+                    {d.items.map(renderTranscriptItem)}
+                  </TurnGroup>
+                ) : (
+                  renderTranscriptItem(d)
+                )
+              )}
+              {orphanApprovals.map((a) => (
+                <JsonClaudeApprovalCard
+                  key={a.requestId}
+                  approval={a}
+                  onResolve={(result) => resolve(a.requestId, result)}
+                />
+              ))}
+              {(() => {
+                // In-chat "agent is working" indicator. Visible whenever the
+                // turn is in flight and no other UI element already signals
+                // progress. Suppressed while a text block is streaming (the
+                // partial entry's cursor is at the end of the text) or a
+                // tool_use block is on screen (its placeholder card signals
+                // the call is being prepared). The remaining gap cases — empty
+                // partial entry just after message_start, partial entry whose
+                // last block is a finalized thinking card waiting for the
+                // next content_block_start (e.g. the agent is about to emit
+                // a big tool call) — are exactly when nothing else moves on
+                // screen, so the spinner reassures the user the agent didn't
+                // freeze.
+                if (!busy) return null
+                const last = session?.entries[session.entries.length - 1]
+                const lastBlock = last?.kind === 'assistant' && last.blocks?.length
+                  ? last.blocks[last.blocks.length - 1]
+                  : null
+                const showWhileStreaming =
+                  last?.kind === 'assistant' && last.isPartial &&
+                  (lastBlock?.type === 'text' || lastBlock?.type === 'tool_use')
+                if (showWhileStreaming) return null
+                return (
+                  <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted italic">
+                    <span className="json-claude-spinner" aria-label="working" />
+                    <span>thinking…</span>
+                  </div>
+                )
+              })()}
+            </div>
             )}
-            {groupedItems.map((g) => {
-              // Rewind is only meaningful on assistant rows — right-
-              // clicking a user bubble or any other kind of row falls
-              // through to the browser default. For ToolGroup the
-              // target is the first tool's parent assistant entry,
-              // which is exactly the entry to rewind to.
-              const targetEntryId = g.rows[0]?.entryId
-              const targetEntry = targetEntryId
-                ? entries[entryIndexById.get(targetEntryId) ?? -1]
-                : undefined
-              const onContextMenu =
-                hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
-                  ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
-                  : undefined
-              const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
-              const anchorRef = isAnchor
-                ? (el: HTMLDivElement | null): void => {
-                    anchorPromptRef.current = el
-                  }
-                : undefined
-              return g.kind === 'single' ? (
-                <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                  {g.rows[0].node}
-                </div>
-              ) : (
-                <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                  <ToolGroup rows={g.rows} />
-                </div>
-              )
-            })}
-            {orphanApprovals.map((a) => (
-              <JsonClaudeApprovalCard
-                key={a.requestId}
-                approval={a}
-                onResolve={(result) => resolve(a.requestId, result)}
-              />
-            ))}
-            {(() => {
-              // In-chat "agent is working" indicator. Visible whenever the
-              // turn is in flight and no other UI element already signals
-              // progress. Suppressed while a text block is streaming (the
-              // partial entry's cursor is at the end of the text) or a
-              // tool_use block is on screen (its placeholder card signals
-              // the call is being prepared). The remaining gap cases — empty
-              // partial entry just after message_start, partial entry whose
-              // last block is a finalized thinking card waiting for the
-              // next content_block_start (e.g. the agent is about to emit
-              // a big tool call) — are exactly when nothing else moves on
-              // screen, so the spinner reassures the user the agent didn't
-              // freeze.
-              if (!busy) return null
-              const last = session?.entries[session.entries.length - 1]
-              const lastBlock = last?.kind === 'assistant' && last.blocks?.length
-                ? last.blocks[last.blocks.length - 1]
-                : null
-              const showWhileStreaming =
-                last?.kind === 'assistant' && last.isPartial &&
-                (lastBlock?.type === 'text' || lastBlock?.type === 'tool_use')
-              if (showWhileStreaming) return null
-              return (
-                <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted italic">
-                  <span className="json-claude-spinner" aria-label="working" />
-                  <span>thinking…</span>
-                </div>
-              )
-            })()}
+            </div>
           </div>
+          </FindContext.Provider>
+          {showJumpToBottom && (
+            <button
+              onClick={jumpToBottom}
+              className="absolute right-4 bottom-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
+              title="Jump to bottom"
+            >
+              <ChevronDown className="icon-xs" />
+              <span>Jump to bottom</span>
+            </button>
           )}
-          </div>
+          {showJumpToPrompt && (
+            <button
+              onClick={jumpToPrompt}
+              className="absolute right-4 top-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
+              title="Jump to prompt"
+            >
+              <ChevronUp className="icon-xs" />
+              <span>Jump to prompt</span>
+            </button>
+          )}
         </div>
-        </FindContext.Provider>
-        {showJumpToBottom && (
-          <button
-            onClick={jumpToBottom}
-            className="absolute right-4 bottom-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
-            title="Jump to bottom"
-          >
-            <ChevronDown className="icon-xs" />
-            <span>Jump to bottom</span>
-          </button>
-        )}
-        {showJumpToPrompt && (
-          <button
-            onClick={jumpToPrompt}
-            className="absolute right-4 top-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
-            title="Jump to prompt"
-          >
-            <ChevronUp className="icon-xs" />
-            <span>Jump to prompt</span>
-          </button>
-        )}
+        <ChatAgentColumn
+          sessionId={sessionId}
+          active={showSubagents && mode === 'awake'}
+          chipSlot={subagentChipSlot}
+        />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
-        <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
+        <div className={`shrink-0 px-6 pt-1 flex items-center gap-2 text-xs text-muted ${columnClass}`}>
           <span className="opacity-70">auto-allowing:</span>
           <span className="font-mono truncate">
             {session.sessionToolApprovals.join(', ')}
@@ -3104,7 +3255,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
           onDoubleClick={resetComposerHeight}
           title="Drag to resize the prompt · double-click to reset"
         />
-        <div className="p-2">
+        <div className={`px-4 pt-2 pb-3 ${columnClass}`}>
         <div className="relative rounded-md border border-border bg-panel focus-within:border-accent transition-colors">
           {mentionItems.length > 0 && (
             <JsonModeMentionPopover
@@ -3286,6 +3437,7 @@ export function JsonModeChat({ sessionId, worktreePath, mode = 'awake' }: JsonMo
                 {modeBadgeLabel}
               </button>
             )}
+            <span ref={setSubagentChipSlot} className="contents" />
             <div className="flex-1" />
             {busy && (
               <button

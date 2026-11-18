@@ -64,6 +64,9 @@ interface UseHotkeyHandlersArgs {
   handleSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
   handleSplitPane: (worktreePath: string, fromPaneId: string, direction?: 'horizontal' | 'vertical') => void
   handleRefreshWorktrees: () => void
+  // Undefined while a screen claims Cmd+[ / Cmd+] for itself.
+  historyBack: (() => void) | undefined
+  historyForward: (() => void) | undefined
   setShowSettings: React.Dispatch<React.SetStateAction<boolean>>
   onStartAliasEdit: (path: string) => void
 }
@@ -111,6 +114,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     handleSelectTab,
     handleSplitPane,
     handleRefreshWorktrees,
+    historyBack,
+    historyForward,
     setShowSettings,
     onStartAliasEdit,
     pathBackendId
@@ -320,6 +325,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       },
       nextTab: () => cycleTab(1),
       prevTab: () => cycleTab(-1),
+      historyBack,
+      historyForward,
       renameTab: () => {
         if (!activeWorktreeId) return
         const tabId = activeTabId[activeWorktreeId]
@@ -460,6 +467,8 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       handleOpenPR,
       handleCloseTab,
       handleRefreshWorktrees,
+      historyBack,
+      historyForward,
       prStatuses,
       panes,
       activePaneId,

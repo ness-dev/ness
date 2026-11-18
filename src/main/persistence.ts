@@ -22,6 +22,8 @@ import {
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
 import type { WorktreeReview } from '../shared/state/reviews'
+import type { WorktreeSubscription } from '../shared/state/subscriptions'
+import type { WorktreeOrigin } from '../shared/state/origins'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
 
@@ -316,6 +318,11 @@ export interface Config {
   // historical look). 'comfy' bumps font sizes, padding, and corner
   // radius for newcomers / screen-sharing.
   jsonModeChatDensity?: 'compact' | 'comfy'
+  // 'reading' caps the chat transcript at a centred column. Default
+  // (undefined) is 'full', spanning the whole pane.
+  jsonModeChatWidth?: 'reading' | 'full'
+  // How a Chat tab's Subagents column starts. Undefined = 'expanded'.
+  subagentsColumnDefault?: 'expanded' | 'collapsed'
   // Global UI density. Undefined = 'small' (the historical look at 16px
   // root font-size). 'x-small' = 14px, 'medium' = 18px, 'large' = 20px,
   // 'x-large' = 22px.
@@ -330,6 +337,8 @@ export interface Config {
   // of the viewport instead of auto-scrolling to the bottom. Default true
   // (undefined = follow the tail, matches historical behavior).
   autoScrollToBottom?: boolean
+  // When false, finished chat turns render fully expanded. Default true.
+  collapseFinishedTurns?: boolean
   // Permission mode applied when a brand-new json-mode session spawns.
   // Existing sessions keep whatever mode they were last in. Default
   // 'acceptEdits' (auto-allow Edit/Write, still ask for Bash etc.).
@@ -383,6 +392,12 @@ export interface Config {
   // Review viewer comments keyed by worktree path (the `reviews` slice's
   // byPath). Pruned when a worktree is removed.
   reviews?: Record<string, WorktreeReview>
+  // Agent-to-worktree progress subscriptions (the `subscriptions` slice).
+  // Pruned when either end's worktree is removed.
+  worktreeSubscriptions?: WorktreeSubscription[]
+  // Which agent Chat tab created each worktree (the `origins` slice).
+  // Pruned when the worktree is removed.
+  worktreeOrigins?: Record<string, WorktreeOrigin>
   // Persisted alias map: worktree path → user-defined display alias.
   aliases?: Record<string, string>
   // Wake-lock mode: hold a power-save blocker 'off' | while any agent

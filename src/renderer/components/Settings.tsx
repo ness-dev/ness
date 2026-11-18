@@ -453,10 +453,13 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     wsTransportHost,
     defaultClaudeTabType,
     jsonModeChatDensity,
+    jsonModeChatWidth,
+    subagentsColumnDefault,
     uiScale,
     nessieColor,
     jsonModeSendOnEnter,
     autoScrollToBottom,
+    collapseFinishedTurns,
     jsonModeDefaultPermissionMode,
     jsonModeTranscriptWindow,
     autoSleepMinutes,
@@ -2580,6 +2583,83 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Chat width
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    Reading caps the transcript and composer at a comfortable
+                    line length on wide panes. Full lets them span the pane.
+                  </div>
+                  <div className="inline-flex rounded border border-border-strong overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setJsonModeChatWidth('reading')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors ${
+                        jsonModeChatWidth === 'reading'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Reading
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setJsonModeChatWidth('full')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors border-l border-border-strong ${
+                        jsonModeChatWidth === 'full'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Full
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Subagents column
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    How the column of running sub-agents starts beside a
+                    chat. Opening or closing it in a chat is remembered for
+                    that chat.
+                  </div>
+                  <div className="inline-flex rounded border border-border-strong overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setSubagentsColumnDefault('expanded')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors ${
+                        subagentsColumnDefault === 'expanded'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Expanded
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setSubagentsColumnDefault('collapsed')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors border-l border-border-strong ${
+                        subagentsColumnDefault === 'collapsed'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Collapsed
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
                       type="checkbox"
@@ -2615,6 +2695,26 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       </div>
                       <div className="text-xs text-dim mt-0.5">
                         When on, chat follows the streaming response. When off, the most recent prompt pins to the top and a "Jump to prompt" button appears if you scroll away.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={collapseFinishedTurns}
+                      onChange={(e) => {
+                        void backend.setCollapseFinishedTurns(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base" />
+                    <div className="flex-1">
+                      <div className="text-sm text-fg-bright">
+                        Collapse finished turns
+                      </div>
+                      <div className="text-xs text-dim mt-0.5">
+                        Once a turn finishes, its tool calls and in-between messages fold into one summary line above the final answer. Click the line to expand it.
                       </div>
                     </div>
                   </label>
@@ -3294,13 +3394,15 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <span className="text-xs text-dim">days</span>
                   </div>
 
-                  <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Notify chat on CI failure</h3>
+                  <h3 className="text-sm font-semibold text-fg-bright mt-6 mb-1">Notify chat about its PR</h3>
                   <p className="text-xs text-dim mb-3">
-                    When a worktree's PR checks start failing, post a message
-                    naming the failing checks into its agent chat so the agent
-                    can start investigating. Fires once per failing commit, and
-                    only for worktrees with a live chat tab. Individual
-                    worktrees can opt in or out from the PR panel.
+                    Keep a worktree&apos;s agent posted on its own pull request.
+                    CI failing, changes requested, merge conflicts and the PR
+                    merging or closing interrupt the agent; routine updates
+                    (CI passing, approvals, new commits) are held and delivered
+                    with its next turn. Each CI result is reported once per
+                    commit. Individual worktrees can opt in or out from the PR
+                    panel.
                   </p>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
@@ -3309,7 +3411,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       onChange={(e) => { void backend.setNotifyChatOnCiFailure(e.target.checked) }}
                       className="accent-current icon-base cursor-pointer" />
                     <span className="text-sm text-fg">
-                      Tell the agent when CI fails
+                      Tell the agent about its PR
                     </span>
                   </label>
 
@@ -4079,6 +4181,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-sm text-fg-bright">Enable worktree messaging</div>
                     <div className="text-xs text-dim mt-0.5">
                       Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
+                      Also lets agents follow each other: a Chat tab that creates a worktree is told about its PR and CI status, and the agent there sends it progress reports.
                     </div>
                   </div>
                 </label>

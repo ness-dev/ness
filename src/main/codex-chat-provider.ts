@@ -33,7 +33,7 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { parseUserTurn } from '../shared/state/json-claude'
 import {
   cloneCategories,
   emptyCategories,
@@ -956,17 +956,15 @@ export class CodexChatProvider implements ChatProvider {
     images: ChatImageInput[] | undefined,
     queued: boolean
   ): void {
-    const automated = parseAutomatedMessage(text)
+    const turn = parseUserTurn(text)
     const refs = (images ?? [])
       .filter((img) => img.path.length > 0)
       .map((img) => ({ path: img.path, mediaType: img.mediaType }))
     this.appendEntry(sessionId, {
       kind: 'user',
-      text: automated ? automated.body : text,
+      ...turn,
       timestamp: Date.now(),
       entryId: this.nextEntryId(sessionId, queued ? 'uq' : 'u'),
-      ...(automated ? { automation: automated.source } : {}),
-      ...(automated?.from ? { automationFrom: automated.from } : {}),
       ...(queued ? { isQueued: true } : {}),
       ...(refs.length > 0 ? { images: refs } : {})
     })
@@ -1009,7 +1007,10 @@ export class CodexChatProvider implements ChatProvider {
   private dispatchBusy(sessionId: string, busy: boolean): void {
     const session = this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
     if (!session || session.busy === busy) return
-    this.store.dispatch({ type: 'jsonClaude/busyChanged', payload: { sessionId, busy } })
+    this.store.dispatch({
+      type: 'jsonClaude/busyChanged',
+      payload: busy ? { sessionId, busy, turnStartedAt: Date.now() } : { sessionId, busy }
+    })
   }
 }
 
@@ -1253,14 +1254,12 @@ export function turnsToEntries(sessionId: string, turns: CodexTurn[]): JsonClaud
             path: c.path as string,
             mediaType: IMAGE_MEDIA_TYPES[extname(c.path as string).toLowerCase()] ?? 'image/png'
           }))
-        const automated = parseAutomatedMessage(text)
+        const turn = parseUserTurn(text)
         entries.push({
           entryId,
           kind: 'user',
-          text: automated ? automated.body : text,
+          ...turn,
           timestamp: now,
-          ...(automated ? { automation: automated.source } : {}),
-          ...(automated?.from ? { automationFrom: automated.from } : {}),
           ...(images.length > 0 ? { images } : {})
         })
         return

@@ -9,7 +9,6 @@ export function GlobCard({ block, result, autoApproved, sessionAllowed }: ToolCa
       id={block.id}
       name="Glob"
       subtitle={<HighlightedText text={pattern} />}
-      variant="info"
       icon={GlobIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

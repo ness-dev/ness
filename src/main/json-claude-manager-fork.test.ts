@@ -367,6 +367,41 @@ describe('JsonClaudeManager.seedFromTranscript — mid-turn messages', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0].text).toBe('hello')
   })
+
+  it('stamps each entry with its transcript line time, falling back to now', () => {
+    const store = new Store()
+    const mgr = makeManager(store)
+    const sessionId = '77777777-7777-7777-7777-777777777777'
+    const worktree = '/tmp/wt-seed-timestamps'
+
+    writeTranscript(sessionId, worktree, [
+      {
+        type: 'user',
+        sessionId,
+        timestamp: '2026-01-02T03:04:05.000Z',
+        message: { content: 'go' }
+      },
+      {
+        type: 'assistant',
+        sessionId,
+        timestamp: '2026-01-02T03:06:05.000Z',
+        message: { id: 'msg_a', content: [{ type: 'text', text: 'done' }] }
+      },
+      { type: 'user', sessionId, message: { content: 'no timestamp' } }
+    ])
+    store.dispatch({
+      type: 'jsonClaude/sessionStarted',
+      payload: { sessionId, worktreePath: worktree }
+    })
+
+    const before = Date.now()
+    mgr.seedFromTranscript(sessionId, worktree)
+
+    const entries = store.getSnapshot().state.jsonClaude.sessions[sessionId].entries
+    expect(entries[0].timestamp).toBe(Date.parse('2026-01-02T03:04:05.000Z'))
+    expect(entries[1].timestamp - entries[0].timestamp).toBe(120_000)
+    expect(entries[2].timestamp).toBeGreaterThanOrEqual(before)
+  })
 })
 
 // Browser-screenshot tool results arrive as Anthropic-shaped image

@@ -34,7 +34,7 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseAutomatedMessage } from '../shared/state/json-claude'
+import { parseUserTurn } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
@@ -446,6 +446,14 @@ export class JsonClaudeManager implements ChatProvider {
         continue
       }
       const type = parsed['type']
+      // When the line was written, not when we replay it — a turn's
+      // elapsed time is read off these, and stamping them all at parse
+      // time made every reloaded turn look instant.
+      const parsedTs =
+        typeof parsed['timestamp'] === 'string'
+          ? Date.parse(parsed['timestamp'] as string)
+          : NaN
+      const lineTs = Number.isFinite(parsedTs) ? parsedTs : Date.now()
       // The session jsonl contains the same user/assistant message
       // shapes the live stream emits, plus internal bookkeeping types
       // (queue-operation, attachment, ai-title, last-prompt) we ignore.
@@ -473,14 +481,12 @@ export class JsonClaudeManager implements ChatProvider {
           ) {
             continue
           }
-          const automated = parseAutomatedMessage(content)
+          const turn = parseUserTurn(content)
           seededEntries.push({
             kind: 'user',
-            text: automated ? automated.body : content,
-            timestamp: Date.now(),
+            ...turn,
+            timestamp: lineTs,
             entryId: `${sessionId}-seed-u-${counter++}`,
-            ...(automated ? { automation: automated.source } : {}),
-            ...(automated?.from ? { automationFrom: automated.from } : {}),
             ...(transcriptUuid ? { transcriptUuid } : {})
           })
         } else if (Array.isArray(content)) {
@@ -488,7 +494,7 @@ export class JsonClaudeManager implements ChatProvider {
             seededEntries.push({
               entryId: `${sessionId}-tr-${r.toolUseId}-${seededEntries.length}`,
               kind: 'tool_result',
-              timestamp: Date.now(),
+              timestamp: lineTs,
               ...(transcriptUuid ? { transcriptUuid } : {}),
               blocks: [
                 {
@@ -519,7 +525,7 @@ export class JsonClaudeManager implements ChatProvider {
         seededEntries.push({
           kind: 'assistant',
           blocks,
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-a-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(apiMessageId ? { apiMessageId } : {}),
@@ -541,14 +547,12 @@ export class JsonClaudeManager implements ChatProvider {
         if (attachment?.type !== 'queued_command') continue
         const prompt = attachment.prompt
         if (typeof prompt !== 'string' || prompt.length === 0) continue
-        const automated = parseAutomatedMessage(prompt)
+        const turn = parseUserTurn(prompt)
         seededEntries.push({
           kind: 'user',
-          text: automated ? automated.body : prompt,
-          timestamp: Date.now(),
+          ...turn,
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-u-${counter++}`,
-          ...(automated ? { automation: automated.source } : {}),
-          ...(automated?.from ? { automationFrom: automated.from } : {}),
           ...(transcriptUuid ? { transcriptUuid } : {})
         })
       } else if (type === 'system' && parsed['subtype'] === 'compact_boundary') {
@@ -565,7 +569,7 @@ export class JsonClaudeManager implements ChatProvider {
           typeof meta?.postTokens === 'number' ? meta.postTokens : undefined
         seededEntries.push({
           kind: 'compact',
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-c-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(trigger ? { compactTrigger: trigger } : {}),
@@ -931,14 +935,12 @@ export class JsonClaudeManager implements ChatProvider {
     const hasImages = !!images && images.length > 0
     // The sentinel is for claude's benefit on the wire; the slice keeps the
     // stripped body plus a flag so the renderer can style the bubble.
-    const automated = parseAutomatedMessage(text)
+    const turn = parseUserTurn(text)
     this.appendEntry(inst, {
       kind: 'user',
-      text: automated ? automated.body : text,
+      ...turn,
       timestamp: Date.now(),
       entryId: extra.entryId,
-      ...(automated ? { automation: automated.source } : {}),
-      ...(automated?.from ? { automationFrom: automated.from } : {}),
       ...(extra.isQueued ? { isQueued: true } : {}),
       ...(hasImages
         ? {
@@ -2123,7 +2125,7 @@ export class JsonClaudeManager implements ChatProvider {
   private dispatchBusy(sessionId: string, busy: boolean): void {
     this.store.dispatch({
       type: 'jsonClaude/busyChanged',
-      payload: { sessionId, busy }
+      payload: busy ? { sessionId, busy, turnStartedAt: Date.now() } : { sessionId, busy }
     })
   }
 

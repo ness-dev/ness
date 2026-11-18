@@ -44,8 +44,14 @@ slice has:
 
 There is one slice per file in `src/shared/state/`; `index.ts` composes
 them into the root reducer. (`terminals` also owns `panes` and
-`lastActive`.) Adding a new piece of shared state means picking the
+`lastActive`; implicit worktree follows are derived from `origins` in
+`shared/subscribers.ts`, never stored.) Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
+
+Every automatic message into an agent chat — PR/CI updates, reviews,
+worktree messages, progress reports, kickoff briefs — goes through
+`NotificationBus` (`src/main/notification-bus.ts`); only user-typed turns
+call `ChatRouter.send` directly.
 
 ### How a state mutation flows end-to-end
 
@@ -497,6 +503,9 @@ hard dependency on `gh`.
   `npm install --legacy-peer-deps` once before building (the `--legacy-peer-deps`
   flag is required because `electron-vite@5` declares a peer range that
   npm's strict resolver rejects against the installed `vite@8`).
+  Use Node 22 (≥22.12): electron-builder's nested `@electron/rebuild` 4
+  requires it for the `postinstall` node-pty rebuild, and CI runs 22. On
+  Node 20 the install still works but prints an `EBADENGINE` warning.
 - **node-pty rebuild** — `node-pty` is a native module compiled against a
   specific Electron version. After running `npm run pack` or `npm run dist*`,
   the postdist hook runs `electron-rebuild -f -w node-pty` so dev mode keeps

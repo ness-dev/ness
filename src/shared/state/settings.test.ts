@@ -685,6 +685,20 @@ describe('settingsReducer', () => {
     expect(compact.jsonModeChatDensity).toBe('compact')
   })
 
+  it('subagentsColumnDefaultChanged switches between expanded and collapsed', () => {
+    expect(initialSettings.subagentsColumnDefault).toBe('expanded')
+    const collapsed = apply(initialSettings, {
+      type: 'settings/subagentsColumnDefaultChanged',
+      payload: 'collapsed'
+    })
+    expect(collapsed.subagentsColumnDefault).toBe('collapsed')
+    const expanded = apply(collapsed, {
+      type: 'settings/subagentsColumnDefaultChanged',
+      payload: 'expanded'
+    })
+    expect(expanded.subagentsColumnDefault).toBe('expanded')
+  })
+
   it('uiScaleChanged walks through every step', () => {
     expect(initialSettings.uiScale).toBe('small')
     const medium = apply(initialSettings, {
@@ -765,6 +779,34 @@ describe('settingsReducer', () => {
       payload: true
     })
     expect(on.autoScrollToBottom).toBe(true)
+  })
+
+  it('collapseFinishedTurnsChanged toggles turn collapsing', () => {
+    expect(initialSettings.collapseFinishedTurns).toBe(true)
+    const off = apply(initialSettings, {
+      type: 'settings/collapseFinishedTurnsChanged',
+      payload: false
+    })
+    expect(off.collapseFinishedTurns).toBe(false)
+    const on = apply(off, {
+      type: 'settings/collapseFinishedTurnsChanged',
+      payload: true
+    })
+    expect(on.collapseFinishedTurns).toBe(true)
+  })
+
+  it('jsonModeChatWidthChanged switches between reading and full width', () => {
+    expect(initialSettings.jsonModeChatWidth).toBe('full')
+    const reading = apply(initialSettings, {
+      type: 'settings/jsonModeChatWidthChanged',
+      payload: 'reading'
+    })
+    expect(reading.jsonModeChatWidth).toBe('reading')
+    const full = apply(reading, {
+      type: 'settings/jsonModeChatWidthChanged',
+      payload: 'full'
+    })
+    expect(full.jsonModeChatWidth).toBe('full')
   })
 
   it('jsonModeDefaultPermissionModeChanged sets the default and preserves other settings', () => {

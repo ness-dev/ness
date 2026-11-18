@@ -18,13 +18,13 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -51,6 +51,8 @@ jobs:
       - name: Build renderer + main
         run: npm run build
 
+      # package-mac.sh retries only on hdiutil's intermittent DMG
+      # failure on hosted runners; anything else fails immediately.
       - name: Package, sign, and notarize
         env:
           CSC_LINK: ${{ secrets.MAC_CERTS_P12_BASE64 }}
@@ -58,7 +60,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac --publish=never
+        run: bash scripts/package-mac.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

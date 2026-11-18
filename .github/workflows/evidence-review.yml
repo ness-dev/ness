@@ -1,0 +1,355 @@
+name: Evidence review
+
+# Experimental: a cheap vision model drives the headless web client of the
+# PR's base and head builds side by side, captures screenshots that prove
+# (or disprove) what the PR claims, and posts them as a PR comment.
+#
+# Every run costs OpenRouter credit, so runs are rationed:
+#   - It runs automatically once per PR, not per push: on `opened`,
+#     `reopened` and `ready_for_review`, and never for drafts. Later pushes
+#     don't re-run it (`synchronize` used to, at ~$0.12 a push).
+#   - A `gate` job (scripts/evidence-reviewer/gate.mjs) runs first with a
+#     read-only token and no PR code. It lists the PR's files through the API
+#     and skips the run when nothing under src/renderer/ or src/web-client/
+#     changed, so CI- or script-only PRs cost nothing, post nothing, and stay
+#     green. It also resolves the PR number and the head SHA to review.
+#   - To re-run on a newer push, tick "Re-run evidence review on the latest
+#     push" in the bot's PR comment. That edit fires `issue_comment`, and
+#     the gate only lets it through when the comment is on a PR, was written
+#     by github-actions[bot] and starts with the `<!-- evidence-reviewer -->`
+#     marker, this edit took the box from unchecked to checked
+#     (`changes.body.from` vs the new body), the sender isn't a bot, and the
+#     sender has write, maintain or admin on the repo (collaborator
+#     permission API; GitHub already only lets writers tick someone else's
+#     box, this is belt and braces). The UI-path skip still applies; drafts
+#     are allowed, since someone asked. A re-run reviews the PR's head at
+#     the time of the tick. Its result posts a fresh comment with the box
+#     unchecked again; comments written with GITHUB_TOKEN don't trigger
+#     workflows, so that can't loop, and the bot-sender check is the
+#     backstop. A re-run runs on `main`'s commit, so its pass/fail shows in
+#     the Actions tab, not in the PR's checks; the comment is the result.
+#   - Even then it needs approval unless the person who triggered it (the
+#     PR opener, or whoever ticked the box) is on the allowlist in the
+#     EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
+#       - allowlisted → `evidence-review-auto` environment, no reviewers,
+#         runs immediately.
+#       - everyone else → `evidence-review` environment, which has required
+#         reviewers. The run waits at "Waiting for review" until a reviewer
+#         clicks Review deployments → Approve and deploy on the run (in the
+#         PR's checks, or the Actions tab for a checkbox re-run).
+#         Unapproved runs cost nothing, and a newer run for the same PR
+#         cancels the older pending one.
+# OPENROUTER_API_KEY is an environment secret, so both environments need
+# their own copy.
+#
+# Triggers. Every PR, fork or not, uses `pull_request_target`, and the
+# re-run box uses `issue_comment`; both always run the workflow from
+# `main`, so a PR can't edit its own gate. Both environments only allow
+# deployments from `main` (Settings → Environments → Deployment branches),
+# so a workflow on any other branch can't reach them or their key.
+# workflow_dispatch therefore only works when run from `main`; it skips
+# the draft check but not the UI-path one. To try changes to this workflow
+# before merging, temporarily add the branch to the environments' allowed
+# list.
+#
+# Every comment edit in the repo starts this workflow. The `gate` job's
+# `if` drops anything that isn't an edit of a bot comment on a PR without
+# booting a runner, and the concurrency group gives such edits a group of
+# their own so they can't cancel a review in progress.
+#
+# PRs mean running untrusted code next to a secret, so the work is split:
+#   - `review` builds and runs the PR's code and calls OpenRouter. Its token
+#     is read-only, and nothing in it can write to the repo. The PR's code
+#     shares the runner with the agent, and runner code has root and can
+#     read any secret the job uses from the runner's memory, so it CAN read
+#     OPENROUTER_API_KEY. Use a dedicated key with a low credit limit, and
+#     read a stranger's diff before approving their run.
+#   - Agents running inside Ness (Chat / Claude Code tabs) are driven by a
+#     model that reads untrusted PR text, so they could be talked into
+#     printing secrets onto a screenshot. The servers, and every agent and
+#     shell they spawn, run as an unprivileged `evidence` user without sudo
+#     (boot-ness.sh), which can't read run.mjs's environment or the
+#     runner's memory. Agents reach OpenRouter only through run.mjs's
+#     localhost proxy with a dummy token. As backstops, captures showing
+#     anything key-shaped are refused, reports are redacted, and publish
+#     refuses key-shaped text. Those regexes are easy to defeat with an
+#     encoding, so the user boundary is the real control.
+#     EVIDENCE_RUN_BUDGET_USD caps a run's spend and
+#     EVIDENCE_AGENT_MAX_REQUESTS caps agent calls.
+#   - No npm cache: pull_request_target shares main's cache scope, and a
+#     cache saved here would be restored by main's CI and release builds.
+#   - `publish` runs no PR code. It takes the artifact from `review` and is
+#     the only job with write permissions (assets branch + PR comment).
+#
+# Pieces, so this can be lifted into other repos:
+#   scripts/evidence-reviewer/gate.mjs      skip / re-run checkbox gate
+#   scripts/evidence-reviewer/run.mjs       generic agent (URL in, report out)
+#   scripts/evidence-reviewer/boot-ness.sh  app-specific boot + fixture seed
+#   .github/evidence-reviewer/instructions.md  app-specific usage guide
+#   scripts/evidence-reviewer/publish.sh    screenshots branch + PR comment
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number
+        required: true
+      model:
+        description: OpenRouter model id (blank = repo default)
+        required: false
+
+concurrency:
+  group: >-
+    evidence-review-${{
+      (github.event_name != 'issue_comment'
+        || (github.event.comment.user.login == 'github-actions[bot]'
+            && startsWith(github.event.comment.body, '<!-- evidence-reviewer -->')
+            && contains(github.event.comment.body, '- [x] Re-run evidence review')))
+      && (github.event.pull_request.number || github.event.issue.number || inputs.pr)
+      || format('ignored-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  gate:
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false)
+      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.login == 'github-actions[bot]'
+          && github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+      pr: ${{ steps.gate.outputs.pr }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/evidence-reviewer
+
+      - name: Gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          node scripts/evidence-reviewer/gate.mjs
+          echo "### Evidence review gate" >> "$GITHUB_STEP_SUMMARY"
+          grep '^reason=' "$GITHUB_OUTPUT" | cut -d= -f2- >> "$GITHUB_STEP_SUMMARY"
+
+  review:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    environment: >-
+      ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
+          && 'evidence-review-auto' || 'evidence-review' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      PR: ${{ needs.gate.outputs.pr }}
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      # The reviewer itself always comes from the workflow's own commit on
+      # main, never from the PR's code.
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: reviewer
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/evidence-reviewer
+            .github/evidence-reviewer
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          # Pinned by the gate: the push that queued a PR-event run, or the
+          # head at gate time for a re-run or dispatch, so approving a run
+          # approves exactly that commit.
+          ref: ${{ needs.gate.outputs.sha }}
+          path: after
+          fetch-depth: 0
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+
+      - name: Collect PR context
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node reviewer/scripts/evidence-reviewer/collect-pr.mjs "$PR" "$RUNNER_TEMP/pr.json" --repo "$GITHUB_REPOSITORY"
+          BASE_SHA=$(jq -r .baseSha "$RUNNER_TEMP/pr.json")
+          git -C after fetch -q "https://github.com/$GITHUB_REPOSITORY.git" "$BASE_SHA"
+          MERGE_BASE=$(git -C after merge-base HEAD "$BASE_SHA")
+          git -C after worktree add -q --detach "$GITHUB_WORKSPACE/before" "$MERGE_BASE"
+          echo "sha=$(git -C after rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install + build (after)
+        working-directory: after
+        run: |
+          npm install --legacy-peer-deps
+          npm run build:headless
+
+      # Reuse the head's node_modules when the lockfile didn't change, which
+      # is most PRs. A base that fails to build just means no "before" app.
+      - name: Install + build (before)
+        id: before
+        continue-on-error: true
+        working-directory: before
+        run: |
+          if cmp -s package-lock.json ../after/package-lock.json; then
+            ln -s ../after/node_modules node_modules
+          else
+            npm install --legacy-peer-deps
+          fi
+          npm run build:headless
+
+      # Agents inside Ness talk to run.mjs's local proxy, never to OpenRouter
+      # directly, so this step needs no key (see boot-ness.sh).
+      - name: Boot apps
+        env:
+          EVIDENCE_SANDBOX_USER: evidence
+          EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
+        run: |
+          AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
+          echo "AFTER_URL=$AFTER_URL" >> "$GITHUB_ENV"
+          if [ "${{ steps.before.outcome }}" = "success" ]; then
+            BEFORE_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh before 37602 before) || true
+            echo "BEFORE_URL=$BEFORE_URL" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run evidence agent
+        working-directory: after
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EVIDENCE_MODEL: ${{ inputs.model || vars.EVIDENCE_MODEL || 'anthropic/claude-haiku-5.5' }}
+          EVIDENCE_RUN_BUDGET_USD: ${{ vars.EVIDENCE_RUN_BUDGET_USD || '1' }}
+          EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::Set OPENROUTER_API_KEY as a secret on this run's environment."
+            exit 1
+          fi
+          node ../reviewer/scripts/evidence-reviewer/run.mjs \
+            --after "$AFTER_URL" \
+            ${BEFORE_URL:+--before "$BEFORE_URL"} \
+            --instructions ../reviewer/.github/evidence-reviewer/instructions.md \
+            --pr "$RUNNER_TEMP/pr.json" \
+            --ui-paths src/renderer/,src/web-client/ \
+            --out "$RUNNER_TEMP/evidence"
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: ${{ runner.temp }}/evidence-*.log
+          if-no-files-found: ignore
+
+  # Posts the report, or a crash notice if `review` failed, then fails the
+  # check when any claim was refuted. Cancelled runs (superseded by a newer
+  # run for the same PR), runs the gate skipped, and runs that never started
+  # (approval rejected) post nothing and leave publish green; review's own
+  # red is the signal there.
+  publish:
+    needs: [gate, review]
+    if: always() && (needs.review.result == 'success' || needs.review.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    env:
+      PR: ${{ needs.gate.outputs.pr }}
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE: ${{ github.workspace }}/evidence-out
+    steps:
+      - name: Checkout reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/evidence-reviewer
+
+      - uses: actions/download-artifact@v4
+        if: needs.review.result == 'success'
+        with:
+          name: evidence
+          path: ${{ env.EVIDENCE }}
+
+      - name: Write crash report
+        id: crash
+        if: needs.review.result == 'failure'
+        run: |
+          FAILED_STEP=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+            --jq '.jobs[] | select(.name == "review") | .steps[] | select(.conclusion == "failure") | .name' | head -1)
+          if [ -z "$FAILED_STEP" ]; then
+            echo "review never ran a step (approval rejected?); nothing to report"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$EVIDENCE"
+          {
+            echo "## 💥 Evidence review crashed"
+            echo
+            echo "The reviewer failed at **${FAILED_STEP}** before it could reach a verdict, so this PR has no evidence either way. The run log below has the details; re-run the job once it's fixed."
+          } > "$EVIDENCE/report.md"
+
+      # The artifact was produced next to untrusted code: only its PNGs and
+      # report.md are used, and the SHA is validated before it's interpolated.
+      - name: Publish to PR
+        if: steps.crash.outputs.skip != 'true'
+        env:
+          REVIEWED_SHA: ${{ needs.review.outputs.sha }}
+        run: |
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || REVIEWED_SHA=unknown
+          export REVIEWED_SHA
+          bash scripts/evidence-reviewer/publish.sh "$EVIDENCE" "$PR"
+
+      # inconclusive stays green: a cheap model failing to reach a screen is
+      # too common to block on. A refuted claim means the screenshots show
+      # the feature not doing what the PR says.
+      - name: Check verdict
+        if: steps.crash.outputs.skip != 'true'
+        run: |
+          if [ "${{ needs.review.result }}" = "failure" ]; then
+            echo "::error::Evidence review crashed; see the review job log."
+            exit 1
+          fi
+          REFUTED=$(jq -r '[.result.claims[]? | select(.status == "refuted") | .claim] | join("\n")' "$EVIDENCE/result.json")
+          VERDICT=$(jq -r '.result.verdict' "$EVIDENCE/result.json")
+          echo "verdict: $VERDICT"
+          if [ "$VERDICT" = "refuted" ] || [ -n "$REFUTED" ]; then
+            echo "::error::Evidence review refuted the PR's claims. See the PR comment for screenshots."
+            printf '%s\n' "$REFUTED" | sed 's/^/  ✗ /'
+            exit 1
+          fi

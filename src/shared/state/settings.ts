@@ -86,6 +86,12 @@ export type BrowserToolsMode = 'view' | 'full'
 
 export type JsonModeChatDensity = 'compact' | 'comfy'
 
+export type JsonModeChatWidth = 'reading' | 'full'
+
+/** Whether a Chat tab's Subagents column starts open or as its composer
+ *  chip. Only the default — a per-session open/close choice still wins. */
+export type SubagentsColumnDefault = 'expanded' | 'collapsed'
+
 /** Five-step UI density. Controls the root `html` font-size so every
  *  `rem`-based unit (and therefore the entire `text-xs` / `text-sm` /
  *  `text-base` / `text-lg` scale and every `w-N` / `h-N` icon) shifts
@@ -438,6 +444,13 @@ export interface SettingsState {
    *  radius for newcomers / screen-sharing. Wired via CSS variables on
    *  the chat root, so it's a pure styling switch. */
   jsonModeChatDensity: JsonModeChatDensity
+  /** 'full' (default) lets the chat transcript and composer span the
+   *  whole pane; 'reading' caps them at a comfortable line length,
+   *  centred. */
+  jsonModeChatWidth: JsonModeChatWidth
+  /** How the Subagents column starts in a session the user hasn't opened
+   *  or closed it in. */
+  subagentsColumnDefault: SubagentsColumnDefault
   /** Global UI density. Maps to a root `html` font-size — see SCALES. */
   uiScale: UiScale
   /** Id of the active Nessie colour preset — the app's primary colour.
@@ -453,6 +466,9 @@ export interface SettingsState {
    *  pinned to the top of the viewport instead, and a "Jump to prompt"
    *  button surfaces when the anchor scrolls off the top. */
   autoScrollToBottom: boolean
+  /** When true (default), a finished chat turn folds everything between
+   *  the prompt and the final answer into one summary strip. */
+  collapseFinishedTurns: boolean
   /** Permission mode applied to a freshly-spawned json-mode session.
    *  Existing sessions keep whatever mode they were in (set via the
    *  statusline picker). Default 'acceptEdits' so first-time users
@@ -595,10 +611,13 @@ export type SettingsEvent =
   | { type: 'settings/autoApproveSteerInstructionsChanged'; payload: string }
   | { type: 'settings/useSystemClaudeForJsonModeChanged'; payload: boolean }
   | { type: 'settings/jsonModeChatDensityChanged'; payload: JsonModeChatDensity }
+  | { type: 'settings/jsonModeChatWidthChanged'; payload: JsonModeChatWidth }
+  | { type: 'settings/subagentsColumnDefaultChanged'; payload: SubagentsColumnDefault }
   | { type: 'settings/uiScaleChanged'; payload: UiScale }
   | { type: 'settings/nessieColorChanged'; payload: string }
   | { type: 'settings/jsonModeSendOnEnterChanged'; payload: boolean }
   | { type: 'settings/autoScrollToBottomChanged'; payload: boolean }
+  | { type: 'settings/collapseFinishedTurnsChanged'; payload: boolean }
   | {
       type: 'settings/jsonModeDefaultPermissionModeChanged'
       payload: JsonClaudePermissionMode
@@ -681,10 +700,13 @@ export const initialSettings: SettingsState = {
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
+  jsonModeChatWidth: 'full',
+  subagentsColumnDefault: 'expanded',
   uiScale: 'small',
   nessieColor: DEFAULT_NESSIE_COLOR,
   jsonModeSendOnEnter: false,
   autoScrollToBottom: true,
+  collapseFinishedTurns: true,
   jsonModeDefaultPermissionMode: 'acceptEdits',
   jsonModeTranscriptWindow: DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
   autoSleepMinutes: 30,
@@ -755,7 +777,7 @@ function patchOverrides(
  *  window (quit confirmation, the auto-updater), and a field with no
  *  main-side reader at all is pure renderer presentation. Both are
  *  client-owned. Anything a backend module acts on — `claude-launch`,
- *  `auto-sleep-monitor`, `pr-poller`, `ci-notifier`, `wake-lock-controller`
+ *  `auto-sleep-monitor`, `pr-poller`, `worktree-subscriptions`, `wake-lock-controller`
  *  — stays workspace-owned, because the box doing the work is the one
  *  that has to obey it.
  *
@@ -794,10 +816,13 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'defaultClaudeTabType',
   'chatPromotionDismissed',
   'jsonModeChatDensity',
+  'jsonModeChatWidth',
+  'subagentsColumnDefault',
   'uiScale',
   'nessieColor',
   'jsonModeSendOnEnter',
   'autoScrollToBottom',
+  'collapseFinishedTurns',
   'jsonModeDefaultPermissionMode',
   'jsonModeTranscriptWindow',
   'snoozeDefaultDays',
@@ -844,10 +869,13 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setDefaultClaudeTabType',
   'config:setChatPromotionDismissed',
   'config:setJsonModeChatDensity',
+  'config:setJsonModeChatWidth',
+  'config:setSubagentsColumnDefault',
   'config:setUiScale',
   'config:setNessieColor',
   'config:setJsonModeSendOnEnter',
   'config:setAutoScrollToBottom',
+  'config:setCollapseFinishedTurns',
   'config:setJsonModeDefaultPermissionMode',
   'config:setJsonModeTranscriptWindow',
   'config:setSnoozeDefaultDays',
@@ -999,6 +1027,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, useSystemClaudeForJsonMode: event.payload }
     case 'settings/jsonModeChatDensityChanged':
       return { ...state, jsonModeChatDensity: event.payload }
+    case 'settings/jsonModeChatWidthChanged':
+      return { ...state, jsonModeChatWidth: event.payload }
+    case 'settings/subagentsColumnDefaultChanged':
+      return { ...state, subagentsColumnDefault: event.payload }
     case 'settings/uiScaleChanged':
       return { ...state, uiScale: event.payload }
     case 'settings/nessieColorChanged':
@@ -1007,6 +1039,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, jsonModeSendOnEnter: event.payload }
     case 'settings/autoScrollToBottomChanged':
       return { ...state, autoScrollToBottom: event.payload }
+    case 'settings/collapseFinishedTurnsChanged':
+      return { ...state, collapseFinishedTurns: event.payload }
     case 'settings/jsonModeDefaultPermissionModeChanged':
       return { ...state, jsonModeDefaultPermissionMode: event.payload }
     case 'settings/jsonModeTranscriptWindowChanged':

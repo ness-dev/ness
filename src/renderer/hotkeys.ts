@@ -24,6 +24,8 @@ export type Action =
   | 'renameTab'
   | 'nextTab'
   | 'prevTab'
+  | 'historyBack'
+  | 'historyForward'
   | 'newWorktree'
   | 'refreshWorktrees'
   | 'focusTerminal'
@@ -94,6 +96,8 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
   renameTab: { key: 'l', modifiers: { cmd: true } },
   nextTab: { key: 'Tab', modifiers: { ctrl: true } },
   prevTab: { key: 'Tab', modifiers: { ctrl: true, shift: true } },
+  historyBack: { key: '[', modifiers: { cmd: true } },
+  historyForward: { key: ']', modifiers: { cmd: true } },
   newWorktree: { key: 'n', modifiers: { cmd: true } },
   refreshWorktrees: { key: 'r', modifiers: { cmd: true, shift: true } },
   // Gesture-driven: focusTerminal fires on a double-tap of Shift (see
@@ -131,6 +135,15 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
  * modifier+key chord. The key matcher in useHotkeys skips these, and the
  * Settings rebind UI omits them — they have no editable binding. */
 export const GESTURE_ACTIONS: ReadonlySet<Action> = new Set<Action>(['focusTerminal'])
+
+/** Actions whose default chord Monaco also binds (Cmd+[ / Cmd+] are its
+ * outdent / indent). useHotkeys lets the keystroke through to the editor
+ * when one has focus; the mouse side buttons still navigate there. */
+export const EDITOR_YIELD_ACTIONS: ReadonlySet<Action> = new Set<Action>(['historyBack', 'historyForward'])
+
+export function yieldsToEditor(action: Action, target: Pick<Element, 'closest'> | null): boolean {
+  return EDITOR_YIELD_ACTIONS.has(action) && !!target?.closest('.monaco-editor')
+}
 
 const CODE_TO_KEY: Record<string, string> = {
   Comma: ',',
@@ -325,6 +338,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   renameTab: 'Rename tab',
   nextTab: 'Next tab',
   prevTab: 'Previous tab',
+  historyBack: 'Back to previous tab',
+  historyForward: 'Forward to next tab',
   newWorktree: 'New worktree',
   refreshWorktrees: 'Refresh worktrees',
   focusTerminal: 'Focus terminal',
@@ -404,7 +419,7 @@ export const ACTION_CATEGORIES: HotkeyCategory[] = [
   {
     id: 'tabs',
     label: 'Tabs & panes',
-    actions: ['newShellTab', 'closeTab', 'renameTab', 'nextTab', 'prevTab', 'focusTerminal', 'splitPaneRight', 'splitPaneDown']
+    actions: ['newShellTab', 'closeTab', 'renameTab', 'nextTab', 'prevTab', 'historyBack', 'historyForward', 'focusTerminal', 'splitPaneRight', 'splitPaneDown']
   },
   {
     id: 'layout',

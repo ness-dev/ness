@@ -12,7 +12,6 @@ export function BashCard({ block, result, autoApproved, sessionAllowed }: ToolCa
       id={block.id}
       name="Bash"
       subtitle={description ? <HighlightedText text={description} /> : trunc(cmd, 80)}
-      variant="warn"
       icon={BashIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

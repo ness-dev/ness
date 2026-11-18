@@ -1344,7 +1344,7 @@ function CiNotifyToggle({
   return (
     <label
       className="flex items-center gap-1.5 cursor-pointer text-xs text-dim hover:text-fg mt-1.5"
-      title={`Post a message naming the failing checks into this worktree's agent chat when CI goes red. Default for all worktrees: ${globalDefault ? 'on' : 'off'}.`}
+      title={`Keep this worktree's agent posted on its PR: CI failures, change requests and conflicts interrupt it, routine updates wait for its next turn. Default for all worktrees: ${globalDefault ? 'on' : 'off'}.`}
       onClick={(e) => e.stopPropagation()}
     >
       <input
@@ -1359,7 +1359,7 @@ function CiNotifyToggle({
         }}
         className="accent-current icon-base cursor-pointer"
       />
-      <span>Tell the agent when CI fails</span>
+      <span>Tell the agent about its PR</span>
     </label>
   )
 }

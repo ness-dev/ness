@@ -26,6 +26,7 @@ import {
 import type { ToolIcon } from './tool-icons'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
+import { CHAT_ROW_CLASS, CHAT_ROW_HIT_CLASS, CHAT_ROW_STYLE, Chevron } from './ChatRow'
 
 export {
   extractArgs,
@@ -111,7 +112,6 @@ export function ToolCardChrome({
   id,
   name,
   subtitle,
-  variant,
   isError,
   brand,
   icon: Icon,
@@ -139,7 +139,6 @@ export function ToolCardChrome({
   /** Accepts a ReactNode so cards whose primary render is the subtitle
    *  (Grep/Glob's pattern field) can pass a <HighlightedText> here. */
   subtitle: ReactNode
-  variant: 'info' | 'warn'
   isError?: boolean
   brand?: boolean
   icon?: ToolIcon | null
@@ -159,57 +158,40 @@ export function ToolCardChrome({
   const isOpen = forceOpen || (expanded ?? autoExpand)
   const isCurrentHit = !!id && find.currentHitBlockId === id
 
-  const ring = isCurrentHit
-    ? 'border-accent ring-2 ring-accent/50'
-    : isError
-    ? 'border-danger/50'
-    : brand
-      ? 'border-warning/40'
-      : variant === 'warn'
-        ? 'border-warning/30'
-        : 'border-border'
-  const headerBg = isError ? 'bg-danger/10' : 'bg-app/40'
-  const headerHover = isError ? 'hover:bg-danger/15' : 'hover:bg-app/60'
   // `group` enables the .group:hover .brand-gradient-flow-text-hover rule
   // (same trick the Add worktree button uses) — animated flow on hover,
   // static gradient otherwise.
-  const groupClass = brand ? 'group' : ''
-  const nameClass = brand
-    ? 'brand-gradient-text brand-gradient-flow-text-hover'
-    : 'text-accent'
+  const nameClass = isError
+    ? 'text-danger'
+    : brand
+      ? 'brand-gradient-text brand-gradient-flow-text-hover'
+      : 'text-fg'
+  const badgeClass = 'uppercase tracking-wide opacity-70 shrink-0'
 
   return (
     <div
       data-find-block-id={id}
-      className={`my-2 border ${ring} bg-panel overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
-      {brand && <div className="brand-gradient-bg h-0.5" />}
       <button
         type="button"
         onClick={() => setExpanded((v) => !(v ?? autoExpand))}
-        className={`${groupClass} w-full flex items-center gap-2 ${isOpen ? 'border-b border-border' : ''} ${headerBg} ${headerHover} cursor-pointer transition-colors text-left`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={`${CHAT_ROW_CLASS} ${brand ? 'group' : ''}`}
+        style={CHAT_ROW_STYLE}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
-        {Icon && <Icon className="icon-sm shrink-0" />}
+        <Chevron open={isOpen} />
+        {Icon && <Icon className="icon-xs shrink-0" />}
         <span
-          className={`font-semibold shrink-0 ${nameClass}`}
+          className={`font-medium shrink-0 ${nameClass}`}
           style={{ fontFamily: 'var(--chat-tool-name-family)' }}
         >
           <HighlightedText text={name} />
         </span>
-        <span className="opacity-70 truncate flex-1 min-w-0">{subtitle}</span>
+        <span className="truncate flex-1 min-w-0">{subtitle}</span>
         {autoApproved && (
           <span
             title={`auto-approved by ${autoApproved.model} · ${autoApproved.reason}`}
-            className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+            className={badgeClass}
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             auto · haiku
@@ -222,7 +204,7 @@ export function ToolCardChrome({
                 ? `allowed by saved rule · ${sessionAllowed.rule}`
                 : `allowed by session policy · ${sessionAllowed.toolName}`
             }
-            className="uppercase tracking-wide text-muted bg-app/60 border border-border/50 rounded px-1 py-0.5 shrink-0"
+            className={badgeClass}
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             {sessionAllowed.rule ? 'always' : 'session'}
@@ -238,9 +220,18 @@ export function ToolCardChrome({
         )}
       </button>
       {!isOpen && collapsedImages && (
-        <CollapsedImageStrip images={collapsedImages} />
+        <div>
+          <CollapsedImageStrip images={collapsedImages} />
+        </div>
       )}
-      {isOpen && children}
+      {isOpen && (
+        <div
+          className="mt-0.5 mb-2 bg-panel overflow-hidden"
+          style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   )
 }

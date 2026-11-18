@@ -23,6 +23,7 @@ interface SidebarProps {
   pathBackendId?: Record<string, string>
   originByPath?: Record<string, string>
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
+  onCloseTab: (worktreePath: string, tabId: string) => void
   onDismissPendingWorktree: (id: string) => void
   onNewWorktree: (repoRoot?: string) => void
   onContinueWorktree: (worktreePath: string, newBranchName: string) => Promise<void>
@@ -64,6 +65,7 @@ export function Sidebar({
   pathBackendId,
   originByPath,
   onSelectTab,
+  onCloseTab,
   onDismissPendingWorktree,
   onNewWorktree,
   onContinueWorktree,
@@ -168,6 +170,7 @@ export function Sidebar({
           pathBackendId={pathBackendId}
           originByPath={originByPath}
           onSelectTab={onSelectTab}
+          onCloseTab={onCloseTab}
           onToggleGroup={onToggleGroup}
           onToggleRepo={onToggleRepo}
           onNewWorktree={onNewWorktree}

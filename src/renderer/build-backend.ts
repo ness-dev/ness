@@ -315,6 +315,10 @@ export function buildBackend(
       reqConfig('config:setChatPromotionDismissed', value),
     setJsonModeChatDensity: (value: 'compact' | 'comfy') =>
       reqConfig('config:setJsonModeChatDensity', value),
+    setJsonModeChatWidth: (value: 'reading' | 'full') =>
+      reqConfig('config:setJsonModeChatWidth', value),
+    setSubagentsColumnDefault: (value: 'expanded' | 'collapsed') =>
+      reqConfig('config:setSubagentsColumnDefault', value),
     setUiScale: (value: 'x-small' | 'small' | 'medium' | 'large' | 'x-large') =>
       reqConfig('config:setUiScale', value),
     setNessieColor: (value: string) => reqConfig('config:setNessieColor', value),
@@ -322,6 +326,8 @@ export function buildBackend(
       reqConfig('config:setJsonModeSendOnEnter', enabled),
     setAutoScrollToBottom: (enabled: boolean) =>
       reqConfig('config:setAutoScrollToBottom', enabled),
+    setCollapseFinishedTurns: (enabled: boolean) =>
+      reqConfig('config:setCollapseFinishedTurns', enabled),
     setJsonModeDefaultPermissionMode: (value: JsonClaudePermissionMode) =>
       reqConfig('config:setJsonModeDefaultPermissionMode', value),
     setJsonModeTranscriptWindow: (value: number) =>
@@ -478,6 +484,18 @@ export function buildBackend(
     setSnoozeDefaultDays: (days: number) => reqConfig('config:setSnoozeDefaultDays', days),
     setCiNotifyOverride: (path: string, enabled: boolean | null) =>
       req('ciNotify:setOverride', path, enabled),
+    setSubscriptionMode: (
+      worktreePath: string,
+      tabId: string,
+      targetPath: string,
+      mode: 'interrupt' | 'silent'
+    ) => req('subscriptions:setMode', worktreePath, tabId, targetPath, mode),
+    unsubscribeTab: (worktreePath: string, tabId: string, targetPath: string) =>
+      req('subscriptions:unsubscribe', worktreePath, tabId, targetPath),
+    deliverHeldNotices: (worktreePath: string, tabId: string) =>
+      req('notifications:deliverHeld', worktreePath, tabId),
+    discardHeldNotices: (worktreePath: string, tabId: string) =>
+      req('notifications:discardHeld', worktreePath, tabId),
     setNotifyChatOnCiFailure: (enabled: boolean) =>
       reqConfig('config:setNotifyChatOnCiFailure', enabled),
     requestMergeConflictFix: (worktreePath: string) =>
@@ -623,6 +641,10 @@ export function buildBackend(
       onLocalSignal('app:uiScaleDown', () => callback()),
     onUiScaleReset: (callback: () => void) =>
       onLocalSignal('app:uiScaleReset', () => callback()),
+    onNavigateBack: (callback: () => void) =>
+      onLocalSignal('window:navigateBack', () => callback()),
+    onNavigateForward: (callback: () => void) =>
+      onLocalSignal('window:navigateForward', () => callback()),
     onFullscreenChanged: (callback: (isFullscreen: boolean) => void) =>
       onLocalSignal('window:fullscreenChanged', (...args: unknown[]) =>
         callback(Boolean(args[0]))

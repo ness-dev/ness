@@ -28,7 +28,6 @@ export function MultiEditCard({
       id={block.id}
       name="MultiEdit"
       subtitle={`${basename(fp)} (${edits.length} edit${edits.length === 1 ? '' : 's'})`}
-      variant="warn"
       icon={EditIcon}
       isError={result?.isError}
       autoApproved={autoApproved}
