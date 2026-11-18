@@ -795,6 +795,20 @@ describe('settingsReducer', () => {
     expect(on.collapseFinishedTurns).toBe(true)
   })
 
+  it('jsonModeChatWidthChanged switches between reading and full width', () => {
+    expect(initialSettings.jsonModeChatWidth).toBe('reading')
+    const full = apply(initialSettings, {
+      type: 'settings/jsonModeChatWidthChanged',
+      payload: 'full'
+    })
+    expect(full.jsonModeChatWidth).toBe('full')
+    const reading = apply(full, {
+      type: 'settings/jsonModeChatWidthChanged',
+      payload: 'reading'
+    })
+    expect(reading.jsonModeChatWidth).toBe('reading')
+  })
+
   it('jsonModeDefaultPermissionModeChanged sets the default and preserves other settings', () => {
     expect(initialSettings.jsonModeDefaultPermissionMode).toBe('acceptEdits')
     const start: SettingsState = {

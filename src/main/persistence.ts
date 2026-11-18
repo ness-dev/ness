@@ -318,6 +318,9 @@ export interface Config {
   // historical look). 'comfy' bumps font sizes, padding, and corner
   // radius for newcomers / screen-sharing.
   jsonModeChatDensity?: 'compact' | 'comfy'
+  // 'full' lets the chat transcript span the whole pane. Default (undefined)
+  // is 'reading', a capped, centred column.
+  jsonModeChatWidth?: 'reading' | 'full'
   // How a Chat tab's Subagents column starts. Undefined = 'expanded'.
   subagentsColumnDefault?: 'expanded' | 'collapsed'
   // Global UI density. Undefined = 'small' (the historical look at 16px

@@ -4521,6 +4521,24 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest(
+    'config:setJsonModeChatWidth',
+    (_ctx, value: 'reading' | 'full') => {
+      const next: 'reading' | 'full' = value === 'full' ? 'full' : 'reading'
+      if (next === 'reading') {
+        delete config.jsonModeChatWidth
+      } else {
+        config.jsonModeChatWidth = 'full'
+      }
+      saveConfig(config)
+      store.dispatch({
+        type: 'settings/jsonModeChatWidthChanged',
+        payload: next
+      })
+      return true
+    }
+  )
+
+  transport.onRequest(
     'config:setJsonModeChatDensity',
     (_ctx, value: 'compact' | 'comfy') => {
       const next: 'compact' | 'comfy' = value === 'comfy' ? 'comfy' : 'compact'

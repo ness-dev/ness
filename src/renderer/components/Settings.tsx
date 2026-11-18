@@ -453,6 +453,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     wsTransportHost,
     defaultClaudeTabType,
     jsonModeChatDensity,
+    jsonModeChatWidth,
     subagentsColumnDefault,
     uiScale,
     nessieColor,
@@ -2577,6 +2578,44 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       }`}
                     >
                       Comfy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="block text-xs font-medium text-fg mb-1">
+                    Chat width
+                  </label>
+                  <div className="text-xs text-dim mb-2">
+                    Reading caps the transcript and composer at a comfortable
+                    line length on wide panes. Full lets them span the pane.
+                  </div>
+                  <div className="inline-flex rounded border border-border-strong overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setJsonModeChatWidth('reading')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors ${
+                        jsonModeChatWidth === 'reading'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Reading
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void backend.setJsonModeChatWidth('full')
+                      }}
+                      className={`px-3 py-1 text-xs cursor-pointer transition-colors border-l border-border-strong ${
+                        jsonModeChatWidth === 'full'
+                          ? 'bg-accent/20 text-fg-bright'
+                          : 'bg-panel text-muted hover:bg-panel-raised'
+                      }`}
+                    >
+                      Full
                     </button>
                   </div>
                 </div>

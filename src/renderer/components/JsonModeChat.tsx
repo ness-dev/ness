@@ -1540,6 +1540,7 @@ export function JsonModeChat({
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
   const {
     jsonModeChatDensity: density,
+    jsonModeChatWidth,
     jsonModeSendOnEnter: sendOnEnter,
     autoScrollToBottom,
     collapseFinishedTurns,
@@ -2926,6 +2927,12 @@ export function JsonModeChat({
           ? 'bg-danger'
           : 'bg-faint'
 
+  // Applied separately to the transcript, the auto-allow strip and the
+  // composer so they share one centred column while each scrolls or
+  // resizes on its own.
+  const columnClass =
+    jsonModeChatWidth === 'reading' ? 'w-full max-w-[var(--chat-column-max)] mx-auto' : ''
+
   return (
     <div
       ref={outerDivRef}
@@ -3124,7 +3131,7 @@ export function JsonModeChat({
                 </div>
               ) : null
             ) : (
-            <div className="px-4 py-3 space-y-3">
+            <div className={`px-4 py-3 space-y-3 ${columnClass}`}>
               {hiddenEntryCount > 0 && (
                 <div className="flex items-center justify-center gap-2 pb-1">
                   <button
@@ -3224,7 +3231,7 @@ export function JsonModeChat({
         />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
-        <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
+        <div className={`shrink-0 px-3 pt-1 flex items-center gap-2 text-xs text-muted ${columnClass}`}>
           <span className="opacity-70">auto-allowing:</span>
           <span className="font-mono truncate">
             {session.sessionToolApprovals.join(', ')}
@@ -3248,7 +3255,7 @@ export function JsonModeChat({
           onDoubleClick={resetComposerHeight}
           title="Drag to resize the prompt · double-click to reset"
         />
-        <div className="p-2">
+        <div className={`p-2 ${columnClass}`}>
         <div className="relative rounded-md border border-border bg-panel focus-within:border-accent transition-colors">
           {mentionItems.length > 0 && (
             <JsonModeMentionPopover
