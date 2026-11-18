@@ -446,6 +446,14 @@ export class JsonClaudeManager implements ChatProvider {
         continue
       }
       const type = parsed['type']
+      // When the line was written, not when we replay it — a turn's
+      // elapsed time is read off these, and stamping them all at parse
+      // time made every reloaded turn look instant.
+      const parsedTs =
+        typeof parsed['timestamp'] === 'string'
+          ? Date.parse(parsed['timestamp'] as string)
+          : NaN
+      const lineTs = Number.isFinite(parsedTs) ? parsedTs : Date.now()
       // The session jsonl contains the same user/assistant message
       // shapes the live stream emits, plus internal bookkeeping types
       // (queue-operation, attachment, ai-title, last-prompt) we ignore.
@@ -477,7 +485,7 @@ export class JsonClaudeManager implements ChatProvider {
           seededEntries.push({
             kind: 'user',
             ...turn,
-            timestamp: Date.now(),
+            timestamp: lineTs,
             entryId: `${sessionId}-seed-u-${counter++}`,
             ...(transcriptUuid ? { transcriptUuid } : {})
           })
@@ -486,7 +494,7 @@ export class JsonClaudeManager implements ChatProvider {
             seededEntries.push({
               entryId: `${sessionId}-tr-${r.toolUseId}-${seededEntries.length}`,
               kind: 'tool_result',
-              timestamp: Date.now(),
+              timestamp: lineTs,
               ...(transcriptUuid ? { transcriptUuid } : {}),
               blocks: [
                 {
@@ -517,7 +525,7 @@ export class JsonClaudeManager implements ChatProvider {
         seededEntries.push({
           kind: 'assistant',
           blocks,
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-a-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(apiMessageId ? { apiMessageId } : {}),
@@ -543,7 +551,7 @@ export class JsonClaudeManager implements ChatProvider {
         seededEntries.push({
           kind: 'user',
           ...turn,
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-u-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {})
         })
@@ -561,7 +569,7 @@ export class JsonClaudeManager implements ChatProvider {
           typeof meta?.postTokens === 'number' ? meta.postTokens : undefined
         seededEntries.push({
           kind: 'compact',
-          timestamp: Date.now(),
+          timestamp: lineTs,
           entryId: `${sessionId}-seed-c-${counter++}`,
           ...(transcriptUuid ? { transcriptUuid } : {}),
           ...(trigger ? { compactTrigger: trigger } : {}),

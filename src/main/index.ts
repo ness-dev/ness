@@ -4610,6 +4610,24 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest(
+    'config:setCollapseFinishedTurns',
+    (_ctx, value: boolean) => {
+      const next = value !== false
+      if (next) {
+        delete config.collapseFinishedTurns
+      } else {
+        config.collapseFinishedTurns = false
+      }
+      saveConfig(config)
+      store.dispatch({
+        type: 'settings/collapseFinishedTurnsChanged',
+        payload: next
+      })
+      return true
+    }
+  )
+
+  transport.onRequest(
     'config:setJsonModeDefaultPermissionMode',
     (_ctx, value: JsonClaudePermissionMode) => {
       const next: JsonClaudePermissionMode = isJsonClaudePermissionMode(value)

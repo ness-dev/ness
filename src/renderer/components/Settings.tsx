@@ -458,6 +458,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     nessieColor,
     jsonModeSendOnEnter,
     autoScrollToBottom,
+    collapseFinishedTurns,
     jsonModeDefaultPermissionMode,
     jsonModeTranscriptWindow,
     autoSleepMinutes,
@@ -2655,6 +2656,26 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       </div>
                       <div className="text-xs text-dim mt-0.5">
                         When on, chat follows the streaming response. When off, the most recent prompt pins to the top and a "Jump to prompt" button appears if you scroll away.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={collapseFinishedTurns}
+                      onChange={(e) => {
+                        void backend.setCollapseFinishedTurns(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base" />
+                    <div className="flex-1">
+                      <div className="text-sm text-fg-bright">
+                        Collapse finished turns
+                      </div>
+                      <div className="text-xs text-dim mt-0.5">
+                        Once a turn finishes, its tool calls and in-between messages fold into one summary line above the final answer. Click the line to expand it.
                       </div>
                     </div>
                   </label>

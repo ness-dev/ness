@@ -54,6 +54,12 @@ import {
 } from './json-mode-cards'
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
+import { TurnGroup } from './json-mode-cards/TurnGroup'
+import {
+  foldFinishedTurns,
+  getEditedPaths,
+  type TurnSummary
+} from './json-mode-cards/turn-collapse'
 import { TaskCard } from './json-mode-cards/TaskCard'
 import { buildChildrenMap, isSubAgentToolName } from './json-mode-cards/grouping'
 import { JsonModeMentionPopover, type MentionPopoverItem } from './JsonModeMentionPopover'
@@ -445,6 +451,12 @@ interface RenderedRow {
    *  agent work between user-facing replies), but ToolGroup counts it
    *  separately in the header. */
   isThinking?: boolean
+  /** Fields read by foldFinishedTurns — see TurnRow. */
+  timestamp?: number
+  isTurnStart?: boolean
+  isTurnError?: boolean
+  editedPaths?: string[]
+  coveredEntryIds?: string[]
 }
 
 function ThinkingCard({
@@ -1121,6 +1133,8 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
 
 interface RenderContext {
   resultsByToolUseId: Map<string, ToolResultView>
+  /** tool_use id → the tool_result entry that carried its output. */
+  resultEntryIdByToolUseId: Map<string, string>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
   approvalCard: (toolUseId: string | undefined) => ReactNode
   pendingToolUseIds: Set<string>
@@ -1161,6 +1175,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnStart: !entry.isQueued,
         node: (
           <AutomatedTurnCard
             source={entry.automation}
@@ -1179,6 +1194,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnStart: !queued,
         node: queued ? (
           <div className="flex justify-end">
             <div
@@ -1269,6 +1285,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'text',
+        isTurnError: true,
         node: (
           <SubprocessExitCard
             message={entry.errorMessage ?? defaultMsg}
@@ -1285,6 +1302,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: (
           <AuthFailureCard
             message={entry.errorMessage}
@@ -1314,6 +1332,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: <AgentErrorCard message={entry.errorMessage ?? 'The agent reported an error'} />
       })
       continue
@@ -1323,6 +1342,7 @@ function renderEntries(
         key: entry.entryId,
         entryId: entry.entryId,
         type: 'tool',
+        isTurnError: true,
         node: (
           <RateLimitErrorCard
             message={entry.errorMessage ?? 'Rate limit reached'}
@@ -1391,6 +1411,10 @@ function renderEntries(
           let subAgentBody: ReactNode = null
           let subAgentChildCount = 0
           let subAgentDescendantHasPendingApproval = false
+          const resultEntryId = block.id
+            ? ctx.resultEntryIdByToolUseId.get(block.id)
+            : undefined
+          const coveredEntryIds = resultEntryId ? [resultEntryId] : []
           if (isSubAgentToolName(block.name) && block.id) {
             const childEntries =
               ctx.childrenByParentToolUseId.get(block.id) ?? []
@@ -1400,6 +1424,10 @@ function renderEntries(
               subAgentDescendantHasPendingApproval = childRows.some(
                 (r) => r.hasPendingApproval
               )
+              for (const c of childEntries) coveredEntryIds.push(c.entryId)
+              for (const r of childRows) {
+                coveredEntryIds.push(...(r.coveredEntryIds ?? []))
+              }
               subAgentBody = renderGroupedItems(
                 groupConsecutiveToolRows(childRows)
               )
@@ -1413,6 +1441,8 @@ function renderEntries(
             toolIntent: getToolIntent(block) ?? undefined,
             hasError: !!result?.isError,
             images: result?.images,
+            editedPaths: getEditedPaths(block.name, block.input),
+            ...(coveredEntryIds.length > 0 ? { coveredEntryIds } : {}),
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,
@@ -1458,6 +1488,10 @@ function renderEntries(
     }
     // tool_result entries are folded into their tool_use cards above.
   }
+  const timestampById = new Map(entries.map((e) => [e.entryId, e.timestamp]))
+  for (const r of rows) {
+    if (r.entryId) r.timestamp = timestampById.get(r.entryId)
+  }
   return rows
 }
 
@@ -1466,6 +1500,18 @@ interface GroupedItem {
   key: string
   rows: RenderedRow[]
 }
+
+/** A top-level transcript item: a row or tool group, or a finished turn
+ *  folded behind its summary strip. */
+type DisplayItem =
+  | GroupedItem
+  | {
+      kind: 'turn'
+      key: string
+      rows: RenderedRow[]
+      summary: TurnSummary
+      items: GroupedItem[]
+    }
 
 function groupConsecutiveToolRows(rows: RenderedRow[]): GroupedItem[] {
   const out: GroupedItem[] = []
@@ -1535,6 +1581,7 @@ export function JsonModeChat({
     jsonModeChatDensity: density,
     jsonModeSendOnEnter: sendOnEnter,
     autoScrollToBottom,
+    collapseFinishedTurns,
     jsonModeTranscriptWindow,
     defaultClaudeTabType,
     conversationForkEnabled,
@@ -2085,10 +2132,12 @@ export function JsonModeChat({
     // entries array (results live in top-level tool_result entries
     // even when their corresponding tool_use was a sub-agent's call).
     const resultsByToolUseId = new Map<string, ToolResultView>()
+    const resultEntryIdByToolUseId = new Map<string, string>()
     for (const entry of deferredEntries) {
       if (entry.kind !== 'tool_result' || !entry.blocks) continue
       for (const b of entry.blocks) {
         if (b.type === 'tool_result' && b.toolUseId) {
+          resultEntryIdByToolUseId.set(b.toolUseId, entry.entryId)
           resultsByToolUseId.set(b.toolUseId, {
             content: b.content || '',
             isError: !!b.isError,
@@ -2125,6 +2174,7 @@ export function JsonModeChat({
       hiddenEntryCount: windowStart,
       rows: renderEntries(windowedEntries, {
         resultsByToolUseId,
+        resultEntryIdByToolUseId,
         childrenByParentToolUseId,
         backgroundAgents,
         approvalCard: renderApprovalForToolUseId,
@@ -2172,10 +2222,30 @@ export function JsonModeChat({
     session?.state
   ])
 
-  const groupedItems = useMemo(() => groupConsecutiveToolRows(rows), [rows])
+  const sessionBusy = !!session?.busy
+  const turnStartedAt = session?.turnStartedAt
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    if (!collapseFinishedTurns) return groupConsecutiveToolRows(rows)
+    return foldFinishedTurns(rows, {
+      busy: sessionBusy,
+      turnStartedAt
+    }).flatMap((item): DisplayItem[] =>
+      item.kind === 'rows'
+        ? groupConsecutiveToolRows(item.rows)
+        : [
+            {
+              kind: 'turn',
+              key: item.key,
+              rows: item.rows,
+              summary: item.summary,
+              items: groupConsecutiveToolRows(item.rows)
+            }
+          ]
+    )
+  }, [rows, collapseFinishedTurns, sessionBusy, turnStartedAt])
 
   // The anchor for "pin prompt to top" mode is the most recent non-queued
-  // user entry. Derived from `entries` (not `groupedItems`) so the id is
+  // user entry. Derived from `entries` (not `displayItems`) so the id is
   // stable across group-shape changes (e.g. tool_use turns that resolve to
   // a single group after streaming completes).
   const lastUserEntryId = useMemo<string | null>(() => {
@@ -2267,6 +2337,32 @@ export function JsonModeChat({
     },
     [rewindDisabledReason, forkDisabledReason]
   )
+  // Rewind is only meaningful on assistant rows — right-clicking a user
+  // bubble or any other kind of row falls through to the browser default.
+  // For ToolGroup the target is the first tool's parent assistant entry,
+  // which is exactly the entry to rewind to. Rows inside an expanded
+  // TurnGroup go through here too, so each keeps its own menu.
+  const renderTranscriptItem = (g: GroupedItem): JSX.Element => {
+    const targetEntryId = g.rows[0]?.entryId
+    const targetEntry = targetEntryId
+      ? entries[entryIndexById.get(targetEntryId) ?? -1]
+      : undefined
+    const onContextMenu =
+      hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
+        ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
+        : undefined
+    const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
+    const anchorRef = isAnchor
+      ? (el: HTMLDivElement | null): void => {
+          anchorPromptRef.current = el
+        }
+      : undefined
+    return (
+      <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
+        {g.kind === 'single' ? g.rows[0].node : <ToolGroup rows={g.rows} />}
+      </div>
+    )
+  }
   const performRewind = useCallback(
     async (entryId: string) => {
       setRewindMenu(null)
@@ -3089,36 +3185,15 @@ export function JsonModeChat({
                   )}
                 </div>
               )}
-              {groupedItems.map((g) => {
-                // Rewind is only meaningful on assistant rows — right-
-                // clicking a user bubble or any other kind of row falls
-                // through to the browser default. For ToolGroup the
-                // target is the first tool's parent assistant entry,
-                // which is exactly the entry to rewind to.
-                const targetEntryId = g.rows[0]?.entryId
-                const targetEntry = targetEntryId
-                  ? entries[entryIndexById.get(targetEntryId) ?? -1]
-                  : undefined
-                const onContextMenu =
-                  hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
-                    ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
-                    : undefined
-                const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
-                const anchorRef = isAnchor
-                  ? (el: HTMLDivElement | null): void => {
-                      anchorPromptRef.current = el
-                    }
-                  : undefined
-                return g.kind === 'single' ? (
-                  <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                    {g.rows[0].node}
-                  </div>
+              {displayItems.map((d) =>
+                d.kind === 'turn' ? (
+                  <TurnGroup key={d.key} rows={d.rows} summary={d.summary}>
+                    {d.items.map(renderTranscriptItem)}
+                  </TurnGroup>
                 ) : (
-                  <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                    <ToolGroup rows={g.rows} />
-                  </div>
+                  renderTranscriptItem(d)
                 )
-              })}
+              )}
               {orphanApprovals.map((a) => (
                 <JsonClaudeApprovalCard
                   key={a.requestId}

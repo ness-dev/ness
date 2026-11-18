@@ -460,6 +460,9 @@ export interface SettingsState {
    *  pinned to the top of the viewport instead, and a "Jump to prompt"
    *  button surfaces when the anchor scrolls off the top. */
   autoScrollToBottom: boolean
+  /** When true (default), a finished chat turn folds everything between
+   *  the prompt and the final answer into one summary strip. */
+  collapseFinishedTurns: boolean
   /** Permission mode applied to a freshly-spawned json-mode session.
    *  Existing sessions keep whatever mode they were in (set via the
    *  statusline picker). Default 'acceptEdits' so first-time users
@@ -607,6 +610,7 @@ export type SettingsEvent =
   | { type: 'settings/nessieColorChanged'; payload: string }
   | { type: 'settings/jsonModeSendOnEnterChanged'; payload: boolean }
   | { type: 'settings/autoScrollToBottomChanged'; payload: boolean }
+  | { type: 'settings/collapseFinishedTurnsChanged'; payload: boolean }
   | {
       type: 'settings/jsonModeDefaultPermissionModeChanged'
       payload: JsonClaudePermissionMode
@@ -694,6 +698,7 @@ export const initialSettings: SettingsState = {
   nessieColor: DEFAULT_NESSIE_COLOR,
   jsonModeSendOnEnter: false,
   autoScrollToBottom: true,
+  collapseFinishedTurns: true,
   jsonModeDefaultPermissionMode: 'acceptEdits',
   jsonModeTranscriptWindow: DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW,
   autoSleepMinutes: 30,
@@ -808,6 +813,7 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'nessieColor',
   'jsonModeSendOnEnter',
   'autoScrollToBottom',
+  'collapseFinishedTurns',
   'jsonModeDefaultPermissionMode',
   'jsonModeTranscriptWindow',
   'snoozeDefaultDays',
@@ -859,6 +865,7 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setNessieColor',
   'config:setJsonModeSendOnEnter',
   'config:setAutoScrollToBottom',
+  'config:setCollapseFinishedTurns',
   'config:setJsonModeDefaultPermissionMode',
   'config:setJsonModeTranscriptWindow',
   'config:setSnoozeDefaultDays',
@@ -1020,6 +1027,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, jsonModeSendOnEnter: event.payload }
     case 'settings/autoScrollToBottomChanged':
       return { ...state, autoScrollToBottom: event.payload }
+    case 'settings/collapseFinishedTurnsChanged':
+      return { ...state, collapseFinishedTurns: event.payload }
     case 'settings/jsonModeDefaultPermissionModeChanged':
       return { ...state, jsonModeDefaultPermissionMode: event.payload }
     case 'settings/jsonModeTranscriptWindowChanged':
