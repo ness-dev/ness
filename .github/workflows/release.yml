@@ -79,7 +79,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # electron-vite@5's peer range rejects vite@7/8 under strict
@@ -158,7 +158,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # libnss3/libgbm1 keep Electron's sandbox happy if anything tries
