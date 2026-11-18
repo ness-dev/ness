@@ -2908,193 +2908,193 @@ export function JsonModeChat({
         </div>
       )}
       <div className="flex-1 min-h-0 flex">
-      <div className="relative flex-1 min-w-0 flex flex-col">
-        <div className="absolute top-2 left-2 z-30 pointer-events-auto">
-          <FindOverlay controller={find} inputRef={findInputRef} />
-        </div>
-        <FindContext.Provider value={find.contextValue}>
-        <div
-          ref={scrollRef}
-          onScroll={onScroll}
-          tabIndex={0}
-          onKeyDown={(e) => {
-            // Escape parks focus here so bare-key hotkeys work; Enter puts
-            // it back in the composer. Guarded to the container itself so
-            // Enter on a focused button inside the transcript (Allow, Deny,
-            // a collapsed card) still activates that button.
-            if (e.key === 'Enter' && e.target === e.currentTarget) {
-              e.preventDefault()
-              textareaRef.current?.focus()
-            }
-          }}
-          // focus-visible, not focus: a click into the transcript to scroll
-          // or select text shouldn't draw a ring, but arriving here from
-          // Escape should — that's the moment the user needs to see that
-          // the composer no longer has the keystroke.
-          className="flex-1 overflow-y-auto overflow-x-hidden outline-none focus-visible:ring-1 focus-visible:ring-accent/40 focus-visible:ring-inset"
-          style={{ overflowAnchor: 'none' }}
-        >
-          {/* Stable wrapper so the auto-scroll ResizeObserver (mounted once
-              with empty deps) always has a firstElementChild to observe.
-              Without it, a fresh chat mounts with entriesHydrated=false and
-              the empty-state ternary returns null, leaving the scroll
-              container childless — the RO is never attached and streaming
-              tokens after entries hydrate don't snap to bottom. */}
-          <div className="min-h-full flex flex-col">
-          {entries.length === 0 && orphanApprovals.length === 0 && !busy ? (
-            // Empty-state is only safe to show once we've confirmed there's
-            // nothing to display. The wire snapshot ships entries stripped
-            // (entriesHydrated=false) and the lazy-fetch above seeds them
-            // shortly after mount — rendering the bright sparkle card in
-            // that window flashes loudly on tabs that actually have history.
-            // Render blank during the fetch; a spinner's appear-then-
-            // disappear would itself be a flash. A provider that loads
-            // history from the agent (Codex) takes seconds rather than a
-            // frame, so that case does get a quiet loading line.
-            historyPending ? (
-              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
-                <Loader2 className="icon-xs animate-spin" />
-                Loading conversation…
-              </div>
-            ) : entriesHydrated ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
-                <div className="relative mb-6">
-                  <div
-                    className="absolute inset-0 rounded-full blur-2xl opacity-30 brand-gradient-bg"
-                    aria-hidden
-                  />
-                  <div className="relative w-16 h-16 rounded-full brand-gradient-bg flex items-center justify-center shadow-lg">
-                    <Sparkles className="w-[1.625rem] h-[1.625rem] text-white" />
+        <div className="relative flex-1 min-w-0 flex flex-col">
+          <div className="absolute top-2 left-2 z-30 pointer-events-auto">
+            <FindOverlay controller={find} inputRef={findInputRef} />
+          </div>
+          <FindContext.Provider value={find.contextValue}>
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              // Escape parks focus here so bare-key hotkeys work; Enter puts
+              // it back in the composer. Guarded to the container itself so
+              // Enter on a focused button inside the transcript (Allow, Deny,
+              // a collapsed card) still activates that button.
+              if (e.key === 'Enter' && e.target === e.currentTarget) {
+                e.preventDefault()
+                textareaRef.current?.focus()
+              }
+            }}
+            // focus-visible, not focus: a click into the transcript to scroll
+            // or select text shouldn't draw a ring, but arriving here from
+            // Escape should — that's the moment the user needs to see that
+            // the composer no longer has the keystroke.
+            className="flex-1 overflow-y-auto overflow-x-hidden outline-none focus-visible:ring-1 focus-visible:ring-accent/40 focus-visible:ring-inset"
+            style={{ overflowAnchor: 'none' }}
+          >
+            {/* Stable wrapper so the auto-scroll ResizeObserver (mounted once
+                with empty deps) always has a firstElementChild to observe.
+                Without it, a fresh chat mounts with entriesHydrated=false and
+                the empty-state ternary returns null, leaving the scroll
+                container childless — the RO is never attached and streaming
+                tokens after entries hydrate don't snap to bottom. */}
+            <div className="min-h-full flex flex-col">
+            {entries.length === 0 && orphanApprovals.length === 0 && !busy ? (
+              // Empty-state is only safe to show once we've confirmed there's
+              // nothing to display. The wire snapshot ships entries stripped
+              // (entriesHydrated=false) and the lazy-fetch above seeds them
+              // shortly after mount — rendering the bright sparkle card in
+              // that window flashes loudly on tabs that actually have history.
+              // Render blank during the fetch; a spinner's appear-then-
+              // disappear would itself be a flash. A provider that loads
+              // history from the agent (Codex) takes seconds rather than a
+              // frame, so that case does get a quiet loading line.
+              historyPending ? (
+                <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted select-none">
+                  <Loader2 className="icon-xs animate-spin" />
+                  Loading conversation…
+                </div>
+              ) : entriesHydrated ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center px-4 select-none">
+                  <div className="relative mb-6">
+                    <div
+                      className="absolute inset-0 rounded-full blur-2xl opacity-30 brand-gradient-bg"
+                      aria-hidden
+                    />
+                    <div className="relative w-16 h-16 rounded-full brand-gradient-bg flex items-center justify-center shadow-lg">
+                      <Sparkles className="w-[1.625rem] h-[1.625rem] text-white" />
+                    </div>
                   </div>
+                  <h2 className="text-lg font-semibold brand-gradient-text">
+                    What are we going to build today?
+                  </h2>
+                  <p className="mt-2 text-xs text-muted">
+                    Send a message to get started.
+                  </p>
                 </div>
-                <h2 className="text-lg font-semibold brand-gradient-text">
-                  What are we going to build today?
-                </h2>
-                <p className="mt-2 text-xs text-muted">
-                  Send a message to get started.
-                </p>
-              </div>
-            ) : null
-          ) : (
-          <div className="px-4 py-3 space-y-3">
-            {hiddenEntryCount > 0 && (
-              <div className="flex items-center justify-center gap-2 pb-1">
-                <button
-                  onClick={() => showEarlierEntries(windowStep)}
-                  className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
-                >
-                  Show {Math.min(hiddenEntryCount, windowStep)} earlier{' '}
-                  {Math.min(hiddenEntryCount, windowStep) === 1
-                    ? 'message'
-                    : 'messages'}
-                </button>
-                {hiddenEntryCount > windowStep && (
+              ) : null
+            ) : (
+            <div className="px-4 py-3 space-y-3">
+              {hiddenEntryCount > 0 && (
+                <div className="flex items-center justify-center gap-2 pb-1">
                   <button
-                    onClick={() => showEarlierEntries(hiddenEntryCount)}
-                    className="text-xs text-muted hover:text-fg cursor-pointer"
+                    onClick={() => showEarlierEntries(windowStep)}
+                    className="text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded px-2 py-1 cursor-pointer"
                   >
-                    Show all ({hiddenEntryCount})
+                    Show {Math.min(hiddenEntryCount, windowStep)} earlier{' '}
+                    {Math.min(hiddenEntryCount, windowStep) === 1
+                      ? 'message'
+                      : 'messages'}
                   </button>
-                )}
-              </div>
-            )}
-            {groupedItems.map((g) => {
-              // Rewind is only meaningful on assistant rows — right-
-              // clicking a user bubble or any other kind of row falls
-              // through to the browser default. For ToolGroup the
-              // target is the first tool's parent assistant entry,
-              // which is exactly the entry to rewind to.
-              const targetEntryId = g.rows[0]?.entryId
-              const targetEntry = targetEntryId
-                ? entries[entryIndexById.get(targetEntryId) ?? -1]
-                : undefined
-              const onContextMenu =
-                hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
-                  ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
+                  {hiddenEntryCount > windowStep && (
+                    <button
+                      onClick={() => showEarlierEntries(hiddenEntryCount)}
+                      className="text-xs text-muted hover:text-fg cursor-pointer"
+                    >
+                      Show all ({hiddenEntryCount})
+                    </button>
+                  )}
+                </div>
+              )}
+              {groupedItems.map((g) => {
+                // Rewind is only meaningful on assistant rows — right-
+                // clicking a user bubble or any other kind of row falls
+                // through to the browser default. For ToolGroup the
+                // target is the first tool's parent assistant entry,
+                // which is exactly the entry to rewind to.
+                const targetEntryId = g.rows[0]?.entryId
+                const targetEntry = targetEntryId
+                  ? entries[entryIndexById.get(targetEntryId) ?? -1]
                   : undefined
-              const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
-              const anchorRef = isAnchor
-                ? (el: HTMLDivElement | null): void => {
-                    anchorPromptRef.current = el
-                  }
-                : undefined
-              return g.kind === 'single' ? (
-                <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                  {g.rows[0].node}
-                </div>
-              ) : (
-                <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
-                  <ToolGroup rows={g.rows} />
-                </div>
-              )
-            })}
-            {orphanApprovals.map((a) => (
-              <JsonClaudeApprovalCard
-                key={a.requestId}
-                approval={a}
-                onResolve={(result) => resolve(a.requestId, result)}
-              />
-            ))}
-            {(() => {
-              // In-chat "agent is working" indicator. Visible whenever the
-              // turn is in flight and no other UI element already signals
-              // progress. Suppressed while a text block is streaming (the
-              // partial entry's cursor is at the end of the text) or a
-              // tool_use block is on screen (its placeholder card signals
-              // the call is being prepared). The remaining gap cases — empty
-              // partial entry just after message_start, partial entry whose
-              // last block is a finalized thinking card waiting for the
-              // next content_block_start (e.g. the agent is about to emit
-              // a big tool call) — are exactly when nothing else moves on
-              // screen, so the spinner reassures the user the agent didn't
-              // freeze.
-              if (!busy) return null
-              const last = session?.entries[session.entries.length - 1]
-              const lastBlock = last?.kind === 'assistant' && last.blocks?.length
-                ? last.blocks[last.blocks.length - 1]
-                : null
-              const showWhileStreaming =
-                last?.kind === 'assistant' && last.isPartial &&
-                (lastBlock?.type === 'text' || lastBlock?.type === 'tool_use')
-              if (showWhileStreaming) return null
-              return (
-                <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted italic">
-                  <span className="json-claude-spinner" aria-label="working" />
-                  <span>thinking…</span>
-                </div>
-              )
-            })()}
+                const onContextMenu =
+                  hasMessageMenu && targetEntryId && targetEntry?.kind === 'assistant'
+                    ? (e: ReactMouseEvent): void => openRewindMenu(targetEntryId, e)
+                    : undefined
+                const isAnchor = targetEntryId != null && targetEntryId === lastUserEntryId
+                const anchorRef = isAnchor
+                  ? (el: HTMLDivElement | null): void => {
+                      anchorPromptRef.current = el
+                    }
+                  : undefined
+                return g.kind === 'single' ? (
+                  <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
+                    {g.rows[0].node}
+                  </div>
+                ) : (
+                  <div key={g.key} ref={anchorRef} onContextMenu={onContextMenu}>
+                    <ToolGroup rows={g.rows} />
+                  </div>
+                )
+              })}
+              {orphanApprovals.map((a) => (
+                <JsonClaudeApprovalCard
+                  key={a.requestId}
+                  approval={a}
+                  onResolve={(result) => resolve(a.requestId, result)}
+                />
+              ))}
+              {(() => {
+                // In-chat "agent is working" indicator. Visible whenever the
+                // turn is in flight and no other UI element already signals
+                // progress. Suppressed while a text block is streaming (the
+                // partial entry's cursor is at the end of the text) or a
+                // tool_use block is on screen (its placeholder card signals
+                // the call is being prepared). The remaining gap cases — empty
+                // partial entry just after message_start, partial entry whose
+                // last block is a finalized thinking card waiting for the
+                // next content_block_start (e.g. the agent is about to emit
+                // a big tool call) — are exactly when nothing else moves on
+                // screen, so the spinner reassures the user the agent didn't
+                // freeze.
+                if (!busy) return null
+                const last = session?.entries[session.entries.length - 1]
+                const lastBlock = last?.kind === 'assistant' && last.blocks?.length
+                  ? last.blocks[last.blocks.length - 1]
+                  : null
+                const showWhileStreaming =
+                  last?.kind === 'assistant' && last.isPartial &&
+                  (lastBlock?.type === 'text' || lastBlock?.type === 'tool_use')
+                if (showWhileStreaming) return null
+                return (
+                  <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted italic">
+                    <span className="json-claude-spinner" aria-label="working" />
+                    <span>thinking…</span>
+                  </div>
+                )
+              })()}
+            </div>
+            )}
+            </div>
           </div>
+          </FindContext.Provider>
+          {showJumpToBottom && (
+            <button
+              onClick={jumpToBottom}
+              className="absolute right-4 bottom-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
+              title="Jump to bottom"
+            >
+              <ChevronDown className="icon-xs" />
+              <span>Jump to bottom</span>
+            </button>
           )}
-          </div>
+          {showJumpToPrompt && (
+            <button
+              onClick={jumpToPrompt}
+              className="absolute right-4 top-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
+              title="Jump to prompt"
+            >
+              <ChevronUp className="icon-xs" />
+              <span>Jump to prompt</span>
+            </button>
+          )}
         </div>
-        </FindContext.Provider>
-        {showJumpToBottom && (
-          <button
-            onClick={jumpToBottom}
-            className="absolute right-4 bottom-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
-            title="Jump to bottom"
-          >
-            <ChevronDown className="icon-xs" />
-            <span>Jump to bottom</span>
-          </button>
-        )}
-        {showJumpToPrompt && (
-          <button
-            onClick={jumpToPrompt}
-            className="absolute right-4 top-4 z-10 px-3 py-1.5 rounded-full bg-accent text-white text-xs shadow-lg hover:bg-accent/90 cursor-pointer flex items-center gap-1.5"
-            title="Jump to prompt"
-          >
-            <ChevronUp className="icon-xs" />
-            <span>Jump to prompt</span>
-          </button>
-        )}
-      </div>
-      <ChatAgentColumn
-        sessionId={sessionId}
-        active={showSubagents && mode === 'awake'}
-        chipSlot={subagentChipSlot}
-      />
+        <ChatAgentColumn
+          sessionId={sessionId}
+          active={showSubagents && mode === 'awake'}
+          chipSlot={subagentChipSlot}
+        />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
         <div className="shrink-0 border-t border-border bg-panel/40 px-3 py-1 flex items-center gap-2 text-xs text-muted">
