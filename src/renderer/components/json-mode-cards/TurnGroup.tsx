@@ -55,7 +55,6 @@ export function TurnGroup({
           {isOpen ? '▾' : '▸'}
         </span>
         <span className="shrink-0">{summaryLabel(summary)}</span>
-        <span className="flex-1 h-px bg-border/60" />
         {hasError && (
           <span
             className="text-danger/80 uppercase tracking-wide shrink-0"
@@ -71,7 +70,7 @@ export function TurnGroup({
         </div>
       )}
       {isOpen && (
-        <div className="mt-2 pl-3 border-l border-border/60 space-y-3">
+        <div className="mt-2 space-y-3">
           {children}
         </div>
       )}
