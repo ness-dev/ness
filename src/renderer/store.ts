@@ -34,7 +34,10 @@ import {
   type WireSnapshotState
 } from '../shared/state'
 import { findLeafByTabId, type PtyStatus } from '../shared/state/terminals'
-import { firstDraftForTerminal } from '../shared/state/copy-drafts'
+import {
+  firstDraftForTerminal,
+  firstWithdrawnDraftForTerminal
+} from '../shared/state/copy-drafts'
 import type { RemoteServerVersion } from '../shared/state/ssh-bootstrap'
 import {
   EMPTY_REVIEW_COMMENTS,
@@ -1434,6 +1437,11 @@ export function useJsonClaudeSession(sessionId: string) {
  *  draft raised in one worktree doesn't re-render every other tab. */
 export function useCopyDraftForTerminal(terminalId: string) {
   return useAppState((s) => firstDraftForTerminal(s.copyDrafts, terminalId))
+}
+
+/** Oldest draft for one tab that the agent stopped waiting on. */
+export function useWithdrawnCopyDraftForTerminal(terminalId: string) {
+  return useAppState((s) => firstWithdrawnDraftForTerminal(s.copyDrafts, terminalId))
 }
 
 /** Approvals map alone. Narrow over `useJsonClaude()` for the same

@@ -35,6 +35,28 @@ describe('CopyDraftBroker', () => {
     await expect(result).resolves.toEqual({ kind: 'cancelled' })
   })
 
+  it('keeps a withdrawn draft until the user clears it', () => {
+    const { store, broker } = setup()
+    const { id } = broker.request(input)
+    broker.cancel(id)
+    const drafts = (): typeof initialState.copyDrafts => store.getSnapshot().state.copyDrafts
+    expect(drafts().pending[id]).toBeUndefined()
+    expect(drafts().withdrawn[id]).toMatchObject(input)
+
+    expect(broker.clearWithdrawn(id)).toBe(true)
+    expect(drafts().withdrawn[id]).toBeUndefined()
+    expect(broker.clearWithdrawn(id)).toBe(false)
+  })
+
+  it('hands a Terminal tab back to waiting, not processing, when the agent stops waiting', () => {
+    // An Esc in the TUI ends the turn with no further hook event, so a
+    // processing dot would spin until the next prompt.
+    const { store, broker } = setup()
+    const { id } = broker.request(input)
+    broker.cancel(id)
+    expect(store.getSnapshot().state.terminals.statuses['term-1']).toBe('waiting')
+  })
+
   it('flags a terminal tab as needs-approval until the human answers', () => {
     const { store, broker } = setup()
     const { id } = broker.request(input)

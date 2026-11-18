@@ -757,6 +757,8 @@ export interface ElectronAPI {
       | { kind: 'submitted'; text: string; note?: string }
       | { kind: 'dismissed'; note?: string }
   ): Promise<boolean>
+  /** Close the "the agent stopped waiting" notice for a withdrawn draft. */
+  clearWithdrawnCopyDraft(id: string): Promise<boolean>
   startJsonClaude(id: string, cwd: string): Promise<boolean>
   sendJsonClaudeMessage(
     id: string,

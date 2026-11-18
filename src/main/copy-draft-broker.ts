@@ -8,7 +8,9 @@
 // which reads the copyDrafts slice. Terminal tabs have no deriver — their
 // status comes from Claude Code hooks, which only know a tool is running —
 // so the broker sets needs-approval itself and hands back to processing once
-// the human answers (the tool is still finishing; PostToolUse follows).
+// the human answers (the tool is still finishing; PostToolUse follows). A
+// withdrawal goes to waiting instead: it's usually an Esc in the TUI, which
+// ends the turn without another hook event to correct the dot.
 
 import { randomUUID } from 'crypto'
 import type { Store } from './store'
@@ -53,13 +55,35 @@ export class CopyDraftBroker {
 
   /** Returns false when the draft is already gone — answered from another
    *  client, or the agent's call was abandoned. */
-  resolve(id: string, outcome: CopyDraftOutcome): boolean {
+  resolve(id: string, outcome: Exclude<CopyDraftOutcome, { kind: 'cancelled' }>): boolean {
+    return this.settle(id, outcome)
+  }
+
+  /** The agent stopped waiting (call timed out, turn interrupted, process
+   *  exited). The draft moves to `withdrawn` rather than vanishing, so a
+   *  half-finished edit can still be copied out. */
+  cancel(id: string): void {
+    this.settle(id, { kind: 'cancelled' })
+  }
+
+  clearWithdrawn(id: string): boolean {
+    const req = this.store.getSnapshot().state.copyDrafts.withdrawn[id]
+    if (!req) return false
+    this.store.dispatch({
+      type: 'copyDrafts/withdrawnCleared',
+      payload: { id, terminalId: req.terminalId }
+    })
+    return true
+  }
+
+  private settle(id: string, outcome: CopyDraftOutcome): boolean {
     const waiter = this.waiters.get(id)
     const req = this.store.getSnapshot().state.copyDrafts.pending[id]
     if (!waiter || !req) return false
     this.waiters.delete(id)
+    const withdrawn = outcome.kind === 'cancelled'
     this.store.dispatch({
-      type: 'copyDrafts/resolved',
+      type: withdrawn ? 'copyDrafts/withdrawn' : 'copyDrafts/resolved',
       payload: { id, terminalId: req.terminalId }
     })
     if (!this.isChatSession(req.terminalId)) {
@@ -67,18 +91,16 @@ export class CopyDraftBroker {
       if (current === 'needs-approval') {
         this.store.dispatch({
           type: 'terminals/statusChanged',
-          payload: { id: req.terminalId, status: 'processing', pendingTool: null }
+          payload: {
+            id: req.terminalId,
+            status: withdrawn ? 'waiting' : 'processing',
+            pendingTool: null
+          }
         })
       }
     }
-    log('copy-drafts', `resolved id=${id} outcome=${outcome.kind}`)
+    log('copy-drafts', `settled id=${id} outcome=${outcome.kind}`)
     waiter(outcome)
     return true
-  }
-
-  /** The agent stopped waiting (call timed out, turn interrupted, process
-   *  exited). Drop the card so nobody edits into the void. */
-  cancel(id: string): void {
-    this.resolve(id, { kind: 'cancelled' })
   }
 }

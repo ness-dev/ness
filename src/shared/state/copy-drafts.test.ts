@@ -3,6 +3,7 @@ import {
   initialCopyDrafts,
   copyDraftsReducer,
   firstDraftForTerminal,
+  firstWithdrawnDraftForTerminal,
   type CopyDraftRequest
 } from './copy-drafts'
 
@@ -37,6 +38,50 @@ describe('copyDraftsReducer', () => {
       payload: { id: 'missing', terminalId: 't1' }
     })
     expect(next).toBe(initialCopyDrafts)
+  })
+})
+
+describe('copyDraftsReducer withdrawal', () => {
+  const pendingA = copyDraftsReducer(initialCopyDrafts, {
+    type: 'copyDrafts/requested',
+    payload: req('a', 't1', 1)
+  })
+
+  it('copyDrafts/withdrawn moves the draft from pending to withdrawn', () => {
+    const next = copyDraftsReducer(pendingA, {
+      type: 'copyDrafts/withdrawn',
+      payload: { id: 'a', terminalId: 't1' }
+    })
+    expect(next.pending).toEqual({})
+    expect(next.withdrawn.a).toEqual(req('a', 't1', 1))
+    expect(firstWithdrawnDraftForTerminal(next, 't1')?.id).toBe('a')
+  })
+
+  it('copyDrafts/withdrawn for a draft that was already answered is a no-op', () => {
+    expect(
+      copyDraftsReducer(initialCopyDrafts, {
+        type: 'copyDrafts/withdrawn',
+        payload: { id: 'a', terminalId: 't1' }
+      })
+    ).toBe(initialCopyDrafts)
+  })
+
+  it('copyDrafts/withdrawnCleared drops the notice', () => {
+    const withdrawn = copyDraftsReducer(pendingA, {
+      type: 'copyDrafts/withdrawn',
+      payload: { id: 'a', terminalId: 't1' }
+    })
+    const next = copyDraftsReducer(withdrawn, {
+      type: 'copyDrafts/withdrawnCleared',
+      payload: { id: 'a', terminalId: 't1' }
+    })
+    expect(next.withdrawn).toEqual({})
+    expect(
+      copyDraftsReducer(next, {
+        type: 'copyDrafts/withdrawnCleared',
+        payload: { id: 'a', terminalId: 't1' }
+      })
+    ).toBe(next)
   })
 })
 

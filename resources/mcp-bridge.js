@@ -92,9 +92,14 @@ function send(msg) {
 const CALL_TIMEOUT_MS = Number(process.env.HARNESS_CALL_TIMEOUT_MS) || 60_000
 // Worktree creation legitimately blocks on git fetch / PR checkout.
 const WORKTREE_CREATE_TIMEOUT_MS = 300_000
-// edit_copy waits on a person, not on Ness. Matches Claude's own MCP idle
-// timeout so the bridge never gives up before the agent does.
-const COPY_DRAFT_TIMEOUT_MS = 1_800_000
+// edit_copy waits on a person, not on Ness, and a person may leave a draft
+// open over lunch. Claude Code (2.1.301) aborts a stdio tool call after 30 min
+// with no response *or progress notification*
+// (CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT), and hard-caps it at MCP_TOOL_TIMEOUT,
+// default 1e8 ms (~27.8 h). So the bridge sends a progress heartbeat while it
+// waits, and its own limit sits just under Claude's cap.
+const COPY_DRAFT_TIMEOUT_MS = 24 * 60 * 60 * 1000
+const COPY_DRAFT_HEARTBEAT_MS = Number(process.env.HARNESS_PROGRESS_HEARTBEAT_MS) || 60_000
 
 function callControl(method, path, body, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
@@ -1037,7 +1042,23 @@ function formatCopyDraftResult(original, r) {
   )
 }
 
-async function handleToolCall(name, args, signal) {
+/** Keep the client's idle timer from firing while a call waits on a human.
+ *  Without a progressToken the client isn't listening for progress, so
+ *  there's nothing to send. */
+function startHeartbeat(progressToken) {
+  if (progressToken === undefined || progressToken === null) return () => {}
+  let progress = 0
+  const timer = setInterval(() => {
+    send({
+      jsonrpc: '2.0',
+      method: 'notifications/progress',
+      params: { progressToken, progress: ++progress, message: 'waiting for the user to edit the draft' }
+    })
+  }, COPY_DRAFT_HEARTBEAT_MS)
+  return () => clearInterval(timer)
+}
+
+async function handleToolCall(name, args, signal, progressToken) {
   if (name === 'create_worktree') {
     const prNumber = args && args.prNumber
     if (!args || (!args.branchName && !prNumber)) {
@@ -1517,14 +1538,19 @@ async function handleToolCall(name, args, signal) {
     if (!args || typeof args.draft !== 'string' || !args.draft.trim()) {
       throw new Error('draft is required')
     }
-    const r = await callControl(
-      'POST',
-      '/copy-drafts',
-      { draft: args.draft, title: args.title, context: args.context },
-      COPY_DRAFT_TIMEOUT_MS,
-      signal
-    )
-    return formatCopyDraftResult(args.draft, r)
+    const stopHeartbeat = startHeartbeat(progressToken)
+    try {
+      const r = await callControl(
+        'POST',
+        '/copy-drafts',
+        { draft: args.draft, title: args.title, context: args.context },
+        COPY_DRAFT_TIMEOUT_MS,
+        signal
+      )
+      return formatCopyDraftResult(args.draft, r)
+    } finally {
+      stopHeartbeat()
+    }
   }
   if (name === 'list_shells') {
     const r = await callControl('GET', '/shells')
@@ -1607,7 +1633,8 @@ async function handle(msg) {
         result = await handleToolCall(
           params && params.name,
           (params && params.arguments) || {},
-          controller.signal
+          controller.signal,
+          params && params._meta ? params._meta.progressToken : undefined
         )
       } finally {
         inflight.delete(id)
@@ -1630,6 +1657,8 @@ async function handle(msg) {
   } catch (err) {
     const message = (err && err.message) || String(err)
     logErr('error', method, message)
+    // The client cancelled this call; MCP says not to answer it.
+    if (method === 'tools/call' && err && err.name === 'AbortError') return null
     if (method === 'tools/call') {
       return {
         jsonrpc: '2.0',

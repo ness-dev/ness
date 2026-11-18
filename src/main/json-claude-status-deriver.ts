@@ -18,7 +18,7 @@
 import type { Store } from './store'
 import type { StateEvent } from '../shared/state'
 import type { JsonClaudeState } from '../shared/state/json-claude'
-import { firstDraftForTerminal } from '../shared/state/copy-drafts'
+import { firstDraftForTerminal, type CopyDraftsEvent } from '../shared/state/copy-drafts'
 import type { PtyStatus, PendingTool } from '../shared/state/terminals'
 import { log } from './debug'
 
@@ -48,10 +48,11 @@ export class JsonClaudeStatusDeriver {
   }
 
   private onEvent(event: StateEvent): void {
-    if (event.type === 'copyDrafts/requested' || event.type === 'copyDrafts/resolved') {
+    if (event.type.startsWith('copyDrafts/')) {
       const jc = this.store.getSnapshot().state.jsonClaude
-      if (event.payload.terminalId in jc.sessions) {
-        this.deriveSession(event.payload.terminalId, jc)
+      const { terminalId } = (event as CopyDraftsEvent).payload
+      if (terminalId in jc.sessions) {
+        this.deriveSession(terminalId, jc)
       }
       return
     }

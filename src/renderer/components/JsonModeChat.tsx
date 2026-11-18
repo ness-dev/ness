@@ -40,6 +40,7 @@ import { openForkIntoWorktree } from './NewWorktreeScreen'
 import {
   useAliases,
   useCopyDraftForTerminal,
+  useWithdrawnCopyDraftForTerminal,
   useJsonClaudeSession,
   useSettings,
   useWorktrees
@@ -1547,6 +1548,7 @@ export function JsonModeChat({
   const session = useJsonClaudeSession(sessionId)
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
   const copyDraft = useCopyDraftForTerminal(sessionId)
+  const withdrawnCopyDraft = useWithdrawnCopyDraftForTerminal(sessionId)
   const {
     jsonModeChatDensity: density,
     jsonModeChatWidth,
@@ -1986,20 +1988,25 @@ export function JsonModeChat({
   }
 
   // The draft carries no tool_use id (it arrives over the control server, not
-  // the permission bridge), so pin it to the newest unanswered edit_copy call
-  // whose input matches. No match yet — the block hasn't streamed — and it
-  // renders at the bottom of the log instead.
+  // the permission bridge), so pin it to the newest edit_copy call whose input
+  // matches and that has no result yet — an agent retrying the same text after
+  // a dismissal must not land on the old, answered call. No match yet — the
+  // block hasn't streamed — and it renders at the bottom of the log instead.
   const copyDraftToolUseId = useMemo(() => {
     const all = session?.entries
     if (!copyDraft || !all) return null
+    // Results follow their call, so walking backwards sees them first.
+    const answered = new Set<string>()
     for (let i = all.length - 1; i >= 0; i--) {
       const blocks = all[i].blocks
       if (!blocks) continue
       for (let j = blocks.length - 1; j >= 0; j--) {
         const b = blocks[j]
+        if (b.type === 'tool_result' && b.toolUseId) answered.add(b.toolUseId)
         if (
           b.type === 'tool_use' &&
           b.id &&
+          !answered.has(b.id) &&
           b.name === EDIT_COPY_TOOL_NAME &&
           b.input?.draft === copyDraft.draft
         ) {
@@ -3206,6 +3213,7 @@ export function JsonModeChat({
                 />
               ))}
               {copyDraft && !copyDraftToolUseId && <CopyDraftCard draft={copyDraft} />}
+              {withdrawnCopyDraft && <CopyDraftCard draft={withdrawnCopyDraft} withdrawn />}
               {(() => {
                 // In-chat "agent is working" indicator. Visible whenever the
                 // turn is in flight and no other UI element already signals

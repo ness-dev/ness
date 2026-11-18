@@ -17,15 +17,22 @@ export interface CopyDraftRequest {
 
 export interface CopyDraftsState {
   pending: Record<string, CopyDraftRequest>
+  /** Drafts the agent stopped waiting on before anyone answered (timeout,
+   *  interrupt, exit). Kept until the user closes the notice, so whatever
+   *  they had typed isn't silently thrown away. */
+  withdrawn: Record<string, CopyDraftRequest>
 }
 
 export const initialCopyDrafts: CopyDraftsState = {
-  pending: {}
+  pending: {},
+  withdrawn: {}
 }
 
 export type CopyDraftsEvent =
   | { type: 'copyDrafts/requested'; payload: CopyDraftRequest }
   | { type: 'copyDrafts/resolved'; payload: { id: string; terminalId: string } }
+  | { type: 'copyDrafts/withdrawn'; payload: { id: string; terminalId: string } }
+  | { type: 'copyDrafts/withdrawnCleared'; payload: { id: string; terminalId: string } }
 
 export function copyDraftsReducer(
   state: CopyDraftsState,
@@ -43,6 +50,21 @@ export function copyDraftsReducer(
       delete next[id]
       return { ...state, pending: next }
     }
+    case 'copyDrafts/withdrawn': {
+      const { id } = event.payload
+      const req = state.pending[id]
+      if (!req) return state
+      const next = { ...state.pending }
+      delete next[id]
+      return { pending: next, withdrawn: { ...state.withdrawn, [id]: req } }
+    }
+    case 'copyDrafts/withdrawnCleared': {
+      const { id } = event.payload
+      if (!(id in state.withdrawn)) return state
+      const next = { ...state.withdrawn }
+      delete next[id]
+      return { ...state, withdrawn: next }
+    }
     default: {
       const _exhaustive: never = event
       void _exhaustive
@@ -58,8 +80,22 @@ export function firstDraftForTerminal(
   state: CopyDraftsState,
   terminalId: string
 ): CopyDraftRequest | null {
+  return oldestForTerminal(state.pending, terminalId)
+}
+
+export function firstWithdrawnDraftForTerminal(
+  state: CopyDraftsState,
+  terminalId: string
+): CopyDraftRequest | null {
+  return oldestForTerminal(state.withdrawn, terminalId)
+}
+
+function oldestForTerminal(
+  drafts: Record<string, CopyDraftRequest>,
+  terminalId: string
+): CopyDraftRequest | null {
   let first: CopyDraftRequest | null = null
-  for (const req of Object.values(state.pending)) {
+  for (const req of Object.values(drafts)) {
     if (req.terminalId !== terminalId) continue
     if (!first || req.timestamp < first.timestamp) first = req
   }

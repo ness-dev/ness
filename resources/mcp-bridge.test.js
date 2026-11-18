@@ -455,6 +455,35 @@ describe('mcp-bridge edit_copy', () => {
     expect(response.result.content[0].text).toContain('wrong tone')
   })
 
+  it('sends progress heartbeats while the user is editing', async () => {
+    let answer
+    stub = await startStub((req, body, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      if (req.url !== '/copy-drafts') return res.end(JSON.stringify({ scope: null }))
+      answer = () => res.end(JSON.stringify({ kind: 'submitted', text: 'x' }))
+    })
+    bridge = spawnBridge(stub.port, 'tok', { HARNESS_PROGRESS_HEARTBEAT_MS: '20' })
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'edit_copy', arguments: { draft: 'x' }, _meta: { progressToken: 'p1' } }
+    })
+    const first = await bridge.next()
+    const second = await bridge.next()
+    expect(first).toMatchObject({
+      method: 'notifications/progress',
+      params: { progressToken: 'p1', progress: 1 }
+    })
+    expect(second.params.progress).toBe(2)
+    answer()
+    let msg = await bridge.next()
+    while (msg.method === 'notifications/progress') msg = await bridge.next()
+    expect(msg.id).toBe(2)
+  })
+
   it('hangs up on Ness when the client cancels the call', async () => {
     let closed = false
     stub = await startStub((req, body, res) => {
@@ -483,11 +512,13 @@ describe('mcp-bridge edit_copy', () => {
       method: 'notifications/cancelled',
       params: { requestId: 2 }
     })
-    await bridge.next()
     for (let i = 0; i < 200 && !closed; i++) {
       await new Promise((r) => setTimeout(r, 10))
     }
     expect(closed).toBe(true)
+    // MCP: a cancelled request gets no response.
+    bridge.send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} })
+    expect((await bridge.next()).id).toBe(3)
   })
 })
 
