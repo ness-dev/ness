@@ -190,3 +190,22 @@ export function followedTargets(state: AppState): Set<string> {
   for (const r of IMPLICIT_RULES) for (const t of r.targets(state)) out.add(t)
   return out
 }
+
+/** What one Chat tab follows and who follows its worktree, for the
+ *  Subscriptions panel. Unlike subscriptionsOfTab this only evaluates the
+ *  own-worktree rule for `worktreePath`, so it is cheap enough to run per
+ *  store event. A worktree's own agent isn't listed as its follower. */
+export function tabSubscriptionsView(
+  state: AppState,
+  worktreePath: string,
+  tabId: string
+): { following: Subscriber[]; followers: Subscriber[] } {
+  const explicit = state.subscriptions.list
+    .filter((s) => s.subscriberTabId === tabId)
+    .map(fromExplicit)
+  const created = createdWorktree.subscriptionsOfTab(state, tabId)
+  const own = ownWorktree.subscribersOf(state, worktreePath).filter((s) => s.subscriberTabId === tabId)
+  const following = dedupe([...explicit, ...created, ...own], (s) => s.targetPath)
+  const followers = subscribersOf(state, worktreePath).filter((s) => s.reason !== 'own-worktree')
+  return { following, followers }
+}

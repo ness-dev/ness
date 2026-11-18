@@ -24,6 +24,7 @@ export interface NotificationsState {
 export type NotificationsEvent =
   | { type: 'notifications/queued'; payload: { tabId: string; notice: PendingNotice } }
   | { type: 'notifications/drained'; payload: { tabIds: string[] } }
+  | { type: 'notifications/dismissed'; payload: { tabId: string; ids: string[] } }
 
 export const initialNotifications: NotificationsState = {
   pendingByTab: {}
@@ -50,6 +51,18 @@ export function notificationsReducer(
       const next = { ...state.pendingByTab }
       for (const id of hit) delete next[id]
       return { ...state, pendingByTab: next }
+    }
+    case 'notifications/dismissed': {
+      const { tabId, ids } = event.payload
+      const prev = state.pendingByTab[tabId]
+      if (!prev) return state
+      const drop = new Set(ids)
+      const next = prev.filter((n) => !drop.has(n.id))
+      if (next.length === prev.length) return state
+      const pendingByTab = { ...state.pendingByTab }
+      if (next.length === 0) delete pendingByTab[tabId]
+      else pendingByTab[tabId] = next
+      return { ...state, pendingByTab }
     }
     default: {
       const _exhaustive: never = event

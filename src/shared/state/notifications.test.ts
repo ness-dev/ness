@@ -24,6 +24,23 @@ describe('notificationsReducer', () => {
     expect(list[0].id).toBe('3')
   })
 
+  it('notifications/dismissed drops named notices and the tab entry once empty', () => {
+    const state = { pendingByTab: { a: [notice('1'), notice('2')] } }
+    const one = notificationsReducer(state, {
+      type: 'notifications/dismissed',
+      payload: { tabId: 'a', ids: ['1'] }
+    })
+    expect(one.pendingByTab['a'].map((n) => n.id)).toEqual(['2'])
+    const none = notificationsReducer(one, {
+      type: 'notifications/dismissed',
+      payload: { tabId: 'a', ids: ['2'] }
+    })
+    expect(none.pendingByTab).toEqual({})
+    expect(
+      notificationsReducer(state, { type: 'notifications/dismissed', payload: { tabId: 'a', ids: ['z'] } })
+    ).toBe(state)
+  })
+
   it('notifications/drained clears the named tabs and no-ops on unknown ones', () => {
     const state = { pendingByTab: { a: [notice('1')], b: [notice('2')] } }
     const next = notificationsReducer(state, {

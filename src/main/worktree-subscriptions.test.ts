@@ -535,6 +535,21 @@ describe('own-worktree PR notifications: delivery edge cases', () => {
   })
 })
 
+describe('tabSubscriptionsView', () => {
+  it("lists what a tab follows and its worktree's followers, without the own-PR self entry", async () => {
+    const { tabSubscriptionsView } = await import('../shared/subscribers')
+    const { store } = setup({ settings: { ...initialState.settings, notifyChatOnCiFailure: true } })
+    recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
+    const parent = tabSubscriptionsView(store.getSnapshot().state, PARENT, PARENT_TAB)
+    expect(parent.following.map((f) => [f.targetPath, f.reason])).toEqual([
+      [CHILD, 'created-worktree'],
+      [PARENT, 'own-worktree']
+    ])
+    const child = tabSubscriptionsView(store.getSnapshot().state, CHILD, CHILD_TAB)
+    expect(child.followers.map((f) => f.subscriberTabId)).toEqual([PARENT_TAB])
+  })
+})
+
 describe('review round 3 follow-ups', () => {
   it('a change mid-flap does not make the re-run failure news again', async () => {
     const { store, send, delivery } = setup({

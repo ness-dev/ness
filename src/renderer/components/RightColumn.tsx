@@ -19,6 +19,7 @@ import { CostPanel } from './CostPanel'
 import { ContextPanel } from './ContextPanel'
 import { JsonClaudeTodosPanel } from './JsonClaudeTodosPanel'
 import { JsonClaudeAgentsPanel } from './JsonClaudeAgentsPanel'
+import { SubscriptionsPanel } from './SubscriptionsPanel'
 import { ScratchpadPanel } from './ScratchpadPanel'
 import { RightColumnToolbar } from './RightColumnToolbar'
 import { useBackend } from '../backend'
@@ -165,6 +166,14 @@ export const RightColumn = memo(function RightColumn({
         return <JsonClaudeTodosPanel key="todos" focusedTabId={focusedTabId} />
       case 'agents':
         return <JsonClaudeAgentsPanel key="agents" focusedTabId={focusedTabId} />
+      case 'subscriptions':
+        return (
+          <SubscriptionsPanel
+            key="subscriptions"
+            worktreePath={activeWorktreeId}
+            focusedTabId={focusedTabId}
+          />
+        )
       case 'commits':
         return (
           <BranchCommitsPanel

@@ -480,6 +480,18 @@ export function buildBackend(
     setSnoozeDefaultDays: (days: number) => reqConfig('config:setSnoozeDefaultDays', days),
     setCiNotifyOverride: (path: string, enabled: boolean | null) =>
       req('ciNotify:setOverride', path, enabled),
+    setSubscriptionMode: (
+      worktreePath: string,
+      tabId: string,
+      targetPath: string,
+      mode: 'interrupt' | 'silent'
+    ) => req('subscriptions:setMode', worktreePath, tabId, targetPath, mode),
+    unsubscribeTab: (worktreePath: string, tabId: string, targetPath: string) =>
+      req('subscriptions:unsubscribe', worktreePath, tabId, targetPath),
+    deliverHeldNotices: (worktreePath: string, tabId: string) =>
+      req('notifications:deliverHeld', worktreePath, tabId),
+    discardHeldNotices: (worktreePath: string, tabId: string) =>
+      req('notifications:discardHeld', worktreePath, tabId),
     setNotifyChatOnCiFailure: (enabled: boolean) =>
       reqConfig('config:setNotifyChatOnCiFailure', enabled),
     requestMergeConflictFix: (worktreePath: string) =>

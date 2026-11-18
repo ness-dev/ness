@@ -76,6 +76,7 @@ import {
   unsubscribeFromWorktree
 } from './worktree-subscriptions'
 import { subscribersOf, subscriptionsOfTab } from '../shared/subscribers'
+import type { NotifyMode } from '../shared/state/subscriptions'
 import { AutoSleepMonitor } from './auto-sleep-monitor'
 import { WakeLockController } from './wake-lock-controller'
 import { WorktreeWatcher } from './worktree-watcher'
@@ -180,7 +181,7 @@ import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
 import { describeWorktree, resolveWorktreeQuery } from './chat-delivery'
-import { listChatTabs } from '../shared/agent-tabs'
+import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
 import {
   agentAuthor,
@@ -5379,6 +5380,59 @@ function registerIpcHandlers(): void {
   transport.onRequest('aliases:clear', (_ctx, path: string) => {
     if (typeof path !== 'string' || !path) return false
     store.dispatch({ type: 'aliases/cleared', payload: { path } })
+    return true
+  })
+
+  // Subscriptions panel actions. Each is scoped to one Chat tab of the
+  // worktree it's called for, and refused for any other kind of tab.
+  const isChatTabIn = (worktreePath: unknown, tabId: unknown): boolean =>
+    typeof worktreePath === 'string' &&
+    typeof tabId === 'string' &&
+    findTabInWorktree(store.getSnapshot().state, worktreePath, tabId)?.type === 'json-claude'
+
+  transport.onRequest(
+    'subscriptions:setMode',
+    (_ctx, worktreePath: string, tabId: string, targetPath: string, mode: NotifyMode) => {
+      if (!isChatTabIn(worktreePath, tabId) || typeof targetPath !== 'string') return false
+      if (mode !== 'interrupt' && mode !== 'silent') return false
+      // An explicit subscription with the new mode: it replaces an explicit
+      // one, or shadows an implicit one. Same note, so nobody is re-briefed.
+      const existing = store
+        .getSnapshot()
+        .state.subscriptions.list.find((s) => s.subscriberTabId === tabId && s.targetPath === targetPath)
+      subscribeToWorktree(store, notificationBus, {
+        subscriberPath: worktreePath,
+        subscriberTabId: tabId,
+        targetPath,
+        note: existing?.note,
+        mode
+      })
+      return true
+    }
+  )
+
+  transport.onRequest(
+    'subscriptions:unsubscribe',
+    (_ctx, worktreePath: string, tabId: string, targetPath: string) => {
+      if (!isChatTabIn(worktreePath, tabId) || typeof targetPath !== 'string') return false
+      return unsubscribeFromWorktree(store, tabId, targetPath) === 'removed'
+    }
+  )
+
+  // Deliver a tab's held notices now: the newest goes as an interrupt, and
+  // ChatRouter.send carries the rest in front of it, as any turn would.
+  transport.onRequest('notifications:deliverHeld', (_ctx, worktreePath: string, tabId: string) => {
+    if (!isChatTabIn(worktreePath, tabId)) return false
+    const held = store.getSnapshot().state.notifications.pendingByTab[tabId]
+    if (!held || held.length === 0) return false
+    const newest = held[held.length - 1]
+    store.dispatch({ type: 'notifications/dismissed', payload: { tabId, ids: [newest.id] } })
+    return notificationBus.toTab(worktreePath, tabId, newest.wire).ok
+  })
+
+  transport.onRequest('notifications:discardHeld', (_ctx, worktreePath: string, tabId: string) => {
+    if (!isChatTabIn(worktreePath, tabId)) return false
+    store.dispatch({ type: 'notifications/drained', payload: { tabIds: [tabId] } })
     return true
   })
 
