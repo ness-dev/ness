@@ -135,7 +135,9 @@ describe('Fable / Mythos 5.2', () => {
   })
 
   it('does not capture a dated Fable 5.0 id whose date starts with 2', () => {
-    expect(rateFor('claude-fable-5-20260401')).toEqual(rateFor('claude-fable-5'))
+    // Same id as 'prefix-matches dated Fable 5 variants' above; this one
+    // pins that the 5-2 key specifically doesn't win.
+    expect(rateFor('claude-fable-5-20260401')).not.toEqual(rateFor('claude-fable-5-2'))
   })
 })
 
