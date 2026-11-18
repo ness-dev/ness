@@ -24,10 +24,11 @@ navigation.
 
 ## Architecture (read this before touching state)
 
-This app went through a large refactor where **the main process owns all
-shared state**, the renderer is a thin view layer, and a single transport
-(currently Electron IPC, future: WebSocket) carries both state events
-and side-effect signals. If you find yourself adding a `useState` to
+**The main process owns all shared state**, the renderer is a thin view
+layer, and a transport carries both state events and side-effect signals.
+Main registers every handler once on a compound transport that fans out to
+Electron IPC (`transport-electron.ts`) and WebSocket
+(`transport-websocket.ts`; the only member in headless mode). If you find yourself adding a `useState` to
 hold a value that any other client of this workspace would also want,
 you're doing it wrong — that value belongs in a slice.
 
@@ -41,27 +42,32 @@ slice has:
 - An `initial<Slice>` constant
 - A test file with one test per event variant
 
-Current slices: `settings`, `prs`, `onboarding`, `hooks`, `worktrees`,
-`terminals` (which also owns `panes` and `lastActive`), `updater`,
-`repoConfigs`, `permissions`. Adding a new piece of shared state means picking the
+There is one slice per file in `src/shared/state/`; `index.ts` composes
+them into the root reducer. (`terminals` also owns `panes` and
+`lastActive`.) Adding a new piece of shared state means picking the
 right slice (or making a new one) and editing the reducer + event union.
 
 ### How a state mutation flows end-to-end
 
-1. **Renderer**: user clicks something. The handler calls a thin IPC
-   method like `window.api.setTheme('solarized')`.
-2. **Main / preload**: the IPC handler in `src/main/index.ts` does the
-   side effect (validation, writing to disk, etc.) and **dispatches a
-   typed event** through the store: `store.dispatch({type: 'settings/themeChanged', payload: 'solarized'})`.
+1. **Renderer**: user clicks something. The handler calls a thin backend
+   method like `useBackend().setThemeLight('solarized')`, which
+   `src/renderer/build-backend.ts` turns into a request on the active
+   backend's transport.
+2. **Main / request handler**: the `transport.onRequest(...)` handler in
+   `src/main/index.ts` does the side effect (validation, writing to disk,
+   etc.) and **dispatches a typed event** through the store:
+   `store.dispatch({type: 'settings/themeLightChanged', payload: 'solarized'})`.
 3. **Main / store**: `src/main/store.ts` runs the dispatched event
    through the shared `rootReducer`, updates its in-memory `AppState`,
    bumps a monotonic `seq`, and notifies subscribers.
-4. **Main / transport**: `src/main/transport-electron.ts` subscribes to
-   the store and forwards every event over the `state:event` IPC channel
-   to all `BrowserWindow`s.
-5. **Renderer / client store**: `src/renderer/store.ts` listens on
-   `state:event`, applies the **same** shared `rootReducer` to its local
-   mirror, and bumps its own seq.
+4. **Main / transport**: `transport-electron.ts` and
+   `transport-websocket.ts` each subscribe to the store and forward every
+   event as `state:event` to their clients (`BrowserWindow`s / WS
+   connections).
+5. **Renderer / client store**: `src/renderer/store.ts` wires each
+   backend transport's `onStateEvent` to that backend's client store,
+   which applies the **same** shared `rootReducer` to its local mirror
+   and bumps its own seq.
 6. **Renderer / hooks**: `useSyncExternalStore` notifies any component
    reading via `useSettings()` (or the slice-specific hook). React
    re-renders.
@@ -90,21 +96,16 @@ slice. If no, renderer.
 src/
 ├── shared/state/                  # Slices imported by BOTH main and renderer
 │   ├── index.ts                   # Root reducer + AppState + StateEvent union
-│   ├── settings.ts                # Theme, hotkeys, claudeCommand, fonts, …
-│   ├── prs.ts                     # byPath PRStatus, mergedByPath, loading
-│   ├── worktrees.ts               # list, repoRoots, pending FSM entries
-│   ├── terminals.ts               # statuses, pendingTools, shellActivity, panes, lastActive
-│   ├── onboarding.ts              # quest step
-│   ├── hooks.ts                   # consent + justInstalled
-│   ├── updater.ts                 # status (checking/available/downloading/…)
-│   ├── repo-configs.ts            # byRepo: per-repo .ness.json contents
-│   ├── permissions.ts             # global "Always allow" tool grants
+│   ├── <slice>.ts                 # One slice per file (settings, prs, worktrees, terminals, …)
 │   └── *.test.ts                  # vitest reducer tests, one per slice
+├── shared/worktree-sort.ts        # Group worktrees by PR status
 │
 ├── main/
-│   ├── index.ts                   # IPC handlers, menu, autoUpdater, store init
-│   ├── store.ts                   # The authoritative Store class (~40 lines)
+│   ├── index.ts                   # Request handlers, store init
+│   ├── desktop-shell.ts           # Electron-only: menu, windows, autoUpdater, userData override
+│   ├── store.ts                   # The authoritative Store class
 │   ├── transport-electron.ts      # Forwards store events to all windows via state:event IPC
+│   ├── transport-websocket.ts     # Same contract over WebSocket (headless + remote clients)
 │   ├── pr-poller.ts               # Background PR polling, focus refresh, dedup
 │   ├── worktrees-fsm.ts           # Pending-creation FSM (addWorktree → setup script → outcome)
 │   ├── panes-fsm.ts               # Every pane/tab mutation (addTab, closeTab, splitPane, …)
@@ -118,14 +119,15 @@ src/
 │   ├── secrets.ts                 # safeStorage-encrypted secrets
 │   └── debug.ts                   # File-based debug logger
 │
-├── preload/index.ts               # contextBridge — exposes window.api
+├── preload/index.ts               # contextBridge — local transport handle + Electron-only helpers
 │
 └── renderer/
     ├── App.tsx                    # Root component, per-client UI focus + JSX
-    ├── store.ts                   # Client mirror + useSettings/usePrs/usePanes/etc. hooks
+    ├── store.ts                   # Per-backend client mirrors + useSettings/usePrs/usePanes/etc. hooks
+    ├── build-backend.ts           # Builds the ElectronAPI object; each method is a req(…) on a transport
+    ├── backend.ts                 # useBackend() / getBackend() accessors
     ├── types.ts                   # ElectronAPI interface (re-exports shared types)
     ├── hotkeys.ts                 # Hotkey definitions, parsing, formatting
-    ├── worktree-sort.ts           # Group worktrees by PR status
     ├── components/                # React components
     └── hooks/
         ├── useHotkeys.ts          # Keyboard event subscription
@@ -148,16 +150,18 @@ free. Pattern is the same for every slice:
    - Add a reducer case
    - Update `initial<Slice>`
 2. **Seed it in main** (`src/main/index.ts`, in the `new Store({...})` block)
-3. **Add the IPC mutation handler** (in `main/index.ts` `registerIpcHandlers`):
+3. **Add the request handler** (in `main/index.ts` `registerIpcHandlers`):
    ```ts
-   ipcMain.handle('myslice:setX', (_, value) => {
+   transport.onRequest('myslice:setX', (_ctx, value) => {
      // …validation, persist…
      store.dispatch({type: 'myslice/xChanged', payload: value})
      return true
    })
    ```
-4. **Expose in preload + types**:
-   - `src/preload/index.ts`: `setX: (v) => ipcRenderer.invoke('myslice:setX', v)`
+4. **Expose in the backend + types**:
+   - `src/renderer/build-backend.ts`: `setX: (v) => req('myslice:setX', v)`
+     (use `reqConfig` for settings channels, `reqLocal` for things only
+     the local Electron owns)
    - `src/renderer/types.ts`: add to `ElectronAPI` interface
 5. **Add a reducer test** in `src/shared/state/<slice>.test.ts` (one
    test per new event variant)
@@ -172,8 +176,8 @@ trigger React re-renders. This is fine for events that fire a few times
 per second.
 
 PTY data is **not** a state event — it's a side-effect signal. It flows
-through its own `terminal:data` IPC channel directly to xterm.js via
-`window.api.onTerminalData`. If we put it through the reducer, every
+through its own `terminal:data` signal directly to xterm.js via
+`backend.onTerminalData`. If we put it through the reducer, every
 byte from a noisy build would re-render the world. The same conceptual
 distinction applies for any future high-frequency stream.
 
@@ -258,9 +262,10 @@ anti-pattern #1 first.
 const settings = useSettings()
 const theme = settings.theme
 
-// Mutate — fire-and-forget IPC. The store dispatches and the read
+// Mutate — fire-and-forget request. The store dispatches and the read
 // above re-renders automatically.
-window.api.setTheme('solarized')
+const backend = useBackend()
+void backend.setThemeLight('solarized')
 ```
 
 The renderer **never holds a local copy of shared state**. There's no
@@ -277,8 +282,8 @@ A `useSettings().theme` read traces through:
 1. `App.tsx` calls the hook
 2. `src/renderer/store.ts` defines the hook (`useAppState((s) => s.settings)`)
 3. `useSyncExternalStore` reads from the client mirror in `store.ts`
-4. The mirror was populated by a `state:event` IPC message
-5. Main dispatched that event from an IPC handler in `main/index.ts`
+4. The mirror was populated by a `state:event` transport message
+5. Main dispatched that event from a `transport.onRequest` handler in `main/index.ts`
 6. The handler ran the reducer in `src/shared/state/settings.ts`
 
 Six files for one value. The mitigation: **the structure is the same
@@ -336,15 +341,14 @@ What gets written to `perf.log` (and where the threshold lives):
   with current rates, lag, active PTYs, and top event types. Cheap
   continuous trace for "what was happening at <timestamp>". Memory keys
   are explicitly prefixed (`mainRssMB` / `mainHeapUsedMB` vs
-  `rendererHeapUsedMB`), because an unqualified `memoryHeapUsedMB` here
-  used to mean main-only — it read 30MB while the renderer sat at 900MB,
-  which is worse than reporting no memory at all.
+  `rendererHeapUsedMB`); an unqualified memory key invites reading a
+  main-only number as the whole app.
 - `[renderer-slow]` / `[renderer-snapshot]` — one aggregated 1 s bucket
   per renderer (`src/renderer/renderer-perf.ts`), delivered over the
   `perf:reportRendererSample` fire-and-forget signal. `-slow` when a
   threshold tripped, `-snapshot` for the 30 s heartbeat. Carries long
   tasks + blocking time, renderer heap and GC churn, input latency, and
-  React commits/time. See "Why the renderer needs its own telemetry".
+  React commits/time. See "Renderer telemetry".
 - `[changed-files]` — `getChangedFiles` / `getCommitChangedFiles` /
   `getCommitRangeChangedFiles` calls taking ≥ `SLOW_CHANGED_FILES_MS`
   (50 ms; `src/main/worktree.ts`).
@@ -369,95 +373,68 @@ For AI agents debugging perf: ask the user to `npm run log:perf:clear`,
 reproduce, then tail `perf.log` and look for the slow-* lines around the
 reported timestamp.
 
-### Why the renderer needs its own telemetry
+### Renderer telemetry
 
 Everything above except the `[renderer-*]` lines measures the **main
-process**. That gap once cost two days: a report of "the whole UI stutters
-whenever a worktree is calling a tool" was chased through three rounds of
-main-process optimization while `perf.log` showed `store=0-3/s`,
-`ipc=0-3/s`, `lag=0-2ms`, no `[cascade]` lines, and zero slow-render lines
-— with the renderer at 155% CPU and 966MB RSS. The bug was
-`rehype-highlight` rebuilding 37 highlight.js grammars on every markdown
-render, per streamed token.
+process**. A renderer-side hot path (e.g. re-highlighting markdown on
+every streamed token) can peg the renderer while `store`, `ipc`, `lag`,
+and `[cascade]` all read idle. When the UI stutters and main looks quiet,
+read the `[renderer-*]` lines and `rendererCpuPct` / `rendererRssMB` in
+`[snapshot]`.
 
-Three structural reasons the old instrumentation couldn't see it, and what
-replaced them:
+How `renderer-perf.ts` is built:
 
-1. **A per-commit frame-budget gate misses death by a thousand cuts.**
-   `[render-slow]` only fired on commits ≥16 ms; the pathology was hundreds
-   of individually-fine commits. `renderer-perf.ts` aggregates instead, so
-   `reactTotalMs` per second is what's compared against a threshold. It
-   also removes an IPC from the commit hot path.
-2. **Nothing measured renderer GC or heap.** A GC pause happens *between*
-   tasks, in a different process from the one `perf-monitor.ts` samples, so
-   it is invisible to both React profiler callbacks and main-process
-   event-loop lag. The `longtask` PerformanceObserver catches those pauses
-   (plus layout thrash and any non-React work).
-3. **`[snapshot]` memory was main-only but unlabelled.** Now prefixed, per
-   above.
+1. **Aggregate per second; don't gate per commit.** Hundreds of
+   individually-fine commits add up, so `reactTotalMs` per second is what's
+   compared against a threshold. This also keeps IPC off the commit hot path.
+2. **A `longtask` PerformanceObserver catches GC pauses**, layout thrash,
+   and non-React work. GC pauses happen between tasks, in a different
+   process from the one `perf-monitor.ts` samples, so React profiler
+   callbacks and main-process event-loop lag both miss them.
+3. **Memory keys are prefixed** (`main…` vs `renderer…`) so a main-only
+   number can't be misread as the whole app.
 
-**Two fields lied for months, and both hid the same class of bug. Read this
-before trusting a `[renderer-*]` line.**
+**Read this before trusting a `[renderer-*]` line:**
 
-- **`reactCommits` / `reactTotalMs` were structurally 0 in every packaged
-  build.** React's production build compiles out `enableProfilerTimer`, so
-  `<Profiler>`'s `onRender` is never called — `react-dom-client.production.js`
-  contains zero occurrences of `onRender`. `"reactCommits":0` appeared in
-  100% of ~1,823 samples across two log files and never once nonzero. The fix
-  — aliasing `react-dom/client` → `react-dom/profiling` in
-  `electron.vite.config.ts` — turned out to cost more than the number was
-  worth: React 19.2's profiling entry emits a `performance.measure()` per
-  component render for the DevTools Performance track, and in a trace of a
-  loaded session `logComponentRender` + `logComponentEffect` + their
-  `performance.now()` calls were **~15% of total renderer CPU**, plus 21k
-  retained `PerformanceMeasure` objects in a heap snapshot taken while nothing
-  was recording. So the alias is now **opt-in via `HARNESS_REACT_PROFILING=1`**.
-  Default builds ship `reactProfiling: false` on every sample and every
-  consumer renders `n/a` — never `0`, which is what caused the original
-  misreading. **Do not add a bare `react-dom` alias** — the profiling build
-  itself does `require("react-dom")` for `ReactDOMSharedInternals`, so that
-  creates a cycle and the app dies at startup on `reading 'd'`.
+- **`reactCommits` / `reactTotalMs` are `n/a` in default builds.** React's
+  production build compiles out `enableProfilerTimer`, so `<Profiler>`'s
+  `onRender` never fires. Opt in with `HARNESS_REACT_PROFILING=1`, which
+  aliases `react-dom/client` → `react-dom/profiling` in
+  `electron.vite.config.ts`. Don't make it the default: React 19.2's
+  profiling entry emits a `performance.measure()` per component render,
+  measured at ~15% of renderer CPU plus thousands of retained
+  `PerformanceMeasure` objects. With profiling off, every sample ships
+  `reactProfiling: false` and consumers render `n/a` — never `0`.
+  **Do not add a bare `react-dom` alias** — the profiling build does
+  `require("react-dom")` for `ReactDOMSharedInternals`, so that creates a
+  cycle and the app dies at startup on `reading 'd'`.
+- **Profiling builds are not free.** After enabling any always-on
+  profiler, re-profile and confirm the instrumentation isn't in its own
+  top-10.
+- **`…Quantized` heap fields are up to ~20 minutes stale.** Chrome caches
+  `performance.memory` on pages that aren't cross-origin isolated, so
+  `heapGrowthMB` / `heapReclaimedMB` cannot show an allocate-and-collect
+  sawtooth, and when the cached value refreshes, the whole stale delta lands
+  in one 1-second bucket. Trust `rendererRssMB` / `rendererCpuPct` in
+  `[snapshot]` instead: sampled in main via `app.getAppMetrics()` and scoped
+  to `BrowserWindow` webContents (browser tabs are separate renderer
+  processes and are deliberately excluded).
+- **`rendererBlockingMsPerSec` is normalized by `elapsedMs`.** The bucket
+  is nominally 1 s but stretches without bound when the renderer's timer
+  is starved (a DevTools heap snapshot produces a ~100 s bucket).
+  `rendererBucketMs` and `rendererBlockingMsTotal` are logged alongside so
+  the raw numbers stay recoverable. **Check `rendererBucketMs` before
+  comparing blocking across snapshots** — a long window is itself a sign
+  the renderer stalled, and averaging over it hides the spike.
 
-  The meta-lesson, since this bug's *fix* became the next bug: **profiling
-  builds are not free, and instrumentation added to explain a slowdown can
-  become a measurable share of it.** After enabling any always-on profiler,
-  re-profile and confirm the instrumentation isn't in its own top-10.
-- **`heapUsedMB` and its deltas are quantized and up to ~20 minutes stale.**
-  Chrome caches `performance.memory` on pages that aren't cross-origin
-  isolated. Observed: `heapUsedMB` pinned at exactly 560.8 for 40 minutes
-  across 617 samples (9 distinct values in an entire log) while real RSS swung
-  600MB inside 30 seconds. So `heapGrowthMB` / `heapReclaimedMB` **cannot**
-  show an allocate-and-collect sawtooth — the exact shape they were added to
-  catch — and when the cached value does refresh, the whole 20-minute delta
-  gets misattributed to one 1-second bucket. The trustworthy number is
-  `rendererRssMB` / `rendererCpuPct` in `[snapshot]`, sampled in main via
-  `app.getAppMetrics()` and scoped to `BrowserWindow` webContents (browser
-  tabs are separate renderer processes and are deliberately excluded). The
-  `performance.memory`-derived fields are suffixed `…Quantized` so they can't
-  be misread as live.
-- **`rendererBlockingMsPerSec` was not per second.** It logged the renderer
-  bucket's raw `blockingMs`. That bucket is nominally 1 s but stretches without
-  bound when the renderer's timer is starved — a DevTools heap snapshot
-  produced a single ~104 s bucket, which surfaced as `blocked=103792ms/s`.
-  Reading those totals as rates overstates blocking by 20-100x and makes a
-  mostly-idle renderer look pegged. Now normalized by `elapsedMs`, with
-  `rendererBucketMs` and `rendererBlockingMsTotal` logged alongside so the raw
-  numbers stay recoverable. **Check `rendererBucketMs` before comparing
-  blocking across snapshots** — a long window is itself a signal that the
-  renderer stalled, and it means everything derived from that bucket is
-  averaged over a period long enough to hide the spike.
+Two rules for any telemetry here:
 
-Two of these three were caught only because someone asked whether a number
-could physically be what it claimed: 100% zeros, a heap that never moved, and
-1399 ms of blocking inside a 1000 ms second. **Sanity-check units and ranges
-against physical limits before drawing conclusions** — a rate that exceeds its
-own denominator is a units bug, not a finding.
-
-The general lesson, since this has now cost three investigations: **a
-telemetry field that reads a constant is not evidence of a quiet system, it is
-evidence of broken instrumentation.** Before optimizing against a metric,
-confirm it has ever moved — `grep -oE '"field":[0-9.]+' perf.log | sort -u`
-takes seconds and would have caught both of these.
+- **Sanity-check units and ranges against physical limits before drawing
+  conclusions.** A rate that exceeds its own denominator is a units bug,
+  not a finding.
+- **A field that reads a constant is evidence of broken instrumentation,
+  not of a quiet system.** Before optimizing against a metric, confirm it
+  has ever moved: `grep -oE '"field":[0-9.]+' perf.log | sort -u`.
 
 The hard constraint when extending this: **the telemetry must not become
 the bottleneck.** `longtask` can fire continuously under load, so buckets
@@ -515,11 +492,11 @@ hard dependency on `gh`.
   Ness never sees them. `unsymlinkClaudeSettings` +
   `migrateClaudeSettingsOffSymlinks` exist only to undo the old scheme
   (one-shot, gated on `claudeSettingsUnsymlinked`).
-- **Worktree dep installs** — fresh git worktrees under
-  `claude-harness-worktrees/` start with no `node_modules`. Run
+- **Worktree dep installs** — fresh git worktrees (default location
+  `<repo>-worktrees/` beside the repo) start with no `node_modules`. Run
   `npm install --legacy-peer-deps` once before building (the `--legacy-peer-deps`
   flag is required because `electron-vite@5` declares a peer range that
-  npm's strict resolver rejects against the installed `vite@7`).
+  npm's strict resolver rejects against the installed `vite@8`).
 - **node-pty rebuild** — `node-pty` is a native module compiled against a
   specific Electron version. After running `npm run pack` or `npm run dist*`,
   the postdist hook runs `electron-rebuild -f -w node-pty` so dev mode keeps
@@ -582,7 +559,7 @@ hard dependency on `gh`.
   handle), remotes use `WebSocketClientTransport` directly in renderer
   context. Each transport's `onStateEvent` is wired to its own store at
   registration time, so there's no central event router — per-backend
-  channels are naturally segregated. `window.api` is built in the
+  channels are naturally segregated. The `ElectronAPI` object is built in the
   RENDERER (`src/renderer/build-backend.ts`, exported via
   `src/renderer/backend.ts` as `getBackend()` / `useBackend()`),
   with each method calling `registry.getActiveTransport().request(...)`
@@ -594,10 +571,8 @@ hard dependency on `gh`.
   controls). `connections:*` methods always go to the local transport
   (renderer-shell-owned per design §C/§G). Menu signals
   (`onOpenSettings`, etc.) likewise bind to the local transport since
-  only the local Electron has a Menu. The legacy `HARNESS_REMOTE_URL`
-  env-var mode was removed in Tier 1 — adding a remote backend now
-  happens via the chip strip's `+` button (or `File → Add Backend…`
-  if/when wired). Tokens encrypted in `secrets.enc` keyed
+  only the local Electron has a Menu. Add a remote backend via the chip
+  strip's `+` button or `File → Add Backend…`. Tokens encrypted in `secrets.enc` keyed
   `backend-token:<id>`; connections list lives in `userData/config.json`.
 - **Dual-claude model** — Ness ships two Claude Code binaries. **Terminal
   tabs** (internally xterm-hosted) spawn `/bin/zsh -ilc claude` so the user's
@@ -675,8 +650,8 @@ These are how the user wants Claude to behave when working on this repo:
    safety net, but the local pre-commit ritual still catches issues before
    you push.
 
-4. **Don't add comments unless asked.** Code should explain itself; comments
-   are reserved for non-obvious "why" notes. The exception is the comment
+4. **Match the surrounding comment density; comment only the non-obvious
+   "why".** Don't narrate what the code already says. The comment
    blocks already present in `src/main/store.ts`, `src/main/index.ts`
    (around the panesFSM/worktreesFSM construction), `src/shared/state/index.ts`,
    `src/renderer/store.ts`, and `src/main/activity-deriver.ts` — those
