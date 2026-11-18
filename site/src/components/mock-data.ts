@@ -44,9 +44,9 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
       prompt:
         'The welcome screen still says "Sign up" right after login. Show their name and a Continue button instead.',
       tools: [
-        { tool: 'Read', label: 'Read' },
-        { tool: 'Grep', label: 'Grep' },
-        { tool: 'Bash', label: 'Reproduce the signed-out flash' }
+        { tool: 'Read' },
+        { tool: 'Grep' },
+        { tool: 'Bash', intent: 'Reproduce the signed-out flash' }
       ],
       explanation:
         '`Welcome` reads the session before it has loaded, so it always renders the signed-out copy. Waiting on `status` fixes it.',
@@ -61,11 +61,7 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
         ]
       },
       working: {
-        todos: [
-          { status: 'completed', text: 'Find why the signed-out copy shows' },
-          { status: 'in_progress', text: 'Wait for the session before rendering' },
-          { status: 'pending', text: 'Test the loading state' }
-        ],
+        todos: { done: 1, total: 3 },
         streaming: 'Adding a test for the loading state'
       },
       approval: {
@@ -95,9 +91,9 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
       },
       prompt: 'Logging out flashes the dashboard for a frame. Fix it.',
       tools: [
-        { tool: 'Grep', label: 'Grep' },
-        { tool: 'Read', label: 'Read' },
-        { tool: 'Bash', label: 'Run the logout e2e test' }
+        { tool: 'Grep' },
+        { tool: 'Read' },
+        { tool: 'Bash', intent: 'Run the logout e2e test' }
       ],
       explanation:
         'The redirect runs in an effect, after first paint. Guarding the route in its `loader` means a signed-out user never renders `Dashboard` at all.',
@@ -111,11 +107,7 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
         ]
       },
       working: {
-        todos: [
-          { status: 'completed', text: 'Find where the redirect happens' },
-          { status: 'in_progress', text: 'Move the guard into the loader' },
-          { status: 'pending', text: 'Check it in the e2e suite' }
-        ],
+        todos: { done: 1, total: 3 },
         streaming: 'Running the logout e2e test'
       },
       approval: {

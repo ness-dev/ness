@@ -26,16 +26,11 @@ export interface MockDiffLine {
   text: string
 }
 
-export interface MockTodo {
-  status: 'completed' | 'in_progress' | 'pending'
-  text: string
-}
-
 /** A collapsed tool call. Bash carries the model's stated `intent`, which
  * the real chat shows in place of the bare tool name. */
 export interface MockToolCall {
   tool: 'Read' | 'Grep' | 'Bash'
-  label: string
+  intent?: string
 }
 
 /** One worktree's conversation. Assistant text marks inline code with
@@ -54,8 +49,8 @@ export interface MockTranscript {
   tools: MockToolCall[]
   explanation: string
   edit: { path: string; lines: MockDiffLine[] }
-  /** While working: the todo list plus the turn still streaming in. */
-  working: { todos: MockTodo[]; streaming: string }
+  /** While working: todo progress plus the turn still streaming in. */
+  working: { todos: { done: number; total: number }; streaming: string }
   /** When the worktree needs approval: the Bash call it's blocked on. */
   approval: { command: string; description: string }
 }
@@ -240,7 +235,7 @@ function ToolGroup({ thoughts, tools }: { thoughts: number; tools: MockToolCall[
             <span key={i} className="flex items-center gap-1.5 shrink-0">
               {i > 0 && <span className="opacity-40">·</span>}
               <Icon className="shrink-0 w-3 h-3" />
-              <span className="truncate max-w-[16rem]">{t.label}</span>
+              <span className="truncate max-w-[16rem]">{t.intent ?? t.tool}</span>
             </span>
           )
         })}
@@ -332,14 +327,12 @@ function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
   )
 }
 
-/** Collapsed, like every tool call in the real chat until clicked — the
- * live list itself lives in the right column's Todos panel. */
-function TodoCard({ todos }: { todos: MockTodo[] }) {
-  const done = todos.filter((t) => t.status === 'completed').length
+/** Collapsed, like every tool call in the real chat until clicked. */
+function TodoCard({ todos }: { todos: MockTranscript['working']['todos'] }) {
   return (
     <ToolCard
       name="TodoWrite"
-      subtitle={`${done}/${todos.length} done`}
+      subtitle={`${todos.done}/${todos.total} done`}
       icon={ListChecks}
       open={false}
     />
