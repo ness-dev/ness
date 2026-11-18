@@ -11,6 +11,12 @@
 #
 # Everything app-specific lives here and in .github/evidence-reviewer/;
 # scripts/evidence-reviewer/run.mjs only ever sees a URL.
+#
+# When OPENROUTER_API_KEY is set, agents inside Ness work too: the server
+# gets an isolated $HOME whose ~/.claude/settings.json points Claude Code at
+# OpenRouter's Anthropic-compatible endpoint, with every model alias mapped
+# to EVIDENCE_AGENT_MODEL. Chat tabs (bundled binary) and Claude Code
+# terminal tabs (PATH claude, the same bundled binary here) both read it.
 
 set -euo pipefail
 
@@ -57,9 +63,39 @@ cat > "$DATA_DIR/config.json" <<EOF
 }
 EOF
 
+SERVER_HOME="$TMP/home"
+mkdir -p "$SERVER_HOME/.claude"
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  MODEL="${EVIDENCE_AGENT_MODEL:-anthropic/claude-haiku-5.5}"
+  jq -n --arg key "$OPENROUTER_API_KEY" --arg model "$MODEL" '{
+    env: {
+      ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+      ANTHROPIC_AUTH_TOKEN: $key,
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: $model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: $model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: $model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: $model,
+      ANTHROPIC_SMALL_FAST_MODEL: $model,
+      CLAUDE_CODE_SUBAGENT_MODEL: $model,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      DISABLE_AUTOUPDATER: "1"
+    }
+  }' > "$SERVER_HOME/.claude/settings.json"
+fi
+# Skip Claude Code's first-run theme picker and folder-trust prompt, which
+# would otherwise be the first thing every terminal tab shows.
+jq -n --args '{
+  hasCompletedOnboarding: true,
+  projects: ($ARGS.positional | map({key: ., value: {hasTrustDialogAccepted: true}}) | from_entries)
+}' "$(cd "$FIXTURE" && pwd -P)" "$(cd "$TMP/acme-app-login" && pwd -P)" "$(cd "$TMP/acme-app-typo" && pwd -P)" \
+  > "$SERVER_HOME/.claude.json"
+
 # Keep the server off the real GitHub API: the fixture has no remote, and
 # a token in env would make PR polling hit api.github.com for nothing.
-env -u GITHUB_TOKEN -u GH_TOKEN \
+env -u GITHUB_TOKEN -u GH_TOKEN -u OPENROUTER_API_KEY \
+  HOME="$SERVER_HOME" \
+  PATH="$CHECKOUT/node_modules/.bin:$PATH" \
   HARNESS_DATA_DIR="$DATA_DIR" \
   HARNESS_AUTH_TOKEN="$TOKEN" \
   node "$CHECKOUT/dist-headless/main/index.js" --port "$PORT" --host 127.0.0.1 \

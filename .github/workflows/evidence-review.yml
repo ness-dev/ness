@@ -133,7 +133,12 @@ jobs:
           fi
           npm run build:headless
 
+      # The key goes into the servers' isolated ~/.claude/settings.json so
+      # agents inside Ness can run (see boot-ness.sh).
       - name: Boot apps
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
         run: |
           AFTER_URL=$(bash reviewer/scripts/evidence-reviewer/boot-ness.sh after 37601 after)
           echo "AFTER_URL=$AFTER_URL" >> "$GITHUB_ENV"
@@ -176,7 +181,8 @@ jobs:
 
   # Posts the report, or a crash notice if `review` failed, then fails the
   # check when any claim was refuted. Cancelled runs (superseded by a newer
-  # push) and runs that never started (approval rejected) post nothing.
+  # push) and runs that never started (approval rejected) post nothing and
+  # leave publish green; review's own red is the signal there.
   publish:
     needs: review
     if: always() && (needs.review.result == 'success' || needs.review.result == 'failure')
@@ -236,6 +242,7 @@ jobs:
       # too common to block on. A refuted claim means the screenshots show
       # the feature not doing what the PR says.
       - name: Check verdict
+        if: steps.crash.outputs.skip != 'true'
         run: |
           if [ "${{ needs.review.result }}" = "failure" ]; then
             echo "::error::Evidence review crashed; see the review job log."

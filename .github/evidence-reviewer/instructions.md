@@ -22,7 +22,14 @@ The repo has no GitHub remote, so PR badges, CI status and "Request AI review" h
 ## Things that work in CI
 
 - Selecting worktrees, opening and closing tabs, splitting panes, and the sidebar context menus (right-click a worktree row).
-- **Opening tabs.** The top bar, right of the breadcrumb, has a sparkle button (tooltip "New Chat tab" or "New Claude Code tab"; shift-click for the other mode, and the chevron beside it lists the options). It also has "New shell tab" and "New browser tab" buttons. A **Chat tab** opens and renders its UI even though it can't get a model reply, so UI that only appears for Chat tabs (some right-column panels, chat cards, composer controls) can still be reached this way.
+- **Opening tabs.** Right of the breadcrumb in the top bar, there's a sparkle icon button for a new agent tab, then a chevron, then "New shell tab" and "New browser tab". The sparkle button has **no label** in the element list. At the default viewport it sits at about (372, 68).
+  - **Chat tab:** click the sparkle with modifiers `["Shift"]`. A plain click opens a Claude Code terminal tab, because Terminal mode is the default.
+  - **Check:** a Chat tab has a "Message Claude — Cmd+Enter to send" composer at the bottom.
+- **Agents really run.** Chat tabs and Claude Code terminal tabs start a real Claude Code session backed by a cheap model, so you can exercise anything that needs a live agent: send a message, watch it stream, approve or deny a tool permission, see status dots change in the sidebar, follow cards and notifications. To use one:
+  - Click the composer at the bottom of a Chat tab, type a message, and send with `Meta+Enter`. In a terminal tab, type the prompt and press `Enter`.
+  - Replies take 5–30 seconds. Use `wait_for_text` for a word you asked it to say, never repeated observes.
+  - Keep prompts tiny and concrete, because every agent turn costs money: "Reply with just the word PINEAPPLE", or "Create a file notes.txt containing hi, then say DONE". Ask for a tool call (writing a file, running `ls`) only when the PR is about tools or approvals.
+  - The agent is a small model. If it does something odd, that's the model, not the PR, unless the PR changed how Ness drives agents. Judge Ness's UI around the agent, not the agent's intelligence.
 - **Shell tabs** are real PTYs. You can click into one, type `ls`, and press Enter.
 - Clicking a file in the Changed files panel opens a diff view.
 - Settings, the command palette, the hotkey cheatsheet, and the perf HUD.
@@ -30,7 +37,9 @@ The repo has no GitHub remote, so PR badges, CI status and "Request AI review" h
 
 ## Things that do NOT work in CI
 
-- **Claude Code / Codex sessions**: there is no `claude` binary and no auth. A "Claude Code" terminal tab shows `claude: command not found` and a "Claude Code exited. Start a new session" card. A Chat tab can't get a response. The right column shows "Connect a GitHub token" under Pull Request. All of that is expected. Don't treat that as a regression caused by the PR unless the PR touches that path.
+- **Codex sessions**: no Codex binary or auth. Only Claude Code (Chat and terminal tabs) runs.
+- **Claude.ai account features**: anything that needs a signed-in claude.ai account (usage limits, plan info) shows empty or errors.
+- The right column shows "Connect a GitHub token" under Pull Request. That's expected.
 - GitHub data: PR status, checks, merge buttons, and AI review requests.
 - Native desktop features: menu bar, dock, OS notifications, "Open in editor", and Electron browser panes.
 

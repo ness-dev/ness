@@ -115,7 +115,8 @@ const tools = [
     x: { type: 'number' },
     y: { type: 'number' },
     button: { type: 'string', enum: ['left', 'right', 'middle'] },
-    double: { type: 'boolean' }
+    double: { type: 'boolean' },
+    modifiers: { type: 'array', items: { type: 'string', enum: ['Shift', 'Alt', 'Control', 'Meta'] } }
   }, ['app']),
   tool('hover', 'Move the mouse over an element by id.', { app: appEnum(), id: { type: 'integer' } }, ['app', 'id']),
   tool('type', 'Type text. If id is given, that element is focused first.', {
@@ -132,6 +133,11 @@ const tools = [
     dy: { type: 'number' },
     id: { type: 'integer' }
   }, ['app', 'dy']),
+  tool('wait_for_text', 'Wait until text appears in an app (case-insensitive), e.g. an agent reply in a Chat tab. Returns as soon as it shows up, or after timeout_s, then observes.', {
+    app: appEnum(),
+    text: { type: 'string' },
+    timeout_s: { type: 'number', description: 'Default 30, max 120.' }
+  }, ['app', 'text']),
   tool('find_text', 'Search the visible DOM text of an app for a string (case-insensitive). Returns matching snippets.', {
     app: appEnum(),
     query: { type: 'string' }
@@ -234,7 +240,7 @@ async function runTool(name, input) {
       return { text: `Plan recorded (${plan.length} claims). Now work through it. Read code with search_code/read_file whenever you don't know how to reach a state.` }
     case 'read_diff': {
       const d = pr.fileDiffs[input.path]
-      if (!d) return { text: `No diff for "${input.path}". Changed files:\n${pr.files.map((f) => f.path).join('\n')}` }
+      if (!d) return { text: `No diff for "${input.path}". Changed files:\n${changedPaths().join('\n')}` }
       return { text: d.length > 40000 ? d.slice(0, 40000) + '\n…[truncated]' : d }
     }
     case 'read_file':
@@ -253,10 +259,12 @@ async function runTool(name, input) {
     case 'click': {
       if (input.id != null) {
         const loc = page.locator(`[data-ev-id="${input.id}"]`).first()
-        const opts = { button: input.button || 'left', timeout: 3000 }
+        const opts = { button: input.button || 'left', timeout: 3000, modifiers: input.modifiers }
         input.double ? await loc.dblclick(opts) : await loc.click(opts)
       } else if (input.x != null && input.y != null) {
+        for (const m of input.modifiers || []) await page.keyboard.down(m)
         await page.mouse.click(input.x, input.y, { button: input.button || 'left', clickCount: input.double ? 2 : 1 })
+        for (const m of input.modifiers || []) await page.keyboard.up(m)
       } else return { text: 'click needs id or x+y' }
       return settleAndObserve(app)
     }
@@ -274,6 +282,14 @@ async function runTool(name, input) {
       if (input.id != null) await page.locator(`[data-ev-id="${input.id}"]`).first().hover({ timeout: 3000 })
       await page.mouse.wheel(0, input.dy)
       return settleAndObserve(app)
+    case 'wait_for_text': {
+      const timeout = Math.min(120, input.timeout_s || 30) * 1000
+      const found = await page
+        .waitForFunction((t) => document.body.innerText.toLowerCase().includes(t.toLowerCase()), input.text, { timeout, polling: 500 })
+        .then(() => true, () => false)
+      const out = await settleAndObserve(app)
+      return { ...out, text: `${found ? 'appeared' : `not seen after ${timeout / 1000}s`}: "${input.text}"\n${out.text}` }
+    }
     case 'find_text': {
       const snippets = await page.evaluate((q) => {
         const text = document.body.innerText
@@ -373,13 +389,20 @@ function translateId(afterId) {
 function tryFinish(input) {
   const claims = input.claims || []
   const weak = claims.filter((c) => c.status === 'inconclusive')
-  const gaveUp = ['inconclusive', 'not_visual'].includes(input.verdict) || weak.length > 0
+  const uiChanged = changedPaths().some(isUi)
+  const wronglyNotVisual = input.verdict === 'not_visual' && uiChanged
+  const gaveUp = input.verdict === 'inconclusive' || weak.length > 0 || wronglyNotVisual
   const early = currentStep < MAX_STEPS * MIN_EFFORT
   if (gaveUp && early && finishRejections < MAX_FINISH_REJECTIONS) {
     finishRejections++
     const left = MAX_STEPS - currentStep - 1
+    const why = wronglyNotVisual
+      ? `the PR changes UI files (${changedPaths().filter(isUi).slice(0, 5).join(', ')}), so "not_visual" doesn't fit`
+      : weak.length
+        ? `${weak.length} claim(s) are still inconclusive:\n${weak.map((c) => `- ${c.claim}`).join('\n')}`
+        : 'the verdict is inconclusive'
     return {
-      text: `Not finished: you have ${left} turns left and ${weak.length || 'some'} claim(s) are still inconclusive${weak.length ? `:\n${weak.map((c) => `- ${c.claim}`).join('\n')}` : ''}.
+      text: `Not finished: you have ${left} turns left and ${why}.
 Before giving up on a claim, try a different route:
 - search_code for the component or its label to find where it renders and what gates it (settings, menus, panel visibility, tab type, feature flags)
 - read_diff / read_file the UI files involved
@@ -533,7 +556,7 @@ Method:
 2. Work through the plan claim by claim. Drive the app to the state, observe, adjust.${both ? `
 3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's element list. For before, you see only the elements that differ from after, and "only in after" lines are often the new UI the PR adds. Once both apps show the state that demonstrates a claim, call capture_evidence with app "both". If the apps diverge (the new UI only exists in after), act on each app separately to line them up again, then capture with "both".` : `
 3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
-4. When a route fails, try another. Things that hide UI: panel-visibility menus, collapsed sections, settings pages that need scrolling, context menus (right-click), hover-only controls, specific tab types, empty states. If the fixture can't produce the full state (it needs a live agent, a GitHub PR, …), capture the closest reachable state that still shows the change: the new toggle, menu entry, empty panel, or label. That is real evidence.
+4. When a route fails, try another. Things that hide UI: panel-visibility menus, collapsed sections, settings pages that need scrolling, context menus (right-click), hover-only controls, specific tab types, empty states. If the fixture can't produce the full state (it needs a GitHub PR, a Codex session, …), capture the closest reachable state that still shows the change: the new toggle, menu entry, empty panel, or label. That is real evidence.
 5. Be skeptical. If the UI does not do what the PR claims, capture it and mark the claim refuted. Mark a claim inconclusive only after at least two concrete routes failed, and say which. Never mark a claim verified without a capture that shows it. find_text only proves the text is in the DOM, so scroll it into view and capture.
 6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically.
 7. Pure refactors, CI, docs or test-only PRs: verdict "not_visual" after a quick sanity check. If any UI file changed, the PR is visual.
@@ -549,10 +572,12 @@ ${instructions}`
 // tests and docs, each capped so one huge file can't eat the budget.
 // Everything that doesn't fit is listed and reachable with read_diff.
 function prPrompt() {
-  const isUi = (p) => UI_PATHS.some((prefix) => p.startsWith(prefix))
   const isAux = (p) => /\.test\.|__tests__|\.md$|^\.github\//.test(p)
   const rank = (p) => (isAux(p) ? 2 : isUi(p) ? 0 : 1)
-  const files = [...pr.files].sort((a, b) => rank(a.path) - rank(b.path))
+  const stats = Object.fromEntries(pr.files.map((f) => [f.path, f]))
+  const files = changedPaths()
+    .map((path) => stats[path] || { path, additions: '?', deletions: '?' })
+    .sort((a, b) => rank(a.path) - rank(b.path))
   let used = 0
   const shown = []
   const omitted = []
@@ -626,6 +651,16 @@ function renderReport() {
     `<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} tokens · $${usage.cost.toFixed(4)}</sub>`
   )
   return lines.join('\n')
+}
+
+function isUi(path) {
+  return UI_PATHS.some((prefix) => path.startsWith(prefix))
+}
+
+// fileDiffs comes from `gh pr diff` and is complete; pr.files is capped at
+// 100 by the API, so it's only used for +/- counts.
+function changedPaths() {
+  return Object.keys(pr.fileDiffs)
 }
 
 function cell(s) {
