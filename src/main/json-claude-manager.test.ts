@@ -391,6 +391,21 @@ describe('JsonClaudeManager', () => {
         (e) => e.isQueued
       ).length
 
+    it('stamps turnStartedAt when a turn starts, and a mid-turn send leaves it alone', () => {
+      // Without the stamp, collectAgents falls back to `busy` and agents
+      // from earlier turns read as running again.
+      const store = new Store()
+      const sessionId = 'sess-turn-start'
+      const { mgr } = startBusySession(store, sessionId)
+      const startedAt = store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt
+      expect(typeof startedAt).toBe('number')
+
+      mgr.send(sessionId, 'interjection')
+      expect(store.getSnapshot().state.jsonClaude.sessions[sessionId]?.turnStartedAt).toBe(
+        startedAt
+      )
+    })
+
     it("clears isQueued on the next 'requesting' status, before the turn ends", () => {
       const store = new Store()
       const sessionId = 'sess-queued-requesting'
