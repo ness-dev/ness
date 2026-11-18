@@ -230,16 +230,24 @@ export function pruneForRemovedWorktrees(store: Store, removed: ReadonlySet<stri
   }
 }
 
+export type PrChangeKind =
+  | 'opened'
+  | 'state'
+  | 'commit'
+  | 'ci'
+  | 'review'
+  | 'conflict'
+
 export interface PrChange {
+  kind: PrChangeKind
   text: string
   /** Something the subscriber likely needs to act on now. Forces an
    *  interrupt even for a silent subscription. */
   urgent: boolean
-  /** Set on a CI result: `<headSha>:<result>`. A check that flaps
-   *  (failure → pending → failure on a re-run of the same commit) is one
-   *  result, so the notifier reports each key once. */
-  ciKey?: string
 }
+
+/** What a worktree's own agent already knows because it did it. */
+const SELF_EVIDENT: ReadonlySet<PrChangeKind> = new Set(['opened', 'commit'])
 
 function shortSha(sha: string | undefined): string {
   return sha ? sha.slice(0, 7) : ''
@@ -259,8 +267,18 @@ function failingChecks(pr: PRStatus): string {
   return lines.length > 0 ? `\n${lines.join('\n')}` : ''
 }
 
-function ciKey(pr: PRStatus): string {
-  return `${pr.headSha || `pr-${pr.number}`}:${pr.checksOverall}`
+/** Identity of a CI result: the commit it ran on, and how it came out.
+ *  Falls back to the PR number for statuses cached without a headSha. */
+function ciKey(pr: PRStatus | null | undefined): string | undefined {
+  return pr ? `${pr.headSha || `pr-${pr.number}`}:${pr.checksOverall}` : undefined
+}
+
+function ciChange(pr: PRStatus): PrChange | null {
+  if (pr.checksOverall === 'failure') {
+    return { kind: 'ci', text: `CI failing${failingChecks(pr)}`, urgent: true }
+  }
+  if (pr.checksOverall === 'success') return { kind: 'ci', text: 'CI passed', urgent: false }
+  return null
 }
 
 function latestChangeRequester(pr: PRStatus): string | undefined {
@@ -278,37 +296,43 @@ export function describePrChanges(
   if (prev === undefined || !next) return []
   if (!prev || prev.number !== next.number) {
     const draft = next.state === 'draft' ? ' as a draft' : ''
-    return [{ text: `Opened PR #${next.number}${draft}: "${next.title}"`, urgent: false }]
+    const ci = ciChange(next)
+    return [
+      { kind: 'opened', text: `Opened PR #${next.number}${draft}: "${next.title}"`, urgent: false },
+      ...(ci ? [ci] : [])
+    ]
   }
   const out: PrChange[] = []
   if (prev.state !== next.state) {
-    if (next.state === 'merged') out.push({ text: 'PR merged', urgent: true })
-    else if (next.state === 'closed') out.push({ text: 'PR closed without merging', urgent: true })
-    else if (next.state === 'draft') out.push({ text: 'PR converted to draft', urgent: false })
-    else if (prev.state === 'draft') out.push({ text: 'PR marked ready for review', urgent: false })
-    else out.push({ text: 'PR reopened', urgent: false })
+    const state = (text: string, urgent: boolean): PrChange => ({ kind: 'state', text, urgent })
+    if (next.state === 'merged') out.push(state('PR merged', true))
+    else if (next.state === 'closed') out.push(state('PR closed without merging', true))
+    else if (next.state === 'draft') out.push(state('PR converted to draft', false))
+    else if (prev.state === 'draft') out.push(state('PR marked ready for review', false))
+    else out.push(state('PR reopened', false))
   }
   const newCommit = !!prev.headSha && !!next.headSha && prev.headSha !== next.headSha
-  if (newCommit) out.push({ text: `New commit pushed (${shortSha(next.headSha)})`, urgent: false })
-  const checksMoved = prev.checksOverall !== next.checksOverall || newCommit
-  if (checksMoved && next.checksOverall === 'failure') {
-    out.push({ text: `CI failing${failingChecks(next)}`, urgent: true, ciKey: ciKey(next) })
-  } else if (checksMoved && next.checksOverall === 'success') {
-    out.push({ text: 'CI passed', urgent: false, ciKey: ciKey(next) })
+  if (newCommit) {
+    out.push({ kind: 'commit', text: `New commit pushed (${shortSha(next.headSha)})`, urgent: false })
+  }
+  if (prev.checksOverall !== next.checksOverall || newCommit) {
+    const ci = ciChange(next)
+    if (ci) out.push(ci)
   }
   if (prev.reviewDecision !== next.reviewDecision) {
-    if (next.reviewDecision === 'approved') out.push({ text: 'PR approved', urgent: false })
-    else if (next.reviewDecision === 'changes_requested') {
+    if (next.reviewDecision === 'approved') {
+      out.push({ kind: 'review', text: 'PR approved', urgent: false })
+    } else if (next.reviewDecision === 'changes_requested') {
       const who = latestChangeRequester(next)
-      out.push({ text: who ? `Changes requested by ${who}` : 'Changes requested', urgent: true })
+      out.push({ kind: 'review', text: who ? `Changes requested by ${who}` : 'Changes requested', urgent: true })
     } else if (prev.reviewDecision === 'approved') {
-      out.push({ text: 'Approval dismissed — review required again', urgent: false })
+      out.push({ kind: 'review', text: 'Approval dismissed — review required again', urgent: false })
     }
   }
   if (prev.hasConflict !== true && next.hasConflict === true) {
-    out.push({ text: 'PR now has merge conflicts with its base', urgent: true })
+    out.push({ kind: 'conflict', text: 'PR now has merge conflicts with its base', urgent: true })
   } else if (prev.hasConflict === true && next.hasConflict === false) {
-    out.push({ text: 'Merge conflicts resolved', urgent: false })
+    out.push({ kind: 'conflict', text: 'Merge conflicts resolved', urgent: false })
   }
   return out
 }
@@ -339,22 +363,37 @@ export function buildOwnPrUpdate(pr: PRStatus, changes: PrChange[]): string {
   ].join('\n')
 }
 
+interface PlannedUpdate {
+  sub: Subscriber
+  changes: PrChange[]
+  /** What the subscriber had been told before this update was claimed —
+   *  restored if delivery fails, so the next poll tries again. */
+  base: PRStatus | null
+}
+
 /** Every GitHub notification to an agent goes through here: a worktree's
  *  own agent hearing about its PR, and agents following it from elsewhere.
  *  Reports PR opened, new commits, CI results, review decisions, conflicts
  *  and merge/close.
  *
- *  Keeps the last PR status seen for every path — references, so it's
- *  cheap — and diffs against it, so a re-poll that changes nothing says
- *  nothing and a path that only starts being followed later already has a
- *  baseline. A path's first observation is a baseline rather than news,
- *  which keeps boot quiet. Who hears about a change is re-derived per
- *  delivery from subscribersOf; nothing here caches subscriptions. */
+ *  The state that matters is what each subscriber has actually been told
+ *  (`told`, per path per tab). A change is diffed against that, claimed
+ *  before delivery so two polls can't report it twice, and released if
+ *  delivery fails — so a tab that couldn't be woken hears about it on the
+ *  next poll instead of never. Because the comparison is against what was
+ *  told rather than the previous poll, a check that flaps on the same
+ *  commit is reported once.
+ *
+ *  `last` is the previous poll for every path, which a new subscriber
+ *  starts from, so following a worktree doesn't replay its history. The
+ *  one exception is a worktree's own agent and CI: `ownToldCi` remembers
+ *  the last CI result it was told, so a failure that landed while the
+ *  worktree had no Chat tab is still reported once one opens. Who
+ *  subscribes is re-derived per poll from subscribersOf. */
 export class SubscriptionNotifier {
   private last = new Map<string, PRStatus | null>()
-  /** Last CI result reported per path, so a flapping check is reported
-   *  once per commit. */
-  private reportedCi = new Map<string, string>()
+  private told = new Map<string, Map<string, PRStatus | null>>()
+  private ownToldCi = new Map<string, string>()
   private unsubscribe: (() => void) | null = null
 
   constructor(
@@ -368,14 +407,8 @@ export class SubscriptionNotifier {
 
   start(): void {
     if (this.unsubscribe) return
-    const byPath = this.store.getSnapshot().state.prs.byPath
-    for (const [path, status] of Object.entries(byPath)) {
-      this.last.set(path, status ?? null)
-      // An already-red PR at boot isn't news; claim its result so the
-      // next poll of the same commit stays quiet.
-      if (status && (status.checksOverall === 'failure' || status.checksOverall === 'success')) {
-        this.reportedCi.set(path, ciKey(status))
-      }
+    for (const [path, status] of Object.entries(this.store.getSnapshot().state.prs.byPath)) {
+      this.observeFirst(path, status ?? null)
     }
     this.unsubscribe = this.store.subscribe((event) => this.onEvent(event))
   }
@@ -383,6 +416,14 @@ export class SubscriptionNotifier {
   stop(): void {
     this.unsubscribe?.()
     this.unsubscribe = null
+  }
+
+  /** A path's first status is a baseline, not news — including its CI
+   *  result, so boot doesn't re-announce every already-red PR. */
+  private observeFirst(path: string, status: PRStatus | null): void {
+    this.last.set(path, status)
+    const key = ciKey(status)
+    if (key) this.ownToldCi.set(path, key)
   }
 
   private onEvent(event: StateEvent): void {
@@ -402,46 +443,88 @@ export class SubscriptionNotifier {
       for (const path of [...this.last.keys()]) {
         if (!(path in event.payload)) {
           this.last.delete(path)
-          this.reportedCi.delete(path)
+          this.told.delete(path)
+          this.ownToldCi.delete(path)
         }
       }
     }
   }
 
   private consider(path: string, next: PRStatus | null, followed: Set<string>): void {
-    const prev = this.last.has(path) ? this.last.get(path) : undefined
+    if (!this.last.has(path)) {
+      this.observeFirst(path, next)
+      return
+    }
+    const prevPoll = this.last.get(path) ?? null
     this.last.set(path, next)
-    if (!followed.has(path) || !next) return
-    const changes = describePrChanges(prev, next).filter((c) => {
-      if (!c.ciKey) return true
-      if (this.reportedCi.get(path) === c.ciKey) return false
-      this.reportedCi.set(path, c.ciKey)
-      return true
-    })
-    if (changes.length === 0) return
-    setImmediate(() => this.deliver(path, next, changes))
+    if (!next || !followed.has(path)) {
+      this.told.delete(path)
+      return
+    }
+    const messaging = this.messagingEnabled()
+    const subs = subscribersOf(this.store.getSnapshot().state, path, 'pr').filter(
+      (s) => messaging || !s.needsMessaging
+    )
+    const prior = this.told.get(path)
+    const told = new Map<string, PRStatus | null>()
+    const plans: PlannedUpdate[] = []
+    for (const sub of subs) {
+      const own = sub.reason === 'own-worktree'
+      const base = prior?.has(sub.subscriberTabId)
+        ? prior.get(sub.subscriberTabId)!
+        : this.startingPoint(path, prevPoll, own)
+      let changes = describePrChanges(base, next)
+      if (own) changes = changes.filter((c) => !SELF_EVIDENT.has(c.kind))
+      if (changes.length === 0) {
+        told.set(sub.subscriberTabId, base)
+        continue
+      }
+      told.set(sub.subscriberTabId, next)
+      plans.push({ sub, changes, base })
+    }
+    this.told.set(path, told)
+    if (plans.length > 0) setImmediate(() => this.deliver(path, next, plans))
   }
 
-  private deliver(target: string, pr: PRStatus, changes: PrChange[]): void {
+  /** Where a subscriber with no history on this path starts from. */
+  private startingPoint(path: string, prevPoll: PRStatus | null, own: boolean): PRStatus | null {
+    if (!own || !prevPoll || this.ownToldCi.get(path) === ciKey(prevPoll)) return prevPoll
+    // The own agent was never told the CI result already showing — hide
+    // it from the baseline so the diff reports it.
+    return { ...prevPoll, checksOverall: 'none' }
+  }
+
+  private deliver(target: string, pr: PRStatus, plans: PlannedUpdate[]): void {
     const targetName = describeWorktree(this.store.getSnapshot().state, target)
-    const urgent = changes.some((c) => c.urgent)
-    const own = wrapAutomatedMessage('pr-update', buildOwnPrUpdate(pr, changes))
-    const other = wrapAutomatedMessage(
-      'subscription-update',
-      buildSubscriptionUpdate(targetName, pr, changes),
-      { from: targetName }
-    )
-    const result = fanOut(this.store, this.bus, target, {
-      topic: 'pr',
-      urgent,
-      messagingEnabled: this.messagingEnabled(),
-      message: (sub) => (sub.subscriberPath === target ? own : other)
-    })
-    log(
-      'subscriptions',
-      `update ${target}: ${changes.map((c) => c.text.split('\n')[0]).join('; ')} urgent=${urgent} ` +
-        `-> delivered=${result.delivered.length} failed=${result.failed.length}`
-    )
+    const dead: string[] = []
+    for (const { sub, changes, base } of plans) {
+      const own = sub.reason === 'own-worktree'
+      const urgent = changes.some((c) => c.urgent)
+      const wire = own
+        ? wrapAutomatedMessage('pr-update', buildOwnPrUpdate(pr, changes))
+        : wrapAutomatedMessage('subscription-update', buildSubscriptionUpdate(targetName, pr, changes), {
+            from: targetName
+          })
+      const r = this.bus.toTab(sub.subscriberPath, sub.subscriberTabId, wire, urgent ? 'interrupt' : sub.mode)
+      log(
+        'subscriptions',
+        `update ${target} -> ${sub.subscriberTabId}: ${changes.map((c) => c.text.split('\n')[0]).join('; ')} ` +
+          `${r.ok ? 'ok' : `failed: ${r.reason}`}`
+      )
+      if (r.ok) {
+        const key = ciKey(pr)
+        if (own && key) this.ownToldCi.set(target, key)
+        continue
+      }
+      // Release the claim so the next poll retries — unless a newer poll
+      // already re-claimed it.
+      const told = this.told.get(target)
+      if (told?.get(sub.subscriberTabId) === pr) told.set(sub.subscriberTabId, base)
+      if (sub.explicitId && GONE.has(r.reason)) dead.push(sub.explicitId)
+    }
+    if (dead.length > 0) {
+      this.store.dispatch({ type: 'subscriptions/removed', payload: { ids: dead } })
+    }
   }
 }
 

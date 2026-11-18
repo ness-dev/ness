@@ -95,7 +95,7 @@ describe('describePrChanges', () => {
 
   it('reports a PR opening as routine', () => {
     expect(describePrChanges(null, pr())).toEqual([
-      { text: 'Opened PR #7: "Add a thing"', urgent: false }
+      { kind: 'opened', text: 'Opened PR #7: "Add a thing"', urgent: false }
     ])
   })
 
@@ -106,8 +106,8 @@ describe('describePrChanges', () => {
       checks: [{ name: 'build', state: 'failure', description: '' }]
     })
     expect(describePrChanges(pr(), next)).toEqual([
-      { text: 'New commit pushed (bbbbbbb)', urgent: false },
-      { text: 'CI failing\n  - build', urgent: true, ciKey: 'bbbbbbb2:failure' }
+      { kind: 'commit', text: 'New commit pushed (bbbbbbb)', urgent: false },
+      { kind: 'ci', text: 'CI failing\n  - build', urgent: true }
     ])
   })
 
@@ -124,9 +124,16 @@ describe('describePrChanges', () => {
       })
     )
     expect(changes).toEqual([
-      { text: 'PR merged', urgent: true },
-      { text: 'Changes requested by octo', urgent: true },
-      { text: 'PR now has merge conflicts with its base', urgent: true }
+      { kind: 'state', text: 'PR merged', urgent: true },
+      { kind: 'review', text: 'Changes requested by octo', urgent: true },
+      { kind: 'conflict', text: 'PR now has merge conflicts with its base', urgent: true }
+    ])
+  })
+
+  it('reports the CI result a PR opens with', () => {
+    expect(describePrChanges(null, pr({ checksOverall: 'failure' })).map((c) => c.kind)).toEqual([
+      'opened',
+      'ci'
     ])
   })
 
@@ -417,5 +424,113 @@ describe('own-worktree PR notifications', () => {
     expect(off.send).not.toHaveBeenCalled()
     expect(off.store.getSnapshot().state.notifications.pendingByTab).toEqual({})
     n2.stop()
+  })
+})
+
+describe('own-worktree PR notifications: delivery edge cases', () => {
+  /** Like setup(), but the bus's delivery can be made to fail, the way a
+   *  tab that can't be woken does. */
+  function ownSetup(opts: { global?: boolean; override?: boolean; childLive?: boolean } = {}) {
+    const store = new Store({
+      ...initialState,
+      settings: { ...initialState.settings, notifyChatOnCiFailure: opts.global ?? true },
+      ciNotify: { byPath: opts.override === undefined ? {} : { [CHILD]: opts.override } },
+      worktrees: { ...initialState.worktrees, list: [worktree(PARENT, 'parent'), worktree(CHILD, 'child')] },
+      terminals: { ...initialState.terminals, panes: { [PARENT]: leaf(PARENT_TAB), [CHILD]: leaf(CHILD_TAB) } }
+    })
+    const live = new Set(opts.childLive === false ? [] : [CHILD_TAB])
+    const send = vi.fn<(sessionId: string, text: string) => void>()
+    const wake = vi.fn((_wt: string, tabId: string) => {
+      if (canWake.value) live.add(tabId)
+    })
+    const canWake = { value: true }
+    const bus = new NotificationBus(
+      store,
+      { send, hasSession: (id) => live.has(id), wake, respawn: (wt, id) => wake(wt, id) },
+      async () => true
+    )
+    const notifier = new SubscriptionNotifier(store, bus, () => false)
+    notifier.start()
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    return { store, send, wake, canWake, notifier }
+  }
+  const red = (over: Partial<PRStatus> = {}) => pr({ checksOverall: 'failure', ...over })
+
+  it('retries a CI failure whose delivery failed, on the next poll of the same commit', async () => {
+    const t = ownSetup({ childLive: false })
+    t.canWake.value = false
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(t.send).not.toHaveBeenCalled()
+
+    t.canWake.value = true
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(t.send).toHaveBeenCalledTimes(1)
+    expect(parseAutomatedMessage(t.send.mock.calls[0][1])?.body).toContain('CI failing')
+    t.notifier.stop()
+  })
+
+  it('wakes a slept tab to deliver an urgent update', async () => {
+    const t = ownSetup({ childLive: false })
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(t.wake).toHaveBeenCalled()
+    expect(t.send).toHaveBeenCalledTimes(1)
+    t.notifier.stop()
+  })
+
+  it('reports a failure that landed while the worktree had no Chat tab, once one opens', async () => {
+    const t = ownSetup()
+    t.store.dispatch({
+      type: 'terminals/panesForWorktreeChanged',
+      payload: { worktreePath: CHILD, panes: { type: 'leaf', id: 'p', tabs: [], activeTabId: '' } }
+    })
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(t.send).not.toHaveBeenCalled()
+
+    t.store.dispatch({ type: 'terminals/panesForWorktreeChanged', payload: { worktreePath: CHILD, panes: leaf(CHILD_TAB) } })
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(t.send).toHaveBeenCalledTimes(1)
+    t.notifier.stop()
+  })
+
+  it('a per-worktree override beats the global setting, both ways', async () => {
+    const offHere = ownSetup({ global: true, override: false })
+    offHere.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(offHere.send).not.toHaveBeenCalled()
+    offHere.notifier.stop()
+
+    const onHere = ownSetup({ global: false, override: true })
+    onHere.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: red() } })
+    await flush()
+    expect(onHere.send).toHaveBeenCalledTimes(1)
+    onHere.notifier.stop()
+  })
+
+  it('works for statuses cached without a headSha', async () => {
+    const t = ownSetup()
+    t.store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr({ headSha: undefined }) } })
+    for (const checksOverall of ['failure', 'pending', 'failure'] as const) {
+      t.store.dispatch({
+        type: 'prs/statusChanged',
+        payload: { path: CHILD, status: pr({ headSha: undefined, checksOverall }) }
+      })
+    }
+    await flush()
+    expect(t.send).toHaveBeenCalledTimes(1)
+    t.notifier.stop()
+  })
+
+  it("leaves out what the agent already knows: its own new commits and opening the PR", async () => {
+    const t = ownSetup()
+    t.store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status: pr({ headSha: 'bbbbbbb2' }) } })
+    await flush()
+    expect(t.send).not.toHaveBeenCalled()
+    expect(t.store.getSnapshot().state.notifications.pendingByTab).toEqual({})
+    t.notifier.stop()
   })
 })
