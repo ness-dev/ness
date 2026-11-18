@@ -6,21 +6,42 @@
 // Deliberately app-agnostic. It only knows:
 //   - one or two URLs ("after" = PR head, optionally "before" = PR base)
 //   - a markdown instructions file describing how to use the app
-//   - a PR context file (title, body, diff)
+//   - a PR context file (title, body, per-file diffs)
+//   - optionally, a checkout of the PR head it may read and grep
 // Booting the app, seeding fixtures and publishing the report are the
 // caller's job, so another repo can reuse this by swapping those pieces.
 //
 // Usage:
 //   node run.mjs --after <url> [--before <url>] --instructions <md>
 //                --pr <json> --out <dir>
+//                [--repo-dir <dir>]      PR head checkout (default: cwd)
+//                [--ui-paths a/,b/]      path prefixes whose diffs go first
 // Env:
 //   OPENROUTER_API_KEY   required
 //   EVIDENCE_MODEL       default anthropic/claude-haiku-5.5
 //   EVIDENCE_MAX_STEPS   default 40
+//   EVIDENCE_RUN_BUDGET_USD  default 1. Stop the run (and refuse agent
+//                        proxy calls) once the reviewer plus agents in the
+//                        app have spent this much.
+//   EVIDENCE_AGENT_MODEL default anthropic/claude-haiku-5.5. Every proxied
+//                        agent call is rewritten to this model.
+//   EVIDENCE_AGENT_MAX_REQUESTS  default 80. Hard cap on proxied agent
+//                        calls, so a runaway agent loop is bounded even if
+//                        responses stop reporting cost.
+//
+// Agents running INSIDE the app under test never see the OpenRouter key.
+// They're configured (by the boot script) to call http://127.0.0.1:<port>
+// with a dummy token, and this process forwards those requests to
+// OpenRouter's Anthropic-compatible endpoint with the real key added. A
+// prompt-injected agent that dumps its own config or env therefore has
+// nothing to leak into a screenshot. Captures and reports are also
+// scrubbed for anything key-shaped as a backstop.
 
+import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 const require = createRequire(resolve(process.cwd(), 'package.json'))
 const { chromium } = require('playwright-core')
@@ -32,12 +53,35 @@ const MAX_STEPS = Number(process.env.EVIDENCE_MAX_STEPS || 40)
 const API_KEY = process.env.OPENROUTER_API_KEY
 const VIEWPORT = { width: 1440, height: 900 }
 const KEEP_IMAGES = 3
+const KEEP_FULL_TOOL_TEXT = 4
+const DIFF_BUDGET = 60000
+const PER_FILE_DIFF = 12000
+// Below this share of the step budget, a finish that leaves claims
+// inconclusive is bounced back once or twice with a nudge to dig deeper.
+// Cheap models otherwise give up after a handful of turns.
+const MIN_EFFORT = 0.5
+const MAX_FINISH_REJECTIONS = 2
+const RUN_BUDGET = Number(process.env.EVIDENCE_RUN_BUDGET_USD || 1)
+const AGENT_MAX_REQUESTS = Number(process.env.EVIDENCE_AGENT_MAX_REQUESTS || 80)
+const AGENT_MODEL = process.env.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5'
+const AGENT_MAX_TOKENS = 8192
+const AGENT_MAX_IN_FLIGHT = 4
+const AGENT_PATHS = new Set(['/v1/messages', '/v1/messages/count_tokens'])
+const AGENT_PROXY_PORT = Number(args['agent-proxy-port'] || 37700)
+const SECRET_RE = /sk-or-v1-[A-Za-z0-9]{16,}/g
+const REPO_DIR = resolve(args['repo-dir'] || process.cwd())
+const UI_PATHS = (args['ui-paths'] || '').split(',').map((s) => s.trim()).filter(Boolean)
 
 if (!API_KEY) fail('OPENROUTER_API_KEY is not set')
 if (!args.after) fail('--after <url> is required')
 mkdirSync(OUT, { recursive: true })
 
 const instructions = args.instructions ? readFileSync(args.instructions, 'utf8') : ''
+let agentProxyRequests = 0
+let agentUnpricedRequests = 0
+let agentInFlight = 0
+let agentCost = 0
+const agentProxy = startAgentProxy()
 const pr = JSON.parse(readFileSync(args.pr, 'utf8'))
 
 const browser = await chromium.launch({
@@ -62,8 +106,36 @@ const evidence = []
 const transcript = []
 let usage = { prompt: 0, completion: 0, cost: 0 }
 let result = null
+let plan = null
+let finishRejections = 0
+let currentStep = 0
 
 const tools = [
+  tool('plan', 'Record your test plan before touching the app. One entry per user-visible claim.', {
+    claims: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'What the PR says a user will see or be able to do.' },
+          code: { type: 'string', description: 'Files/components that implement it, from the diff.' },
+          how_to_reach: { type: 'string', description: 'Concrete UI path to the state that proves it: what to click, which menu, which tab type, which setting.' },
+          proof: { type: 'string', description: 'What the before and after screenshots should each show.' }
+        },
+        required: ['claim', 'how_to_reach', 'proof']
+      }
+    }
+  }, ['claims']),
+  tool('read_diff', 'Read the full diff of one changed file. Use this for any file whose diff was omitted or truncated in the prompt.', {
+    path: { type: 'string' }
+  }, ['path']),
+  tool('read_file', 'Read a file from the PR head checkout (the "after" code), e.g. to see where a component is mounted or what gates it.', {
+    path: { type: 'string' },
+    start_line: { type: 'integer', description: '1-based, default 1' }
+  }, ['path']),
+  tool('search_code', 'git grep the PR head checkout. Use it to find where a component is rendered, which setting/flag/menu shows it, or the exact UI label text.', {
+    query: { type: 'string', description: 'Fixed string, case-insensitive.' }
+  }, ['query']),
   tool('observe', 'Take a screenshot of an app and list its visible interactive elements with numeric ids.', {
     app: appEnum()
   }, ['app']),
@@ -73,7 +145,8 @@ const tools = [
     x: { type: 'number' },
     y: { type: 'number' },
     button: { type: 'string', enum: ['left', 'right', 'middle'] },
-    double: { type: 'boolean' }
+    double: { type: 'boolean' },
+    modifiers: { type: 'array', items: { type: 'string', enum: ['Shift', 'Alt', 'Control', 'Meta'] } }
   }, ['app']),
   tool('hover', 'Move the mouse over an element by id.', { app: appEnum(), id: { type: 'integer' } }, ['app', 'id']),
   tool('type', 'Type text. If id is given, that element is focused first.', {
@@ -90,6 +163,11 @@ const tools = [
     dy: { type: 'number' },
     id: { type: 'integer' }
   }, ['app', 'dy']),
+  tool('wait_for_text', 'Wait until NEW occurrences of text appear in an app (case-insensitive), e.g. an agent reply. Counts occurrences already on screen when called and waits for the count to rise, so a prompt that contains the word doesn\'t count. Call it right after sending. Returns as soon as it rises, or after timeout_s, then observes.', {
+    app: appEnum(),
+    text: { type: 'string' },
+    timeout_s: { type: 'number', description: 'Default 30, max 120.' }
+  }, ['app', 'text']),
   tool('find_text', 'Search the visible DOM text of an app for a string (case-insensitive). Returns matching snippets.', {
     app: appEnum(),
     query: { type: 'string' }
@@ -122,12 +200,19 @@ const messages = [
   { role: 'user', content: prPrompt() }
 ]
 
+let overBudget = false
 for (let step = 0; step < MAX_STEPS && !result; step++) {
   const remaining = MAX_STEPS - step
+  if (!overBudget && (runSpend() > RUN_BUDGET || agentProxyRequests >= AGENT_MAX_REQUESTS)) {
+    overBudget = true
+    messages.push({ role: 'user', content: `The run's budget is used up ($${RUN_BUDGET} or ${AGENT_MAX_REQUESTS} agent calls). Call finish now with what you have.` })
+  }
   if (remaining === 3) {
     messages.push({ role: 'user', content: 'You have 3 steps left. Capture any final evidence and call finish.' })
   }
-  const reply = await chat(messages, remaining === 1 ? { type: 'function', function: { name: 'finish' } } : 'auto')
+  currentStep = step
+  const forced = step === 0 ? 'plan' : remaining === 1 || overBudget ? 'finish' : null
+  const reply = await chat(messages, forced ? { type: 'function', function: { name: forced } } : 'auto')
   const msg = reply.choices?.[0]?.message
   if (!msg) fail(`no message in response: ${JSON.stringify(reply).slice(0, 500)}`)
   messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls })
@@ -155,6 +240,7 @@ for (let step = 0; step < MAX_STEPS && !result; step++) {
     messages.push({ role: 'tool', tool_call_id: call.id, content: out.text })
     images.push(...(out.images || []))
   }
+  pruneOldToolText()
   if (images.length) {
     pruneOldImages()
     messages.push({
@@ -175,15 +261,30 @@ if (!result) {
 }
 
 await browser.close()
+agentProxy.closeAllConnections?.()
+agentProxy.close()
+const runCost = runSpend()
 
-writeFileSync(join(OUT, 'result.json'), JSON.stringify({ model: MODEL, usage, result, evidence, transcript }, null, 2))
-writeFileSync(join(OUT, 'report.md'), renderReport())
+writeFileSync(join(OUT, 'result.json'), redact(JSON.stringify({ model: MODEL, usage, runCost, agentCost, agentProxyRequests, agentUnpricedRequests, plan, result, evidence, transcript }, null, 2)))
+writeFileSync(join(OUT, 'report.md'), redact(renderReport()))
 log(`done: ${result.verdict} (${evidence.length} screenshots, $${usage.cost.toFixed(4)})`)
 
 async function runTool(name, input) {
-  if (name === 'finish') {
-    result = input
-    return { text: 'ok' }
+  switch (name) {
+    case 'finish':
+      return tryFinish(input)
+    case 'plan':
+      plan = input.claims || []
+      return { text: `Plan recorded (${plan.length} claims). Now work through it. Read code with search_code/read_file whenever you don't know how to reach a state.` }
+    case 'read_diff': {
+      const d = pr.fileDiffs[input.path]
+      if (!d) return { text: `No diff for "${input.path}". Changed files:\n${changedPaths().join('\n')}` }
+      return { text: d.length > 40000 ? d.slice(0, 40000) + '\n…[truncated]' : d }
+    }
+    case 'read_file':
+      return readRepoFile(input.path, input.start_line || 1)
+    case 'search_code':
+      return searchCode(input.query)
   }
   if (input.app === 'both') return runOnBoth(name, input)
   const app = apps[input.app]
@@ -196,10 +297,15 @@ async function runTool(name, input) {
     case 'click': {
       if (input.id != null) {
         const loc = page.locator(`[data-ev-id="${input.id}"]`).first()
-        const opts = { button: input.button || 'left', timeout: 3000 }
+        const opts = { button: input.button || 'left', timeout: 3000, modifiers: input.modifiers }
         input.double ? await loc.dblclick(opts) : await loc.click(opts)
       } else if (input.x != null && input.y != null) {
-        await page.mouse.click(input.x, input.y, { button: input.button || 'left', clickCount: input.double ? 2 : 1 })
+        try {
+          for (const m of input.modifiers || []) await page.keyboard.down(m)
+          await page.mouse.click(input.x, input.y, { button: input.button || 'left', clickCount: input.double ? 2 : 1 })
+        } finally {
+          for (const m of input.modifiers || []) await page.keyboard.up(m)
+        }
       } else return { text: 'click needs id or x+y' }
       return settleAndObserve(app)
     }
@@ -217,6 +323,20 @@ async function runTool(name, input) {
       if (input.id != null) await page.locator(`[data-ev-id="${input.id}"]`).first().hover({ timeout: 3000 })
       await page.mouse.wheel(0, input.dy)
       return settleAndObserve(app)
+    case 'wait_for_text': {
+      const timeout = Math.min(120, input.timeout_s || 30) * 1000
+      const occurrences = (t) => document.body.innerText.toLowerCase().split(t.toLowerCase()).length - 1
+      const baseline = await page.evaluate(occurrences, input.text)
+      const found = await page
+        .waitForFunction(
+          ([t, n]) => document.body.innerText.toLowerCase().split(t.toLowerCase()).length - 1 > n,
+          [input.text, baseline],
+          { timeout, polling: 500 }
+        )
+        .then(() => true, () => false)
+      const out = await settleAndObserve(app)
+      return { ...out, text: `${found ? 'appeared' : `not seen after ${timeout / 1000}s`}: "${input.text}"\n${out.text}` }
+    }
     case 'find_text': {
       const snippets = await page.evaluate((q) => {
         const text = document.body.innerText
@@ -233,6 +353,7 @@ async function runTool(name, input) {
       return { text: snippets.length ? snippets.map((s) => `… ${s} …`).join('\n') : 'no matches' }
     }
     case 'capture_evidence': {
+      if (await showsSecret(page)) return { text: 'refused: the screen contains an API key. Clear or close it, then capture again.' }
       const id = `E${evidence.length + 1}`
       const file = `${id}-${input.app}.png`
       await page.screenshot({ path: join(OUT, file) })
@@ -251,6 +372,9 @@ async function runTool(name, input) {
 // same rank among duplicates), since ids are assigned per page.
 async function runOnBoth(name, input) {
   if (name === 'capture_evidence') {
+    for (const appName of ['before', 'after']) {
+      if (await showsSecret(apps[appName].page)) return { text: `refused: the ${appName} screen contains an API key. Clear or close it, then capture again.` }
+    }
     const id = `E${evidence.length + 1}`
     const files = {}
     for (const appName of ['before', 'after']) {
@@ -260,27 +384,48 @@ async function runOnBoth(name, input) {
     evidence.push({ id, app: 'both', caption: input.caption, files })
     return { text: `saved before/after pair as ${id}` }
   }
-  const texts = []
+  const texts = {}
   const images = []
   for (const appName of ['before', 'after']) {
     let mapped = { ...input, app: appName }
     if (appName === 'before' && input.id != null) {
       const beforeId = translateId(input.id)
       if (beforeId == null) {
-        texts.push(`[before] no element matching after's [${input.id}]; action skipped. Act on "before" directly with its own ids.`)
+        texts.before = `[before] no element matching after's [${input.id}]; action skipped. Act on "before" directly with its own ids.`
         continue
       }
       mapped.id = beforeId
     }
     try {
       const out = await runTool(name, mapped)
-      texts.push(`[${appName}] ${out.text}`)
+      texts[appName] = `[${appName}] ${out.text}`
       images.push(...(out.images || []))
     } catch (e) {
-      texts.push(`[${appName}] error: ${e.message.split('\n')[0]}`)
+      texts[appName] = `[${appName}] error: ${e.message.split('\n')[0]}`
     }
   }
-  return { text: texts.join('\n\n'), images }
+  if (texts.before?.includes('interactive elements:') && texts.after?.includes('interactive elements:')) {
+    texts.before = texts.before.split('interactive elements:')[0] + elementDiff()
+  }
+  return { text: [texts.after, texts.before].filter(Boolean).join('\n\n'), images }
+}
+
+// The before list is usually near-identical to after's, so only its
+// differences are shown. Ids in "both" actions come from after's list.
+function elementDiff() {
+  const count = (list) => list.reduce((m, e) => m.set(e.key, (m.get(e.key) || 0) + 1), new Map())
+  const before = apps.before.elements || []
+  const after = apps.after.elements || []
+  const afterCounts = count(after)
+  const beforeCounts = count(before)
+  const onlyBefore = before.filter((e) => (afterCounts.get(e.key) || 0) < (beforeCounts.get(e.key) || 0))
+  const onlyAfter = after.filter((e) => (beforeCounts.get(e.key) || 0) < (afterCounts.get(e.key) || 0))
+  if (!onlyBefore.length && !onlyAfter.length) return `interactive elements: same ${before.length} as after.`
+  return [
+    `interactive elements: ${before.length}, same as after except:`,
+    ...onlyBefore.slice(0, 30).map((e) => `  only in before: ${e.line}`),
+    ...onlyAfter.slice(0, 30).map((e) => `  only in after:  ${e.line.replace(/^\[\d+\] /, '')}`)
+  ].join('\n')
 }
 
 function translateId(afterId) {
@@ -290,6 +435,81 @@ function translateId(afterId) {
   const rank = after.filter((e) => e.key === target.key && e.id < afterId).length
   const matches = (apps.before.elements || []).filter((e) => e.key === target.key)
   return matches[rank]?.id ?? null
+}
+
+function tryFinish(input) {
+  const claims = input.claims || []
+  const weak = claims.filter((c) => c.status === 'inconclusive')
+  const uiChanged = changedPaths().some(isUi)
+  const wronglyNotVisual = input.verdict === 'not_visual' && uiChanged
+  const gaveUp = input.verdict === 'inconclusive' || weak.length > 0 || wronglyNotVisual
+  const early = currentStep < MAX_STEPS * MIN_EFFORT
+  if (gaveUp && early && finishRejections < MAX_FINISH_REJECTIONS) {
+    finishRejections++
+    const left = MAX_STEPS - currentStep - 1
+    const why = wronglyNotVisual
+      ? `the PR changes UI files (${changedPaths().filter(isUi).slice(0, 5).join(', ')}), so "not_visual" doesn't fit`
+      : weak.length
+        ? `${weak.length} claim(s) are still inconclusive:\n${weak.map((c) => `- ${c.claim}`).join('\n')}`
+        : 'the verdict is inconclusive'
+    return {
+      text: `Not finished: you have ${left} turns left and ${why}.
+Before giving up on a claim, try a different route:
+- search_code for the component or its label to find where it renders and what gates it (settings, menus, panel visibility, tab type, feature flags)
+- read_diff / read_file the UI files involved
+- look for menus, context menus (right-click), settings sections, or hidden panels that reveal it
+- if a state needs data the fixture lacks, show the closest reachable state (the empty state, the toggle, the menu entry) and capture that
+Call finish again only when every claim has evidence or you have tried at least two concrete routes for it.`
+    }
+  }
+  result = input
+  return { text: 'ok' }
+}
+
+function readRepoFile(path, startLine) {
+  const full = resolve(REPO_DIR, path)
+  const rel = relative(REPO_DIR, full)
+  if (rel.startsWith('..') || rel.startsWith('/') || rel.split('/').includes('.git')) return { text: 'path must be inside the repo' }
+  let text
+  try {
+    text = readFileSync(full, 'utf8')
+  } catch (e) {
+    return { text: `cannot read ${path}: ${e.code || e.message}` }
+  }
+  const lines = text.split('\n')
+  const from = Math.max(1, startLine)
+  const chunk = lines.slice(from - 1, from - 1 + 400)
+  const body = chunk.map((l, i) => `${from + i}: ${l}`).join('\n')
+  const more = from - 1 + 400 < lines.length ? `\n…[${lines.length} lines total; pass start_line=${from + 400} for more]` : ''
+  return { text: body.slice(0, 30000) + more }
+}
+
+function searchCode(query) {
+  try {
+    const out = execFileSync(
+      'git',
+      ['grep', '-n', '-I', '-i', '-F', '--max-count', '5', '-e', query, '--', '.', ':!package-lock.json', ':!*.lock', ':!*.test.*'],
+      { cwd: REPO_DIR, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }
+    )
+    const lines = out.split('\n').filter(Boolean)
+    return { text: lines.slice(0, 60).map((l) => l.slice(0, 240)).join('\n') + (lines.length > 60 ? `\n…[${lines.length - 60} more]` : '') }
+  } catch (e) {
+    return { text: e.status === 1 ? 'no matches' : `search failed: ${e.message.split('\n')[0]}` }
+  }
+}
+
+// Element lists dominate the context. Only the most recent few tool results
+// keep theirs; older ones shrink to a stub (ids are stale by then anyway).
+function pruneOldToolText() {
+  let seen = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role !== 'tool') continue
+    seen++
+    if (seen > KEEP_FULL_TOOL_TEXT && typeof m.content === 'string' && m.content.includes('interactive elements:')) {
+      m.content = m.content.split('interactive elements:')[0] + '[old element list elided; ids are stale, observe again]'
+    }
+  }
 }
 
 async function settleAndObserve(app) {
@@ -372,44 +592,71 @@ async function chat(msgs, toolChoice) {
 }
 
 function systemPrompt() {
-  const appsLine = appNames.includes('before')
+  const both = appNames.includes('before')
+  const appsLine = both
     ? 'Two copies of the app are running side by side: "before" is built from the PR base branch, "after" is built from the PR head. Both are seeded with identical fixture data.'
     : 'One copy of the app is running: "after", built from the PR head.'
-  return `You are an evidence-gathering QA reviewer for a pull request. You do not review code style. Your only job is to PROVE, using screenshots of the running app, whether the user-visible behaviour the PR claims actually works.
+  return `You are an evidence-gathering QA reviewer for a pull request. You do not review code style. Your job is to PROVE, using screenshots of the running app, whether the user-visible behaviour the PR claims actually works. The PR author is relying on you to find the feature and show it, so be persistent and resourceful: a reviewer who reports "couldn't find it" after a few clicks has failed.
 
 ${appsLine}
 
-Method:
-1. Read the PR description and diff. List the concrete, user-visible claims it makes (what should look or behave differently). If the change has no user-visible surface (pure refactor, CI, docs, tests), say so and finish with verdict "not_visual" after at most a quick sanity check.
-2. For each claim, decide what screen state would prove it and drive the app there.${appNames.includes('before') ? `
-3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's list (before's matching element is found by role + name). Once both apps show the state that demonstrates a claim, call capture_evidence with app "both" to save a side-by-side pair. If the two apps diverge (for example the new UI only exists in after), act on each app on its own to line them up again, then capture with "both". Capture a single app only when a comparison is meaningless.` : `
-3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
-4. Be skeptical. If the UI does not show what the PR claims, that is a finding: capture it and mark the claim refuted. If you cannot reach the relevant state, mark it inconclusive and say why. Never mark a claim verified without a capture that shows it.
-5. Prefer clicking by element id from observe. Re-observe after anything that changes the screen. Use find_text to confirm text exists.
-6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically ("Screenshot of app").
-7. Finish with the finish tool. Cite evidence ids (E1, E2, …) per claim.
+You can also read the PR head's code: read_diff (any changed file), read_file and search_code (the whole repo). Use them freely. They are the fastest way to learn where a feature renders and how to reach it.
 
-You have at most ${MAX_STEPS} tool-calling turns. Several tool calls per turn are allowed.
+Method:
+1. PLAN FIRST. Your first call is plan. For each user-visible claim, name the component(s) from the diff, the concrete click path to the state that proves it, and what before and after should show. If a component's diff isn't in the prompt, read_diff it. If you don't know how a component is reached (which menu, setting, tab type, panel, flag), search_code for where it is rendered or imported before guessing in the UI.
+2. Work through the plan claim by claim. Drive the app to the state, observe, adjust.${both ? `
+3. The report's main artifact is BEFORE/AFTER PAIRS. Use app "both" for observe, click, type, press, scroll and hover: the action runs on before and then after, so the two stay in the same state. Ids come from the after app's element list. For before, you see only the elements that differ from after, and "only in after" lines are often the new UI the PR adds. Once both apps show the state that demonstrates a claim, call capture_evidence with app "both". If the apps diverge (the new UI only exists in after), act on each app separately to line them up again, then capture with "both".` : `
+3. Call capture_evidence on "after" whenever the screen proves or disproves a claim.`}
+4. When a route fails, try another. Things that hide UI: panel-visibility menus, collapsed sections, settings pages that need scrolling, context menus (right-click), hover-only controls, specific tab types, empty states. If the fixture can't produce the full state (it needs a GitHub PR, a Codex session, …), capture the closest reachable state that still shows the change: the new toggle, menu entry, empty panel, or label. That is real evidence.
+5. Be skeptical. If the UI does not do what the PR claims, capture it and mark the claim refuted. Mark a claim inconclusive only after at least two concrete routes failed, and say which. Never mark a claim verified without a capture that shows it. find_text only proves the text is in the DOM, so scroll it into view and capture.
+6. Captions describe the difference specifically ("Before: middle-click leaves the Shell row in place. After: the row is removed"), not generically.
+7. Pure refactors, CI, docs or test-only PRs: verdict "not_visual" after a quick sanity check. If any UI file changed, the PR is visual.
+8. Finish with the finish tool, citing evidence ids (E1, E2, …) per claim.
+
+You have ${MAX_STEPS} tool-calling turns; use them. Several tool calls per turn are allowed and encouraged.
 
 # How to use this app
 ${instructions}`
 }
 
+// UI files first (the agent's job is the UI), then other source, then
+// tests and docs, each capped so one huge file can't eat the budget.
+// Everything that doesn't fit is listed and reachable with read_diff.
 function prPrompt() {
-  const diff = pr.diff.length > 60000 ? pr.diff.slice(0, 60000) + '\n…[diff truncated]' : pr.diff
+  const isAux = (p) => /\.test\.|__tests__|\.md$|^\.github\//.test(p)
+  const rank = (p) => (isAux(p) ? 2 : isUi(p) ? 0 : 1)
+  const stats = Object.fromEntries(pr.files.map((f) => [f.path, f]))
+  const files = changedPaths()
+    .map((path) => stats[path] || { path, additions: '?', deletions: '?' })
+    .sort((a, b) => rank(a.path) - rank(b.path))
+  let used = 0
+  const shown = []
+  const omitted = []
+  for (const f of files) {
+    const d = pr.fileDiffs[f.path]
+    if (!d) continue
+    const clipped = d.length > PER_FILE_DIFF ? d.slice(0, PER_FILE_DIFF) + `\n…[${f.path} truncated, read_diff for the rest]\n` : d
+    if (used + clipped.length > DIFF_BUDGET) {
+      omitted.push(f)
+      continue
+    }
+    used += clipped.length
+    shown.push(clipped)
+  }
+  const fileLine = (f) => `${f.path} (+${f.additions} -${f.deletions})${isUi(f.path) ? ' [UI]' : ''}`
   return `# PR #${pr.number}: ${pr.title}
 
 ${pr.body || '(no description)'}
 
 ## Changed files
-${pr.files.join('\n')}
+${files.map(fileLine).join('\n')}
 
 ## Diff
 \`\`\`diff
-${diff}
+${shown.join('')}
 \`\`\`
-
-Start by listing the claims you intend to verify, then observe the app.`
+${omitted.length ? `\nNot shown above (use read_diff): ${omitted.map((f) => f.path).join(', ')}\n` : ''}
+Start with plan.`
 }
 
 function renderReport() {
@@ -427,6 +674,11 @@ function renderReport() {
       lines.push(`| ${icon[c.status] || '❔'} | ${cell(c.claim)} | ${ev} | ${cell(c.notes || '')} |`)
     }
     lines.push('')
+  }
+  if (plan?.length) {
+    lines.push('<details><summary>Test plan</summary>', '')
+    for (const p of plan) lines.push(`- **${p.claim}**: ${p.how_to_reach}${p.proof ? ` → ${p.proof}` : ''}`)
+    lines.push('', '</details>', '')
   }
   for (const e of evidence) {
     lines.push(`### ${e.id}`, '', e.caption, '')
@@ -446,10 +698,104 @@ function renderReport() {
   if (uncited.length) {
     lines.push(`<sub>Uncited screenshots: ${uncited.map((e) => e.id).join(', ')}</sub>`, '')
   }
-  lines.push(
-    `<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} tokens · $${usage.cost.toFixed(4)}</sub>`
-  )
+  const unpriced = agentUnpricedRequests ? `, ${agentUnpricedRequests} of ${agentProxyRequests} unpriced` : ''
+  const atLeast = agentUnpricedRequests ? '≥' : ''
+  const total = `${atLeast}$${runCost.toFixed(4)} total (reviewer $${usage.cost.toFixed(4)}, agents in app ${atLeast}$${agentCost.toFixed(4)} over ${agentProxyRequests} calls${unpriced})`
+  lines.push(`<sub>Model \`${MODEL}\` · ${transcript.length} actions · ${usage.prompt + usage.completion} reviewer tokens · ${total}</sub>`)
   return lines.join('\n')
+}
+
+function startAgentProxy() {
+  // The proxy is the one thing an agent in the app can spend money through,
+  // so it enforces the limits itself rather than trusting the agent's
+  // config: known paths only, the configured model whatever was asked for,
+  // a max_tokens ceiling, and a small concurrency limit so a burst can't
+  // all pass the budget check before any cost has been counted.
+  const server = createServer(async (req, res) => {
+    const reject = (status, message) => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ type: 'error', error: { type: status === 429 ? 'rate_limit_error' : 'invalid_request_error', message } }))
+    }
+    const path = (req.url || '').split('?')[0]
+    if (req.method !== 'POST' || !AGENT_PATHS.has(path)) return reject(404, `evidence proxy only serves POST ${[...AGENT_PATHS].join(', ')}`)
+    const limit =
+      runSpend() > RUN_BUDGET ? `budget of $${RUN_BUDGET}`
+      : agentProxyRequests >= AGENT_MAX_REQUESTS ? `cap of ${AGENT_MAX_REQUESTS} agent calls`
+      : agentInFlight >= AGENT_MAX_IN_FLIGHT ? `limit of ${AGENT_MAX_IN_FLIGHT} concurrent agent calls`
+      : null
+    if (limit) return reject(429, `evidence run ${limit} reached`)
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    let payload
+    try {
+      payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch {
+      return reject(400, 'evidence proxy expects a JSON body')
+    }
+    payload.model = AGENT_MODEL
+    if (typeof payload.max_tokens === 'number') payload.max_tokens = Math.min(payload.max_tokens, AGENT_MAX_TOKENS)
+    // The API requires thinking.budget_tokens < max_tokens, which the clamp
+    // above can break; the agent's reasoning isn't what's under test anyway.
+    delete payload.thinking
+    const headers = {}
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (!['host', 'authorization', 'x-api-key', 'content-length', 'connection', 'accept-encoding'].includes(k)) headers[k] = v
+    }
+    headers.authorization = `Bearer ${API_KEY}`
+    agentProxyRequests++
+    agentInFlight++
+    try {
+      const upstream = await fetch(`https://openrouter.ai/api${req.url}`, { method: 'POST', headers, body: JSON.stringify(payload) })
+      const out = {}
+      upstream.headers.forEach((v, k) => {
+        if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) out[k] = v
+      })
+      res.writeHead(upstream.status, out)
+      // OpenRouter reports each response's cost in its usage block (the
+      // final SSE event when streaming); the last one seen is the total.
+      let tail = ''
+      if (upstream.body) {
+        for await (const chunk of upstream.body) {
+          res.write(chunk)
+          tail = (tail + Buffer.from(chunk).toString('utf8')).slice(-4000)
+        }
+      }
+      res.end()
+      const costs = [...tail.matchAll(/"cost":\s*([0-9.eE+-]+)/g)].map((m) => Number(m[1])).filter(Number.isFinite)
+      if (costs.length) agentCost += costs[costs.length - 1]
+      else if (path === '/v1/messages') agentUnpricedRequests++
+    } catch (e) {
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' })
+      res.end(`evidence agent proxy: ${e.message}`)
+    } finally {
+      agentInFlight--
+    }
+  })
+  server.listen(AGENT_PROXY_PORT, '127.0.0.1')
+  return server
+}
+
+function runSpend() {
+  return usage.cost + agentCost
+}
+
+async function showsSecret(page) {
+  const text = await page.evaluate(() => document.body.innerText).catch(() => '')
+  return text.includes(API_KEY) || new RegExp(SECRET_RE.source).test(text)
+}
+
+function redact(text) {
+  return text.split(API_KEY).join('[REDACTED]').replace(SECRET_RE, '[REDACTED]')
+}
+
+function isUi(path) {
+  return UI_PATHS.some((prefix) => path.startsWith(prefix))
+}
+
+// fileDiffs comes from `gh pr diff` and is complete; pr.files is capped at
+// 100 by the API, so it's only used for +/- counts.
+function changedPaths() {
+  return Object.keys(pr.fileDiffs)
 }
 
 function cell(s) {
