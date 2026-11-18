@@ -734,6 +734,9 @@ function startAgentProxy() {
     }
     payload.model = AGENT_MODEL
     if (typeof payload.max_tokens === 'number') payload.max_tokens = Math.min(payload.max_tokens, AGENT_MAX_TOKENS)
+    // The API requires thinking.budget_tokens < max_tokens, which the clamp
+    // above can break; the agent's reasoning isn't what's under test anyway.
+    delete payload.thinking
     const headers = {}
     for (const [k, v] of Object.entries(req.headers)) {
       if (!['host', 'authorization', 'x-api-key', 'content-length', 'connection', 'accept-encoding'].includes(k)) headers[k] = v

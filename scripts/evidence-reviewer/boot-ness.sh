@@ -120,9 +120,13 @@ if [ -n "$SANDBOX_USER" ]; then
 fi
 
 # Keep the server off the real GitHub API: the fixture has no remote, and
-# a token in env would make PR polling hit api.github.com for nothing. The
-# log is opened by this shell, so it stays readable outside the sandbox.
-${RUN_AS[@]+"${RUN_AS[@]}"} env -u GITHUB_TOKEN -u GH_TOKEN -u OPENROUTER_API_KEY \
+# a token in env would make PR polling hit api.github.com for nothing.
+# Inherited CLAUDE*/ANTHROPIC* vars (e.g. when run from inside a Claude Code
+# session) would override settings.json or mark agents as child sessions.
+# The log is opened by this shell, so it stays readable outside the sandbox.
+UNSET=(-u GITHUB_TOKEN -u GH_TOKEN -u OPENROUTER_API_KEY)
+for v in $(compgen -e | grep -E '^(CLAUDE|ANTHROPIC)'); do UNSET+=(-u "$v"); done
+${RUN_AS[@]+"${RUN_AS[@]}"} env "${UNSET[@]}" \
   HOME="$SERVER_HOME" \
   PATH="$APP/node_modules/.bin:$PATH" \
   HARNESS_DATA_DIR="$DATA_DIR" \
