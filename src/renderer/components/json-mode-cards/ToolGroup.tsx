@@ -148,9 +148,9 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
     <>
       {visibleDisplays.map((d, i) => (
         <Fragment key={i}>
-          {i > 0 && <span className="opacity-40">·</span>}
+          {i > 0 && <span className="opacity-40 shrink-0">·</span>}
           {d.icon && <d.icon className="icon-xs shrink-0" />}
-          <span className="truncate min-w-0 max-w-[16rem]" title={d.text}>
+          <span className="truncate shrink-0 max-w-[16rem]" title={d.text}>
             {d.text}
           </span>
         </Fragment>
@@ -186,7 +186,12 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
         {/* Stays in the tree even when empty — it's the flex-1 spacer
             that keeps the badges on the right from shifting as chips
             come and go. */}
-        <span className="opacity-70 truncate flex-1 min-w-0 flex items-center gap-1.5">
+        <span
+          className="opacity-70 overflow-hidden whitespace-nowrap flex-1 min-w-0 flex items-center gap-1.5"
+          style={{
+            maskImage: 'linear-gradient(to right, black calc(100% - 2rem), transparent)'
+          }}
+        >
           {showChips ? summary : null}
         </span>
         {hasPending && (

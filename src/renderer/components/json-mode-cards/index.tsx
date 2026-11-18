@@ -221,13 +221,13 @@ export function ToolCardChrome({
         )}
       </button>
       {!isOpen && collapsedImages && (
-        <div className="pl-3">
+        <div>
           <CollapsedImageStrip images={collapsedImages} />
         </div>
       )}
       {isOpen && (
         <div
-          className="mt-0.5 mb-2 ml-5 bg-panel overflow-hidden"
+          className="mt-0.5 mb-2 bg-panel overflow-hidden"
           style={{ borderRadius: 'var(--chat-bubble-radius)' }}
         >
           {children}

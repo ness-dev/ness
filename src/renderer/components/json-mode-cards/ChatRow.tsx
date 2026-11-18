@@ -26,11 +26,12 @@ export const CHAT_ROW_STYLE: CSSProperties = {
   fontSize: 'var(--chat-chrome-text)'
 }
 
-/** Body of an expanded row. A thin rule under the chevron's centre line
- *  carries the hierarchy that nested boxes used to. */
+/** Body of an expanded row. Flush with the row above it rather than
+ *  indented: nesting reads as more boxes, which is what the flat rows
+ *  replaced. */
 export function ChatRowChildren({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <div className="mt-0.5 mb-1 ml-1.5 pl-3 border-l border-border">
+    <div className="mt-0.5 mb-1">
       {children}
     </div>
   )
