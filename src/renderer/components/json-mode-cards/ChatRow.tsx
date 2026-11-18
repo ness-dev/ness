@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
  *  its em box, so it rides visibly above the label it's centred against. */
 export function Chevron({
   open,
-  className = 'text-muted'
+  className = ''
 }: {
   open: boolean
   className?: string
@@ -36,3 +36,8 @@ export function ChatRowChildren({ children }: { children: ReactNode }): JSX.Elem
     </div>
   )
 }
+
+/** Find-in-chat's current match on a flat row. The negative margin pays
+ *  for the padding so the ring clears the chevron and text without
+ *  shifting the row. */
+export const CHAT_ROW_HIT_CLASS = 'rounded -mx-1.5 px-1.5 ring-1 ring-accent/70 bg-accent/10'

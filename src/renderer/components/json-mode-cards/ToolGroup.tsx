@@ -180,7 +180,7 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
         className={CHAT_ROW_CLASS}
         style={CHAT_ROW_STYLE}
       >
-        <Chevron open={expanded} className="" />
+        <Chevron open={expanded} />
         {thinkingCount > 0 && <Brain className="icon-xs shrink-0" />}
         <span className="shrink-0">{countLabel}</span>
         {/* Stays in the tree even when empty — it's the flex-1 spacer

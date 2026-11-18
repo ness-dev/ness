@@ -123,7 +123,7 @@ export function TaskCard({
         className={CHAT_ROW_CLASS}
         style={CHAT_ROW_STYLE}
       >
-        <Chevron open={expanded} className="" />
+        <Chevron open={expanded} />
         <Sparkles className="icon-xs shrink-0" />
         <span
           className={`font-medium shrink-0 ${isError ? 'text-danger' : 'text-fg'}`}

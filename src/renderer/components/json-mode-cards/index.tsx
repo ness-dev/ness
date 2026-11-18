@@ -26,7 +26,7 @@ import {
 import type { ToolIcon } from './tool-icons'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
-import { CHAT_ROW_CLASS, CHAT_ROW_STYLE, Chevron } from './ChatRow'
+import { CHAT_ROW_CLASS, CHAT_ROW_HIT_CLASS, CHAT_ROW_STYLE, Chevron } from './ChatRow'
 
 export {
   extractArgs,
@@ -139,7 +139,6 @@ export function ToolCardChrome({
   /** Accepts a ReactNode so cards whose primary render is the subtitle
    *  (Grep/Glob's pattern field) can pass a <HighlightedText> here. */
   subtitle: ReactNode
-  variant: 'info' | 'warn'
   isError?: boolean
   brand?: boolean
   icon?: ToolIcon | null
@@ -172,7 +171,7 @@ export function ToolCardChrome({
   return (
     <div
       data-find-block-id={id}
-      className={isCurrentHit ? 'rounded ring-1 ring-accent/60 bg-accent/10' : ''}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
@@ -180,7 +179,7 @@ export function ToolCardChrome({
         className={`${CHAT_ROW_CLASS} ${brand ? 'group' : ''}`}
         style={CHAT_ROW_STYLE}
       >
-        <Chevron open={isOpen} className="" />
+        <Chevron open={isOpen} />
         {Icon && <Icon className="icon-xs shrink-0" />}
         <span
           className={`font-medium shrink-0 ${nameClass}`}

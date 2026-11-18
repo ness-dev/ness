@@ -51,7 +51,7 @@ export function TurnGroup({
         className="w-full flex items-center gap-2 cursor-pointer text-left text-muted hover:text-fg transition-colors"
         style={{ fontSize: 'var(--chat-chrome-text)' }}
       >
-        <Chevron open={isOpen} className="" />
+        <Chevron open={isOpen} />
         <span className="shrink-0">{summaryLabel(summary)}</span>
         {hasError && (
           <span

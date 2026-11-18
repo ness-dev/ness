@@ -9,6 +9,7 @@ import {
   type AgentSummary
 } from '../../shared/state/json-claude-agents'
 import { AgentPeek } from './AgentPeek'
+import { Chevron } from './json-mode-cards/ChatRow'
 import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
 import { useLiveClock } from './JsonClaudeAgentsPanel'
@@ -175,9 +176,7 @@ function AgentCardImpl({
             fontSize: 'var(--chat-chrome-text)'
           }}
         >
-          <span className="text-muted text-xs w-2 shrink-0 select-none">
-            {expanded ? '▾' : '▸'}
-          </span>
+          <Chevron open={expanded} className="text-muted" />
           <AgentStatusDot agent={agent} />
           {/* The purpose leads: in a column of near-identical cards, the
               title is the only thing that tells them apart at a glance. */}

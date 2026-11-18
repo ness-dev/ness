@@ -15,7 +15,6 @@ export function EditCard({ block, result, autoApproved, sessionAllowed }: ToolCa
       id={block.id}
       name="Edit"
       subtitle={`${basename(fp)}${diffSummary}`}
-      variant="warn"
       icon={EditIcon}
       isError={result?.isError}
       autoApproved={autoApproved}

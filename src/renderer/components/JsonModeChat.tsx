@@ -56,6 +56,7 @@ import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TurnGroup } from './json-mode-cards/TurnGroup'
 import {
   CHAT_ROW_CLASS,
+  CHAT_ROW_HIT_CLASS,
   CHAT_ROW_STYLE,
   ChatRowChildren,
   Chevron
@@ -494,7 +495,7 @@ function ThinkingCard({
   return (
     <div
       data-find-block-id={blockId}
-      className={isCurrentHit ? 'rounded ring-1 ring-accent/60 bg-accent/10' : ''}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
@@ -502,7 +503,7 @@ function ThinkingCard({
         className={CHAT_ROW_CLASS}
         style={CHAT_ROW_STYLE}
       >
-        <Chevron open={isOpen} className="" />
+        <Chevron open={isOpen} />
         <Brain className="icon-xs shrink-0" />
         <span className="shrink-0">{isPartial ? 'Thinking' : 'Thought'}</span>
         {isPartial && (
@@ -558,7 +559,7 @@ function CompactCard({
   return (
     <div
       data-find-block-id={blockId}
-      className={isCurrentHit ? 'rounded ring-1 ring-accent/60 bg-accent/10' : ''}
+      className={isCurrentHit ? CHAT_ROW_HIT_CLASS : undefined}
     >
       <button
         type="button"
@@ -566,7 +567,7 @@ function CompactCard({
         className={CHAT_ROW_CLASS}
         style={CHAT_ROW_STYLE}
       >
-        <Chevron open={isOpen} className="" />
+        <Chevron open={isOpen} />
         <Layers className="icon-xs text-info shrink-0" />
         <span className="font-medium shrink-0 text-info">Compact</span>
         <span className="truncate flex-1 min-w-0">{subtitle}</span>
@@ -1414,7 +1415,6 @@ function renderEntries(
                     id={block.id}
                     name={block.name || 'tool'}
                     subtitle="preparing call…"
-                    variant="info"
                   >
                     <div className="px-2 py-1.5 text-xs text-muted italic flex items-center gap-2">
                       <span className="json-claude-cursor" />

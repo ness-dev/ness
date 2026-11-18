@@ -21,7 +21,6 @@ export function GenericToolCard({ block, result, autoApproved, sessionAllowed }:
     <ToolCardChrome
       name={display.label}
       subtitle={hasArgs ? <CompactArgs args={args} /> : ''}
-      variant="info"
       isError={result?.isError}
       brand={brand}
       icon={display.icon}
