@@ -970,7 +970,7 @@ function automationLabel(
   if (source === 'review-request') {
     return {
       label: from ? `Review Request · from ${from}` : 'Review Request',
-      note: 'you were asked to review this branch',
+      note: 'this agent is reviewing the branch',
       brand: true
     }
   }
