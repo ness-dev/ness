@@ -25,7 +25,7 @@ const MAX_TIMELINE_STEPS = 14
  *  thumbnails for the steps that produced a screenshot, tool icons for
  *  everything in between — so a browser session reads as
  *  `[shot] click scroll type [shot]` without expanding anything. */
-function ToolTimeline({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
+export function ToolTimeline({ rows }: { rows: TimelineRow[] }): JSX.Element {
   const steps = buildTimeline(rows)
   const shown = steps.slice(0, MAX_TIMELINE_STEPS)
   const moreCount = steps.length - shown.length

@@ -781,6 +781,20 @@ describe('settingsReducer', () => {
     expect(on.autoScrollToBottom).toBe(true)
   })
 
+  it('collapseFinishedTurnsChanged toggles turn collapsing', () => {
+    expect(initialSettings.collapseFinishedTurns).toBe(true)
+    const off = apply(initialSettings, {
+      type: 'settings/collapseFinishedTurnsChanged',
+      payload: false
+    })
+    expect(off.collapseFinishedTurns).toBe(false)
+    const on = apply(off, {
+      type: 'settings/collapseFinishedTurnsChanged',
+      payload: true
+    })
+    expect(on.collapseFinishedTurns).toBe(true)
+  })
+
   it('jsonModeDefaultPermissionModeChanged sets the default and preserves other settings', () => {
     expect(initialSettings.jsonModeDefaultPermissionMode).toBe('acceptEdits')
     const start: SettingsState = {

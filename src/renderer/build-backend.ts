@@ -324,6 +324,8 @@ export function buildBackend(
       reqConfig('config:setJsonModeSendOnEnter', enabled),
     setAutoScrollToBottom: (enabled: boolean) =>
       reqConfig('config:setAutoScrollToBottom', enabled),
+    setCollapseFinishedTurns: (enabled: boolean) =>
+      reqConfig('config:setCollapseFinishedTurns', enabled),
     setJsonModeDefaultPermissionMode: (value: JsonClaudePermissionMode) =>
       reqConfig('config:setJsonModeDefaultPermissionMode', value),
     setJsonModeTranscriptWindow: (value: number) =>

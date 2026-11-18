@@ -306,6 +306,7 @@ export function buildInitialAppState(
       nessieColor: nessieColorById(config.nessieColor ?? '').id,
       jsonModeSendOnEnter: config.jsonModeSendOnEnter === true,
       autoScrollToBottom: config.autoScrollToBottom !== false,
+      collapseFinishedTurns: config.collapseFinishedTurns !== false,
       jsonModeDefaultPermissionMode: isJsonClaudePermissionMode(
         config.jsonModeDefaultPermissionMode
       )

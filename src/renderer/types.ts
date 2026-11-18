@@ -418,6 +418,7 @@ export interface ElectronAPI {
   setNessieColor(value: string): Promise<boolean>
   setJsonModeSendOnEnter(enabled: boolean): Promise<boolean>
   setAutoScrollToBottom(enabled: boolean): Promise<boolean>
+  setCollapseFinishedTurns(enabled: boolean): Promise<boolean>
   setJsonModeDefaultPermissionMode(
     value: JsonClaudePermissionMode
   ): Promise<boolean>

@@ -332,6 +332,8 @@ export interface Config {
   // of the viewport instead of auto-scrolling to the bottom. Default true
   // (undefined = follow the tail, matches historical behavior).
   autoScrollToBottom?: boolean
+  // When false, finished chat turns render fully expanded. Default true.
+  collapseFinishedTurns?: boolean
   // Permission mode applied when a brand-new json-mode session spawns.
   // Existing sessions keep whatever mode they were last in. Default
   // 'acceptEdits' (auto-allow Edit/Write, still ask for Bash etc.).
