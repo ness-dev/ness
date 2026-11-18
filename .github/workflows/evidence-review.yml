@@ -17,12 +17,15 @@ name: Evidence review
 # OPENROUTER_API_KEY is an environment secret, so both environments need
 # their own copy.
 #
-# Triggers. Same-repo PRs use `pull_request`, so changes to this workflow
-# can be tried on their own PR. Fork PRs use `pull_request_target`, because
-# `pull_request` never gets secrets for forks. The guards on `review` pick
-# exactly one per PR.
+# Triggers. Every PR, fork or not, uses `pull_request_target`, so the
+# workflow always comes from `main` and a PR can't edit its own gate. Both
+# environments only allow deployments from `main` (Settings → Environments
+# → Deployment branches), so a workflow on any other branch can't reach
+# them or their key. workflow_dispatch therefore only works when run
+# from `main`. To try changes to this workflow before merging, temporarily
+# add the branch to the environments' allowed list.
 #
-# Fork PRs mean running untrusted code next to a secret, so the work is split:
+# PRs mean running untrusted code next to a secret, so the work is split:
 #   - `review` builds and runs the PR's code and calls OpenRouter. Its token
 #     is read-only, and nothing in it can write to the repo. The PR's code
 #     shares the runner with the agent, so it CAN read OPENROUTER_API_KEY.
@@ -38,8 +41,6 @@ name: Evidence review
 #   scripts/evidence-reviewer/publish.sh    screenshots branch + PR comment
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -59,12 +60,6 @@ permissions: {}
 
 jobs:
   review:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
     environment: >-
       ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
           && 'evidence-review-auto' || 'evidence-review' }}
@@ -78,8 +73,8 @@ jobs:
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
     steps:
-      # The reviewer itself always comes from the workflow's own commit (the
-      # base branch for pull_request_target), never from a fork's code.
+      # The reviewer itself always comes from the workflow's own commit on
+      # main, never from the PR's code.
       - name: Checkout reviewer
         uses: actions/checkout@v4
         with:
