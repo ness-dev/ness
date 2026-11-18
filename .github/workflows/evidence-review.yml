@@ -31,11 +31,11 @@ name: Evidence review
 #   - Even then it needs approval unless the person who triggered it (the
 #     PR opener, or whoever ticked the box) is on the allowlist in the
 #     EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
-#       - allowlisted, on a same-repo PR or a dispatch →
-#         `evidence-review-auto` environment, no reviewers, runs
-#         immediately. Fork PRs never qualify: ticking the box on one would
-#         otherwise auto-approve whatever the contributor pushed since the
-#         maintainer last read the diff.
+#       - allowlisted, on a same-repo PR → `evidence-review-auto`
+#         environment, no reviewers, runs immediately. Fork PRs never
+#         qualify, dispatches included: ticking the box or dispatching on
+#         one would otherwise auto-approve whatever the contributor pushed
+#         since the maintainer last read the diff.
 #       - everyone else → `evidence-review` environment, which has required
 #         reviewers. The run waits at "Waiting for review" until a reviewer
 #         clicks Review deployments → Approve and deploy on the run (in the
@@ -163,7 +163,7 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     environment: >-
       ${{ contains(fromJSON(vars.EVIDENCE_AUTO_RUN_USERS || '[]'), github.actor)
-          && (github.event_name == 'workflow_dispatch' || needs.gate.outputs.same_repo == 'true')
+          && needs.gate.outputs.same_repo == 'true'
           && 'evidence-review-auto' || 'evidence-review' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
