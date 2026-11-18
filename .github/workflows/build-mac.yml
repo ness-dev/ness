@@ -15,9 +15,6 @@ name: Build macOS
 
 on:
   workflow_dispatch:
-  # TEMPORARY: branch smoke test for the macos-latest move. Remove before merge.
-  push:
-    branches: [ci/macos-latest-runners]
 
 jobs:
   build:
