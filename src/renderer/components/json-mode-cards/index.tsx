@@ -26,6 +26,7 @@ import {
 import type { ToolIcon } from './tool-icons'
 import { HighlightedText, useFind } from '../JsonModeChatFind'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
+import { Chevron } from './Chevron'
 
 export {
   extractArgs,
@@ -195,9 +196,7 @@ export function ToolCardChrome({
           fontSize: 'var(--chat-chrome-text)'
         }}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
+        <Chevron open={isOpen} />
         {Icon && <Icon className="icon-sm shrink-0" />}
         <span
           className={`font-semibold shrink-0 ${nameClass}`}

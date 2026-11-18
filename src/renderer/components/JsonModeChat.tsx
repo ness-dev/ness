@@ -23,7 +23,6 @@ import {
   Bot,
   Brain,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   Square,
   Terminal,
@@ -55,6 +54,7 @@ import {
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TurnGroup } from './json-mode-cards/TurnGroup'
+import { Chevron } from './json-mode-cards/Chevron'
 import {
   foldFinishedTurns,
   getEditedPaths,
@@ -503,9 +503,7 @@ function ThinkingCard({
           fontSize: 'var(--chat-chrome-text)'
         }}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
+        <Chevron open={isOpen} />
         <Brain className="icon-xs text-muted shrink-0" />
         <span
           className="text-muted shrink-0"
@@ -587,9 +585,7 @@ function CompactCard({
           fontSize: 'var(--chat-chrome-text)'
         }}
       >
-        <span className="text-info/70 text-xs w-2 shrink-0 select-none">
-          {isOpen ? '▾' : '▸'}
-        </span>
+        <Chevron open={isOpen} className="text-info/70" />
         <Layers className="icon-xs text-info shrink-0" />
         <span
           className="font-semibold shrink-0 text-info"
@@ -1098,11 +1094,7 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
           }}
           aria-expanded={open}
         >
-          {open ? (
-            <ChevronDown className="icon-xs shrink-0 text-muted" />
-          ) : (
-            <ChevronRight className="icon-xs shrink-0 text-muted" />
-          )}
+          <Chevron open={open} />
           <NessIcon className="icon-sm shrink-0" />
           <span
             className="font-semibold shrink-0 brand-gradient-text"

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { trunc, type ToolCardProps } from './index'
+import { Chevron } from './Chevron'
 import { isLaunchStub } from '../../../shared/state/json-claude-agents'
 
 export interface TaskCardProps extends ToolCardProps {
@@ -128,9 +129,7 @@ export function TaskCard({
           fontSize: 'var(--chat-chrome-text)'
         }}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {expanded ? '▾' : '▸'}
-        </span>
+        <Chevron open={expanded} />
         <Sparkles className="icon-xs text-muted shrink-0" />
         <span
           className="text-muted shrink-0"

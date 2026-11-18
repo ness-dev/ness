@@ -7,6 +7,7 @@ import {
   type TimelineRow
 } from './tool-timeline'
 import { JsonModeChatImageThumb } from '../JsonModeChatImageThumb'
+import { Chevron } from './Chevron'
 
 export interface ToolGroupRow extends TimelineRow {
   node: ReactNode
@@ -187,9 +188,7 @@ export function ToolGroup({ rows }: { rows: ToolGroupRow[] }): JSX.Element {
           fontSize: 'var(--chat-chrome-text)'
         }}
       >
-        <span className="text-muted text-xs w-2 shrink-0 select-none">
-          {expanded ? '▾' : '▸'}
-        </span>
+        <Chevron open={expanded} />
         {thinkingCount > 0 && (
           <Brain className="icon-xs text-muted shrink-0" />
         )}
