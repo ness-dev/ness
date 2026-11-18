@@ -936,6 +936,9 @@ function automationLabel(
       brand: true
     }
   }
+  if (source === 'reviewed-pr-update') {
+    return { label: 'Ness · Reviewed PR update', note: 'the PR you are reviewing', brand: false }
+  }
   if (source === 'pr-update') {
     return { label: 'Ness · PR update', note: "this worktree's pull request", brand: false }
   }

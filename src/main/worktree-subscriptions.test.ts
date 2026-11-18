@@ -534,3 +534,51 @@ describe('own-worktree PR notifications: delivery edge cases', () => {
     t.notifier.stop()
   })
 })
+
+describe('review round 3 follow-ups', () => {
+  it('a change mid-flap does not make the re-run failure news again', async () => {
+    const { store, send, delivery } = setup({
+      settings: { ...initialState.settings, notifyChatOnCiFailure: true }
+    })
+    const notifier = new SubscriptionNotifier(store, delivery, () => false)
+    notifier.start()
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: pr() } })
+    const polls = [
+      pr({ checksOverall: 'failure' }),
+      pr({ checksOverall: 'pending', reviewDecision: 'approved' }),
+      pr({ checksOverall: 'failure', reviewDecision: 'approved' })
+    ]
+    for (const status of polls) {
+      store.dispatch({ type: 'prs/statusChanged', payload: { path: CHILD, status } })
+      await flush()
+    }
+    const ciFailingTurns = [
+      ...send.mock.calls.map((c) => c[1]),
+      ...(store.getSnapshot().state.notifications.pendingByTab[CHILD_TAB] ?? []).map((n) => n.wire)
+    ].filter((w) => parseAutomatedMessage(w)?.body.includes('CI failing'))
+    expect(ciFailingTurns).toHaveLength(1)
+    notifier.stop()
+  })
+
+  it("frames a reviewed PR as the reviewer's, and keeps the author's new commits", async () => {
+    const { store, send, delivery } = setup({
+      settings: { ...initialState.settings, notifyChatOnCiFailure: true, viewerLogin: 'me' }
+    })
+    const notifier = new SubscriptionNotifier(store, delivery, () => false)
+    notifier.start()
+    const theirs = (over: Partial<PRStatus> = {}) =>
+      pr({ author: { login: 'contributor', avatarUrl: '' }, ...over })
+    store.dispatch({ type: 'prs/bulkStatusChanged', payload: { [CHILD]: theirs() } })
+    store.dispatch({
+      type: 'prs/statusChanged',
+      payload: { path: CHILD, status: theirs({ headSha: 'bbbbbbb2', hasConflict: true }) }
+    })
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    const parsed = parseAutomatedMessage(send.mock.calls[0][1])
+    expect(parsed?.source).toBe('reviewed-pr-update')
+    expect(parsed?.body).toContain('The PR you are reviewing')
+    expect(parsed?.body).toContain('New commit pushed')
+    notifier.stop()
+  })
+})

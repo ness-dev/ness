@@ -369,6 +369,43 @@ interface PlannedUpdate {
   /** What the subscriber had been told before this update was claimed —
    *  restored if delivery fails, so the next poll tries again. */
   base: PRStatus | null
+  /** What was recorded as told when this update was claimed. */
+  claimed: PRStatus
+  /** The worktree's own agent, on a PR someone else wrote: it is reviewing
+   *  it, so the update is framed that way and new commits are news. */
+  reviewing: boolean
+}
+
+function sameCommit(a: PRStatus, b: PRStatus): boolean {
+  return (a.headSha || `pr-${a.number}`) === (b.headSha || `pr-${b.number}`)
+}
+
+/** What to record as told after reporting `next`. While CI is re-running
+ *  on the same commit, the last reported result still stands — otherwise
+ *  an unrelated change mid-run (a review, a conflict) would record
+ *  "pending" as told, and the re-run's identical result would be news
+ *  again. */
+function toldAfter(base: PRStatus | null, next: PRStatus): PRStatus {
+  if (
+    base &&
+    sameCommit(base, next) &&
+    (next.checksOverall === 'pending' || next.checksOverall === 'none') &&
+    (base.checksOverall === 'failure' || base.checksOverall === 'success')
+  ) {
+    return { ...next, checksOverall: base.checksOverall, checks: base.checks }
+  }
+  return next
+}
+
+/** The update as the agent reviewing someone else's PR reads it.
+ *  Exported for tests. */
+export function buildReviewedPrUpdate(pr: PRStatus, changes: PrChange[]): string {
+  return [
+    `The PR you are reviewing, #${pr.number} "${pr.title}" by ${pr.author?.login ?? 'its author'}:`,
+    ...changes.map((c) => `- ${c.text}`),
+    '',
+    pr.url
+  ].join('\n')
 }
 
 /** Every GitHub notification to an agent goes through here: a worktree's
@@ -468,19 +505,23 @@ export class SubscriptionNotifier {
     const prior = this.told.get(path)
     const told = new Map<string, PRStatus | null>()
     const plans: PlannedUpdate[] = []
+    const viewer = this.store.getSnapshot().state.settings.viewerLogin
+    const someoneElses = !!viewer && !!next.author && next.author.login !== viewer
     for (const sub of subs) {
       const own = sub.reason === 'own-worktree'
+      const reviewing = own && someoneElses
       const base = prior?.has(sub.subscriberTabId)
         ? prior.get(sub.subscriberTabId)!
         : this.startingPoint(path, prevPoll, own)
       let changes = describePrChanges(base, next)
-      if (own) changes = changes.filter((c) => !SELF_EVIDENT.has(c.kind))
+      if (own && !reviewing) changes = changes.filter((c) => !SELF_EVIDENT.has(c.kind))
       if (changes.length === 0) {
         told.set(sub.subscriberTabId, base)
         continue
       }
-      told.set(sub.subscriberTabId, next)
-      plans.push({ sub, changes, base })
+      const claimed = toldAfter(base, next)
+      told.set(sub.subscriberTabId, claimed)
+      plans.push({ sub, changes, base, claimed, reviewing })
     }
     this.told.set(path, told)
     if (plans.length > 0) setImmediate(() => this.deliver(path, next, plans))
@@ -497,14 +538,16 @@ export class SubscriptionNotifier {
   private deliver(target: string, pr: PRStatus, plans: PlannedUpdate[]): void {
     const targetName = describeWorktree(this.store.getSnapshot().state, target)
     const dead: string[] = []
-    for (const { sub, changes, base } of plans) {
+    for (const { sub, changes, base, claimed, reviewing } of plans) {
       const own = sub.reason === 'own-worktree'
       const urgent = changes.some((c) => c.urgent)
-      const wire = own
-        ? wrapAutomatedMessage('pr-update', buildOwnPrUpdate(pr, changes))
-        : wrapAutomatedMessage('subscription-update', buildSubscriptionUpdate(targetName, pr, changes), {
-            from: targetName
-          })
+      const wire = reviewing
+        ? wrapAutomatedMessage('reviewed-pr-update', buildReviewedPrUpdate(pr, changes))
+        : own
+          ? wrapAutomatedMessage('pr-update', buildOwnPrUpdate(pr, changes))
+          : wrapAutomatedMessage('subscription-update', buildSubscriptionUpdate(targetName, pr, changes), {
+              from: targetName
+            })
       const r = this.bus.toTab(sub.subscriberPath, sub.subscriberTabId, wire, urgent ? 'interrupt' : sub.mode)
       log(
         'subscriptions',
@@ -519,7 +562,7 @@ export class SubscriptionNotifier {
       // Release the claim so the next poll retries — unless a newer poll
       // already re-claimed it.
       const told = this.told.get(target)
-      if (told?.get(sub.subscriberTabId) === pr) told.set(sub.subscriberTabId, base)
+      if (told?.get(sub.subscriberTabId) === claimed) told.set(sub.subscriberTabId, base)
       if (sub.explicitId && GONE.has(r.reason)) dead.push(sub.explicitId)
     }
     if (dead.length > 0) {
