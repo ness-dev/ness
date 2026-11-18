@@ -2123,7 +2123,7 @@ export class JsonClaudeManager implements ChatProvider {
   private dispatchBusy(sessionId: string, busy: boolean): void {
     this.store.dispatch({
       type: 'jsonClaude/busyChanged',
-      payload: { sessionId, busy }
+      payload: busy ? { sessionId, busy, turnStartedAt: Date.now() } : { sessionId, busy }
     })
   }
 

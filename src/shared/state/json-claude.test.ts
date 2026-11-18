@@ -557,27 +557,30 @@ describe('jsonClaudeReducer', () => {
     expect(state.sessions[SID].busy).toBe(true)
   })
 
-  it('busyChanged records the last entry\'s timestamp as the turn boundary when a turn starts', () => {
+  it('busyChanged stores the turn start stamped on the payload', () => {
     let state = seedSession(initialJsonClaude)
     state = jsonClaudeReducer(state, {
-      type: 'jsonClaude/entryAppended',
-      payload: { sessionId: SID, entry: { entryId: 'u1', kind: 'user', timestamp: 1, text: 'go' } }
-    })
-    state = jsonClaudeReducer(state, {
       type: 'jsonClaude/busyChanged',
-      payload: { sessionId: SID, busy: true }
+      payload: { sessionId: SID, busy: true, turnStartedAt: 1234 }
     })
-    expect(state.sessions[SID].turnStartedAt).toBe(1)
-    state = jsonClaudeReducer(state, {
-      type: 'jsonClaude/entryAppended',
-      payload: { sessionId: SID, entry: { entryId: 'a1', kind: 'assistant', timestamp: 2 } }
-    })
+    expect(state.sessions[SID].turnStartedAt).toBe(1234)
     // Turn ending keeps the boundary; only the next start moves it.
     state = jsonClaudeReducer(state, {
       type: 'jsonClaude/busyChanged',
       payload: { sessionId: SID, busy: false }
     })
-    expect(state.sessions[SID].turnStartedAt).toBe(1)
+    expect(state.sessions[SID].turnStartedAt).toBe(1234)
+  })
+
+  it('busyChanged records the boundary even when this client holds no entries', () => {
+    // A renderer starts from a stripped snapshot (entries: []) until the
+    // tab mounts; it must still land on the same boundary as main.
+    const state = jsonClaudeReducer(seedSession(initialJsonClaude), {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: true, turnStartedAt: 5000 }
+    })
+    expect(state.sessions[SID].entries).toEqual([])
+    expect(state.sessions[SID].turnStartedAt).toBe(5000)
   })
 
   it('busyChanged is a no-op when busy is unchanged', () => {

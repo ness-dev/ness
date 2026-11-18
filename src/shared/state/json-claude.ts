@@ -399,18 +399,18 @@ export interface JsonClaudeSession {
   /** Last text of the most recent user submission; used by the renderer to
    *  pair the echo against the user-card it just rendered optimistically. */
   busy: boolean
-  /** Timestamp of the last entry before the current (or most recent) turn
-   *  began — set when `busy` goes false → true. Entries are not
+  /** When the current (or most recent) turn began. Entries are not
    *  turn-delimited on their own: a message typed mid-turn becomes an
    *  ordinary user entry once delivered, so "a later user entry" is not a
    *  turn boundary.
    *
-   *  A timestamp, not that entry's id, because the entry can go away —
+   *  A timestamp, not an entry id, because entries can go away —
    *  cancelling a queued message, rewinding, reseeding — and an id that
-   *  no longer resolves silently drops the boundary. Taken from the entry
-   *  rather than `Date.now()` because this reducer runs separately in
-   *  main and each renderer; the entry's stamp is the one value they all
-   *  agree on. Undefined until the session's first turn starts. */
+   *  no longer resolves silently drops the boundary. Stamped by main on
+   *  the `busyChanged` payload, never derived in the reducer: renderers
+   *  often hold no entries for a session whose tab hasn't mounted, so a
+   *  value computed from entries would differ between clients.
+   *  Undefined until the session's first turn starts. */
   turnStartedAt?: number
   /** --permission-mode flag passed to claude at spawn time. Mid-session
    *  changes are applied via a stdin control_request (subtype
@@ -560,7 +560,10 @@ export type JsonClaudeEvent =
     }
   | {
       type: 'jsonClaude/busyChanged'
-      payload: { sessionId: string; busy: boolean }
+      /** `turnStartedAt` accompanies `busy: true` — stamped once in main
+       *  so every client stores the same boundary, including renderers
+       *  that haven't hydrated this session's entries. */
+      payload: { sessionId: string; busy: boolean; turnStartedAt?: number }
     }
   | {
       type: 'jsonClaude/sessionCleared'
@@ -1008,7 +1011,6 @@ export function jsonClaudeReducer(
     case 'jsonClaude/busyChanged': {
       const session = state.sessions[event.payload.sessionId]
       if (!session || session.busy === event.payload.busy) return state
-      const lastEntryAt = session.entries[session.entries.length - 1]?.timestamp
       return {
         ...state,
         sessions: {
@@ -1016,8 +1018,8 @@ export function jsonClaudeReducer(
           [session.sessionId]: {
             ...session,
             busy: event.payload.busy,
-            ...(event.payload.busy && lastEntryAt !== undefined
-              ? { turnStartedAt: lastEntryAt }
+            ...(event.payload.busy && event.payload.turnStartedAt !== undefined
+              ? { turnStartedAt: event.payload.turnStartedAt }
               : {})
           }
         }

@@ -1009,7 +1009,10 @@ export class CodexChatProvider implements ChatProvider {
   private dispatchBusy(sessionId: string, busy: boolean): void {
     const session = this.store.getSnapshot().state.jsonClaude.sessions[sessionId]
     if (!session || session.busy === busy) return
-    this.store.dispatch({ type: 'jsonClaude/busyChanged', payload: { sessionId, busy } })
+    this.store.dispatch({
+      type: 'jsonClaude/busyChanged',
+      payload: busy ? { sessionId, busy, turnStartedAt: Date.now() } : { sessionId, busy }
+    })
   }
 }
 
