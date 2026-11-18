@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ToolTimeline } from './ToolGroup'
-import { Chevron } from './Chevron'
+import { ChatRowChildren, Chevron } from './ChatRow'
 import { useFind } from '../JsonModeChatFind'
 import {
   formatTurnDuration,
@@ -68,9 +68,9 @@ export function TurnGroup({
         </div>
       )}
       {isOpen && (
-        <div className="mt-2 space-y-3">
-          {children}
-        </div>
+        <ChatRowChildren>
+          <div className="space-y-3">{children}</div>
+        </ChatRowChildren>
       )}
     </div>
   )

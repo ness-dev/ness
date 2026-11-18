@@ -54,7 +54,12 @@ import {
 import { NessIcon } from './json-mode-cards/tool-icons'
 import { ToolGroup } from './json-mode-cards/ToolGroup'
 import { TurnGroup } from './json-mode-cards/TurnGroup'
-import { Chevron } from './json-mode-cards/Chevron'
+import {
+  CHAT_ROW_CLASS,
+  CHAT_ROW_STYLE,
+  ChatRowChildren,
+  Chevron
+} from './json-mode-cards/ChatRow'
 import {
   foldFinishedTurns,
   getEditedPaths,
@@ -486,58 +491,41 @@ function ThinkingCard({
   const forceOpen = find.forceOpenIds.has(blockId)
   const isOpen = expanded || forceOpen
   const isCurrentHit = find.currentHitBlockId === blockId
-  const charCount = text.length
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-1 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-border/40'} bg-app/30 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? 'rounded ring-1 ring-accent/60 bg-accent/10' : ''}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 hover:bg-app/50 cursor-pointer text-left transition-colors"
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <Chevron open={isOpen} />
-        <Brain className="icon-xs text-muted shrink-0" />
-        <span
-          className="text-muted shrink-0"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          {isPartial ? 'Thinking' : 'Thought'}
-        </span>
+        <Chevron open={isOpen} className="" />
+        <Brain className="icon-xs shrink-0" />
+        <span className="shrink-0">{isPartial ? 'Thinking' : 'Thought'}</span>
         {isPartial && (
           <span
             className="json-claude-spinner shrink-0"
             aria-label="thinking"
           />
         )}
-        {charCount > 0 && (
-          <span
-            className="text-muted/60 shrink-0"
-            style={{ fontSize: 'var(--chat-meta-text)' }}
-          >
-            · {charCount} chars
-          </span>
-        )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 border-t border-border/30 markdown italic text-muted text-xs leading-relaxed">
-          {text ? (
-            <MarkdownWithFind>{text}</MarkdownWithFind>
-          ) : !isPartial ? (
-            // Claude Code can return signed-but-empty thinking blocks
-            // (the API tier elides plaintext but keeps a signature so
-            // the model can verify its prior reasoning on the next
-            // turn). Surface that explicitly instead of an empty card.
-            <span className="opacity-70">(hidden)</span>
-          ) : null}
-        </div>
+        <ChatRowChildren>
+          <div className="py-1 markdown italic text-muted text-xs leading-relaxed">
+            {text ? (
+              <MarkdownWithFind>{text}</MarkdownWithFind>
+            ) : !isPartial ? (
+              // Claude Code can return signed-but-empty thinking blocks
+              // (the API tier elides plaintext but keeps a signature so
+              // the model can verify its prior reasoning on the next
+              // turn). Surface that explicitly instead of an empty card.
+              <span className="opacity-70">(hidden)</span>
+            ) : null}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
@@ -570,33 +558,21 @@ function CompactCard({
   return (
     <div
       data-find-block-id={blockId}
-      className={`my-2 border ${isCurrentHit ? 'border-accent ring-2 ring-accent/50' : 'border-info/40'} bg-info/5 overflow-hidden`}
-      style={{ borderRadius: 'var(--chat-bubble-radius)' }}
+      className={isCurrentHit ? 'rounded ring-1 ring-accent/60 bg-accent/10' : ''}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className={`w-full flex items-center gap-2 ${
-          isOpen ? 'border-b border-info/30' : ''
-        } bg-info/10 hover:bg-info/15 cursor-pointer transition-colors text-left`}
-        style={{
-          paddingInline: 'var(--chat-chrome-px)',
-          paddingBlock: 'var(--chat-chrome-py)',
-          fontSize: 'var(--chat-chrome-text)'
-        }}
+        className={CHAT_ROW_CLASS}
+        style={CHAT_ROW_STYLE}
       >
-        <Chevron open={isOpen} className="text-info/70" />
+        <Chevron open={isOpen} className="" />
         <Layers className="icon-xs text-info shrink-0" />
-        <span
-          className="font-semibold shrink-0 text-info"
-          style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-        >
-          Compact
-        </span>
-        <span className="opacity-70 truncate flex-1 min-w-0">{subtitle}</span>
+        <span className="font-medium shrink-0 text-info">Compact</span>
+        <span className="truncate flex-1 min-w-0">{subtitle}</span>
         {triggerLabel && (
           <span
-            className="uppercase tracking-wide text-info/80 bg-info/10 border border-info/30 rounded px-1 py-0.5 shrink-0"
+            className="uppercase tracking-wide opacity-70 shrink-0"
             style={{ fontSize: 'var(--chat-meta-text)' }}
           >
             {triggerLabel}
@@ -604,24 +580,26 @@ function CompactCard({
         )}
       </button>
       {isOpen && (
-        <div className="px-3 py-2 text-xs text-muted space-y-1">
-          <div>
-            <HighlightedText text={COMPACT_BODY_TEXT} />
-          </div>
-          {(typeof preTokens === 'number' ||
-            typeof postTokens === 'number') && (
-            <div className="font-mono text-xs text-faint">
-              {typeof preTokens === 'number' && (
-                <span>before: {preTokens.toLocaleString()} tokens</span>
-              )}
-              {typeof preTokens === 'number' &&
-                typeof postTokens === 'number' && <span> · </span>}
-              {typeof postTokens === 'number' && (
-                <span>after: {postTokens.toLocaleString()} tokens</span>
-              )}
+        <ChatRowChildren>
+          <div className="py-1 text-xs text-muted space-y-1">
+            <div>
+              <HighlightedText text={COMPACT_BODY_TEXT} />
             </div>
-          )}
-        </div>
+            {(typeof preTokens === 'number' ||
+              typeof postTokens === 'number') && (
+              <div className="font-mono text-xs text-faint">
+                {typeof preTokens === 'number' && (
+                  <span>before: {preTokens.toLocaleString()} tokens</span>
+                )}
+                {typeof preTokens === 'number' &&
+                  typeof postTokens === 'number' && <span> · </span>}
+                {typeof postTokens === 'number' && (
+                  <span>after: {postTokens.toLocaleString()} tokens</span>
+                )}
+              </div>
+            )}
+          </div>
+        </ChatRowChildren>
       )}
     </div>
   )
