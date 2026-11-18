@@ -163,12 +163,19 @@ function fromExplicit(s: AppState['subscriptions']['list'][number]): Subscriber 
 
 /** Everyone following `targetPath`, optionally only those who hear about
  *  `topic`. */
+/** Explicit subscriptions never target their own worktree — both entry
+ *  points refuse it, and this drops any that got stored anyway, since one
+ *  would shadow the own-worktree rule. */
+function explicitList(state: AppState): AppState['subscriptions']['list'] {
+  return state.subscriptions.list.filter((s) => s.subscriberPath !== s.targetPath)
+}
+
 export function subscribersOf(
   state: AppState,
   targetPath: string,
   topic?: SubscriptionTopic
 ): Subscriber[] {
-  const explicit = state.subscriptions.list
+  const explicit = explicitList(state)
     .filter((s) => s.targetPath === targetPath)
     .map(fromExplicit)
   const implicit = IMPLICIT_RULES.flatMap((r) => r.subscribersOf(state, targetPath))
@@ -177,7 +184,7 @@ export function subscribersOf(
 }
 
 export function subscriptionsOfTab(state: AppState, tabId: string): Subscriber[] {
-  const explicit = state.subscriptions.list
+  const explicit = explicitList(state)
     .filter((s) => s.subscriberTabId === tabId)
     .map(fromExplicit)
   const implicit = IMPLICIT_RULES.flatMap((r) => r.subscriptionsOfTab(state, tabId))
@@ -186,7 +193,7 @@ export function subscriptionsOfTab(state: AppState, tabId: string): Subscriber[]
 
 /** Every worktree at least one tab follows. */
 export function followedTargets(state: AppState): Set<string> {
-  const out = new Set(state.subscriptions.list.map((s) => s.targetPath))
+  const out = new Set(explicitList(state).map((s) => s.targetPath))
   for (const r of IMPLICIT_RULES) for (const t of r.targets(state)) out.add(t)
   return out
 }
@@ -200,7 +207,7 @@ export function tabSubscriptionsView(
   worktreePath: string,
   tabId: string
 ): { following: Subscriber[]; followers: Subscriber[] } {
-  const explicit = state.subscriptions.list
+  const explicit = explicitList(state)
     .filter((s) => s.subscriberTabId === tabId)
     .map(fromExplicit)
   const created = createdWorktree.subscriptionsOfTab(state, tabId)

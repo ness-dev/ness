@@ -6,7 +6,9 @@ import { Store } from './store'
 import { NotificationBus } from './notification-bus'
 import {
   SubscriptionNotifier,
+  deliverHeldNow,
   describePrChanges,
+  setTabSubscriptionMode,
   pruneForRemovedWorktrees,
   recordWorktreeOrigin,
   reportProgress,
@@ -595,5 +597,100 @@ describe('review round 3 follow-ups', () => {
     expect(parsed?.body).toContain('The PR you are reviewing')
     expect(parsed?.body).toContain('New commit pushed')
     notifier.stop()
+  })
+})
+
+describe('Subscriptions panel actions', () => {
+  it('refuses to set a mode on the own-PR row, leaving the own-worktree rule in charge', () => {
+    const { store, delivery } = setup({
+      settings: { ...initialState.settings, notifyChatOnCiFailure: true }
+    })
+    expect(
+      setTabSubscriptionMode(store, delivery, {
+        worktreePath: CHILD,
+        tabId: CHILD_TAB,
+        targetPath: CHILD,
+        mode: 'interrupt'
+      })
+    ).toBe(false)
+    expect(store.getSnapshot().state.subscriptions.list).toEqual([])
+    expect(subscribersOf(store.getSnapshot().state, CHILD)).toMatchObject([
+      { reason: 'own-worktree', subscriberTabId: CHILD_TAB }
+    ])
+  })
+
+  it('ignores an explicit self-subscription that got stored anyway', () => {
+    const { store } = setup({ settings: { ...initialState.settings, notifyChatOnCiFailure: true } })
+    store.dispatch({
+      type: 'subscriptions/added',
+      payload: {
+        id: 'self',
+        subscriberPath: CHILD,
+        subscriberTabId: CHILD_TAB,
+        targetPath: CHILD,
+        mode: 'interrupt',
+        createdAt: 0
+      }
+    })
+    expect(subscribersOf(store.getSnapshot().state, CHILD)).toMatchObject([{ reason: 'own-worktree' }])
+  })
+
+  it('switching an implicit follow to interrupt shadows it without re-briefing', () => {
+    const { store, send, delivery } = setup()
+    recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
+    expect(
+      setTabSubscriptionMode(store, delivery, {
+        worktreePath: PARENT,
+        tabId: PARENT_TAB,
+        targetPath: CHILD,
+        mode: 'interrupt'
+      })
+    ).toBe(true)
+    expect(send).not.toHaveBeenCalled()
+    expect(subscribersOf(store.getSnapshot().state, CHILD)).toMatchObject([
+      { kind: 'explicit', mode: 'interrupt' }
+    ])
+  })
+
+  function holdTwo(store: Store, delivery: NotificationBus): void {
+    recordWorktreeOrigin(store, CHILD, { worktreePath: PARENT, tabId: PARENT_TAB })
+    reportProgress(store, delivery, CHILD, CHILD_TAB, 'first', false)
+    reportProgress(store, delivery, CHILD, CHILD_TAB, 'second', false)
+  }
+
+  it('deliver now sends the newest as an interrupt and leaves the rest for ChatRouter.send', () => {
+    // The fake send here is the raw chat primitive; in the app it is
+    // ChatRouter.send, which releases the remaining notices in front of
+    // this turn (tested in chat-provider.test.ts).
+    const { store, send, delivery } = setup()
+    holdTwo(store, delivery)
+    expect(deliverHeldNow(store, delivery, PARENT, PARENT_TAB)).toBe(true)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(parseAutomatedMessage(send.mock.calls[0][1])?.body).toBe('second')
+    const rest = store.getSnapshot().state.notifications.pendingByTab[PARENT_TAB]
+    expect(rest.map((n) => parseAutomatedMessage(n.wire)?.body)).toEqual(['first'])
+  })
+
+  it('deliver now keeps everything held when the tab cannot be reached', () => {
+    const { store, delivery } = setup()
+    holdTwo(store, delivery)
+    store.dispatch({
+      type: 'terminals/panesForWorktreeChanged',
+      payload: { worktreePath: PARENT, panes: { type: 'leaf', id: 'p', tabs: [], activeTabId: '' } }
+    })
+    store.dispatch({ type: 'jsonClaude/sessionCleared', payload: { sessionId: PARENT_TAB } })
+    const pending = () => store.getSnapshot().state.notifications.pendingByTab[PARENT_TAB] ?? []
+    expect(pending()).toHaveLength(2)
+    expect(deliverHeldNow(store, delivery, PARENT, PARENT_TAB)).toBe(false)
+    expect(pending().map((n) => parseAutomatedMessage(n.wire)?.body).sort()).toEqual(['first', 'second'])
+  })
+
+  it('deliver now is refused while the agent is mid-turn', () => {
+    const { store, send, delivery } = setup()
+    holdTwo(store, delivery)
+    store.dispatch({ type: 'jsonClaude/busyChanged', payload: { sessionId: PARENT_TAB, busy: true } })
+    expect(deliverHeldNow(store, delivery, PARENT, PARENT_TAB)).toBe(false)
+    expect(send).not.toHaveBeenCalled()
+    expect(store.getSnapshot().state.notifications.pendingByTab[PARENT_TAB]).toHaveLength(2)
   })
 })

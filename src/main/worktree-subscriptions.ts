@@ -211,6 +211,58 @@ export function reportProgress(
   })
 }
 
+/** Change how one Chat tab gets a followed worktree's routine updates,
+ *  from the Subscriptions panel. Writes an explicit subscription with the
+ *  new mode — replacing one, or shadowing an implicit follow — keeping its
+ *  note, so nobody is re-briefed. Refuses the tab's own worktree: own-PR
+ *  updates are governed by the "Tell the agent about its PR" setting, and
+ *  an explicit self-subscription would shadow that rule and break it (the
+ *  control server refuses it for the same reason). */
+export function setTabSubscriptionMode(
+  store: Store,
+  bus: NotificationBus,
+  params: { worktreePath: string; tabId: string; targetPath: string; mode: NotifyMode }
+): boolean {
+  if (params.targetPath === params.worktreePath) return false
+  const existing = findSubscription(
+    store.getSnapshot().state.subscriptions,
+    params.tabId,
+    params.targetPath
+  )
+  subscribeToWorktree(store, bus, {
+    subscriberPath: params.worktreePath,
+    subscriberTabId: params.tabId,
+    targetPath: params.targetPath,
+    note: existing?.note,
+    mode: params.mode
+  })
+  return true
+}
+
+/** "Deliver now" from the Subscriptions panel: the newest held notice goes
+ *  as an interrupt, and ChatRouter.send carries the rest in front of it.
+ *
+ *  Refused while the agent is busy — that turn would be queued, and a
+ *  queued turn can be cancelled, taking the notices with it. The newest is
+ *  taken out of the queue first so it isn't also prepended to itself, and
+ *  put back if the tab can't be reached, so a failed wake loses nothing. */
+export function deliverHeldNow(
+  store: Store,
+  bus: NotificationBus,
+  worktreePath: string,
+  tabId: string
+): boolean {
+  const state = store.getSnapshot().state
+  if (state.jsonClaude.sessions[tabId]?.busy) return false
+  const held = state.notifications.pendingByTab[tabId]
+  if (!held || held.length === 0) return false
+  const newest = held[held.length - 1]
+  store.dispatch({ type: 'notifications/dismissed', payload: { tabId, ids: [newest.id] } })
+  const result = bus.toTab(worktreePath, tabId, newest.wire)
+  if (!result.ok) store.dispatch({ type: 'notifications/queued', payload: { tabId, notice: newest } })
+  return result.ok
+}
+
 /** Remove explicit subscriptions and origins that involve `removed`
  *  worktree paths. Takes the paths that left the list rather than diffing
  *  against the current list, so a worktree created moments ago — whose

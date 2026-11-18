@@ -69,6 +69,8 @@ import { NotificationBus } from './notification-bus'
 import {
   SubscriptionNotifier,
   buildWorktreeDetail,
+  deliverHeldNow,
+  setTabSubscriptionMode,
   pruneForRemovedWorktrees,
   recordWorktreeOrigin,
   reportProgress,
@@ -5395,19 +5397,7 @@ function registerIpcHandlers(): void {
     (_ctx, worktreePath: string, tabId: string, targetPath: string, mode: NotifyMode) => {
       if (!isChatTabIn(worktreePath, tabId) || typeof targetPath !== 'string') return false
       if (mode !== 'interrupt' && mode !== 'silent') return false
-      // An explicit subscription with the new mode: it replaces an explicit
-      // one, or shadows an implicit one. Same note, so nobody is re-briefed.
-      const existing = store
-        .getSnapshot()
-        .state.subscriptions.list.find((s) => s.subscriberTabId === tabId && s.targetPath === targetPath)
-      subscribeToWorktree(store, notificationBus, {
-        subscriberPath: worktreePath,
-        subscriberTabId: tabId,
-        targetPath,
-        note: existing?.note,
-        mode
-      })
-      return true
+      return setTabSubscriptionMode(store, notificationBus, { worktreePath, tabId, targetPath, mode })
     }
   )
 
@@ -5419,15 +5409,9 @@ function registerIpcHandlers(): void {
     }
   )
 
-  // Deliver a tab's held notices now: the newest goes as an interrupt, and
-  // ChatRouter.send carries the rest in front of it, as any turn would.
   transport.onRequest('notifications:deliverHeld', (_ctx, worktreePath: string, tabId: string) => {
     if (!isChatTabIn(worktreePath, tabId)) return false
-    const held = store.getSnapshot().state.notifications.pendingByTab[tabId]
-    if (!held || held.length === 0) return false
-    const newest = held[held.length - 1]
-    store.dispatch({ type: 'notifications/dismissed', payload: { tabId, ids: [newest.id] } })
-    return notificationBus.toTab(worktreePath, tabId, newest.wire).ok
+    return deliverHeldNow(store, notificationBus, worktreePath, tabId)
   })
 
   transport.onRequest('notifications:discardHeld', (_ctx, worktreePath: string, tabId: string) => {

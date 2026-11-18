@@ -105,6 +105,9 @@ export function SubscriptionsPanel({
   const held = useAppState((s) =>
     focusedTabId ? s.notifications.pendingByTab[focusedTabId] : undefined
   )
+  const busy = useAppState((s) =>
+    focusedTabId ? s.jsonClaude.sessions[focusedTabId]?.busy === true : false
+  )
 
   if (!view || !worktreePath || !focusedTabId) return null
   const heldCount = held?.length ?? 0
@@ -139,6 +142,11 @@ export function SubscriptionsPanel({
               >
                 <span className="truncate flex-1 min-w-0 text-fg">{f.name}</span>
                 <span className="text-faint shrink-0">{kindLabel(f.kind, f.reason)}</span>
+                {f.reason === 'own-worktree' ? (
+                  // Own-PR updates are governed by "Tell the agent about its
+                  // PR" (PR panel), not by a subscription mode.
+                  <span className="w-4 shrink-0" aria-hidden="true" />
+                ) : (
                 <button
                   type="button"
                   onClick={() =>
@@ -163,6 +171,7 @@ export function SubscriptionsPanel({
                     <BellOff className="icon-xs" />
                   )}
                 </button>
+                )}
                 {f.kind === 'explicit' ? (
                   <button
                     type="button"
@@ -206,9 +215,14 @@ export function SubscriptionsPanel({
               <span className="flex-1" />
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => void backend.deliverHeldNotices(worktreePath, focusedTabId)}
-                className="text-accent hover:underline cursor-pointer"
-                title="Send these to the agent now, as one turn"
+                className="text-accent hover:underline cursor-pointer disabled:opacity-50 disabled:no-underline disabled:cursor-default"
+                title={
+                  busy
+                    ? 'The agent is mid-turn — these go out with its next turn'
+                    : 'Send these to the agent now, as one turn'
+                }
               >
                 Deliver now
               </button>
