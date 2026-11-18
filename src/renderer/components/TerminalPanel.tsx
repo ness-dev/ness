@@ -24,6 +24,7 @@ import {
 import { useBackend } from '../backend'
 import { useReviewProgress } from '../review-progress'
 import { ReviewStatusIcon } from './ReviewStatusIcon'
+import { middleClickToClose } from '../middle-click'
 
 /** Chip shown in the tab bar when other clients are attached to the
  *  active terminal. Click-through is intentional — taking/releasing
@@ -290,16 +291,7 @@ function SortableTab({ tab, worktreePath, isActive, showClose, onSelect, onClose
         }
         onSelect()
       }}
-      onMouseDown={(e) => {
-        if (e.button === 1) e.preventDefault()
-      }}
-      onAuxClick={(e) => {
-        if (e.button === 1 && showClose) {
-          e.preventDefault()
-          e.stopPropagation()
-          onClose()
-        }
-      }}
+      {...middleClickToClose(showClose ? onClose : undefined)}
       onContextMenu={(e) => {
         e.preventDefault()
         if (!hasMenuItems) return

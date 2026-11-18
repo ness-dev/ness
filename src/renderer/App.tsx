@@ -32,6 +32,7 @@ import { RightColumn } from './components/RightColumn'
 import { BackendScope } from './backend-scope'
 import { repoKeyFor } from './worktree-list-model'
 import { useMergedWorktrees, useFleetWorktrees } from './hooks/useMergedWorktrees'
+import { closeTabConfirmReason } from './close-tab-guard'
 import { getFleetWorktreeLists } from './merge-backend-states'
 import { CollapsedSidebar } from './components/CollapsedSidebar'
 import { CollapsedRightPanel } from './components/CollapsedRightPanel'
@@ -1014,25 +1015,26 @@ const setQuestStep = useCallback((next: QuestStep) => {
         setCloseTabConfirm(null)
         return
       }
-      const tab = (terminalTabs[worktreePath] || []).find((t) => t.id === tabId)
-      const status = statuses[tabId]
-      const agentBusy =
-        status === 'processing' || status === 'waiting' || status === 'needs-approval'
-      const shellBusy = !!shellActivity[tabId]?.active
-      if (tab && (agentBusy || shellBusy)) {
-        const reason = shellBusy
-          ? 'running a process'
-          : status === 'needs-approval'
-            ? 'waiting for your approval'
-            : status === 'waiting'
-              ? 'waiting for your input'
-              : 'still working'
+      // Fleet-wide reads: the sidebar can close a tab on any backend, and the
+      // active-backend maps would miss a remote tab and skip the guard.
+      const tab = (mergedData.tabsByWorktree[worktreePath] || []).find((t) => t.id === tabId)
+      const reason = closeTabConfirmReason(
+        mergedData.statuses[tabId],
+        mergedData.shellActivity[tabId]
+      )
+      if (tab && reason) {
         setCloseTabConfirm({ worktreePath, tabId, label: tab.label || 'This tab', reason })
         return
       }
       handleCloseTab(worktreePath, tabId)
     },
-    [terminalTabs, statuses, shellActivity, handleCloseTab, closeTabConfirm]
+    [
+      mergedData.tabsByWorktree,
+      mergedData.statuses,
+      mergedData.shellActivity,
+      handleCloseTab,
+      closeTabConfirm
+    ]
   )
   const confirmCloseTab = useCallback(() => {
     if (!closeTabConfirm) return
@@ -1040,6 +1042,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
     setCloseTabConfirm(null)
   }, [closeTabConfirm, handleCloseTab])
   const cancelCloseTab = useCallback(() => setCloseTabConfirm(null), [])
+  // requestCloseTab changes identity on every status tick; the sidebar's
+  // memoized tab rows get a stable forwarder instead.
+  const requestCloseTabRef = useRef(requestCloseTab)
+  requestCloseTabRef.current = requestCloseTab
+  const handleSidebarCloseTab = useCallback(
+    (worktreePath: string, tabId: string) => requestCloseTabRef.current(worktreePath, tabId),
+    []
+  )
 
   // Sidebar-aware hotkey handlers + the resolved binding map for tooltips.
   // The hook also subscribes to keystrokes via useHotkeys internally.
@@ -1176,6 +1186,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
         onClose={() => setShowTaskList(false)}
         onSelect={handleSidebarSelectWorktree}
         onSelectTab={handleSidebarSelectTab}
+        onCloseTab={handleSidebarCloseTab}
         onToggleGroup={toggleGroup}
       />
     </div>
@@ -1765,6 +1776,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             pathBackendId={fleetData.pathBackendId}
             originByPath={originByPath}
             onSelectTab={handleSidebarSelectTab}
+            onCloseTab={handleSidebarCloseTab}
             onDismissPendingWorktree={handleDismissPendingWorktree}
             onNewWorktree={(repoRoot) => {
               setNewWorktreeRepo(repoRoot)

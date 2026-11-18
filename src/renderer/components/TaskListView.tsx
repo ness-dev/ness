@@ -43,6 +43,7 @@ interface TaskListViewProps {
   onClose: () => void
   onSelect: (worktreePath: string) => void
   onSelectTab: (worktreePath: string, paneId: string, tabId: string) => void
+  onCloseTab: (worktreePath: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
 }
 
@@ -68,6 +69,7 @@ export function TaskListView({
   onClose,
   onSelect,
   onSelectTab,
+  onCloseTab,
   onToggleGroup
 }: TaskListViewProps): JSX.Element {
   useEffect(() => {
@@ -168,6 +170,7 @@ export function TaskListView({
                             backendId={pathBackendId?.[row.path] ?? null}
                             activeTabId={row.path === activeWorktreeId ? activeTabId : null}
                             onSelectTab={onSelectTab}
+                            onCloseTab={onCloseTab}
                           />
                         )}
                       </div>
