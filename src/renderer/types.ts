@@ -759,6 +759,9 @@ export interface ElectronAPI {
   ): Promise<boolean>
   /** Close the "the agent stopped waiting" notice for a withdrawn draft. */
   clearWithdrawnCopyDraft(id: string): Promise<boolean>
+  /** Tell main a pending draft has been touched, so a withdrawal keeps it
+   *  around as a "not sent" notice instead of dropping it. */
+  markCopyDraftEdited(id: string): Promise<boolean>
   startJsonClaude(id: string, cwd: string): Promise<boolean>
   sendJsonClaudeMessage(
     id: string,

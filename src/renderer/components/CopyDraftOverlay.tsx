@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronUp, PenLine } from 'lucide-react'
 import type { CopyDraftRequest } from '../../shared/state/copy-drafts'
 import { useCopyDraftForTerminal, useWithdrawnCopyDraftForTerminal } from '../store'
@@ -9,6 +9,8 @@ import { useBackend } from '../backend'
  *  moving from the bottom of the log to its tool call, the draft being
  *  withdrawn — throws their rewrite away. Per-client, so not slice state. */
 const inProgress = new Map<string, { text: string; note: string }>()
+/** Drafts this client has already reported as edited to main. */
+const reportedEdited = new Set<string>()
 
 /** Docked editor for an agent's `edit_copy` call, rendered over the bottom of
  *  a Terminal tab. Chat tabs render `CopyDraftCard` inline in the transcript
@@ -39,7 +41,7 @@ function CopyDraftEditor({
   draft: CopyDraftRequest
   docked: boolean
   withdrawn: boolean
-}): JSX.Element | null {
+}): JSX.Element {
   const backend = useBackend()
   const saved = inProgress.get(draft.id)
   const [text, setTextState] = useState(saved?.text ?? draft.draft)
@@ -48,18 +50,13 @@ function CopyDraftEditor({
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
   const edited = text !== draft.draft
-  // A withdrawn draft nobody touched has nothing to rescue — usually the user
-  // pressed Stop on purpose — so skip the notice rather than make them close it.
-  const nothingToSave = withdrawn && !edited && !note.trim()
-
-  useEffect(() => {
-    if (!nothingToSave) return
-    inProgress.delete(draft.id)
-    void backend.clearWithdrawnCopyDraft(draft.id)
-  }, [nothingToSave, draft.id, backend])
 
   function remember(next: { text: string; note: string }): void {
     inProgress.set(draft.id, next)
+    if (!withdrawn && !reportedEdited.has(draft.id)) {
+      reportedEdited.add(draft.id)
+      void backend.markCopyDraftEdited(draft.id)
+    }
   }
   function setText(value: string): void {
     setTextState(value)
@@ -106,8 +103,6 @@ function CopyDraftEditor({
       {withdrawn && <span className="text-xs text-muted shrink-0">· not sent</span>}
     </>
   )
-
-  if (nothingToSave) return null
 
   if (docked && collapsed) {
     return (

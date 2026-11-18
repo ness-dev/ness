@@ -15,6 +15,9 @@
 // Withdrawn drafts only outlive their tab long enough to be noticed: a tab
 // closing is itself a withdrawal (the bridge dies with it), and nothing would
 // ever render that notice, so it's dropped on the spot or once panes change.
+// A draft nobody edited is dropped too — usually the user pressed Stop on
+// purpose. Clients report their first edit via markEdited, since only main
+// sees every client and can tell "untouched here" from "untouched anywhere".
 
 import { randomUUID } from 'crypto'
 import type { Store } from './store'
@@ -30,6 +33,7 @@ export type CopyDraftInput = Omit<CopyDraftRequest, 'id' | 'timestamp'>
 
 export class CopyDraftBroker {
   private waiters = new Map<string, (outcome: CopyDraftOutcome) => void>()
+  private edited = new Set<string>()
 
   private unsubscribe: (() => void) | null = null
 
@@ -90,6 +94,10 @@ export class CopyDraftBroker {
     this.settle(id, { kind: 'cancelled' })
   }
 
+  markEdited(id: string): void {
+    if (this.waiters.has(id)) this.edited.add(id)
+  }
+
   clearWithdrawn(id: string): boolean {
     const req = this.store.getSnapshot().state.copyDrafts.withdrawn[id]
     if (!req) return false
@@ -105,7 +113,9 @@ export class CopyDraftBroker {
     const req = this.store.getSnapshot().state.copyDrafts.pending[id]
     if (!waiter || !req) return false
     this.waiters.delete(id)
-    const withdrawn = outcome.kind === 'cancelled' && this.tabExists(req.terminalId)
+    const wasEdited = this.edited.delete(id)
+    const withdrawn =
+      outcome.kind === 'cancelled' && wasEdited && this.tabExists(req.terminalId)
     this.store.dispatch({
       type: withdrawn ? 'copyDrafts/withdrawn' : 'copyDrafts/resolved',
       payload: { id, terminalId: req.terminalId }
@@ -117,7 +127,7 @@ export class CopyDraftBroker {
           type: 'terminals/statusChanged',
           payload: {
             id: req.terminalId,
-            status: withdrawn ? 'waiting' : 'processing',
+            status: outcome.kind === 'cancelled' ? 'waiting' : 'processing',
             pendingTool: null
           }
         })

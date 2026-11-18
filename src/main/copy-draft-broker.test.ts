@@ -45,9 +45,10 @@ describe('CopyDraftBroker', () => {
     await expect(result).resolves.toEqual({ kind: 'cancelled' })
   })
 
-  it('keeps a withdrawn draft until the user clears it', () => {
+  it('keeps an edited withdrawn draft until the user clears it', () => {
     const { store, broker } = setup()
     const { id } = broker.request(input)
+    broker.markEdited(id)
     broker.cancel(id)
     const drafts = (): typeof initialState.copyDrafts => store.getSnapshot().state.copyDrafts
     expect(drafts().pending[id]).toBeUndefined()
@@ -61,7 +62,16 @@ describe('CopyDraftBroker', () => {
   it('drops the draft outright when its tab closed, since nobody would see the notice', () => {
     const { store, broker, openTabs } = setup()
     const { id } = broker.request(input)
+    broker.markEdited(id)
     openTabs.delete('term-1')
+    broker.cancel(id)
+    expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeUndefined()
+    expect(store.getSnapshot().state.copyDrafts.pending[id]).toBeUndefined()
+  })
+
+  it('drops a withdrawn draft nobody edited instead of leaving a notice', () => {
+    const { store, broker } = setup()
+    const { id } = broker.request(input)
     broker.cancel(id)
     expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeUndefined()
     expect(store.getSnapshot().state.copyDrafts.pending[id]).toBeUndefined()
@@ -70,6 +80,7 @@ describe('CopyDraftBroker', () => {
   it('clears a withdrawn draft once its tab is closed', () => {
     const { store, broker, openTabs } = setup()
     const { id } = broker.request(input)
+    broker.markEdited(id)
     broker.cancel(id)
     expect(store.getSnapshot().state.copyDrafts.withdrawn[id]).toBeDefined()
 

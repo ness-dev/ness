@@ -4149,6 +4149,11 @@ function registerIpcHandlers(): void {
     copyDraftBroker.clearWithdrawn(id)
   )
 
+  transport.onRequest('copyDrafts:markEdited', (_ctx, id: string) => {
+    copyDraftBroker.markEdited(id)
+    return true
+  })
+
   transport.onRequest(
     'jsonClaude:resolveApproval',
     (
