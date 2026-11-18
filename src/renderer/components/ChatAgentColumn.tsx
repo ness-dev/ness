@@ -3,13 +3,7 @@ import { createPortal } from 'react-dom'
 import { PanelRightClose, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import {
-  useJsonClaudePendingApprovals,
-  useJsonClaudeSession
-} from '../store'
-import {
   agentElapsedMs,
-  collectAgents,
-  countRunningAgents,
   formatElapsed,
   type AgentStep,
   type AgentSummary
@@ -19,7 +13,8 @@ import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
 import { useLiveClock } from './JsonClaudeAgentsPanel'
 import { ResizeHandle } from './ResizeHandle'
-import { useSessionRevision } from '../session-revision'
+import { useSessionAgents } from '../hooks/useSessionAgents'
+import { getCardOverrides, setCardOverride } from './subagent-card-overrides'
 import { fingerprint, flattenRows, type Row } from './agent-column-rows'
 
 const WIDTH_KEY = 'harness:agentColumnWidth'
@@ -356,49 +351,26 @@ function ChatAgentColumnLive({
   sessionId: string
   chipSlot: HTMLElement | null
 }): JSX.Element | null {
-  const session = useJsonClaudeSession(sessionId)
-  const pendingApprovals = useJsonClaudePendingApprovals()
+  const { agents, running } = useSessionAgents(sessionId)
   const [closed, setClosed] = useState(() => readClosed().includes(sessionId))
   const [width, setWidth] = useState(readWidth)
   // Explicit user choices only. A card defaults open while it's running
   // and closed once it settles, so this records overrides rather than the
   // state — otherwise a card would stay open after its agent finished.
-  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
-    () => new Map()
-  )
+  // Seeded from, and written through to, a store that outlives this
+  // component, which unmounts whenever the tab is hidden.
+  const [overrides, setOverrides] = useState(() => getCardOverrides(sessionId))
+  // Deliberately not persisted: a modal over the chat shouldn't reappear
+  // on returning to a tab.
   const [peekId, setPeekId] = useState<string | null>(null)
 
+  // Written once the drag settles rather than per mousemove frame.
   useEffect(() => {
-    localStorage.setItem(WIDTH_KEY, String(width))
+    const id = setTimeout(() => localStorage.setItem(WIDTH_KEY, String(width)), 250)
+    return () => clearTimeout(id)
   }, [width])
 
-  const pendingToolUseIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const p of Object.values(pendingApprovals)) {
-      if (p.sessionId === session?.sessionId && p.toolUseId) ids.add(p.toolUseId)
-    }
-    return ids
-  }, [pendingApprovals, session?.sessionId])
-
-  // Same derivation contract as JsonClaudeAgentsPanel: keyed on the
-  // session revision rather than the session object, which churns per
-  // streamed token, and fed its previous result so settled agents come
-  // back by reference.
-  const sessionRef = useRef(session)
-  sessionRef.current = session
-  const runningRef = useRef(0)
-  const revision = useSessionRevision(session, runningRef.current > 0)
-  const prevAgentsRef = useRef<readonly AgentSummary[]>([])
-  const agents = useMemo(() => {
-    const next = collectAgents(sessionRef.current, pendingToolUseIds, prevAgentsRef.current)
-    prevAgentsRef.current = next
-    return next
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision, pendingToolUseIds])
-
   const rows = useMemo(() => flattenRows(agents), [agents])
-  const running = countRunningAgents(agents)
-  runningRef.current = running
   const now = useLiveClock(!closed && running > 0)
 
   const isExpanded = useCallback(
@@ -408,8 +380,8 @@ function ChatAgentColumnLive({
   )
   const onToggle = useCallback(
     (id: string, next: boolean) =>
-      setOverrides((cur) => new Map(cur).set(id, next)),
-    []
+      setOverrides(setCardOverride(sessionId, id, next)),
+    [sessionId]
   )
   const setColumnClosed = useCallback(
     (v: boolean) => {
@@ -525,5 +497,7 @@ export function ChatAgentColumn({
   chipSlot: HTMLElement | null
 }): JSX.Element | null {
   if (!active) return null
-  return <ChatAgentColumnLive sessionId={sessionId} chipSlot={chipSlot} />
+  // Keyed so a session change remounts with that session's own closed
+  // state and card choices instead of carrying the last one's.
+  return <ChatAgentColumnLive key={sessionId} sessionId={sessionId} chipSlot={chipSlot} />
 }

@@ -1,14 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CornerDownRight } from 'lucide-react'
-import {
-  useJsonClaudePendingApprovals,
-  useJsonClaudeSession
-} from '../store'
 import {
   agentElapsedMs,
   buildAgentTree,
-  collectAgents,
-  countRunningAgents,
   formatElapsed,
   type AgentSummary,
   type AgentTree
@@ -17,7 +11,7 @@ import { RightPanel } from './RightPanel'
 import { AgentPeek } from './AgentPeek'
 import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
-import { useSessionRevision } from '../session-revision'
+import { useSessionAgents } from '../hooks/useSessionAgents'
 
 /** Top-level agents shown before collapsing the rest behind a toggle. */
 const SETTLED_PREVIEW = 5
@@ -167,8 +161,7 @@ export function JsonClaudeAgentsPanel({
 }: {
   focusedTabId: string | null
 }): JSX.Element | null {
-  const session = useJsonClaudeSession(focusedTabId ?? '')
-  const pendingApprovals = useJsonClaudePendingApprovals()
+  const { agents, running } = useSessionAgents(focusedTabId ?? '')
   const [peekId, setPeekId] = useState<string | null>(null)
   const [showAllSettled, setShowAllSettled] = useState(false)
   // Explicit user choices only. Rows with a running descendant default to
@@ -179,47 +172,7 @@ export function JsonClaudeAgentsPanel({
     () => new Map()
   )
 
-  const pendingToolUseIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const p of Object.values(pendingApprovals)) {
-      if (p.sessionId === session?.sessionId && p.toolUseId) ids.add(p.toolUseId)
-    }
-    return ids
-  }, [pendingApprovals, session?.sessionId])
-
-  // Read through a ref so the derivation isn't keyed on the session's
-  // identity, which churns per streamed token. See useSessionRevision —
-  // notably it is NOT entries.length, because an Agent tool_use block is
-  // appended to the assistant entry already in flight.
-  //
-  // `runningRef` keeps the poll alive for background agents, which
-  // outlive their parent's turn: `busy` alone would stop ticking while
-  // one is still working. Read from a ref because it's derived below
-  // from the very memo this feeds.
-  const sessionRef = useRef(session)
-  sessionRef.current = session
-  const runningRef = useRef(0)
-  const revision = useSessionRevision(session, runningRef.current > 0)
-
-  // Feeding the last result back lets settled agents be handed through
-  // by reference — see collectAgents. Without it, every poll rebuilds
-  // the step feed of every agent the session ever launched, and that
-  // list only grows.
-  const prevAgentsRef = useRef<readonly AgentSummary[]>([])
-  const agents = useMemo(() => {
-    const next = collectAgents(
-      sessionRef.current,
-      pendingToolUseIds,
-      prevAgentsRef.current
-    )
-    prevAgentsRef.current = next
-    return next
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision, pendingToolUseIds])
-
   const tree = useMemo(() => buildAgentTree(agents), [agents])
-  const running = countRunningAgents(agents)
-  runningRef.current = running
   const now = useLiveClock(running > 0)
 
   // Default open when something below is still running, so a live agent
