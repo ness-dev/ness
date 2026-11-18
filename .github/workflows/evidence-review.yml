@@ -29,8 +29,9 @@ name: Evidence review
 #     backstop. A re-run runs on `main`'s commit, so its pass/fail shows in
 #     the Actions tab, not in the PR's checks; the comment is the result.
 #   - Even then it needs approval unless the person who triggered it (the
-#     PR opener, or whoever ticked the box) is on the allowlist in the
-#     EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array of logins):
+#     PR opener, whoever ticked the box, or whoever dispatched) is on the
+#     allowlist in the EVIDENCE_AUTO_RUN_USERS repo variable (a JSON array
+#     of logins):
 #       - allowlisted, on a same-repo PR → `evidence-review-auto`
 #         environment, no reviewers, runs immediately. Fork PRs never
 #         qualify, dispatches included: ticking the box or dispatching on
