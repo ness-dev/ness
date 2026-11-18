@@ -186,7 +186,9 @@ function AgentCardImpl({
         <button
           type="button"
           onClick={() => onToggle(agent.toolUseId, !expanded)}
-          title={`${agent.description}\n${agentStatusLabel(agent)}`}
+          title={[agent.description, agent.prompt, agentStatusLabel(agent)]
+            .filter(Boolean)
+            .join('\n\n')}
           className="w-full flex items-center gap-2 cursor-pointer hover:bg-app/60 transition-colors text-left"
           style={{
             paddingInline: 'var(--chat-chrome-px)',
@@ -197,23 +199,28 @@ function AgentCardImpl({
           <span className="text-muted text-xs w-2 shrink-0 select-none">
             {expanded ? '▾' : '▸'}
           </span>
-          <Sparkles className="icon-xs text-muted shrink-0" />
-          {/* The default type is most of a narrow header's width and says
-              nothing — only a specialised agent earns the label. */}
+          <AgentStatusDot agent={agent} />
+          {/* The purpose leads: in a column of near-identical cards, the
+              title is the only thing that tells them apart at a glance. */}
+          <span
+            className={`truncate flex-1 min-w-0 ${running ? 'text-fg-bright' : 'text-fg'}`}
+          >
+            {agent.description}
+          </span>
+          {/* The default type says nothing — only a specialised agent
+              earns the label, and it trails the title rather than
+              preceding it. */}
           {agent.subagentType && agent.subagentType !== DEFAULT_SUBAGENT_TYPE && (
             <span
               className="text-muted shrink-0"
-              style={{ fontFamily: 'var(--chat-tool-name-family)' }}
+              style={{
+                fontFamily: 'var(--chat-tool-name-family)',
+                fontSize: 'var(--chat-meta-text)'
+              }}
             >
               {agent.subagentType}
             </span>
           )}
-          <span
-            className="opacity-60 truncate flex-1 min-w-0"
-            style={{ fontFamily: 'var(--chat-tool-name-family)' }}
-          >
-            {agent.description}
-          </span>
           {agent.isBackground && (
             <span
               title="detached — runs past the end of the turn"
@@ -229,11 +236,18 @@ function AgentCardImpl({
           >
             {meta}
           </span>
-          <AgentStatusDot agent={agent} />
         </button>
 
         {expanded && (
           <div className="px-2 pb-1">
+            {agent.prompt && (
+              <div
+                title={agent.prompt}
+                className="mx-1 mt-0.5 mb-1 pl-2 border-l-2 border-border/50 text-xs text-muted whitespace-pre-wrap line-clamp-3"
+              >
+                {agent.prompt}
+              </div>
+            )}
             <div
               ref={tail.scrollRef}
               onScroll={tail.onScroll}

@@ -47,6 +47,9 @@ export interface AgentSummary {
    *  and the key every child entry carries as `parentToolUseId`. */
   toolUseId: string
   description: string
+  /** The brief the agent was launched with — `description` is its 3-5
+   *  word title, this is what it was actually asked to do. */
+  prompt?: string
   subagentType?: string
   model?: string
   isBackground: boolean
@@ -82,6 +85,7 @@ export interface AgentSummary {
 interface LaunchSite {
   toolUseId: string
   description: string
+  prompt?: string
   subagentType?: string
   model?: string
   requestedBackground: boolean
@@ -204,6 +208,7 @@ export function collectAgents(
       const site: LaunchSite = {
         toolUseId: b.id,
         description: describeLaunch(b.input),
+        prompt: str(b.input?.prompt),
         subagentType: str(b.input?.subagent_type),
         model: str(b.input?.model),
         requestedBackground: b.input?.run_in_background === true,
@@ -340,6 +345,7 @@ export function collectAgents(
     return {
       toolUseId: site.toolUseId,
       description: site.description,
+      ...(site.prompt ? { prompt: site.prompt } : {}),
       ...(site.subagentType ? { subagentType: site.subagentType } : {}),
       ...(site.model ? { model: site.model } : {}),
       isBackground,

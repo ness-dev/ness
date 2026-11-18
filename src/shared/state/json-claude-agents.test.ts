@@ -124,6 +124,14 @@ describe('collectAgents', () => {
     expect(agents[0].status).toBe('interrupted')
   })
 
+  it('carries the launch prompt alongside the short description', () => {
+    const e = launch('t1', 'Audit auth')
+    e.blocks![0].input = { description: 'Audit auth', prompt: 'Read src/auth and list risks.' }
+    const [agent] = collectAgents(session([e]))
+    expect(agent.description).toBe('Audit auth')
+    expect(agent.prompt).toBe('Read src/auth and list risks.')
+  })
+
   it('keeps an unrecorded agent from an earlier turn interrupted when a new turn starts', () => {
     const userTurn: JsonClaudeChatEntry = {
       entryId: 'u2',
