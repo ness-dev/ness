@@ -45,9 +45,11 @@ const RATES: Record<string, ModelRate> = {
   // dated ids like claude-opus-4-8-20260527 would bill at old rates.
   // Same rule puts 'claude-opus-5-5' ahead of 'claude-opus-5', which is
   // a prefix of it — otherwise a dated 5.5 id would bill at Opus 5 rates,
-  // and likewise for the -5-1 / -5-5 keys below.
+  // and likewise for the -5-1 / -5-2 / -5-5 keys below.
+  'claude-fable-5-2': { in: 8, out: 40, cacheReadMult: 0.025 },
   'claude-fable-5-1': { in: 10, out: 50, cacheReadMult: 0.025 },
   'claude-fable-5': { in: 10, out: 50 },
+  'claude-mythos-5-2': { in: 8, out: 40, cacheReadMult: 0.025 },
   'claude-mythos-5-1': { in: 10, out: 50, cacheReadMult: 0.025 },
   'claude-mythos-5': { in: 10, out: 50 },
   'claude-opus-5-5': { in: 4, out: 20, cacheReadMult: 0.05 },
@@ -96,7 +98,8 @@ const RATES: Record<string, ModelRate> = {
 export function rateFor(model: string): ModelRate | null {
   if (RATES[model]) return RATES[model]
   for (const key of Object.keys(RATES)) {
-    if (model.startsWith(key)) return RATES[key]
+    // Digit boundary: 'claude-fable-5-20260401' is a dated Fable 5, not 5.2.
+    if (model.startsWith(key) && !/\d/.test(model.charAt(key.length))) return RATES[key]
   }
   return null
 }

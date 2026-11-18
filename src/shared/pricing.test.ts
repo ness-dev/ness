@@ -116,8 +116,29 @@ describe('Claude Opus 5.5', () => {
   })
 })
 
-// The `fable` and `best` aliases both resolve to Fable 5.1, so these rates
-// are what a user picking either of those actually gets billed at.
+// The `fable` alias resolves to Fable 5.2, so these rates are what a user
+// picking it actually gets billed at.
+describe('Fable / Mythos 5.2', () => {
+  it('bills at $8 / $40 per MTok with cache reads at 0.025x ($0.20)', () => {
+    for (const id of ['claude-fable-5-2', 'claude-mythos-5-2']) {
+      expect(priceFor(id, { input_tokens: MTOK })).toBeCloseTo(8, 6)
+      expect(priceFor(id, { output_tokens: MTOK })).toBeCloseTo(40, 6)
+      expect(
+        priceFor(id, { cache_read_input_tokens: MTOK }),
+        `${id} should read at 0.025x, not the 0.1x inherited from the 5.0 key`
+      ).toBeCloseTo(0.2, 6)
+    }
+  })
+
+  it('does not let a dated 5.2 id fall through to 5.0 rates', () => {
+    expect(rateFor('claude-fable-5-2-20261101')).toEqual(rateFor('claude-fable-5-2'))
+  })
+
+  it('does not capture a dated Fable 5.0 id whose date starts with 2', () => {
+    expect(rateFor('claude-fable-5-20260401')).toEqual(rateFor('claude-fable-5'))
+  })
+})
+
 describe('Fable / Mythos 5.1', () => {
   it('bills cache reads at $0.25 per MTok (0.025x input)', () => {
     // Without its own RATES key, 'claude-fable-5-1' prefix-matches
