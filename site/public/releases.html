@@ -102,8 +102,42 @@
   <!-- Releases -->
   <div class="max-w-3xl mx-auto px-6 pb-24">
 
+    <!-- v2.18.2 -->
+    <section id="v2.18.2" class="release-section py-10">
+      <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
+        <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.18.2" class="release-anchor">v2.18.2<span class="anchor-icon">🔗</span></a></h2>
+        <span class="text-sm text-neutral-500">November 18, 2026</span>
+      </div>
+      <a href="https://github.com/ness-dev/ness/releases/tag/v2.18.2" class="text-sm text-amber-400/80 hover:text-amber-300 transition-colors">Download &rarr;</a>
+      <p class="text-neutral-400 mt-4 mb-4 leading-relaxed">A cleaner Chat, with finished turns collapsed and a subagents column, plus a new notification system that lets agents subscribe to other worktrees. Tabs also gain back/forward history.</p>
+      <div class="note-body">
+        <h4>New features</h4>
+        <ul>
+          <li><strong>Agent-to-agent subscriptions</strong> — all automatic messages into an agent chat now flow through one notification system, and agents can subscribe to other worktrees or their agents.</li>
+          <li><strong>Subagents column</strong> — subagents now appear in a column beside the Chat transcript.</li>
+          <li><strong>Collapsed finished turns</strong> — completed Chat turns fold behind a summary strip so long conversations stay readable.</li>
+          <li><strong>Tab history</strong> — go back and forward through tabs with your mouse side buttons or Cmd+[ and Cmd+]. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/362" class="text-amber-400/80 hover:text-amber-300">#362</a>)</em></li>
+          <li><strong>AI reviews brief you first</strong> — reviews now open with a briefing and can include real diagrams, in reviews and in Chat.</li>
+          <li><strong>Per-repo scratchpad toggle</strong> — a <code>.ness.json</code> in your repo can now hide the scratchpad right panel.</li>
+          <li><strong>Experimental: screenshot evidence reviewer</strong> — a GitHub Actions workflow that checks UI PRs with screenshots. It runs once per PR, skips non-UI PRs, never auto-runs on fork PRs, and can be re-run from a comment checkbox.</li>
+        </ul>
+        <h4>Improvements</h4>
+        <ul>
+          <li>Chat UI cleanup: flat tool rows, borderless bubbles, a comfortable reading width, and a fixed chevron.</li>
+          <li>Close nested tab rows in the sidebar with a middle-click. <em class="text-neutral-500">(thanks <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a>, <a href="https://github.com/ness-dev/ness/pull/363" class="text-amber-400/80 hover:text-amber-300">#363</a>)</em></li>
+          <li>Updated the bundled Claude Code to 2.1.327.</li>
+          <li>The star links on the website now point to the repo page.</li>
+        </ul>
+        <h4>Fixes</h4>
+        <ul>
+          <li>Review-request chat cards are now labeled correctly instead of showing "Ness · CI failure".</li>
+        </ul>
+        <p class="text-neutral-400 text-sm mt-6 leading-relaxed">Huge thanks to <a href="https://github.com/tresat" class="text-amber-400/80 hover:text-amber-300">@tresat</a> for their contributions to this release.</p>
+      </div>
+    </section>
+
     <!-- v2.18.1 -->
-    <section id="v2.18.1" class="release-section py-10">
+    <section id="v2.18.1"class="release-section py-10">
       <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
         <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.18.1" class="release-anchor">v2.18.1<span class="anchor-icon">🔗</span></a></h2>
         <span class="text-sm text-neutral-500">November 3, 2026</span>

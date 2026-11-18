@@ -48,8 +48,8 @@
 
 Grab the latest release from the [releases page](https://github.com/ness-dev/ness/releases/latest).
 
-- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.18.1-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.1/Ness-2.18.1-arm64.dmg)
-- **Intel Mac:** [Ness-2.18.1.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.1/Ness-2.18.1.dmg)
+- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.18.2-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.2/Ness-2.18.2-arm64.dmg)
+- **Intel Mac:** [Ness-2.18.2.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.2/Ness-2.18.2.dmg)
 
 ## Installation
 
