@@ -3,6 +3,7 @@ export type BuiltinRightPanelKey =
   | 'pr'
   | 'todos'
   | 'agents'
+  | 'subscriptions'
   | 'commits'
   | 'changedFiles'
   | 'allFiles'
@@ -32,6 +33,7 @@ export const DEFAULT_RIGHT_PANEL_ORDER: BuiltinRightPanelKey[] = [
   'allFiles',
   'todos',
   'agents',
+  'subscriptions',
   'cost',
   'context',
   'scratchpad'
@@ -43,7 +45,8 @@ export type HiddenRightPanels = Partial<Record<RightPanelKey, boolean>>
  *  Merged UNDER the saved config in `effectiveHiddenRightPanels` — once a
  *  user toggles a panel here, their choice wins. */
 export const DEFAULT_HIDDEN_RIGHT_PANELS: HiddenRightPanels = {
-  scratchpad: true
+  scratchpad: true,
+  subscriptions: true
 }
 
 export interface RepoConfig {

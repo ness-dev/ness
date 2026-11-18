@@ -506,6 +506,19 @@ export interface ElectronAPI {
    *  global `notifyChatOnCiFailure` setting again. */
   setCiNotifyOverride(path: string, enabled: boolean | null): Promise<boolean>
   setNotifyChatOnCiFailure(enabled: boolean): Promise<boolean>
+  /** Change how one Chat tab gets a followed worktree's routine updates.
+   *  Shadows an implicit follow with an explicit one. */
+  setSubscriptionMode(
+    worktreePath: string,
+    tabId: string,
+    targetPath: string,
+    mode: 'interrupt' | 'silent'
+  ): Promise<boolean>
+  /** Remove a Chat tab's explicit subscription. False for implicit ones. */
+  unsubscribeTab(worktreePath: string, tabId: string, targetPath: string): Promise<boolean>
+  /** Deliver a Chat tab's held notifications now, as one turn. */
+  deliverHeldNotices(worktreePath: string, tabId: string): Promise<boolean>
+  discardHeldNotices(worktreePath: string, tabId: string): Promise<boolean>
   /** Injects a "resolve this PR's conflicts" turn into the worktree's agent
    *  chat, waking a slept tab if needed. */
   requestMergeConflictFix(worktreePath: string): Promise<MergeConflictFixResult>

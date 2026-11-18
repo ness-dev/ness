@@ -769,7 +769,7 @@ function patchOverrides(
  *  window (quit confirmation, the auto-updater), and a field with no
  *  main-side reader at all is pure renderer presentation. Both are
  *  client-owned. Anything a backend module acts on — `claude-launch`,
- *  `auto-sleep-monitor`, `pr-poller`, `ci-notifier`, `wake-lock-controller`
+ *  `auto-sleep-monitor`, `pr-poller`, `worktree-subscriptions`, `wake-lock-controller`
  *  — stays workspace-owned, because the box doing the work is the one
  *  that has to obey it.
  *

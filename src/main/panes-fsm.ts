@@ -48,6 +48,8 @@ interface PanesFSMOptions {
    *  sessionId. The on-disk jsonl is untouched, so a re-mount replays
    *  history via seedFromTranscript. */
   clearJsonClaudeSession?: (sessionId: string) => void
+  /** A tab was closed for good (not slept). */
+  onTabClosed?: (tabId: string) => void
   /** Spawn a json-claude session and (optionally) send a one-shot
    *  initial prompt as the first user message. Called from
    *  ensureInitialized when a default json-claude tab is created so
@@ -437,6 +439,7 @@ export class PanesFSM {
     } else if (closing && closing.type === 'json-claude') {
       this.opts.killJsonClaude?.(tabId)
     }
+    this.opts.onTabClosed?.(tabId)
     const remaining = leaf.tabs.filter((t) => t.id !== tabId)
     if (remaining.length === 0) {
       const collapsed = removeLeaf(tree, leaf.id)
