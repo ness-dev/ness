@@ -3131,7 +3131,7 @@ export function JsonModeChat({
                 </div>
               ) : null
             ) : (
-            <div className={`px-4 py-3 space-y-3 ${columnClass}`}>
+            <div className={`px-6 py-5 space-y-4 ${columnClass}`}>
               {hiddenEntryCount > 0 && (
                 <div className="flex items-center justify-center gap-2 pb-1">
                   <button
@@ -3231,7 +3231,7 @@ export function JsonModeChat({
         />
       </div>
       {session && session.sessionToolApprovals.length > 0 && (
-        <div className={`shrink-0 px-3 pt-1 flex items-center gap-2 text-xs text-muted ${columnClass}`}>
+        <div className={`shrink-0 px-6 pt-1 flex items-center gap-2 text-xs text-muted ${columnClass}`}>
           <span className="opacity-70">auto-allowing:</span>
           <span className="font-mono truncate">
             {session.sessionToolApprovals.join(', ')}
@@ -3255,7 +3255,7 @@ export function JsonModeChat({
           onDoubleClick={resetComposerHeight}
           title="Drag to resize the prompt · double-click to reset"
         />
-        <div className={`p-2 ${columnClass}`}>
+        <div className={`px-4 pt-2 pb-3 ${columnClass}`}>
         <div className="relative rounded-md border border-border bg-panel focus-within:border-accent transition-colors">
           {mentionItems.length > 0 && (
             <JsonModeMentionPopover
