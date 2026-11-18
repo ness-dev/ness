@@ -3,6 +3,7 @@ import {
   foldFinishedTurns,
   formatTurnDuration,
   getEditedPaths,
+  turnHasFindHit,
   type TurnItem,
   type TurnRow
 } from './turn-collapse'
@@ -119,6 +120,43 @@ describe('foldFinishedTurns', () => {
       toolCount: 3,
       editedFileCount: 3
     })
+  })
+})
+
+describe('turnHasFindHit', () => {
+  const rows: TurnRow[] = [
+    { key: 'a', type: 'text', entryId: 'asst-1' },
+    {
+      key: 'b',
+      type: 'tool',
+      toolName: 'Bash',
+      entryId: 'asst-2',
+      coveredEntryIds: ['result-2']
+    },
+    {
+      key: 'c',
+      type: 'tool',
+      toolName: 'Task',
+      entryId: 'asst-3',
+      coveredEntryIds: ['result-3', 'child-1', 'child-result-1']
+    }
+  ]
+
+  it('opens for a hit that only appears in a tool result', () => {
+    expect(turnHasFindHit(rows, new Set(['result-2']))).toBe(true)
+  })
+
+  it("opens for a hit inside a sub-agent's transcript", () => {
+    expect(turnHasFindHit(rows, new Set(['child-result-1']))).toBe(true)
+  })
+
+  it("opens for a hit on a row's own entry", () => {
+    expect(turnHasFindHit(rows, new Set(['asst-1']))).toBe(true)
+  })
+
+  it('stays closed when every hit is elsewhere', () => {
+    expect(turnHasFindHit(rows, new Set(['other']))).toBe(false)
+    expect(turnHasFindHit(rows, new Set())).toBe(false)
   })
 })
 

@@ -454,6 +454,7 @@ interface RenderedRow {
   isTurnStart?: boolean
   isTurnError?: boolean
   editedPaths?: string[]
+  coveredEntryIds?: string[]
 }
 
 function ThinkingCard({
@@ -1049,6 +1050,8 @@ function AutomatedTurnCard({
 
 interface RenderContext {
   resultsByToolUseId: Map<string, ToolResultView>
+  /** tool_use id → the tool_result entry that carried its output. */
+  resultEntryIdByToolUseId: Map<string, string>
   childrenByParentToolUseId: Map<string, JsonClaudeChatEntry[]>
   approvalCard: (toolUseId: string | undefined) => ReactNode
   pendingToolUseIds: Set<string>
@@ -1317,6 +1320,10 @@ function renderEntries(
           let subAgentBody: ReactNode = null
           let subAgentChildCount = 0
           let subAgentDescendantHasPendingApproval = false
+          const resultEntryId = block.id
+            ? ctx.resultEntryIdByToolUseId.get(block.id)
+            : undefined
+          const coveredEntryIds = resultEntryId ? [resultEntryId] : []
           if (isSubAgentToolName(block.name) && block.id) {
             const childEntries =
               ctx.childrenByParentToolUseId.get(block.id) ?? []
@@ -1326,6 +1333,10 @@ function renderEntries(
               subAgentDescendantHasPendingApproval = childRows.some(
                 (r) => r.hasPendingApproval
               )
+              for (const c of childEntries) coveredEntryIds.push(c.entryId)
+              for (const r of childRows) {
+                coveredEntryIds.push(...(r.coveredEntryIds ?? []))
+              }
               subAgentBody = renderGroupedItems(
                 groupConsecutiveToolRows(childRows)
               )
@@ -1340,6 +1351,7 @@ function renderEntries(
             hasError: !!result?.isError,
             images: result?.images,
             editedPaths: getEditedPaths(block.name, block.input),
+            ...(coveredEntryIds.length > 0 ? { coveredEntryIds } : {}),
             hasPendingApproval:
               (!!block.id && ctx.pendingToolUseIds.has(block.id)) ||
               subAgentDescendantHasPendingApproval,
@@ -2029,10 +2041,12 @@ export function JsonModeChat({
     // entries array (results live in top-level tool_result entries
     // even when their corresponding tool_use was a sub-agent's call).
     const resultsByToolUseId = new Map<string, ToolResultView>()
+    const resultEntryIdByToolUseId = new Map<string, string>()
     for (const entry of deferredEntries) {
       if (entry.kind !== 'tool_result' || !entry.blocks) continue
       for (const b of entry.blocks) {
         if (b.type === 'tool_result' && b.toolUseId) {
+          resultEntryIdByToolUseId.set(b.toolUseId, entry.entryId)
           resultsByToolUseId.set(b.toolUseId, {
             content: b.content || '',
             isError: !!b.isError,
@@ -2069,6 +2083,7 @@ export function JsonModeChat({
       hiddenEntryCount: windowStart,
       rows: renderEntries(windowedEntries, {
         resultsByToolUseId,
+        resultEntryIdByToolUseId,
         childrenByParentToolUseId,
         backgroundAgents,
         approvalCard: renderApprovalForToolUseId,

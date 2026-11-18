@@ -3,6 +3,7 @@ import { ToolTimeline } from './ToolGroup'
 import { useFind } from '../JsonModeChatFind'
 import {
   formatTurnDuration,
+  turnHasFindHit,
   type TurnRow,
   type TurnSummary
 } from './turn-collapse'
@@ -36,9 +37,7 @@ export function TurnGroup({
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const { hitEntryIds } = useFind()
-  const forceOpen =
-    hitEntryIds.size > 0 &&
-    rows.some((r) => r.entryId !== undefined && hitEntryIds.has(r.entryId))
+  const forceOpen = turnHasFindHit(rows, hitEntryIds)
   const isOpen = expanded || forceOpen
   const hasError = rows.some((r) => r.hasError)
   const hasImages = rows.some((r) => (r.images?.length ?? 0) > 0)

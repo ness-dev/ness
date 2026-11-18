@@ -19,6 +19,23 @@ export interface TurnRow extends TimelineRow {
   hasPendingApproval?: boolean
   /** Files this tool call wrote. */
   editedPaths?: string[]
+  /** Entries this row renders besides its own: the tool_result entry
+   *  folded into a tool card, and a sub-agent's whole transcript inside
+   *  its Task card. Find tags hits with those entries' ids. */
+  coveredEntryIds?: string[]
+}
+
+/** Whether find has a hit anywhere a fold would hide. */
+export function turnHasFindHit(
+  rows: TurnRow[],
+  hitEntryIds: ReadonlySet<string>
+): boolean {
+  if (hitEntryIds.size === 0) return false
+  return rows.some(
+    (r) =>
+      (r.entryId !== undefined && hitEntryIds.has(r.entryId)) ||
+      (r.coveredEntryIds?.some((id) => hitEntryIds.has(id)) ?? false)
+  )
 }
 
 export interface TurnSummary {
