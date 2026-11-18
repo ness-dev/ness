@@ -4523,11 +4523,11 @@ function registerIpcHandlers(): void {
   transport.onRequest(
     'config:setJsonModeChatWidth',
     (_ctx, value: 'reading' | 'full') => {
-      const next: 'reading' | 'full' = value === 'full' ? 'full' : 'reading'
-      if (next === 'reading') {
+      const next: 'reading' | 'full' = value === 'reading' ? 'reading' : 'full'
+      if (next === 'full') {
         delete config.jsonModeChatWidth
       } else {
-        config.jsonModeChatWidth = 'full'
+        config.jsonModeChatWidth = 'reading'
       }
       saveConfig(config)
       store.dispatch({

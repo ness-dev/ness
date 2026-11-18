@@ -444,9 +444,9 @@ export interface SettingsState {
    *  radius for newcomers / screen-sharing. Wired via CSS variables on
    *  the chat root, so it's a pure styling switch. */
   jsonModeChatDensity: JsonModeChatDensity
-  /** 'reading' (default) caps the chat transcript and composer at a
-   *  comfortable line length, centred in the pane; 'full' lets them span
-   *  the whole pane. */
+  /** 'full' (default) lets the chat transcript and composer span the
+   *  whole pane; 'reading' caps them at a comfortable line length,
+   *  centred. */
   jsonModeChatWidth: JsonModeChatWidth
   /** How the Subagents column starts in a session the user hasn't opened
    *  or closed it in. */
@@ -700,7 +700,7 @@ export const initialSettings: SettingsState = {
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
-  jsonModeChatWidth: 'reading',
+  jsonModeChatWidth: 'full',
   subagentsColumnDefault: 'expanded',
   uiScale: 'small',
   nessieColor: DEFAULT_NESSIE_COLOR,
