@@ -23,6 +23,8 @@
 //   EVIDENCE_RUN_BUDGET_USD  default 1. Stop the run (and refuse agent
 //                        proxy calls) once the reviewer plus agents in the
 //                        app have spent this much.
+//   EVIDENCE_AGENT_MODEL default anthropic/claude-haiku-5.5. Every proxied
+//                        agent call is rewritten to this model.
 //   EVIDENCE_AGENT_MAX_REQUESTS  default 80. Hard cap on proxied agent
 //                        calls, so a runaway agent loop is bounded even if
 //                        responses stop reporting cost.
@@ -61,6 +63,10 @@ const MIN_EFFORT = 0.5
 const MAX_FINISH_REJECTIONS = 2
 const RUN_BUDGET = Number(process.env.EVIDENCE_RUN_BUDGET_USD || 1)
 const AGENT_MAX_REQUESTS = Number(process.env.EVIDENCE_AGENT_MAX_REQUESTS || 80)
+const AGENT_MODEL = process.env.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5'
+const AGENT_MAX_TOKENS = 8192
+const AGENT_MAX_IN_FLIGHT = 4
+const AGENT_PATHS = new Set(['/v1/messages', '/v1/messages/count_tokens'])
 const AGENT_PROXY_PORT = Number(args['agent-proxy-port'] || 37700)
 const SECRET_RE = /sk-or-v1-[A-Za-z0-9]{16,}/g
 const REPO_DIR = resolve(args['repo-dir'] || process.cwd())
@@ -73,6 +79,7 @@ mkdirSync(OUT, { recursive: true })
 const instructions = args.instructions ? readFileSync(args.instructions, 'utf8') : ''
 let agentProxyRequests = 0
 let agentUnpricedRequests = 0
+let agentInFlight = 0
 let agentCost = 0
 const agentProxy = startAgentProxy()
 const pr = JSON.parse(readFileSync(args.pr, 'utf8'))
@@ -699,27 +706,43 @@ function renderReport() {
 }
 
 function startAgentProxy() {
+  // The proxy is the one thing an agent in the app can spend money through,
+  // so it enforces the limits itself rather than trusting the agent's
+  // config: known paths only, the configured model whatever was asked for,
+  // a max_tokens ceiling, and a small concurrency limit so a burst can't
+  // all pass the budget check before any cost has been counted.
   const server = createServer(async (req, res) => {
-    const limit = runSpend() > RUN_BUDGET ? `budget of $${RUN_BUDGET}` : agentProxyRequests >= AGENT_MAX_REQUESTS ? `cap of ${AGENT_MAX_REQUESTS} agent calls` : null
-    if (limit) {
-      res.writeHead(429, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: `evidence run ${limit} reached` } }))
-      return
+    const reject = (status, message) => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ type: 'error', error: { type: status === 429 ? 'rate_limit_error' : 'invalid_request_error', message } }))
     }
-    const body = []
-    for await (const chunk of req) body.push(chunk)
+    const path = (req.url || '').split('?')[0]
+    if (req.method !== 'POST' || !AGENT_PATHS.has(path)) return reject(404, `evidence proxy only serves POST ${[...AGENT_PATHS].join(', ')}`)
+    const limit =
+      runSpend() > RUN_BUDGET ? `budget of $${RUN_BUDGET}`
+      : agentProxyRequests >= AGENT_MAX_REQUESTS ? `cap of ${AGENT_MAX_REQUESTS} agent calls`
+      : agentInFlight >= AGENT_MAX_IN_FLIGHT ? `limit of ${AGENT_MAX_IN_FLIGHT} concurrent agent calls`
+      : null
+    if (limit) return reject(429, `evidence run ${limit} reached`)
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    let payload
+    try {
+      payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch {
+      return reject(400, 'evidence proxy expects a JSON body')
+    }
+    payload.model = AGENT_MODEL
+    if (typeof payload.max_tokens === 'number') payload.max_tokens = Math.min(payload.max_tokens, AGENT_MAX_TOKENS)
     const headers = {}
     for (const [k, v] of Object.entries(req.headers)) {
       if (!['host', 'authorization', 'x-api-key', 'content-length', 'connection', 'accept-encoding'].includes(k)) headers[k] = v
     }
     headers.authorization = `Bearer ${API_KEY}`
     agentProxyRequests++
+    agentInFlight++
     try {
-      const upstream = await fetch(`https://openrouter.ai/api${req.url}`, {
-        method: req.method,
-        headers,
-        body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(body)
-      })
+      const upstream = await fetch(`https://openrouter.ai/api${req.url}`, { method: 'POST', headers, body: JSON.stringify(payload) })
       const out = {}
       upstream.headers.forEach((v, k) => {
         if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) out[k] = v
@@ -737,10 +760,12 @@ function startAgentProxy() {
       res.end()
       const costs = [...tail.matchAll(/"cost":\s*([0-9.eE+-]+)/g)].map((m) => Number(m[1])).filter(Number.isFinite)
       if (costs.length) agentCost += costs[costs.length - 1]
-      else agentUnpricedRequests++
+      else if (path === '/v1/messages') agentUnpricedRequests++
     } catch (e) {
-      res.writeHead(502, { 'content-type': 'text/plain' })
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' })
       res.end(`evidence agent proxy: ${e.message}`)
+    } finally {
+      agentInFlight--
     }
   })
   server.listen(AGENT_PROXY_PORT, '127.0.0.1')

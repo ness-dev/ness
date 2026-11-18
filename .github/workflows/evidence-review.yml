@@ -167,6 +167,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           EVIDENCE_MODEL: ${{ inputs.model || vars.EVIDENCE_MODEL || 'anthropic/claude-haiku-5.5' }}
           EVIDENCE_RUN_BUDGET_USD: ${{ vars.EVIDENCE_RUN_BUDGET_USD || '1' }}
+          EVIDENCE_AGENT_MODEL: ${{ vars.EVIDENCE_AGENT_MODEL || 'anthropic/claude-haiku-5.5' }}
         run: |
           if [ -z "$OPENROUTER_API_KEY" ]; then
             echo "::error::Set OPENROUTER_API_KEY as a secret on this run's environment."
