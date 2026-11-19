@@ -43,4 +43,14 @@ describe('selectHistoryPromptRepos through the backend-state segments', () => {
       expect(select(rootReducer(base, event))).toEqual([])
     })
   }
+
+  it('drops the prompt when loch stops being installable', () => {
+    const installableOnly = rootReducer(
+      rootReducer(base, { type: 'loch/availabilityChanged', payload: false }),
+      { type: 'loch/installableChanged', payload: true }
+    )
+    const select = makeSelector()
+    expect(select(installableOnly)).toEqual(['/repo'])
+    expect(select(rootReducer(installableOnly, { type: 'loch/installableChanged', payload: false }))).toEqual([])
+  })
 })
