@@ -1644,13 +1644,24 @@ const importedLiveChatTabs = new Set<string>()
 // Imported Codex thread ids not yet opened here.
 const importedCodexThreads = new Set<string>()
 
+// Worktrees whose live terminal-mode conversation is being forked right now,
+// and the ones among them the user opened while that was pending.
+const importForksPending = new Set<string>()
+const activatedDuringImportFork = new Set<string>()
+
 /** Give a worktree its first tabs. `activated` is the user opening it (the
  *  renderer's panes:ensureInitialized); otherwise it's a background sweep.
  *  Both must seed an imported conversation — on a fresh install the boot
  *  drain hasn't run yet, so the user's click on the worktree they land on
  *  reaches here before any sweep does. */
 function initWorktreePanes(wtPath: string, activated: boolean): void {
-  if (isMidCreation(wtPath)) return
+  if (isMidCreation(wtPath)) {
+    // The user opened it while an import fork is still pending. Remember
+    // that, so a failed fork doesn't leave the worktree they're looking at
+    // blank.
+    if (activated && importForksPending.has(wtPath)) activatedDuringImportFork.add(wtPath)
+    return
+  }
   if (!importedWorktrees.has(wtPath)) {
     panesFSM.ensureInitialized(wtPath)
     return
@@ -1684,6 +1695,7 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
     // mid-creation meanwhile so an activation or sweep arriving during the
     // await doesn't hand it default tabs first.
     seedingWorktreePaths.add(wtPath)
+    importForksPending.add(wtPath)
     void resolveShellEnv(wtPath)
       .catch(() => undefined)
       .then(() => {
@@ -1701,9 +1713,11 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
       })
       .finally(() => {
         seedingWorktreePaths.delete(wtPath)
+        importForksPending.delete(wtPath)
+        const opened = activatedDuringImportFork.delete(wtPath) || activated
         // The worktree the user is looking at must not stay blank if the
         // copy couldn't be made.
-        if (activated && panesFSM.canSeedImported(wtPath)) panesFSM.ensureInitialized(wtPath)
+        if (opened && panesFSM.canSeedImported(wtPath)) panesFSM.ensureInitialized(wtPath)
       })
     return
   }
