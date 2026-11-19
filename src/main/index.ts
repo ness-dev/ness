@@ -14,12 +14,15 @@ import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
 import { canInstallLoch, installLoch } from './loch-install'
+import { LochHooksCoordinator } from './loch-hooks-coordinator'
 import {
   backfillRepo,
   installLochHooks,
   lochAsk,
+  isLochForkPath,
   lochBinary,
   lochBlame,
+  resetLochBinaryCache,
   removeLochHooks,
   worktreeRelativePath
 } from './loch'
@@ -1712,16 +1715,40 @@ store.subscribe((event) => {
 // including ones created after the opt-in. listChanged is infrequent and the
 // in-memory set means each path is installed once per process (the first
 // pass after boot re-installs everything, which refreshes the binary path).
-const lochHookedPaths = new Set<string>()
+// Installs and removals go through one coordinator: serialized per path,
+// and an opt-out wins over an install still in flight (see
+// loch-hooks-coordinator.ts for how).
+function isLochRecording(repoRoot: string): boolean {
+  return (config.lochRecordingRepos ?? []).includes(repoRoot)
+}
+const lochHooks = new LochHooksCoordinator({
+  isRecording: isLochRecording,
+  install: installLochHooks,
+  remove: (path) => {
+    removeLochHooks(path)
+  },
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
 async function syncLochHooks(): Promise<void> {
-  const enabled = new Set(config.lochRecordingRepos ?? [])
-  if (enabled.size === 0) return
+  if ((config.lochRecordingRepos ?? []).length === 0) return
   for (const wt of store.getSnapshot().state.worktrees.list) {
-    if (wt.prunable || !enabled.has(wt.repoRoot) || lochHookedPaths.has(wt.path)) continue
-    lochHookedPaths.add(wt.path)
-    const r = await installLochHooks(wt.path)
-    if (!r.ok) lochHookedPaths.delete(wt.path)
+    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.hooked.has(wt.path)) continue
+    await lochHooks.installIfRecording(wt)
   }
+}
+function setLochRecordingRepos(next: string[]): void {
+  if (next.length > 0) config.lochRecordingRepos = next
+  else delete config.lochRecordingRepos
+  saveConfig(config)
+  store.dispatch({ type: 'settings/lochRecordingReposChanged', payload: next })
+}
+/** Opt a repo out: drop it from the list first (so in-flight installs roll
+ *  themselves back), then strip hooks from each worktree. */
+async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Promise<number> {
+  const current = config.lochRecordingRepos ?? []
+  if (current.includes(repoRoot)) setLochRecordingRepos(current.filter((r) => r !== repoRoot))
+  const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
+  return results.filter((ok) => !ok).length
 }
 store.subscribe((event) => {
   if (event.type === 'worktrees/listChanged') void syncLochHooks()
@@ -2218,6 +2245,22 @@ function registerIpcHandlers(): void {
     const idx = config.repoRoots.indexOf(repoRoot)
     if (idx === -1) return false
     config.repoRoots.splice(idx, 1)
+    // A removed repo stops recording: strip loch's hooks from its worktrees
+    // (captured now, before the list refresh drops them) and forget its
+    // history-tracking prompt state.
+    if (isLochRecording(repoRoot)) {
+      const paths = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot)
+        .map((w) => w.path)
+      void stopLochRecording(repoRoot, paths)
+    }
+    if (config.lochPromptDismissedRepos?.includes(repoRoot)) {
+      const next = config.lochPromptDismissedRepos.filter((r) => r !== repoRoot)
+      if (next.length > 0) config.lochPromptDismissedRepos = next
+      else delete config.lochPromptDismissedRepos
+      store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    }
     // Also drop any persisted panes for the removed repo so they don't
     // linger as orphans.
     if (config.panes && config.panes[repoRoot]) {
@@ -4353,6 +4396,7 @@ function registerIpcHandlers(): void {
   // Re-probe for the loch binary — the explainer's "Check again" after the
   // user installs it.
   transport.onRequest('loch:refreshAvailability', () => {
+    resetLochBinaryCache()
     const available = !!lochBinary()
     store.dispatch({ type: 'loch/availabilityChanged', payload: available })
     return available
@@ -4382,26 +4426,11 @@ function registerIpcHandlers(): void {
       const worktrees = store
         .getSnapshot()
         .state.worktrees.list.filter((w) => w.repoRoot === repoRoot && !w.prunable)
-      const current = config.lochRecordingRepos ?? []
-      const commit = (next: string[]): void => {
-        if (next.length > 0) config.lochRecordingRepos = next
-        else delete config.lochRecordingRepos
-        saveConfig(config)
-        store.dispatch({ type: 'settings/lochRecordingReposChanged', payload: next })
-      }
-
       if (!enabled) {
-        let failed = 0
-        for (const wt of worktrees) {
-          lochHookedPaths.delete(wt.path)
-          try {
-            removeLochHooks(wt.path)
-          } catch (err) {
-            failed++
-            log('loch', `could not remove hooks from ${wt.path}`, err instanceof Error ? err.message : err)
-          }
-        }
-        commit(current.filter((r) => r !== repoRoot))
+        const failed = await stopLochRecording(
+          repoRoot,
+          worktrees.map((w) => w.path)
+        )
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
@@ -4412,13 +4441,17 @@ function registerIpcHandlers(): void {
         store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
         if (!lochBinary()) return { ok: false, code: 'not-installed' }
       }
+      // Opt in BEFORE installing: the installs re-check the list, so a
+      // concurrent opt-out during them rolls them back rather than losing.
+      const wasRecording = isLochRecording(repoRoot)
+      if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
       let installed = 0
       let viaProject = 0
       let firstFailure: { code: string; error?: string } | null = null
       for (const wt of worktrees) {
-        const r = await installLochHooks(wt.path)
+        const r = await lochHooks.installIfRecording(wt)
+        if (!r) continue
         if (r.ok) {
-          lochHookedPaths.add(wt.path)
           if (r.viaProject) viaProject++
           else installed++
         } else {
@@ -4426,9 +4459,11 @@ function registerIpcHandlers(): void {
         }
       }
       if (installed + viaProject === 0) {
+        if (!wasRecording && isLochRecording(repoRoot)) {
+          setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
+        }
         return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
       }
-      if (!current.includes(repoRoot)) commit([...current, repoRoot])
       // Recording only covers turns from now on; backfill reconstructs what
       // it can of the history so the gutter isn't empty on day one.
       void backfillRepo(repoRoot)
@@ -4480,7 +4515,11 @@ function registerIpcHandlers(): void {
       // resumed. Leaving it would add an orphan session to the other
       // directory's `claude --resume` picker on every ask.
       try {
-        unlinkSync(fork.path)
+        if (isLochForkPath(fork.path, fork.sessionId, fork.conversation.session, knownClaudeConfigDirs())) {
+          unlinkSync(fork.path)
+        } else {
+          log('loch', `not deleting ${fork.path}: doesn't look like loch's fork of ${fork.conversation.session}`)
+        }
       } catch (err) {
         log('loch', `could not remove intermediate fork ${fork.path}`, err instanceof Error ? err.message : err)
       }

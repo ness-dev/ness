@@ -7,6 +7,7 @@ import {
   hunkAtLine,
   isQuietBlameFailure,
   parseBlameDocument,
+  isLochHookCommand,
   stripLochHooks,
   type LochConversation,
   type LochHunk
@@ -189,6 +190,35 @@ describe('stripLochHooks', () => {
   it('drops the hooks key when only loch was there', () => {
     const settings = { hooks: { Stop: [{ hooks: [loch('/x/loch', 'stop')] }] } }
     expect(stripLochHooks(settings)).toEqual({})
+  })
+
+  it('strips hooks whose binary path is quoted, has a space, or is loch.exe', () => {
+    const settings = {
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              loch('"/Users/Jane Doe/.loch/bin/loch"', 'stop'),
+              loch('/Users/Jane Doe/.loch/bin/loch', 'stop'),
+              loch("'/opt/my tools/loch'", 'stop'),
+              loch('C:\\Users\\jane\\.loch\\bin\\loch.exe', 'stop'),
+              loch('"C:\\Program Files\\loch\\LOCH.EXE"', 'stop'),
+              { type: 'command', command: 'keep-me' }
+            ]
+          }
+        ]
+      }
+    }
+    expect(stripLochHooks(settings)).toEqual({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep-me' }] }] }
+    })
+  })
+
+  it('leaves look-alikes that aren’t loch', () => {
+    for (const bin of ['/usr/bin/notloch', 'echo loch &&', '"/x/loch-helper"']) {
+      expect(isLochHookCommand(`${bin} hook stop 2>/dev/null || true`)).toBe(false)
+    }
+    expect(isLochHookCommand('/x/loch hook stop')).toBe(false)
   })
 
   it('returns the same object when there is nothing of loch’s', () => {

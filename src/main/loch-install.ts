@@ -77,6 +77,10 @@ async function doInstall(): Promise<InstallOutcome> {
   const asset = ASSETS[`${process.platform}-${process.arch}`]
   if (!asset) return { ok: false, code: 'unsupported-platform' }
   const dest = managedLochPath()
+  // An existing copy is trusted as-is: no version or checksum check. So when
+  // LOCH_VERSION is bumped, users who already have ~/.loch/bin/loch keep the
+  // old one. Before relying on anything newer than 0.2.0 emits, compare
+  // `loch --version --json` here and replace an older binary.
   if (existsSync(dest)) return { ok: true, path: dest }
 
   const name = `loch-${LOCH_VERSION}-${asset.triple}`

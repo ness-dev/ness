@@ -17,7 +17,7 @@ import {
   statSync,
   writeFileSync
 } from 'fs'
-import { delimiter, isAbsolute, join, relative, resolve } from 'path'
+import { basename, delimiter, isAbsolute, join, relative, resolve } from 'path'
 import { createInterface } from 'readline'
 import { cachedShellEnv, claudeConfigDirFor, knownClaudeConfigDirs } from './claude-env'
 import { log } from './debug'
@@ -61,6 +61,11 @@ function lochEnv(cwd: string): NodeJS.ProcessEnv {
  *  Ness runs is noticed (a miss is a couple of dozen stats). A future
  *  bundled copy would slot in here. */
 let cachedBinary: string | null = null
+/** Forget the cached binary, so the next lookup probes again — for "Check
+ *  again", and after a run finds the cached path gone. */
+export function resetLochBinaryCache(): void {
+  cachedBinary = null
+}
 export function lochBinary(): string | null {
   if (cachedBinary) return cachedBinary
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
@@ -96,7 +101,11 @@ function runLoch(args: string[], cwd: string, timeout: number): Promise<RunOutco
       { cwd, env: lochEnv(cwd), timeout, maxBuffer: 32 * 1024 * 1024 },
       (err, stdout) => {
         const e = err as (NodeJS.ErrnoException & { killed?: boolean }) | null
-        if (e?.code === 'ENOENT') return done({ ok: false, code: 'not-installed' })
+        if (e?.code === 'ENOENT') {
+          // The cached binary was uninstalled or moved while Ness ran.
+          if (cachedBinary === bin) cachedBinary = null
+          return done({ ok: false, code: 'not-installed' })
+        }
         if (e?.killed) return done({ ok: false, code: 'timeout' })
         let doc: unknown
         try {
@@ -117,6 +126,27 @@ function runLoch(args: string[], cwd: string, timeout: number): Promise<RunOutco
         done({ ok: true, doc: d })
       }
     )
+  })
+}
+
+/** Whether `path` is safe to delete as loch's intermediate `ask` fork: named
+ *  `<forkSessionId>.jsonl`, inside a `projects/` dir of a Claude home Ness
+ *  knows, and not the transcript that was forked. Ness deletes the fork
+ *  because a child process named it, so a loch bug or schema change must
+ *  leave an orphan behind rather than delete a real transcript. */
+export function isLochForkPath(
+  path: string,
+  forkSessionId: string,
+  sourceSessionId: string,
+  claudeHomes: string[]
+): boolean {
+  if (!forkSessionId || forkSessionId === sourceSessionId) return false
+  const abs = resolve(path)
+  if (basename(abs) !== `${forkSessionId}.jsonl`) return false
+  return claudeHomes.some((home) => {
+    const rel = relative(join(resolve(home), 'projects'), abs)
+    // Exactly <projects>/<encoded-cwd>/<id>.jsonl.
+    return !rel.startsWith('..') && !isAbsolute(rel) && rel.split(/[\\/]/).length === 2
   })
 }
 
@@ -374,7 +404,10 @@ export async function installLochHooks(
   } catch (err) {
     return { ok: false, code: 'settings-unwritable', error: err instanceof Error ? err.message : String(err) }
   }
-  const out = await runLoch(['install', '--local', '--cwd', worktreePath, '--command', bin], worktreePath, BLAME_TIMEOUT_MS)
+  // loch writes `<command> hook <name>` verbatim into a shell command line,
+  // so a path with whitespace has to arrive already quoted.
+  const command = /\s/.test(bin) ? `"${bin}"` : bin
+  const out = await runLoch(['install', '--local', '--cwd', worktreePath, '--command', command], worktreePath, BLAME_TIMEOUT_MS)
   if (!out.ok) {
     log('loch', `install failed in ${worktreePath} code=${out.code}`, out.error ?? '')
     return out

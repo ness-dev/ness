@@ -213,16 +213,20 @@ export function extractFirstPrompt(lines: Iterable<string>): string | null {
 }
 
 /** The line `loch install` writes for each hook: `<command> hook <name>
- *  2>/dev/null || true`. Matched on a command whose basename is `loch` so
- *  removal never touches anyone else's hook. */
-const LOCH_HOOK_LINE = /^(\S+) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
+ *  2>/dev/null || true`. `<command>` may be quoted, may contain spaces (an
+ *  older unquoted install under a home with a space in it), and may be a
+ *  Windows path to `loch.exe`. Matched on a command whose basename is `loch`
+ *  so removal never touches anyone else's hook — this matcher is the only
+ *  way Ness can take its hooks back out, since loch has no uninstall. */
+const LOCH_HOOK_LINE = /^(.+?) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
 
 export function isLochHookCommand(command: unknown): boolean {
   if (typeof command !== 'string') return false
   const m = LOCH_HOOK_LINE.exec(command.trim())
   if (!m) return false
-  const bin = m[1].replace(/^["']|["']$/g, '')
-  return bin === 'loch' || bin.endsWith('/loch')
+  const bin = m[1].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+  const base = bin.split(/[\\/]/).pop() ?? ''
+  return base.replace(/\.exe$/i, '').toLowerCase() === 'loch'
 }
 
 /** Remove loch's hook lines from a Claude Code settings object, dropping any
