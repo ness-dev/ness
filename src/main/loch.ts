@@ -53,14 +53,15 @@ function lochEnv(cwd: string): NodeJS.ProcessEnv {
   }
 }
 
-/** Absolute path of the loch binary, resolved once from PATH (which boot
- *  merges with the login shell's). Absolute because it's also what the hook
- *  lines name — hooks run under whatever PATH Claude has, which may not
- *  include ~/.local/bin. A future bundled copy would slot in here. */
-let cachedBinary: string | null | undefined
+/** Absolute path of the loch binary, from PATH (which boot merges with the
+ *  login shell's). Absolute because it's also what the hook lines name —
+ *  hooks run under whatever PATH Claude has, which may not include
+ *  ~/.local/bin. A hit is cached; a miss isn't, so installing loch while
+ *  Ness runs is noticed (a miss is a couple of dozen stats). A future
+ *  bundled copy would slot in here. */
+let cachedBinary: string | null = null
 export function lochBinary(): string | null {
-  if (cachedBinary !== undefined) return cachedBinary
-  cachedBinary = null
+  if (cachedBinary) return cachedBinary
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue
     const candidate = join(dir, 'loch')

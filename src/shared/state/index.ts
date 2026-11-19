@@ -108,6 +108,7 @@ import {
   type AnnouncementsEvent,
   type AnnouncementsState
 } from './announcements'
+import { initialLoch, lochReducer, type LochEvent, type LochState } from './loch'
 import {
   initialScratchpad,
   scratchpadReducer,
@@ -251,6 +252,7 @@ export type {
   Announcement
 } from './announcements'
 export type { ScratchpadState, ScratchpadEvent } from './scratchpad'
+export type { LochState, LochEvent } from './loch'
 export type {
   SshBootstrapState,
   SshBootstrapEvent,
@@ -305,6 +307,7 @@ export interface AppState {
   pinned: PinnedState
   announcements: AnnouncementsState
   scratchpad: ScratchpadState
+  loch: LochState
   sshBootstrap: SshBootstrapState
   assignedPRs: AssignedPRsState
   configHealth: ConfigHealthState
@@ -334,6 +337,7 @@ export type StateEvent =
   | PinnedEvent
   | AnnouncementsEvent
   | ScratchpadEvent
+  | LochEvent
   | SshBootstrapEvent
   | AssignedPRsEvent
   | AliasesEvent
@@ -361,6 +365,7 @@ export const initialState: AppState = {
   pinned: initialPinned,
   announcements: initialAnnouncements,
   scratchpad: initialScratchpad,
+  loch: initialLoch,
   sshBootstrap: initialSshBootstrap,
   assignedPRs: initialAssignedPRs,
   configHealth: initialConfigHealth,
@@ -463,6 +468,9 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       scratchpad: scratchpadReducer(state.scratchpad, event as ScratchpadEvent)
     }
   }
+  if (event.type.startsWith('loch/')) {
+    return { ...state, loch: lochReducer(state.loch, event as LochEvent) }
+  }
   if (event.type.startsWith('sshBootstrap/')) {
     return {
       ...state,
@@ -562,6 +570,7 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     pinned: { ...initialState.pinned, ...state.pinned },
     announcements: { ...initialState.announcements, ...state.announcements },
     scratchpad: { ...initialState.scratchpad, ...state.scratchpad },
+    loch: { ...initialState.loch, ...state.loch },
     sshBootstrap: { ...initialState.sshBootstrap, ...state.sshBootstrap },
     assignedPRs: { ...initialState.assignedPRs, ...state.assignedPRs },
     configHealth: { ...initialState.configHealth, ...state.configHealth },

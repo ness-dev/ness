@@ -1726,6 +1726,7 @@ store.subscribe((event) => {
   if (event.type === 'worktrees/listChanged') void syncLochHooks()
 })
 void syncLochHooks()
+store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -4345,6 +4346,28 @@ function registerIpcHandlers(): void {
       return { ok: false, code: 'disabled' }
     }
     return lochBlame(worktreePath, filePath)
+  })
+
+  // Re-probe for the loch binary — the explainer's "Check again" after the
+  // user installs it.
+  transport.onRequest('loch:refreshAvailability', () => {
+    const available = !!lochBinary()
+    store.dispatch({ type: 'loch/availabilityChanged', payload: available })
+    return available
+  })
+
+  transport.onRequest('loch:setPromptDismissed', (_ctx, repoRoot: string, dismissed: boolean) => {
+    const current = config.lochPromptDismissedRepos ?? []
+    const next = dismissed
+      ? current.includes(repoRoot)
+        ? current
+        : [...current, repoRoot]
+      : current.filter((r) => r !== repoRoot)
+    if (next.length > 0) config.lochPromptDismissedRepos = next
+    else delete config.lochPromptDismissedRepos
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    return true
   })
 
   // Explicit per-repo opt-in to loch recording. Nothing is installed

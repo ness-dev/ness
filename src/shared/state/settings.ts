@@ -416,6 +416,9 @@ export interface SettingsState {
    *  installs loch's hooks into every worktree of these repos. Separate from
    *  `lochBlameEnabled`, which only governs showing blame that exists. */
   lochRecordingRepos: string[]
+  /** Repo roots whose sidebar "Install history tracking" prompt the user
+   *  closed. A preference, so it's persisted and shared across clients. */
+  lochPromptDismissedRepos: string[]
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — unlike the
    *  experimental toggles this gates a cosmetic, reversible action. Off
@@ -616,6 +619,7 @@ export type SettingsEvent =
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
   | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
   | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
+  | { type: 'settings/lochPromptDismissedReposChanged'; payload: string[] }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -707,6 +711,7 @@ export const initialSettings: SettingsState = {
   worktreeMessagingEnabled: false,
   lochBlameEnabled: true,
   lochRecordingRepos: [],
+  lochPromptDismissedRepos: [],
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1031,6 +1036,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, lochBlameEnabled: event.payload }
     case 'settings/lochRecordingReposChanged':
       return { ...state, lochRecordingRepos: event.payload }
+    case 'settings/lochPromptDismissedReposChanged':
+      return { ...state, lochPromptDismissedRepos: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

@@ -314,6 +314,9 @@ export function buildBackend(
     setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
     setLochRecording: (repoRoot: string, enabled: boolean) =>
       req('loch:setRecording', repoRoot, enabled),
+    setLochPromptDismissed: (repoRoot: string, dismissed: boolean) =>
+      req('loch:setPromptDismissed', repoRoot, dismissed),
+    refreshLochAvailability: () => req('loch:refreshAvailability'),
     setAgentTabNamingEnabled: (enabled: boolean) =>
       reqConfig('config:setAgentTabNamingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>

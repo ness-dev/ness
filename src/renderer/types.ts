@@ -423,6 +423,10 @@ export interface ElectronAPI {
   /** Opt a repo in to (or out of) loch recording: installs or removes loch's
    *  hooks in every worktree of it. */
   setLochRecording(repoRoot: string, enabled: boolean): Promise<LochRecordingResult>
+  /** Close (or restore) a repo's sidebar "Install history tracking" prompt. */
+  setLochPromptDismissed(repoRoot: string, dismissed: boolean): Promise<boolean>
+  /** Look for the loch binary again; resolves to whether it was found. */
+  refreshLochAvailability(): Promise<boolean>
   setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>

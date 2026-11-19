@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
-import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, selectHistoryPromptRepos, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -57,6 +57,7 @@ import { ReportIssueScreen, onOpenReportIssue, type OpenReportIssueDetail } from
 import { AddBackendModal } from './components/AddBackendModal'
 import { InvalidConfigModal } from './components/InvalidConfigModal'
 import { MonacoWorkerFailedBanner } from './components/MonacoWorkerFailedBanner'
+import { HistoryTrackingExplainer } from './components/HistoryTrackingExplainer'
 import { PerfMonitorHUD } from './components/PerfMonitorHUD'
 import { GitHubApiLogPanel } from './components/GitHubApiLogPanel'
 import { HoldToQuitOverlay } from './components/HoldToQuitOverlay'
@@ -187,6 +188,16 @@ function DesktopApp(): JSX.Element {
   // holding the full states re-rendered App on every streamed chat token
   // from any host. This only changes when some backend's list does.
   const fleetWorktreeLists = useAllBackendStatesSelector(getFleetWorktreeLists)
+  // loch history tracking: which repos get the sidebar nudge, and which one's
+  // full-screen explainer is open (per-client UI focus, so plain state).
+  const historyPromptRepos = useAllBackendStatesSelector(selectHistoryPromptRepos)
+  const [historyTrackingRepo, setHistoryTrackingRepo] = useState<string | null>(null)
+  const dismissHistoryPrompt = useCallback(
+    (repoRoot: string) => {
+      void getBackendFor(mergedData.repoBackendId[repoRoot] ?? null).setLochPromptDismissed(repoRoot, true)
+    },
+    [mergedData.repoBackendId]
+  )
   useEffect(() => {
     setOpenedWorktrees((prev) => {
       if (prev.size === 0) return prev
@@ -1617,6 +1628,13 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <HotkeysProvider bindings={resolvedHotkeys}>
     <div className="flex h-full flex-col">
       <MonacoWorkerFailedBanner />
+      {historyTrackingRepo && (
+        <HistoryTrackingExplainer
+          repoRoot={historyTrackingRepo}
+          backendId={mergedData.repoBackendId[historyTrackingRepo] ?? null}
+          onClose={() => setHistoryTrackingRepo(null)}
+        />
+      )}
       {resizeToast && (
         <div className="pointer-events-none fixed top-12 left-1/2 -translate-x-1/2 z-[60]">
           <div className="rounded-md border border-border-strong bg-panel/95 px-3 py-1.5 text-sm text-fg-bright shadow-lg backdrop-blur">
@@ -1784,6 +1802,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
             snoozeDefaultDays={settings.snoozeDefaultDays}
             prLoading={prLoading}
             onOpenAssignedPR={handleOpenAssignedPR}
+            historyPromptRepos={historyPromptRepos}
+            onOpenHistoryTracking={setHistoryTrackingRepo}
+            onDismissHistoryPrompt={dismissHistoryPrompt}
             agentCount={agentWorktreeCount}
             onSelectWorktree={handleSidebarSelectWorktree}
             pathBackendId={fleetData.pathBackendId}

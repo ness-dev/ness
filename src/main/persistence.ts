@@ -291,6 +291,8 @@ export interface Config {
   lochBlameEnabled?: boolean
   // Repo roots opted in to loch recording (hooks installed in their worktrees).
   lochRecordingRepos?: string[]
+  // Repo roots whose "Install history tracking" sidebar prompt was closed.
+  lochPromptDismissedRepos?: string[]
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */
   agentTabNamingEnabled?: boolean
