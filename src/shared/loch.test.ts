@@ -215,7 +215,18 @@ describe('stripLochHooks', () => {
   })
 
   it('leaves look-alikes that aren’t loch', () => {
-    for (const bin of ['/usr/bin/notloch', 'echo loch &&', '"/x/loch-helper"']) {
+    for (const bin of [
+      '/usr/bin/notloch',
+      'echo loch &&',
+      '"/x/loch-helper"',
+      'echo hi && /x/loch',
+      'foo; /x/loch',
+      './scripts/lint.sh && ~/.loch/bin/loch',
+      'true || /x/loch',
+      '$(which loch)',
+      '`which loch`',
+      'cd /tmp > /x/loch'
+    ]) {
       expect(isLochHookCommand(`${bin} hook stop 2>/dev/null || true`)).toBe(false)
     }
     expect(isLochHookCommand('/x/loch hook stop')).toBe(false)

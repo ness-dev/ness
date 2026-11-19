@@ -213,12 +213,15 @@ export function extractFirstPrompt(lines: Iterable<string>): string | null {
 }
 
 /** The line `loch install` writes for each hook: `<command> hook <name>
- *  2>/dev/null || true`. `<command>` may be quoted, may contain spaces (an
- *  older unquoted install under a home with a space in it), and may be a
- *  Windows path to `loch.exe`. Matched on a command whose basename is `loch`
- *  so removal never touches anyone else's hook — this matcher is the only
+ *  2>/dev/null || true`. `<command>` must be ONE token: a quoted path, or an
+ *  unquoted one with no shell metacharacters (spaces allowed, for an older
+ *  unquoted install under a home with a space in it). A compound command a
+ *  user wrote — `./lint.sh && ~/.loch/bin/loch hook stop …` — is theirs and
+ *  must survive, so anything with `;&|<>$` or a backtick doesn't match. The
+ *  token's basename must be `loch` (or `loch.exe`). This matcher is the only
  *  way Ness can take its hooks back out, since loch has no uninstall. */
-const LOCH_HOOK_LINE = /^(.+?) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
+const LOCH_HOOK_LINE =
+  /^("[^"]+"|'[^']+'|[^;&|<>$`"'()]+?) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
 
 export function isLochHookCommand(command: unknown): boolean {
   if (typeof command !== 'string') return false
