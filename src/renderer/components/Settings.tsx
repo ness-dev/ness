@@ -1440,7 +1440,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
       <div className="drag-region h-10 shrink-0 border-b border-border relative">
         <button
           onClick={onClose}
-          className="no-drag absolute left-20 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-muted hover:text-fg-bright transition-colors cursor-pointer"
+          className="no-drag absolute titlebar-lead-inset top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-muted hover:text-fg-bright transition-colors cursor-pointer"
         >
           <ArrowLeft className="icon-sm" />
           Back

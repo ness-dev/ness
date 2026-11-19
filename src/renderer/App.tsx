@@ -67,6 +67,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useViewport } from './hooks/useViewport'
 import { MobileApp } from './components/MobileApp'
 import { harnessReleaseNotesUrl } from '../shared/constants'
+import { windowControlsKind } from './window-controls'
 
 function isPendingId(id: string | null | undefined): id is string {
   return typeof id === 'string' && id.startsWith('pending:')
@@ -76,6 +77,15 @@ function isPendingId(id: string | null | undefined): id is string {
 // top-bar content — clears the macOS traffic lights. Also the left edge of
 // the "Ness" title segment when it sits above the sidebar.
 const TITLE_LEADING_PX = 80
+
+const WINDOW_CONTROLS = windowControlsKind()
+
+// Set at module load — before first paint — by both the Electron and the
+// web-client entry, which share only App. Drives the titlebar clearance
+// overrides in styles.css.
+if (typeof document !== 'undefined') {
+  document.documentElement.dataset.windowControls = WINDOW_CONTROLS
+}
 
 // Static cap for the sidebar's resizable width. The title segment above the
 // sidebar fills whatever width is chosen, so the cap is a pure UX choice,
@@ -616,6 +626,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   useEffect(() => {
     document.documentElement.dataset.fullscreen = isFullscreen ? 'true' : 'false'
   }, [isFullscreen])
+
+  // Mirrors the styles.css titlebar-lead overrides for the inline-styled
+  // single-screen top bars, which a root-attribute selector can't reach.
+  // Only macOS hides its controls in fullscreen; LinuxWindowControls stay.
+  const singleScreenLeadingPx =
+    WINDOW_CONTROLS === 'none' || (WINDOW_CONTROLS === 'mac' && isFullscreen) ? 0 : TITLE_LEADING_PX
 
   // Open Keyboard Shortcuts from the menu
   useEffect(() => {
@@ -1911,7 +1927,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   onSendToAgent={handleSendToAgent}
                   topBarLeadingPx={
                     singleScreenMode
-                      ? isFullscreen ? 0 : TITLE_LEADING_PX
+                      ? singleScreenLeadingPx
                       : sidebarVisible
                         ? 0
                         : effectiveSidebarWidth + 1
@@ -2010,7 +2026,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               className="drag-region h-10 shrink-0 border-b border-border bg-panel flex items-stretch relative z-10"
               style={{
                 paddingLeft: singleScreenMode
-                  ? isFullscreen ? undefined : TITLE_LEADING_PX
+                  ? singleScreenLeadingPx || undefined
                   : sidebarVisible
                     ? undefined
                     : effectiveSidebarWidth + 1,
