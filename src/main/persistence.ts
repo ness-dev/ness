@@ -8,7 +8,7 @@ import {
   copyFileSync,
   renameSync
 } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { userDataDir } from './paths'
 import type { ConfigLoadError } from '../shared/state/config-health'
 import {
@@ -381,6 +381,10 @@ export interface Config {
   // When true, all announcement banners are suppressed regardless of
   // feed contents.
   announcementsMuted?: boolean
+  // Epoch ms of this install's first launch. Announcements published at
+  // or before it are hidden so new users don't get a backlog of old news.
+  // Installs that predate the field are stamped 0 (see applyFirstLaunchDefault).
+  firstLaunchAt?: number
   // When true, the sidebar's Reviewing group surfaces PRs where the user
   // is a requested reviewer (across all Ness repos) as phantom entries
   // that open the "new worktree from PR" screen on click. Default off.
@@ -561,11 +565,14 @@ export function loadConfig(): Config {
     runMigrations(parsed)
     configLoadError = null
     writesSuspended = false
-    return applyConnectionDefaults({
-      ...DEFAULT_CONFIG,
-      ...(parsed as Partial<Config>),
-      schemaVersion: SCHEMA_VERSION
-    })
+    return applyFirstLaunchDefault(
+      applyConnectionDefaults({
+        ...DEFAULT_CONFIG,
+        ...(parsed as Partial<Config>),
+        schemaVersion: SCHEMA_VERSION
+      }),
+      true
+    )
   } catch (e) {
     // A missing file is the normal first-run case — nothing to preserve,
     // nothing the user broke, so just load defaults. Anything else (bad
@@ -574,6 +581,11 @@ export function loadConfig(): Config {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       configLoadError = null
       writesSuspended = false
+      // Persist right away so the first-launch stamp survives even if
+      // nothing else triggers a save before the next boot.
+      const fresh = applyFirstLaunchDefault(defaultConfig(), false)
+      saveConfigSync(fresh)
+      return fresh
     } else {
       configLoadError = {
         message: e instanceof Error ? e.message : String(e),
@@ -583,8 +595,26 @@ export function loadConfig(): Config {
       writesSuspended = true
       console.error('Failed to load config (quarantined, writes suspended):', e)
     }
-    return defaultConfig()
+    // A corrupt file still means an existing install.
+    return applyFirstLaunchDefault(defaultConfig(), true)
   }
+}
+
+/** Stamp `firstLaunchAt` if it's missing. A fresh install (no config.json
+ *  before this boot) gets `now`; an install that already had a config but
+ *  predates the field gets 0, so existing users keep seeing every
+ *  announcement. An existing value is never changed.
+ *
+ *  Pure for testability; `loadConfig` calls it on the loaded config. */
+export function applyFirstLaunchDefault(
+  config: Config,
+  configExisted: boolean,
+  now: number = Date.now()
+): Config {
+  if (typeof config.firstLaunchAt === 'number' && Number.isFinite(config.firstLaunchAt)) {
+    return config
+  }
+  return { ...config, firstLaunchAt: configExisted ? 0 : now }
 }
 
 /** Raw bytes of config.json for the in-app recovery editor; '' if unreadable. */
@@ -628,7 +658,7 @@ export function validateConfigFile(): { ok: true } | { ok: false; error: string 
 export function discardCorruptConfigAndReset(): Config {
   writesSuspended = false
   configLoadError = null
-  const fresh = defaultConfig()
+  const fresh = applyFirstLaunchDefault(defaultConfig(), true)
   saveConfigSync(fresh)
   return fresh
 }
@@ -667,6 +697,9 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null
 function writeFileAtomic(contents: string): void {
   const target = getConfigPath()
   const tmp = `${target}.tmp`
+  // Electron's userData dir may not exist yet on a fresh install (loadConfig
+  // runs before app.ready), and the first-run save would otherwise ENOENT.
+  mkdirSync(dirname(target), { recursive: true })
   writeFileSync(tmp, contents)
   renameSync(tmp, target)
 }

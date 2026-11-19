@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { applyConnectionDefaults, LOCAL_BACKEND_ID, type Config } from './persistence'
+import { applyConnectionDefaults, applyFirstLaunchDefault, LOCAL_BACKEND_ID, type Config } from './persistence'
 
 function bareConfig(): Config {
   return {
@@ -63,5 +63,23 @@ describe('applyConnectionDefaults', () => {
     const before = JSON.stringify(input)
     applyConnectionDefaults(input)
     expect(JSON.stringify(input)).toBe(before)
+  })
+})
+
+describe('applyFirstLaunchDefault', () => {
+  it('stamps now on a fresh install', () => {
+    expect(applyFirstLaunchDefault(bareConfig(), false, 1700000000000).firstLaunchAt).toBe(
+      1700000000000
+    )
+  })
+
+  it('stamps 0 on an existing install that predates the field', () => {
+    expect(applyFirstLaunchDefault(bareConfig(), true, 1700000000000).firstLaunchAt).toBe(0)
+  })
+
+  it('never overwrites an existing value', () => {
+    const cfg = { ...bareConfig(), firstLaunchAt: 1600000000000 }
+    expect(applyFirstLaunchDefault(cfg, false, 1700000000000)).toBe(cfg)
+    expect(applyFirstLaunchDefault(cfg, true, 1700000000000)).toBe(cfg)
   })
 })
