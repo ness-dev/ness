@@ -31,7 +31,7 @@ function git(cwd: string, ...args: string[]): void {
 function writeClaudeSession(
   cwd: string,
   sessionId: string,
-  opts: { lastPrompt?: string; mtime?: number; dirName?: string } = {}
+  opts: { lastPrompt?: string; mtime?: number; dirName?: string; noReply?: boolean } = {}
 ): void {
   const dir = join(claudeHome, 'projects', opts.dirName ?? cwd.replace(/[^a-zA-Z0-9]/g, '-'))
   mkdirSync(dir, { recursive: true })
@@ -39,6 +39,9 @@ function writeClaudeSession(
     JSON.stringify({ type: 'session-owner', sessionId }),
     JSON.stringify({ type: 'user', cwd, sessionId, message: { role: 'user', content: 'hi "cwd":"/nope"' } })
   ]
+  if (!opts.noReply) {
+    lines.push(JSON.stringify({ type: 'assistant', cwd, sessionId, message: { role: 'assistant', content: 'ok' } }))
+  }
   if (opts.lastPrompt) lines.push(JSON.stringify({ type: 'last-prompt', lastPrompt: opts.lastPrompt, sessionId }))
   const file = join(dir, `${sessionId}.jsonl`)
   writeFileSync(file, lines.join('\n') + '\n')
@@ -63,6 +66,8 @@ beforeAll(() => {
   writeClaudeSession(repo, 'main-new', { lastPrompt: 'newest   prompt\nhere' })
   writeClaudeSession(feature, 'feat-live', { lastPrompt: 'live one', mtime: Date.now() - 120_000 })
   writeClaudeSession(feature, 'feat-newer', { lastPrompt: 'newer but not live' })
+  // What Ness's slash-command probe leaves behind: a prompt, an interrupt, no reply.
+  writeClaudeSession(repo, 'probe', { noReply: true, mtime: Date.now() + 60_000 })
   // Started in a subdirectory: filed under a dir the worktree root can't resume from.
   writeClaudeSession(join(repo, 'sub'), 'sub-session')
   // History for a worktree that has since been deleted.
@@ -130,8 +135,9 @@ describe('scanExistingWork', () => {
     const main = (await scan()).repos[0].worktrees.find((w) => w.isMain)!
     expect(main.session?.sessionId).toBe('main-new')
     expect(main.session?.lastPrompt).toBe('newest prompt here')
-    // Two Claude sessions plus the interactive Codex one; `codex exec` runs
-    // and the subdirectory session don't count.
+    // Two Claude sessions plus the interactive Codex one. `codex exec` runs,
+    // the subdirectory session and the reply-less probe (the newest file in
+    // the directory) don't count.
     expect(main.sessionCount).toBe(3)
   })
 
@@ -164,6 +170,18 @@ describe('scanExistingWork', () => {
     const work = await scan({ addedRepoRoots: [repo] })
     expect(work.repos[0].alreadyAdded).toBe(true)
     expect(work.suggestedAgent).toBe('claude')
+  })
+
+  it('reports first-run status only when the caller vouches for it', async () => {
+    expect((await scan()).mayPreselectAgent).toBe(false)
+    const work = await scanExistingWork({
+      claudeConfigDirs: [claudeHome],
+      codexHome,
+      addedRepoRoots: [],
+      ownSessionIds: new Set(),
+      mayPreselectAgent: true
+    })
+    expect(work.mayPreselectAgent).toBe(true)
   })
 
   it('finds nothing in an empty home', async () => {

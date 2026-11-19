@@ -495,10 +495,12 @@ function DesktopApp(): JSX.Element {
       .then((work) => {
         setExistingWork(work)
         setImportSelection(new Set(defaultSelectedRepoRoots(work.repos, work.scannedAt)))
-        if (work.suggestedAgent) {
+        if (work.suggestedAgent && (work.mayPreselectAgent || previewOnboarding)) {
           // Someone with a history of Claude or Codex sessions has already
           // told us which agent they use. Chat is the interface we steer
           // toward; the TUI stays one click away in the step itself.
+          // Only on a genuine first run: this screen also shows for an
+          // existing user with no repos left, whose settings are theirs.
           // Preview mode must not rewrite the real settings just by opening.
           if (!previewOnboarding) {
             void backend.setDefaultAgent(work.suggestedAgent)
@@ -1546,7 +1548,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                           backend.setDefaultAgent(agent.kind)
                           // Chat is the default interface for any agent that
                           // has one; the line below is the way back to the TUI.
-                          if (!agentChosen && supportsChat(agent.kind)) {
+                          if (!agentChosen && existingWork?.mayPreselectAgent === true && !previewOnboarding && supportsChat(agent.kind)) {
                             void backend.setDefaultClaudeTabType('json')
                           }
                           setAgentChosen(true)

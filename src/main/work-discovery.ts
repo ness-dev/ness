@@ -31,6 +31,7 @@ export interface ScanOptions {
   /** Sessions Ness itself is running. They show up in Claude's live-session
    *  registry like any other, and must not be reported as "elsewhere". */
   ownSessionIds: Set<string>
+  mayPreselectAgent?: boolean
   now?: number
 }
 
@@ -122,6 +123,23 @@ async function readLastPrompt(path: string, size: number): Promise<string | unde
     // Unreadable transcript: the row just shows no prompt.
   }
   return undefined
+}
+
+/** Whether a transcript holds a conversation at all. Ness's slash-command
+ *  probe, and other SDK callers that start a session only to read its init
+ *  event, leave transcripts with a queued prompt and an interrupt but no
+ *  reply. There can be hundreds, and one is often the newest file in a
+ *  worktree, so without this check it is what would get opened.
+ *
+ *  A transcript too big to read cheaply is assumed real: junk sessions
+ *  are small. */
+async function hasAssistantTurn(path: string, size: number): Promise<boolean> {
+  if (size > HEAD_BYTES + TAIL_BYTES) return true
+  try {
+    return (await readSlice(path, 0, size)).includes('"type":"assistant"')
+  } catch {
+    return false
+  }
 }
 
 async function collectClaudeSessions(projectsDir: string): Promise<FoundSession[]> {
@@ -334,6 +352,7 @@ export async function scanExistingWork(opts: ScanOptions): Promise<DiscoveredWor
   }
 
   const added = new Set(opts.addedRepoRoots)
+  const agentCounts: Record<DiscoveredAgentKind, number> = { claude: 0, codex: 0 }
   const repos = await mapLimit(
     [...cwdsByRepo.keys()],
     GIT_CONCURRENCY,
@@ -348,7 +367,12 @@ export async function scanExistingWork(opts: ScanOptions): Promise<DiscoveredWor
         listed.filter((w) => !w.isBare && !w.prunable),
         FILE_CONCURRENCY,
         async (wt): Promise<DiscoveredWorktree> => {
-          const found = (byCwd.get(wt.path) ?? []).slice().sort((a, b) => b.mtime - a.mtime)
+          const candidates = byCwd.get(wt.path) ?? []
+          const real = await mapLimit(candidates, FILE_CONCURRENCY, async (s) =>
+            s.transcriptPath === null || (await hasAssistantTurn(s.transcriptPath, s.size))
+          )
+          const found = candidates.filter((_, i) => real[i]).sort((a, b) => b.mtime - a.mtime)
+          for (const s of found) agentCounts[s.agentKind]++
           const pick = found.find((s) => live.has(s.sessionId)) ?? found[0]
           let session: DiscoveredSession | undefined
           if (pick) {
@@ -392,14 +416,7 @@ export async function scanExistingWork(opts: ScanOptions): Promise<DiscoveredWor
     .filter((r): r is DiscoveredRepo => r !== null)
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
 
-  const keptPaths = new Set(kept.flatMap((r) => r.worktrees.map((w) => w.path)))
-  let claudeCount = 0
-  let codexCount = 0
-  for (const session of sessions) {
-    if (!keptPaths.has(session.cwd)) continue
-    if (session.agentKind === 'claude') claudeCount++
-    else codexCount++
-  }
+  const { claude: claudeCount, codex: codexCount } = agentCounts
   const suggestedAgent: DiscoveredAgentKind | null =
     claudeCount + codexCount === 0 ? null : codexCount > claudeCount ? 'codex' : 'claude'
 
@@ -408,5 +425,10 @@ export async function scanExistingWork(opts: ScanOptions): Promise<DiscoveredWor
     `scan found repos=${kept.length} sessions=${sessions.length} live=${live.size} in ${Date.now() - startedAt}ms ` +
       `(read=${collectedAt - startedAt}ms locate=${locatedAt - collectedAt}ms worktrees=${Date.now() - locatedAt}ms)`
   )
-  return { repos: kept, suggestedAgent, scannedAt: now }
+  return {
+    repos: kept,
+    suggestedAgent,
+    mayPreselectAgent: opts.mayPreselectAgent ?? false,
+    scannedAt: now
+  }
 }

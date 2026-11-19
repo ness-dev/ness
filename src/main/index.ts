@@ -3654,7 +3654,11 @@ function registerIpcHandlers(): void {
     lastWorkScan = await scanExistingWork({
       claudeConfigDirs: knownClaudeConfigDirs(),
       addedRepoRoots: config.repoRoots,
-      ownSessionIds
+      ownSessionIds,
+      mayPreselectAgent:
+        config.defaultAgent === undefined &&
+        config.defaultClaudeTabType === undefined &&
+        (config.onboarding?.quest ?? 'hidden') === 'hidden'
     })
     return lastWorkScan
   })
