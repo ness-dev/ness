@@ -95,6 +95,12 @@ describe('loadConfig corrupt-file handling', () => {
     expect(loadConfig().firstLaunchAt).toBe(123)
   })
 
+  it('first run creates a missing userData dir and persists the stamp', () => {
+    DIR = join(DIR, 'not-yet-created')
+    const cfg = loadConfig()
+    expect(JSON.parse(readFileSync(configPath(), 'utf-8')).firstLaunchAt).toBe(cfg.firstLaunchAt)
+  })
+
   it('atomic write leaves no stray .tmp file behind', () => {
     const cfg = loadConfig()
     saveConfigSync({ ...cfg, repoRoots: ['/z'] })

@@ -8,7 +8,7 @@ import {
   copyFileSync,
   renameSync
 } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { userDataDir } from './paths'
 import type { ConfigLoadError } from '../shared/state/config-health'
 import {
@@ -697,6 +697,9 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null
 function writeFileAtomic(contents: string): void {
   const target = getConfigPath()
   const tmp = `${target}.tmp`
+  // Electron's userData dir may not exist yet on a fresh install (loadConfig
+  // runs before app.ready), and the first-run save would otherwise ENOENT.
+  mkdirSync(dirname(target), { recursive: true })
   writeFileSync(tmp, contents)
   renameSync(tmp, target)
 }
