@@ -1667,26 +1667,44 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
     // the moment the worktree is shown. So a Claude conversation that is
     // running elsewhere is forked now, and the tab resumes the copy — two
     // processes must never append to one transcript. If the copy can't be
-    // made, open nothing rather than the live session.
+    // made, open a fresh agent rather than the live session.
     //
     // Codex needs no equivalent: its thread store refuses a second writer
     // outright, so `codex resume` on a held thread reports it as busy in
     // the TUI instead of writing to it.
-    let seed = session
-    if (session.agentKind === 'claude' && session.live) {
-      const outcome = jsonClaudeManager.forkIntoWorktree({
-        sourceSessionId: session.sessionId,
-        sourceWorktreePath: wtPath,
-        destWorktreePath: wtPath
-      })
-      if (!outcome.ok || !outcome.newSessionId) {
-        log('onboarding', `fork of live session ${session.sessionId} failed: ${outcome.reason ?? 'unknown'}`)
-        if (activated) panesFSM.ensureInitialized(wtPath)
-        return
-      }
-      seed = { ...session, sessionId: outcome.newSessionId }
+    if (session.agentKind !== 'claude' || !session.live) {
+      panesFSM.seedImportedSession(wtPath, session, tabType)
+      return
     }
-    panesFSM.seedImportedSession(wtPath, seed, tabType)
+    // Nothing to fork for if the seed wouldn't land: the copy would sit in
+    // the projects dir unreferenced and be counted by the next scan.
+    if (!panesFSM.canSeedImported(wtPath)) return
+    // The fork has to read the transcript from this worktree's Claude home,
+    // which is only known once its shell env is. Hold the path as
+    // mid-creation meanwhile so an activation or sweep arriving during the
+    // await doesn't hand it default tabs first.
+    seedingWorktreePaths.add(wtPath)
+    void resolveShellEnv(wtPath)
+      .catch(() => undefined)
+      .then(() => {
+        if (!panesFSM.canSeedImported(wtPath)) return
+        const outcome = jsonClaudeManager.forkIntoWorktree({
+          sourceSessionId: session.sessionId,
+          sourceWorktreePath: wtPath,
+          destWorktreePath: wtPath
+        })
+        if (!outcome.ok || !outcome.newSessionId) {
+          log('onboarding', `fork of live session ${session.sessionId} failed: ${outcome.reason ?? 'unknown'}`)
+          return
+        }
+        panesFSM.seedImportedSession(wtPath, { ...session, sessionId: outcome.newSessionId }, tabType)
+      })
+      .finally(() => {
+        seedingWorktreePaths.delete(wtPath)
+        // The worktree the user is looking at must not stay blank if the
+        // copy couldn't be made.
+        if (activated && panesFSM.canSeedImported(wtPath)) panesFSM.ensureInitialized(wtPath)
+      })
     return
   }
   if (!panesFSM.seedImportedSession(wtPath, session, tabType)) return

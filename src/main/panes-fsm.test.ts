@@ -830,3 +830,12 @@ describe('PanesFSM imported conversations', () => {
     expect(leafOf(store, '/wt/a').tabs[0].id).toBe(SESSION)
   })
 })
+
+describe('PanesFSM.canSeedImported', () => {
+  it('is true for an untouched worktree and false once it has tabs', () => {
+    const { fsm } = buildFSM()
+    expect(fsm.canSeedImported('/wt/a')).toBe(true)
+    fsm.seedImportedSession('/wt/a', { agentKind: 'claude', sessionId: 'x' }, 'xterm')
+    expect(fsm.canSeedImported('/wt/a')).toBe(false)
+  })
+})

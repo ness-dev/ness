@@ -314,6 +314,14 @@ export class PanesFSM {
     return pane
   }
 
+  /** Whether seedImportedSession would do anything for this worktree.
+   *  Lets a caller skip work that only makes sense if the seed lands —
+   *  forking a transcript, say, which would otherwise be left orphaned. */
+  canSeedImported(wtPath: string): boolean {
+    const existing = this.getTree(wtPath)
+    return !(existing && hasAnyTabs(existing)) && !this.sleepingPanes.has(wtPath)
+  }
+
   /** Open an existing conversation as this worktree's first tab, asleep.
    *  Used by the onboarding import: a worktree the user was already working
    *  in should come up showing that conversation, not a blank agent — and
@@ -324,9 +332,7 @@ export class PanesFSM {
     session: { agentKind: 'claude' | 'codex'; sessionId: string },
     tabType: 'xterm' | 'json'
   ): boolean {
-    const existing = this.getTree(wtPath)
-    if (existing && hasAnyTabs(existing)) return false
-    if (this.sleepingPanes.has(wtPath)) return false
+    if (!this.canSeedImported(wtPath)) return false
     const { agentKind, sessionId } = session
     const slug = wtPath.replace(/[^a-zA-Z0-9]/g, '-')
     let agentTab: TerminalTab
