@@ -9,6 +9,7 @@ vi.mock('electron', () => ({
 }))
 
 import { buildInitialAppState } from './build-initial-state'
+import { runMigrations } from './persistence-migrations'
 import type { Config } from './persistence'
 import { initialPRs } from '../shared/state/prs'
 import { initialOnboarding } from '../shared/state/onboarding'
@@ -79,6 +80,27 @@ describe('buildInitialAppState', () => {
     expect(result.settings.themeLight).toBe('solarized-light')
     expect(result.settings.hasGithubToken).toBe(true)
     expect(result.worktrees.repoRoots).toEqual(['/a', '/b'])
+  })
+
+  it('gives a fresh install auto-approve on and agent reviews off', () => {
+    expect(seeded.settings.autoApprovePermissions).toBe(true)
+    expect(seeded.settings.agentReviewsEnabled).toBe(false)
+  })
+
+  it('keeps an upgrader on manual approval and on auto-review', () => {
+    // A pre-change config: auto-approve was off (the old setter deleted the
+    // key) and auto-review on green CI was on.
+    const raw: Record<string, unknown> = {
+      schemaVersion: 8,
+      windowBounds: null,
+      repoRoots: [],
+      autoReviewOnGreenCi: true
+    }
+    runMigrations(raw)
+    const result = buildInitialAppState(raw as unknown as Config, { hasGithubToken: false })
+    expect(result.settings.autoApprovePermissions).toBe(false)
+    expect(result.settings.agentReviewsEnabled).toBe(true)
+    expect(result.settings.autoReviewOnGreenCi).toBe(true)
   })
 
   it('keeps review requests and history fields, dropping malformed ones', () => {

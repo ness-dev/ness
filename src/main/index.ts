@@ -4770,10 +4770,12 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setAgentReviewsEnabled', (_ctx, enabled: boolean) => {
-    if (enabled) config.agentReviewsEnabled = true
-    else delete config.agentReviewsEnabled
+    config.agentReviewsEnabled = enabled === true
     saveConfig(config)
-    store.dispatch({ type: 'settings/agentReviewsEnabledChanged', payload: enabled === true })
+    store.dispatch({
+      type: 'settings/agentReviewsEnabledChanged',
+      payload: config.agentReviewsEnabled === true
+    })
     return true
   })
 
