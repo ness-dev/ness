@@ -5,6 +5,7 @@ import type { Worktree, PendingWorktree, PendingDeletion, ForkSource } from '../
 export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 
 import type { RepoConfig } from '../shared/state/repo-configs'
+import type { DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 export type { RepoConfig }
 
 import type {
@@ -482,6 +483,8 @@ export interface ElectronAPI {
   getDefaultTerminalFontFamily(): Promise<string>
   setTerminalFontSize(fontSize: number): Promise<boolean>
   setOnboardingQuest(quest: QuestStep): Promise<boolean>
+  scanExistingWork(): Promise<DiscoveredWork>
+  importExistingWork(repoRoots: string[]): Promise<ImportWorkResult>
   setWorktreeScripts(scripts: { setup: string; teardown: string }): Promise<boolean>
   setRepoConfig(repoRoot: string, next: Partial<RepoConfig>): Promise<RepoConfig | null>
   migrateRepoConfigFilename(repoRoot: string): Promise<boolean>

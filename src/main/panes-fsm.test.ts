@@ -741,3 +741,67 @@ describe('PanesFSM.openReviewerTab', () => {
     expect(tabsOf(store).find((t) => t.id === tabId)).toMatchObject({ agentKind: 'codex' })
   })
 })
+
+describe('PanesFSM imported conversations', () => {
+  const SESSION = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  const leafOf = (store: Store, wtPath: string): PaneLeaf =>
+    store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+
+  it('seeds an existing conversation as a sleeping chat tab whose id is the session id', () => {
+    const { fsm, store } = buildFSM()
+    expect(fsm.seedImportedSession('/wt/a', SESSION, 'json')).toBe(true)
+    const leaf = leafOf(store, '/wt/a')
+    expect(leaf.activeTabId).toBe(SESSION)
+    expect(leaf.tabs[0]).toMatchObject({
+      id: SESSION,
+      type: 'json-claude',
+      sessionId: SESSION,
+      mode: 'asleep'
+    })
+    expect(leaf.tabs[1]).toMatchObject({ type: 'shell', mode: 'asleep' })
+  })
+
+  it('seeds a terminal tab that resumes the session when the TUI is preferred', () => {
+    const { fsm, store } = buildFSM()
+    fsm.seedImportedSession('/wt/a', SESSION, 'xterm')
+    expect(leafOf(store, '/wt/a').tabs[0]).toMatchObject({
+      type: 'agent',
+      agentKind: 'claude',
+      sessionId: SESSION
+    })
+  })
+
+  it('leaves a worktree that already has tabs alone', () => {
+    const { fsm, store } = buildFSM()
+    seedLeaf(store, '/wt/a', {
+      type: 'leaf',
+      id: 'pane-1',
+      tabs: [{ id: 'shell-1', type: 'shell', label: 'Shell' }],
+      activeTabId: 'shell-1'
+    })
+    expect(fsm.seedImportedSession('/wt/a', SESSION, 'json')).toBe(false)
+    expect(leafOf(store, '/wt/a').tabs).toHaveLength(1)
+  })
+
+  it('retargets a sleeping chat tab to a forked session, keeping focus on it', () => {
+    const { fsm, store } = buildFSM()
+    fsm.seedImportedSession('/wt/a', SESSION, 'json')
+    const fork = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    expect(fsm.retargetSleepingChatTab('/wt/a', SESSION, fork)).toBe(true)
+    const leaf = leafOf(store, '/wt/a')
+    expect(leaf.activeTabId).toBe(fork)
+    expect(leaf.tabs[0]).toMatchObject({ id: fork, sessionId: fork, mode: 'asleep' })
+  })
+
+  it('refuses to retarget a chat tab that is already awake', () => {
+    const { fsm, store } = buildFSM()
+    seedLeaf(store, '/wt/a', {
+      type: 'leaf',
+      id: 'pane-1',
+      tabs: [{ id: SESSION, type: 'json-claude', label: 'Chat', sessionId: SESSION, mode: 'awake' }],
+      activeTabId: SESSION
+    })
+    expect(fsm.retargetSleepingChatTab('/wt/a', SESSION, 'x')).toBe(false)
+    expect(leafOf(store, '/wt/a').tabs[0].id).toBe(SESSION)
+  })
+})

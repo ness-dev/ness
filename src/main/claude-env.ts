@@ -245,6 +245,13 @@ export function claudeConfigDirFor(cwd: string): string {
   return env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : defaultClaudeConfigDir()
 }
 
+/** The directory name Claude Code files a cwd's transcripts under: every
+ *  non-alphanumeric character becomes '-'. Lossy, so never try to reverse
+ *  it — read the `cwd` field off a transcript line instead. */
+export function claudeProjectDirName(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
 export function claudeProjectsDirFor(cwd: string): string {
   return join(claudeConfigDirFor(cwd), 'projects')
 }

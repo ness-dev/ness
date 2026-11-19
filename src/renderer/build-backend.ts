@@ -456,6 +456,8 @@ export function buildBackend(
     ) => req('agent:buildSpawnArgs', agentKind, opts),
 
     setOnboardingQuest: (quest: string) => reqConfig('config:setOnboardingQuest', quest),
+    scanExistingWork: () => req('onboarding:scanExistingWork'),
+    importExistingWork: (repoRoots: string[]) => req('onboarding:importWork', repoRoots),
     setWorktreeBase: (mode: 'remote' | 'local') => reqConfig('config:setWorktreeBase', mode),
     setMergeStrategy: (strategy: 'squash' | 'merge-commit' | 'fast-forward') =>
       reqConfig('config:setMergeStrategy', strategy),

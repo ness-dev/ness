@@ -314,6 +314,66 @@ export class PanesFSM {
     return pane
   }
 
+  /** Open an existing conversation as this worktree's first tab, asleep.
+   *  Used by the onboarding import: a worktree the user was already working
+   *  in should come up showing that conversation, not a blank agent — and
+   *  asleep, so importing forty worktrees doesn't spawn forty processes.
+   *  No-op when the worktree already has tabs. Returns whether it seeded. */
+  seedImportedSession(wtPath: string, sessionId: string, tabType: 'xterm' | 'json'): boolean {
+    const existing = this.getTree(wtPath)
+    if (existing && hasAnyTabs(existing)) return false
+    if (this.sleepingPanes.has(wtPath)) return false
+    const slug = wtPath.replace(/[^a-zA-Z0-9]/g, '-')
+    const agentTab: TerminalTab =
+      tabType === 'json'
+        ? { id: sessionId, type: 'json-claude', label: 'Chat', sessionId, mode: 'asleep' }
+        : {
+            // Terminal tabs have no asleep mode; XTerminal only spawns once
+            // the worktree is actually shown, which is lazy enough.
+            id: `agent-${slug}-${Date.now()}`,
+            type: 'agent',
+            agentKind: 'claude',
+            label: getAgentInfo('claude').displayName,
+            sessionId
+          }
+    this.commit(wtPath, {
+      type: 'leaf',
+      id: newPaneId(),
+      tabs: [
+        agentTab,
+        { id: `shell-${slug}-${Date.now()}`, type: 'shell', label: 'Shell', mode: 'asleep' }
+      ],
+      activeTabId: agentTab.id
+    })
+    return true
+  }
+
+  /** Point a sleeping chat tab at a different session id. A chat tab's id
+   *  IS its session id, so this swaps both and keeps the tab's place and
+   *  focus. Returns false if the tab isn't a sleeping chat tab. */
+  retargetSleepingChatTab(wtPath: string, tabId: string, newSessionId: string): boolean {
+    const tree = this.getTree(wtPath)
+    if (!tree) return false
+    const leaf = findLeafByTabId(tree, tabId)
+    const tab = leaf?.tabs.find((t) => t.id === tabId)
+    if (!leaf || !tab || tab.type !== 'json-claude' || (tab.mode ?? 'awake') !== 'asleep') {
+      return false
+    }
+    const next = mapLeaves(tree, (l) =>
+      l.id !== leaf.id
+        ? l
+        : {
+            ...l,
+            tabs: l.tabs.map((t) =>
+              t.id === tabId ? { ...t, id: newSessionId, sessionId: newSessionId } : t
+            ),
+            activeTabId: l.activeTabId === tabId ? newSessionId : l.activeTabId
+          }
+    )
+    this.commit(wtPath, next)
+    return true
+  }
+
   /** A prompt-less ensureInitialized can beat the one carrying a new
    *  worktree's kickoff prompt — main's `worktrees/listChanged`
    *  subscriber inits every path it sees, and a concurrent creation's

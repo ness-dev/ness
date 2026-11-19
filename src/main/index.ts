@@ -127,6 +127,8 @@ import {
 import { createNewProject, type GitignorePreset } from './repo-create'
 import { resolveRepoPath } from './repo-resolve'
 import { registerRepoRoot } from './repo-roots'
+import { scanExistingWork, readLiveClaudeSessions } from './work-discovery'
+import type { DiscoveredSession, DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 import type { AddRepoResult } from '../shared/repo-pick'
 import { isWorktreeMerged } from '../shared/state/prs'
 import type { ForkSource } from '../shared/state/worktrees'
@@ -1603,6 +1605,81 @@ function isMidCreation(wtPath: string): boolean {
     )
 }
 
+// Worktrees that arrived through the onboarding import, mapped to the
+// conversation to open in them (null once seeded, or when there is none).
+// A sweep must not hand these the default fresh agent + Shell pair: a
+// worktree with history gets that history, and one without stays empty
+// until the user opens it (panes:ensureInitialized on activation), so
+// importing dozens of worktrees starts nothing. Kept for the life of the
+// process because every later list refresh re-runs the sweep.
+const importedWorktrees = new Map<string, DiscoveredSession | null>()
+// Imported chat tabs whose session was running in another process at import
+// time and that Ness hasn't woken yet — see forkIfRunningElsewhere.
+const importedLiveChatTabs = new Set<string>()
+
+/** Give a worktree its first tabs. `activated` is the user opening it (the
+ *  renderer's panes:ensureInitialized); otherwise it's a background sweep.
+ *  Both must seed an imported conversation — on a fresh install the boot
+ *  drain hasn't run yet, so the user's click on the worktree they land on
+ *  reaches here before any sweep does. */
+function initWorktreePanes(wtPath: string, activated: boolean): void {
+  if (isMidCreation(wtPath)) return
+  if (!importedWorktrees.has(wtPath)) {
+    panesFSM.ensureInitialized(wtPath)
+    return
+  }
+  const session = importedWorktrees.get(wtPath)
+  if (!session) {
+    if (activated) panesFSM.ensureInitialized(wtPath)
+    return
+  }
+  importedWorktrees.set(wtPath, null)
+  const tabType = store.getSnapshot().state.settings.defaultClaudeTabType === 'json' ? 'json' : 'xterm'
+  if (!panesFSM.seedImportedSession(wtPath, session.sessionId, tabType)) return
+  if (session.live && tabType === 'json') importedLiveChatTabs.add(session.sessionId)
+}
+
+const forksInFlight = new Map<string, Promise<string>>()
+
+/** Two processes can't safely append to one session. If an imported
+ *  conversation is still running in the terminal it came from, opening it
+ *  here continues from a copy under a new session id and leaves the
+ *  original untouched — so the user never has to stop what they're doing
+ *  elsewhere to start using Ness. Returns the tab id to wake. */
+function forkIfRunningElsewhere(wtPath: string, tabId: string): Promise<string> {
+  const pending = forksInFlight.get(tabId)
+  if (pending) return pending
+  if (!importedLiveChatTabs.has(tabId)) return Promise.resolve(tabId)
+  const run = (async (): Promise<string> => {
+    try {
+      await resolveShellEnv(wtPath)
+      const live = await readLiveClaudeSessions(knownClaudeConfigDirs(), new Set())
+      if (!live.has(tabId)) return tabId
+      const outcome = jsonClaudeManager.forkIntoWorktree({
+        sourceSessionId: tabId,
+        sourceWorktreePath: wtPath,
+        destWorktreePath: wtPath
+      })
+      if (!outcome.ok || !outcome.newSessionId) {
+        log('onboarding', `fork of live session ${tabId} failed: ${outcome.reason ?? 'unknown'}`)
+        return tabId
+      }
+      return panesFSM.retargetSleepingChatTab(wtPath, tabId, outcome.newSessionId)
+        ? outcome.newSessionId
+        : tabId
+    } catch (err) {
+      log('onboarding', `live-session check failed for ${tabId}`, err)
+      return tabId
+    } finally {
+      // Once Ness has opened it, it's an ordinary Ness tab.
+      importedLiveChatTabs.delete(tabId)
+      forksInFlight.delete(tabId)
+    }
+  })()
+  forksInFlight.set(tabId, run)
+  return run
+}
+
 async function drainBootInit(force: boolean): Promise<void> {
   if (bootDrained) return
   bootDrained = true
@@ -1615,9 +1692,7 @@ async function drainBootInit(force: boolean): Promise<void> {
   pendingBootInit.clear()
   for (let i = 0; i < paths.length; i++) {
     const path = paths[i]
-    if ((force || !isWorktreeMerged(state.prs, path)) && !isMidCreation(path)) {
-      panesFSM.ensureInitialized(path)
-    }
+    if (force || !isWorktreeMerged(state.prs, path)) initWorktreePanes(path, false)
     if (i + 1 < paths.length && (i + 1) % BOOT_INIT_BATCH_SIZE === 0) {
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
@@ -1632,9 +1707,7 @@ store.subscribe((event) => {
       // Paths whose creation FSM hasn't reached onWorktreeCreated yet own
       // their own init — it carries the kickoff prompt, agent kind and
       // model that this sweep doesn't have.
-      for (const wt of list) {
-        if (!isMidCreation(wt.path)) panesFSM.ensureInitialized(wt.path)
-      }
+      for (const wt of list) initWorktreePanes(wt.path, false)
       return
     }
     for (const wt of list) pendingBootInit.add(wt.path)
@@ -3550,6 +3623,65 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  // Onboarding import. The scan result is returned to the asking client
+  // rather than put in a slice: it's a transient picker for one wizard, not
+  // world state. Main keeps the last one so the import can only ever
+  // register repos the scan itself found, never an arbitrary path.
+  let lastWorkScan: DiscoveredWork | null = null
+  transport.onRequest('onboarding:scanExistingWork', async (): Promise<DiscoveredWork> => {
+    const ownSessionIds = new Set<string>()
+    for (const tree of Object.values(store.getSnapshot().state.terminals.panes)) {
+      for (const leaf of getLeaves(tree)) {
+        for (const tab of leaf.tabs) {
+          if (tab.sessionId && (tab.mode ?? 'awake') === 'awake') ownSessionIds.add(tab.sessionId)
+        }
+      }
+    }
+    lastWorkScan = await scanExistingWork({
+      claudeConfigDirs: knownClaudeConfigDirs(),
+      addedRepoRoots: config.repoRoots,
+      ownSessionIds
+    })
+    return lastWorkScan
+  })
+
+  transport.onRequest(
+    'onboarding:importWork',
+    async (_ctx, repoRoots: string[]): Promise<ImportWorkResult> => {
+      const wanted = new Set(Array.isArray(repoRoots) ? repoRoots : [])
+      const chosen = (lastWorkScan?.repos ?? []).filter(
+        (r) => wanted.has(r.repoRoot) && !config.repoRoots.includes(r.repoRoot)
+      )
+      if (chosen.length === 0) return { addedRepoRoots: [], focusWorktreePath: null }
+      // The quest teaches spawning a second worktree and switching between
+      // two — someone who just imported a sidebar full has done both. Settle
+      // it before the worktrees appear, or the renderer's quest effect sees
+      // them first and advances a quest that should never have started.
+      config.onboarding = { ...(config.onboarding || {}), quest: 'done' }
+      store.dispatch({ type: 'onboarding/questChanged', payload: 'done' })
+      let focus: { path: string; at: number } | null = null
+      for (const repo of chosen) {
+        for (const wt of repo.worktrees) {
+          importedWorktrees.set(
+            wt.path,
+            // Codex conversations are found and counted, but opening one as
+            // a tab isn't wired up yet — those worktrees start empty.
+            wt.session?.agentKind === 'claude' ? wt.session : null
+          )
+          if (wt.lastActiveAt != null && (!focus || wt.lastActiveAt > focus.at)) {
+            focus = { path: wt.path, at: wt.lastActiveAt }
+          }
+        }
+        registerRepoRoot(repo.repoRoot, { config, store, worktreesFSM })
+      }
+      await worktreesFSM.refreshList()
+      return {
+        addedRepoRoots: chosen.map((r) => r.repoRoot),
+        focusWorktreePath: focus?.path ?? null
+      }
+    }
+  )
+
   // Pane / tab tree — fully main-owned via PanesFSM. Renderers call these
   // methods instead of computing pane state locally. ensureInitialized is
   // not exposed: main calls it directly from worktree creation paths.
@@ -3652,15 +3784,16 @@ function registerIpcHandlers(): void {
     panesFSM.sleepJsonClaudeTab(wtPath, tabId)
     return true
   })
-  transport.onRequest('panes:wakeTab', (_ctx, wtPath: string, tabId: string) => {
+  transport.onRequest('panes:wakeTab', async (_ctx, wtPath: string, tabId: string) => {
     // Route by tab type. json-claude needs its subprocess spawned;
     // shell only flips mode (XTerminal owns the PTY spawn). Dispatch by
     // type here rather than fanning out to both methods so any future
     // unconditional side-effect added to either wake path can't silently
     // fire on the wrong tab type.
     const type = panesFSM.getTabType(wtPath, tabId)
-    if (type === 'json-claude') panesFSM.wakeJsonClaudeTab(wtPath, tabId)
-    else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)
+    if (type === 'json-claude') {
+      panesFSM.wakeJsonClaudeTab(wtPath, await forkIfRunningElsewhere(wtPath, tabId))
+    } else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)
     return true
   })
   // Renderer-driven lastActive bump. The composer fires this while the
@@ -3680,7 +3813,7 @@ function registerIpcHandlers(): void {
   // skips merged worktrees, so this is the only path that wakes them.
   // No-op for paths that already have panes.
   transport.onRequest('panes:ensureInitialized', (_ctx, wtPath: string) => {
-    if (!isMidCreation(wtPath)) panesFSM.ensureInitialized(wtPath)
+    initWorktreePanes(wtPath, true)
     return true
   })
 
