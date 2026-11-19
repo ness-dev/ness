@@ -13,8 +13,16 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
-import { lochAsk, lochBlame, worktreeRelativePath } from './loch'
-import { buildBlameAskBody, type LochAskResult } from '../shared/loch'
+import {
+  backfillRepo,
+  installLochHooks,
+  lochAsk,
+  lochBinary,
+  lochBlame,
+  removeLochHooks,
+  worktreeRelativePath
+} from './loch'
+import { buildBlameAskBody, type LochAskResult, type LochRecordingResult } from '../shared/loch'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
@@ -1698,6 +1706,26 @@ store.subscribe((event) => {
     }
   }
 })
+
+// loch recording: every worktree of an opted-in repo gets loch's hooks,
+// including ones created after the opt-in. listChanged is infrequent and the
+// in-memory set means each path is installed once per process (the first
+// pass after boot re-installs everything, which refreshes the binary path).
+const lochHookedPaths = new Set<string>()
+async function syncLochHooks(): Promise<void> {
+  const enabled = new Set(config.lochRecordingRepos ?? [])
+  if (enabled.size === 0) return
+  for (const wt of store.getSnapshot().state.worktrees.list) {
+    if (wt.prunable || !enabled.has(wt.repoRoot) || lochHookedPaths.has(wt.path)) continue
+    lochHookedPaths.add(wt.path)
+    const r = await installLochHooks(wt.path)
+    if (!r.ok) lochHookedPaths.delete(wt.path)
+  }
+}
+store.subscribe((event) => {
+  if (event.type === 'worktrees/listChanged') void syncLochHooks()
+})
+void syncLochHooks()
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -4318,6 +4346,69 @@ function registerIpcHandlers(): void {
     }
     return lochBlame(worktreePath, filePath)
   })
+
+  // Explicit per-repo opt-in to loch recording. Nothing is installed
+  // anywhere until the user asks for it here, and turning it off removes the
+  // hook lines Ness wrote (loch has no uninstall of its own).
+  transport.onRequest(
+    'loch:setRecording',
+    async (_ctx, repoRoot: string, enabled: boolean): Promise<LochRecordingResult> => {
+      if (!(config.repoRoots || []).includes(repoRoot)) return { ok: false, code: 'unknown-repo' }
+      const worktrees = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot && !w.prunable)
+      const current = config.lochRecordingRepos ?? []
+      const commit = (next: string[]): void => {
+        if (next.length > 0) config.lochRecordingRepos = next
+        else delete config.lochRecordingRepos
+        saveConfig(config)
+        store.dispatch({ type: 'settings/lochRecordingReposChanged', payload: next })
+      }
+
+      if (!enabled) {
+        let failed = 0
+        for (const wt of worktrees) {
+          lochHookedPaths.delete(wt.path)
+          try {
+            removeLochHooks(wt.path)
+          } catch (err) {
+            failed++
+            log('loch', `could not remove hooks from ${wt.path}`, err instanceof Error ? err.message : err)
+          }
+        }
+        commit(current.filter((r) => r !== repoRoot))
+        return { ok: true, installed: 0, viaProject: 0, failed }
+      }
+
+      if (!lochBinary()) return { ok: false, code: 'not-installed' }
+      let installed = 0
+      let viaProject = 0
+      let firstFailure: { code: string; error?: string } | null = null
+      for (const wt of worktrees) {
+        const r = await installLochHooks(wt.path)
+        if (r.ok) {
+          lochHookedPaths.add(wt.path)
+          if (r.viaProject) viaProject++
+          else installed++
+        } else {
+          firstFailure ??= { code: r.code, error: r.error }
+        }
+      }
+      if (installed + viaProject === 0) {
+        return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
+      }
+      if (!current.includes(repoRoot)) commit([...current, repoRoot])
+      // Recording only covers turns from now on; backfill reconstructs what
+      // it can of the history so the gutter isn't empty on day one.
+      void backfillRepo(repoRoot)
+      return {
+        ok: true,
+        installed,
+        viaProject,
+        failed: worktrees.length - installed - viaProject
+      }
+    }
+  )
 
   // "Ask the conversation that wrote this": loch forks the session that wrote
   // the line, then Ness re-files that fork under THIS worktree (loch writes it

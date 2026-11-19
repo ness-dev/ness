@@ -411,6 +411,10 @@ export interface SettingsState {
    *  a line. Needs the `loch` CLI on PATH; without it the gutter is simply
    *  empty. Default off (experimental). */
   lochBlameEnabled: boolean
+  /** Repo roots the user has explicitly opted in to loch recording: Ness
+   *  installs loch's hooks into every worktree of these repos. Separate from
+   *  `lochBlameEnabled`, which only governs showing blame that exists. */
+  lochRecordingRepos: string[]
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — unlike the
    *  experimental toggles this gates a cosmetic, reversible action. Off
@@ -610,6 +614,7 @@ export type SettingsEvent =
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
   | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -700,6 +705,7 @@ export const initialSettings: SettingsState = {
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
   lochBlameEnabled: false,
+  lochRecordingRepos: [],
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1022,6 +1028,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, worktreeMessagingEnabled: event.payload }
     case 'settings/lochBlameEnabledChanged':
       return { ...state, lochBlameEnabled: event.payload }
+    case 'settings/lochRecordingReposChanged':
+      return { ...state, lochRecordingRepos: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

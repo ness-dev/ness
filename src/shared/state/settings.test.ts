@@ -596,6 +596,17 @@ describe('settingsReducer', () => {
     expect(off.lochBlameEnabled).toBe(false)
   })
 
+  it('lochRecordingReposChanged replaces the opted-in repo list, defaulting empty', () => {
+    expect(initialSettings.lochRecordingRepos).toEqual([])
+    const on = apply(initialSettings, {
+      type: 'settings/lochRecordingReposChanged',
+      payload: ['/repo/a']
+    })
+    expect(on.lochRecordingRepos).toEqual(['/repo/a'])
+    const off = apply(on, { type: 'settings/lochRecordingReposChanged', payload: [] })
+    expect(off.lochRecordingRepos).toEqual([])
+  })
+
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
     expect(initialSettings.agentTabNamingEnabled).toBe(true)
     const off = apply(initialSettings, {

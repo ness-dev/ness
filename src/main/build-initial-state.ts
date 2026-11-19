@@ -329,6 +329,7 @@ export function buildInitialAppState(
       conversationForkEnabled: config.conversationForkEnabled === true,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
       lochBlameEnabled: config.lochBlameEnabled === true,
+      lochRecordingRepos: Array.isArray(config.lochRecordingRepos) ? config.lochRecordingRepos : [],
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,

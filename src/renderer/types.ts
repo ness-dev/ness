@@ -27,7 +27,7 @@ export type {
 }
 
 import type { ChatTabInfo } from '../shared/agent-tabs'
-import type { LochAskResult, LochBlameResult } from '../shared/loch'
+import type { LochAskResult, LochBlameResult, LochRecordingResult } from '../shared/loch'
 export type { ChatTabInfo }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
@@ -420,6 +420,9 @@ export interface ElectronAPI {
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
   setLochBlameEnabled(enabled: boolean): Promise<boolean>
+  /** Opt a repo in to (or out of) loch recording: installs or removes loch's
+   *  hooks in every worktree of it. */
+  setLochRecording(repoRoot: string, enabled: boolean): Promise<LochRecordingResult>
   setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>

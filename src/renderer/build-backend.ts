@@ -312,6 +312,8 @@ export function buildBackend(
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
     setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
+    setLochRecording: (repoRoot: string, enabled: boolean) =>
+      req('loch:setRecording', repoRoot, enabled),
     setAgentTabNamingEnabled: (enabled: boolean) =>
       reqConfig('config:setAgentTabNamingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>

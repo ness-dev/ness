@@ -7,7 +7,7 @@ import type { FileBinaryReadResult, FileReadResult } from '../types'
 import { Tooltip } from './Tooltip'
 import { MonacoEditor, type MonacoBlame } from './MonacoEditor'
 import { isQuietBlameFailure } from '../../shared/loch'
-import { useSettings } from '../store'
+import { useSettings, useWorktrees } from '../store'
 import { useBackend } from '../backend'
 import { useFileContentChange } from '../hooks/useFileContentChange'
 import { scaledEditorFontSize } from '../../shared/state/settings'
@@ -26,6 +26,11 @@ const PDF_EXTS = new Set(['pdf'])
 
 const REMARK_PLUGINS = [remarkGfm]
 const REHYPE_PLUGINS = [rehypeHighlightShared]
+
+/** Repos whose "record this repo" offer was dismissed this session. Module
+ *  scope so it survives switching files, but not a reload — it's a nudge,
+ *  not a preference. */
+const dismissedRecordingOffers = new Set<string>()
 
 function detectViewerMode(filePath: string): ViewerMode {
   const ext = (filePath.split('.').pop() || '').toLowerCase()
@@ -65,7 +70,14 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
   const [blame, setBlame] = useState<MonacoBlame | null>(null)
   const [blameStatus, setBlameStatus] = useState<string | null>(null)
   const [blameSeq, setBlameSeq] = useState(0)
+  /** Blame ran and found nothing attributed — the cue to offer recording. */
+  const [blameEmpty, setBlameEmpty] = useState(false)
+  // Bumped only to re-render after a dismissal (the set lives at module scope).
+  const [, setOfferDismissed] = useState(0)
   const lochEnabled = settings.lochBlameEnabled
+  const { list: worktreeList } = useWorktrees()
+  const repoRoot = worktreeList.find((w) => w.path === worktreePath)?.repoRoot ?? null
+  const recording = !!repoRoot && settings.lochRecordingRepos.includes(repoRoot)
 
   const valueRef = useRef(value)
   const savedRef = useRef(savedValue)
@@ -170,12 +182,16 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
   // pointing at the wrong lines.
   useEffect(() => {
     setBlame(null)
+    setBlameEmpty(false)
     if (!lochEnabled || !filePath || needsBinary) return
     let cancelled = false
     backend.lochBlame(worktreePath, filePath).then((r) => {
       if (cancelled) return
       if (r.ok) {
         setBlame({ hunks: r.hunks, sessions: r.sessions })
+        setBlameEmpty(!r.hunks.some((h) => h.conversation))
+      } else if (r.code === 'file-unreadable') {
+        setBlameEmpty(true)
       } else if (!isQuietBlameFailure(r.code) && r.code !== 'disabled') {
         console.warn('[loch] blame failed', r.code, r.error)
       }
@@ -184,6 +200,29 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
       cancelled = true
     }
   }, [lochEnabled, worktreePath, filePath, needsBinary, blameSeq, backend])
+
+  const enableRecording = useCallback(() => {
+    if (!repoRoot) return
+    setBlameStatus('Installing loch’s hooks…')
+    backend.setLochRecording(repoRoot, true).then(
+      (r) => {
+        setBlameStatus(
+          r.ok
+            ? 'Recording this repo. New agent turns will show here; earlier history is being backfilled.'
+            : `Couldn’t enable recording (${r.code})`
+        )
+        setBlameSeq((n) => n + 1)
+      },
+      (err) => setBlameStatus(`Couldn’t enable recording (${String(err)})`)
+    )
+  }, [backend, repoRoot])
+
+  const showRecordingOffer =
+    lochEnabled &&
+    blameEmpty &&
+    !recording &&
+    !!repoRoot &&
+    !dismissedRecordingOffers.has(repoRoot)
 
   const askLine = useCallback(
     (line: number, opts: { atTurn: boolean }) => {
@@ -344,6 +383,29 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
         toggleControl={toggleControl}
         wrapToggleControl={wrapToggleControl}
       />
+      {showRecordingOffer && !blameStatus && (
+        <div className="shrink-0 flex items-center gap-3 border-b border-border bg-panel px-4 py-1.5 text-xs text-dim">
+          <span className="flex-1 min-w-0">
+            No conversation blame for this file. Record which agent turn writes each line in
+            this repo from now on?
+          </span>
+          <button
+            onClick={enableRecording}
+            className="shrink-0 px-2 py-0.5 rounded bg-accent/15 text-fg-bright hover:bg-accent/25 cursor-pointer"
+          >
+            Record this repo
+          </button>
+          <button
+            onClick={() => {
+              if (repoRoot) dismissedRecordingOffers.add(repoRoot)
+              setOfferDismissed((n) => n + 1)
+            }}
+            className="shrink-0 text-faint hover:text-fg cursor-pointer"
+          >
+            Not now
+          </button>
+        </div>
+      )}
       {blameStatus && (
         <div className="shrink-0 flex items-center gap-3 border-b border-border bg-panel px-4 py-1.5 text-xs text-dim">
           <span className="flex-1 min-w-0 truncate">{blameStatus}</span>

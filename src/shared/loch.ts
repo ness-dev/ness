@@ -56,6 +56,17 @@ export type LochBlameResult =
     }
   | { ok: false; code: LochFailureCode; error?: string }
 
+export type LochRecordingResult =
+  | {
+      ok: true
+      /** Worktrees Ness wrote hooks into. */
+      installed: number
+      /** Worktrees whose committed settings already run loch — left alone. */
+      viaProject: number
+      failed: number
+    }
+  | { ok: false; code: LochFailureCode; error?: string }
+
 export type LochAskResult =
   | { ok: true; sessionId: string; relocated: boolean }
   | { ok: false; code: LochFailureCode; error?: string }
@@ -195,4 +206,56 @@ export function extractFirstPrompt(lines: Iterable<string>): string | null {
     return text.length > FIRST_PROMPT_MAX_CHARS ? `${text.slice(0, FIRST_PROMPT_MAX_CHARS)}…` : text
   }
   return null
+}
+
+/** The line `loch install` writes for each hook: `<command> hook <name>
+ *  2>/dev/null || true`. Matched on a command whose basename is `loch` so
+ *  removal never touches anyone else's hook. */
+const LOCH_HOOK_LINE = /^(\S+) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
+
+export function isLochHookCommand(command: unknown): boolean {
+  if (typeof command !== 'string') return false
+  const m = LOCH_HOOK_LINE.exec(command.trim())
+  if (!m) return false
+  const bin = m[1].replace(/^["']|["']$/g, '')
+  return bin === 'loch' || bin.endsWith('/loch')
+}
+
+/** Remove loch's hook lines from a Claude Code settings object, dropping any
+ *  group, event or `hooks` key left empty. loch has no `uninstall`, and an
+ *  install with a new binary path adds lines beside the old ones rather than
+ *  replacing them, so Ness strips before every install as well as on opt-out.
+ *  Returns the same object when nothing matched. */
+export function stripLochHooks(settings: Record<string, unknown>): Record<string, unknown> {
+  const hooks = settings.hooks
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return settings
+  let changed = false
+  const next: Record<string, unknown> = {}
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) {
+      next[event] = groups
+      continue
+    }
+    const keptGroups: unknown[] = []
+    for (const group of groups) {
+      const entries = (group as { hooks?: unknown })?.hooks
+      if (!Array.isArray(entries)) {
+        keptGroups.push(group)
+        continue
+      }
+      const kept = entries.filter((e) => !isLochHookCommand((e as { command?: unknown })?.command))
+      if (kept.length === entries.length) {
+        keptGroups.push(group)
+        continue
+      }
+      changed = true
+      if (kept.length > 0) keptGroups.push({ ...(group as object), hooks: kept })
+    }
+    if (keptGroups.length > 0) next[event] = keptGroups
+  }
+  if (!changed) return settings
+  const out = { ...settings }
+  if (Object.keys(next).length > 0) out.hooks = next
+  else delete out.hooks
+  return out
 }

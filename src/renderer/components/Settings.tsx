@@ -22,6 +22,7 @@ import { AGENT_REGISTRY, agentDisplayName, CLAUDE_MODELS, CODEX_MODELS, CURSOR_M
 import { getToolDisplay } from './json-mode-cards/tool-display'
 import type { StoredPermissionRule } from '../../shared/permission-match'
 import { AgentIcon } from './AgentIcon'
+import { LochRecordingRepos } from './LochRecordingRepos'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
 import { SEMANTIC_KEYS } from '../theme-apply'
@@ -4169,10 +4170,10 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   Marks each line in the file viewer&apos;s gutter with the agent
                   conversation that wrote it, using{' '}
                   <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
-                  per-turn attribution. Click a mark to open a Chat on a fork of
-                  that conversation and ask it why. Requires the{' '}
+                  per-turn attribution. Click a mark to pin its card, then ask
+                  a fork of that conversation why it wrote the line. Requires the{' '}
                   <code className="bg-panel px-1 rounded text-xs">loch</code> CLI on
-                  your PATH with its hooks installed.
+                  your PATH; repos only record once you opt them in below.
                 </p>
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
@@ -4184,6 +4185,18 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-sm text-fg-bright">Show conversation blame in the gutter</div>
                   </div>
                 </label>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <div className="text-sm text-fg-bright mb-1">Record conversations in</div>
+                  <p className="text-xs text-dim mb-3">
+                    Ticking a repo installs loch&apos;s hooks into every worktree of it
+                    (in <code className="bg-panel px-1 rounded text-xs">.claude/settings.local.json</code>),
+                    so each agent turn snapshots the workspace and transcript into{' '}
+                    <code className="bg-panel px-1 rounded text-xs">~/.loch</code>, then backfills
+                    what it can of earlier history. Unticking removes the hooks; recorded data stays.
+                  </p>
+                  <LochRecordingRepos />
+                </div>
               </div>
 
               {/* Worktree messaging sub-card */}

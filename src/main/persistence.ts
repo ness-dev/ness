@@ -288,6 +288,8 @@ export interface Config {
   worktreeMessagingEnabled?: boolean
   // loch blame gutter in the file viewer. Default off.
   lochBlameEnabled?: boolean
+  // Repo roots opted in to loch recording (hooks installed in their worktrees).
+  lochRecordingRepos?: string[]
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */
   agentTabNamingEnabled?: boolean

@@ -7,6 +7,7 @@ import {
   hunkAtLine,
   isQuietBlameFailure,
   parseBlameDocument,
+  stripLochHooks,
   type LochConversation,
   type LochHunk
 } from './loch'
@@ -155,5 +156,43 @@ describe('extractFirstPrompt', () => {
   it('returns null when there is no prompt', () => {
     expect(extractFirstPrompt([user('<task-notification>x</task-notification>')])).toBe(null)
     expect(extractFirstPrompt([])).toBe(null)
+  })
+})
+
+describe('stripLochHooks', () => {
+  const loch = (bin: string, name: string): { type: string; command: string } => ({
+    type: 'command',
+    command: `${bin} hook ${name} 2>/dev/null || true`
+  })
+
+  it('removes loch lines at any path and keeps everyone else’s hooks', () => {
+    const settings = {
+      permissions: { allow: ['Bash(ls)'] },
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [loch('/usr/local/bin/loch', 'prompt')] },
+          { hooks: [{ type: 'command', command: 'my-own-hook' }] }
+        ],
+        Stop: [{ hooks: [loch('/old/path/loch', 'stop'), { type: 'command', command: 'notify' }] }],
+        SessionEnd: [{ hooks: [loch('loch', 'end')] }]
+      }
+    }
+    expect(stripLochHooks(settings)).toEqual({
+      permissions: { allow: ['Bash(ls)'] },
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'my-own-hook' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: 'notify' }] }]
+      }
+    })
+  })
+
+  it('drops the hooks key when only loch was there', () => {
+    const settings = { hooks: { Stop: [{ hooks: [loch('/x/loch', 'stop')] }] } }
+    expect(stripLochHooks(settings)).toEqual({})
+  })
+
+  it('returns the same object when there is nothing of loch’s', () => {
+    const settings = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'not-loch hook stop 2>/dev/null || true' }] }] } }
+    expect(stripLochHooks(settings)).toBe(settings)
   })
 })
