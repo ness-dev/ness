@@ -175,7 +175,7 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
     backend.lochBlame(worktreePath, filePath).then((r) => {
       if (cancelled) return
       if (r.ok) {
-        setBlame({ hunks: r.hunks })
+        setBlame({ hunks: r.hunks, sessions: r.sessions })
       } else if (!isQuietBlameFailure(r.code) && r.code !== 'disabled') {
         console.warn('[loch] blame failed', r.code, r.error)
       }

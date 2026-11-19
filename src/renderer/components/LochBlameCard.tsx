@@ -1,4 +1,4 @@
-import type { LochConversation } from '../../shared/loch'
+import type { LochConversation, LochSessionInfo } from '../../shared/loch'
 
 function ago(iso: string): string {
   const t = Date.parse(iso)
@@ -12,27 +12,68 @@ function ago(iso: string): string {
   return new Date(t).toLocaleDateString()
 }
 
-/** Hover card for one blame hunk. The prompt is loch-redacted but may carry
- *  raw harness markup (`<task-notification>` etc.), so it is rendered as a
- *  plain text node — never markdown, never HTML. */
+/** A labelled block of prompt text. Clamped while hovering; a pinned card
+ *  scrolls instead so the whole thing can be read. */
+function PromptBlock({
+  label,
+  text,
+  pinned,
+  clampClass,
+  maxHeightClass
+}: {
+  label: string
+  text: string
+  pinned: boolean
+  clampClass: string
+  maxHeightClass: string
+}): JSX.Element {
+  return (
+    <div className="mx-3 mb-2">
+      <div className="text-faint mb-1">{label}</div>
+      {/* The clamp sits on an inner element: on the padded box itself the
+          clipped lines would show through the bottom padding. */}
+      <div
+        className={`px-2 py-1.5 rounded bg-panel border border-border text-dim ${
+          pinned ? `${maxHeightClass} overflow-y-auto` : ''
+        }`}
+      >
+        <div className={`whitespace-pre-wrap break-words ${pinned ? '' : clampClass}`}>{text}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Hover card for one blame hunk. Prompts are rendered as plain text nodes —
+ *  never markdown or HTML — since they can carry raw harness markup
+ *  (`<task-notification>` etc.). The turn prompt is loch-redacted; the first
+ *  prompt is read by Ness from the user's own local transcript. */
 export function LochBlameCard({
   conversation,
   start,
   end,
   colorSlot,
+  session,
+  pinned = false,
   onAsk
 }: {
   conversation: LochConversation
   start: number
   end: number
   colorSlot: number
+  session?: LochSessionInfo
+  pinned?: boolean
   /** Present only on a pinned card: the explicit, turn-spending action. */
   onAsk?: (atTurn: boolean) => void
 }): JSX.Element {
   const title = conversation.title?.trim() || 'Untitled session'
-  const prompt = conversation.prompt?.trim()
+  const turnPrompt = conversation.prompt?.trim()
+  const firstPrompt = session?.firstPrompt?.trim()
+  // Turn 1's prompt usually IS the first prompt; loch's copy is a truncated
+  // prefix of it, so showing both would repeat the same words.
+  const sameAsFirst =
+    !!firstPrompt && !!turnPrompt && firstPrompt.startsWith(turnPrompt.replace(/…$/, ''))
   return (
-    <div className="w-[26rem] max-w-[70vw] rounded-md border border-border bg-panel-raised shadow-lg text-xs text-fg overflow-hidden">
+    <div className="w-[34rem] max-w-[80vw] rounded-md border border-border bg-panel-raised shadow-lg text-xs text-fg overflow-hidden">
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
         <span className={`loch-swatch loch-c${colorSlot} shrink-0`} />
         <span className="font-medium text-fg-bright truncate flex-1 min-w-0" title={title}>
@@ -55,10 +96,23 @@ export function LochBlameCard({
           </span>
         )}
       </div>
-      {prompt && (
-        <div className="mx-3 mb-2 px-2 py-1.5 rounded bg-panel border border-border font-mono text-dim whitespace-pre-wrap break-words line-clamp-6">
-          {prompt}
-        </div>
+      {firstPrompt && (
+        <PromptBlock
+          label="Conversation started with"
+          text={firstPrompt}
+          pinned={pinned}
+          clampClass="line-clamp-[10]"
+          maxHeightClass="max-h-[16rem]"
+        />
+      )}
+      {turnPrompt && !sameAsFirst && (
+        <PromptBlock
+          label={`Turn ${conversation.index} prompt`}
+          text={turnPrompt}
+          pinned={pinned}
+          clampClass="line-clamp-4 font-mono"
+          maxHeightClass="max-h-[8rem] font-mono"
+        />
       )}
       {!conversation.available ? (
         <div className="px-3 py-1.5 border-t border-border text-faint">

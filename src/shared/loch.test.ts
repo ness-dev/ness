@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   assignTurnColors,
   buildBlameAskBody,
+  extractFirstPrompt,
+  FIRST_PROMPT_MAX_CHARS,
   hunkAtLine,
   isQuietBlameFailure,
   parseBlameDocument,
   type LochConversation,
   type LochHunk
 } from './loch'
+import { wrapAutomatedMessage } from './state/json-claude'
 
 function conv(session: string, index = 1, extra: Partial<LochConversation> = {}): LochConversation {
   return {
@@ -118,5 +121,39 @@ describe('buildBlameAskBody', () => {
     })
     expect(body).toContain('backfilled')
     expect(body).not.toContain('```')
+  })
+})
+
+describe('extractFirstPrompt', () => {
+  const user = (content: unknown, extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({ type: 'user', message: { role: 'user', content }, ...extra })
+
+  it('skips meta, command output and tool results to find the real prompt', () => {
+    const lines = [
+      JSON.stringify({ type: 'custom-title', customTitle: 'loch/main' }),
+      user('<local-command-caveat>Caveat: ...</local-command-caveat>', { isMeta: true }),
+      user('<command-name>/clear</command-name>'),
+      user([{ type: 'tool_result', tool_use_id: 't', content: 'ls output' }]),
+      user([{ type: 'text', text: 'Port all of it' }]),
+      user('a later prompt')
+    ]
+    expect(extractFirstPrompt(lines)).toBe('Port all of it')
+  })
+
+  it('unwraps a Ness kickoff sentinel to its brief', () => {
+    const wrapped = wrapAutomatedMessage('worktree-kickoff', 'Prototype loch in Ness', { from: 'main' })
+    expect(extractFirstPrompt([user(wrapped)])).toBe('Prototype loch in Ness')
+  })
+
+  it('truncates long prompts and tolerates junk lines', () => {
+    const long = 'x'.repeat(FIRST_PROMPT_MAX_CHARS + 50)
+    const got = extractFirstPrompt(['not json', user(long)])
+    expect(got?.length).toBe(FIRST_PROMPT_MAX_CHARS + 1)
+    expect(got?.endsWith('…')).toBe(true)
+  })
+
+  it('returns null when there is no prompt', () => {
+    expect(extractFirstPrompt([user('<task-notification>x</task-notification>')])).toBe(null)
+    expect(extractFirstPrompt([])).toBe(null)
   })
 })

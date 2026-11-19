@@ -5,11 +5,18 @@
 // exit status or the prose.
 
 import { execFile } from 'child_process'
-import { statSync } from 'fs'
-import { isAbsolute, relative, resolve } from 'path'
-import { cachedShellEnv, claudeConfigDirFor } from './claude-env'
+import { createReadStream, existsSync, readdirSync, statSync } from 'fs'
+import { isAbsolute, join, relative, resolve } from 'path'
+import { createInterface } from 'readline'
+import { cachedShellEnv, claudeConfigDirFor, knownClaudeConfigDirs } from './claude-env'
 import { log } from './debug'
-import { parseBlameDocument, type LochBlameResult, type LochConversation } from '../shared/loch'
+import {
+  extractFirstPrompt,
+  parseBlameDocument,
+  type LochBlameResult,
+  type LochConversation,
+  type LochSessionInfo
+} from '../shared/loch'
 
 const BLAME_TIMEOUT_MS = 15_000
 const ASK_TIMEOUT_MS = 60_000
@@ -109,7 +116,16 @@ export async function lochBlame(worktreePath: string, filePath: string): Promise
   const p = (async (): Promise<LochBlameResult> => {
     const started = Date.now()
     const out = await runLoch(['blame', rel], worktreePath, BLAME_TIMEOUT_MS)
-    const result: LochBlameResult = out.ok ? parseBlameDocument(out.doc) : out
+    let result: LochBlameResult = out.ok ? parseBlameDocument(out.doc) : out
+    if (result.ok) {
+      const ids = [...new Set(result.hunks.flatMap((h) => (h.conversation ? [h.conversation.session] : [])))]
+      const infos = await Promise.all(ids.map((id) => sessionInfo(id, worktreePath)))
+      const sessions: Record<string, LochSessionInfo> = {}
+      ids.forEach((id, i) => {
+        sessions[id] = infos[i]
+      })
+      result = { ...result, sessions }
+    }
     log(
       'loch',
       `blame ${rel} ok=${result.ok}${result.ok ? ` hunks=${result.hunks.length}` : ` code=${result.code}`} ms=${Date.now() - started}`
@@ -123,6 +139,71 @@ export async function lochBlame(worktreePath: string, filePath: string): Promise
   } finally {
     blameInflight.delete(key)
   }
+}
+
+// -- per-session info from the transcript ------------------------------------
+
+/** A session's first prompt never changes, so a hit is kept for the life of
+ *  the process. A miss (transcript not found) is not cached: it may be a
+ *  session whose transcript lives only in loch's store until restored. */
+const sessionInfoCache = new Map<string, LochSessionInfo>()
+/** Stop reading after this much — the first prompt is near the top, and a
+ *  session that never had one shouldn't cost a full multi-MB parse. */
+const FIRST_PROMPT_SCAN_LINES = 400
+
+/** loch blame names sessions, not files. Claude files a session under the
+ *  encoded cwd it ended in, which we don't know, so look in every project
+ *  dir of every Claude home Ness has seen. One stat per dir — a few hundred
+ *  on a busy machine — and only for sessions not already cached. */
+function findTranscript(sessionId: string, worktreePath: string): string | null {
+  const homes = new Set([claudeConfigDirFor(worktreePath), ...knownClaudeConfigDirs()])
+  for (const home of homes) {
+    const projects = join(home, 'projects')
+    let dirs: string[]
+    try {
+      dirs = readdirSync(projects)
+    } catch {
+      continue
+    }
+    for (const d of dirs) {
+      const p = join(projects, d, `${sessionId}.jsonl`)
+      if (existsSync(p)) return p
+    }
+  }
+  return null
+}
+
+async function readFirstPrompt(path: string): Promise<string | null> {
+  const stream = createReadStream(path, { encoding: 'utf8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  let seen = 0
+  try {
+    for await (const line of rl) {
+      const found = extractFirstPrompt([line])
+      if (found) return found
+      if (++seen >= FIRST_PROMPT_SCAN_LINES) break
+    }
+    return null
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+}
+
+async function sessionInfo(sessionId: string, worktreePath: string): Promise<LochSessionInfo> {
+  const hit = sessionInfoCache.get(sessionId)
+  if (hit) return hit
+  const path = findTranscript(sessionId, worktreePath)
+  if (!path) return { firstPrompt: null }
+  let firstPrompt: string | null = null
+  try {
+    firstPrompt = await readFirstPrompt(path)
+  } catch (err) {
+    log('loch', `first prompt read failed ${path}`, err instanceof Error ? err.message : err)
+  }
+  const info = { firstPrompt }
+  sessionInfoCache.set(sessionId, info)
+  return info
 }
 
 export interface LochFork {

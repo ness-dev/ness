@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import * as monaco from 'monaco-editor'
 import { detectMonacoLanguage } from '../monaco-setup'
-import { assignTurnColors, hunkAtLine, type LochHunk } from '../../shared/loch'
+import { assignTurnColors, hunkAtLine, type LochHunk, type LochSessionInfo } from '../../shared/loch'
 import { LochBlameCard } from './LochBlameCard'
 
 export interface MonacoBlame {
   hunks: LochHunk[]
+  sessions?: Record<string, LochSessionInfo>
 }
 
 interface MonacoEditorProps {
@@ -163,7 +164,7 @@ export function MonacoEditor({
       const layout = editor.getLayoutInfo()
       const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight)
       const lineTop = editor.getTopForLineNumber(ln) - editor.getScrollTop()
-      const above = lineTop > layout.height - 260
+      const above = lineTop > layout.height - 420
       setBlameHover({
         hunk,
         top: above ? lineTop : lineTop + lineHeight,
@@ -382,6 +383,8 @@ export function MonacoEditor({
             start={blameHover.hunk.start}
             end={blameHover.hunk.end}
             colorSlot={blameColors.current.get(hoverConv.turn) ?? 0}
+            session={blame?.sessions?.[hoverConv.session]}
+            pinned={blameHover.pinned}
             onAsk={blameHover.pinned && onAskLine ? askFromCard : undefined}
           />
         </div>

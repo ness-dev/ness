@@ -1,3 +1,5 @@
+import { parseAutomatedMessage } from './state/json-claude'
+
 // Wire types for loch (https://github.com/ness-dev/loch), the CLI that
 // records which agent turn wrote each line. Only the fields Ness reads are
 // typed; loch's JSON contract (schema 2) adds fields without bumping the
@@ -35,8 +37,23 @@ export interface LochHunk {
 /** Ness's own codes, alongside loch's (`file-unreadable`, `internal`, …). */
 export type LochFailureCode = 'not-installed' | 'bad-output' | 'timeout' | string
 
+/** What Ness adds per session from the transcript itself — loch's blame
+ *  carries only the prompt of the turn that wrote the line, which on its own
+ *  rarely says what the conversation was for. */
+export interface LochSessionInfo {
+  /** The session's first human (or kickoff) prompt, truncated. Not redacted
+   *  by loch — it's read locally from the user's own transcript. */
+  firstPrompt: string | null
+}
+
 export type LochBlameResult =
-  | { ok: true; conversations: LochConversation[]; hunks: LochHunk[] }
+  | {
+      ok: true
+      conversations: LochConversation[]
+      hunks: LochHunk[]
+      /** Keyed by session id. Absent entries just mean "not found". */
+      sessions?: Record<string, LochSessionInfo>
+    }
   | { ok: false; code: LochFailureCode; error?: string }
 
 export type LochAskResult =
@@ -134,4 +151,48 @@ export function buildBlameAskBody(args: {
     parts.push(`The line as it is now:\n\n\`\`\`\n${lineText}\n\`\`\``)
   }
   return parts.join('\n\n')
+}
+
+/** How much of a first prompt to ship to the card. Kickoff briefs run to
+ *  pages; the card shows the opening and scrolls when pinned. */
+export const FIRST_PROMPT_MAX_CHARS = 2000
+
+/** Harness-injected turns that look like user messages but aren't what the
+ *  conversation was started with. */
+const NOT_A_PROMPT = /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|task-notification|system-reminder|user-memory-input)\b/
+
+function userText(record: Record<string, unknown>): string | null {
+  if (record.type !== 'user' || record.isMeta === true || record.isSidechain === true) return null
+  const message = record.message as { content?: unknown } | undefined
+  const content = message?.content
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return null
+  // A tool_result anywhere means this "user" record is the tool's reply.
+  if (content.some((b) => (b as { type?: unknown })?.type === 'tool_result')) return null
+  const text = content
+    .filter((b) => (b as { type?: unknown })?.type === 'text')
+    .map((b) => String((b as { text?: unknown }).text ?? ''))
+    .join('\n')
+  return text || null
+}
+
+/** The first prompt a person (or a Ness kickoff) started the session with,
+ *  from transcript jsonl lines. Ness's automation sentinel is unwrapped so
+ *  the card shows the brief, not the tag and the model-facing footer. */
+export function extractFirstPrompt(lines: Iterable<string>): string | null {
+  for (const line of lines) {
+    if (!line.includes('"user"')) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const raw = userText(record)
+    if (!raw || NOT_A_PROMPT.test(raw)) continue
+    const text = (parseAutomatedMessage(raw)?.body ?? raw).trim()
+    if (!text) continue
+    return text.length > FIRST_PROMPT_MAX_CHARS ? `${text.slice(0, FIRST_PROMPT_MAX_CHARS)}…` : text
+  }
+  return null
 }
