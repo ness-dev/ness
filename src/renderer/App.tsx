@@ -490,6 +490,7 @@ function DesktopApp(): JSX.Element {
   const [workScanned, setWorkScanned] = useState(false)
   const [importSelection, setImportSelection] = useState<ReadonlySet<string>>(() => new Set())
   const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
   // The agent step was answered from the scan rather than by a click.
   const [agentInferred, setAgentInferred] = useState(false)
   const [importFocusPath, setImportFocusPath] = useState<string | null>(null)
@@ -1359,9 +1360,14 @@ const setQuestStep = useCallback((next: QuestStep) => {
         return
       }
       setImporting(true)
+      setImportError(null)
       try {
         const result = await backend.importExistingWork([...importSelection])
         if (result.focusWorktreePath) setImportFocusPath(result.focusWorktreePath)
+      } catch (err) {
+        // Repos are registered one at a time, so a failure part-way can
+        // leave some already added; say so instead of failing silently.
+        setImportError(err instanceof Error ? err.message : String(err))
       } finally {
         setImporting(false)
       }
@@ -1715,6 +1721,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     selected={importSelection}
                     onSelectedChange={setImportSelection}
                     importing={importing}
+                    error={importError}
                     onImport={() => { void handleImportWork() }}
                     onAddManually={handleAddRepo}
                     onNewProject={() => setShowNewProject(true)}

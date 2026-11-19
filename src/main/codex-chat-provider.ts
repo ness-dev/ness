@@ -91,9 +91,13 @@ export interface CodexChatProviderOptions {
   /** True when a thread held by another Codex process should be continued
    *  from a fork instead of reported as busy. Set for conversations brought
    *  in by the onboarding import, which are expected to still be open in
-   *  the terminal they came from and must not make the user close it.
-   *  Asked once per start. */
+   *  the terminal they came from and must not make the user close it. */
   forkWhenHeldElsewhere?: (sessionId: string) => boolean
+  /** The thread a start set out to resume is now open here, either resumed
+   *  or continued from a fork. `threadId` is the one the start began with,
+   *  not the fork's. A start that failed before getting this far doesn't
+   *  call it, so the caller's fork permission survives for the retry. */
+  onThreadOpened?: (sessionId: string, threadId: string) => void
   /** Model to request: the tab's override, else the Codex model setting.
    *  Undefined lets Codex use its own configured default. */
   getModel: (modelOverride?: string) => string | undefined
@@ -465,6 +469,11 @@ export class CodexChatProvider implements ChatProvider {
           log('codex-chat', `resume failed sessionId=${sessionId} thread=${existing}`, reason)
           if (isActiveWriterError(reason) && forkIfHeld) {
             try {
+              // Fork doesn't inherit the parent's model, and a held thread
+              // can't be opened to ask what it was using. threadParams
+              // carries the tab's override or the Codex default from
+              // Settings when there is one; otherwise config.toml decides,
+              // as it does for any new thread.
               resp = await inst.client.request<CodexThreadResponse>('thread/fork', {
                 threadId: existing,
                 excludeTurns: true,
@@ -508,6 +517,7 @@ export class CodexChatProvider implements ChatProvider {
           }
         }
       }
+      if (existing && resp) this.opts.onThreadOpened?.(sessionId, existing)
       if (!resp) {
         resp = await inst.client.request<CodexThreadResponse>('thread/start', threadParams)
         this.opts.setThreadId(sessionId, resp.thread.id)

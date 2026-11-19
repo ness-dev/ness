@@ -22,6 +22,8 @@ interface ImportWorkStepProps {
   selected: ReadonlySet<string>
   onSelectedChange: (next: Set<string>) => void
   importing: boolean
+  /** Message from a failed import, shown above the button. */
+  error?: string | null
   onImport: () => void
   onAddManually: () => void
   onNewProject: () => void
@@ -174,6 +176,7 @@ export function ImportWorkStep({
   selected,
   onSelectedChange,
   importing,
+  error,
   onImport,
   onAddManually,
   onNewProject
@@ -284,6 +287,12 @@ export function ImportWorkStep({
           </span>{' '}
           {liveChosen === 1 ? 'It keeps' : 'They keep'} running there. Open{' '}
           {liveChosen === 1 ? 'it' : 'one'} here whenever you like and Ness continues from a copy.
+        </p>
+      )}
+
+      {error && (
+        <p role="alert" className="mt-3 text-xs text-danger leading-relaxed">
+          The import didn't finish ({error}). Some repos may already have been added. You can try again.
         </p>
       )}
 

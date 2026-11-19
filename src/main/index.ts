@@ -532,7 +532,12 @@ const codexChatProvider = new CodexChatProvider(store, {
   setThreadId: (sessionId, threadId) => panesFSM.setTabProviderSessionId(sessionId, threadId),
   forkWhenHeldElsewhere: (sessionId) => {
     const threadId = findJsonClaudeTab(sessionId)?.providerSessionId
-    return !!threadId && importedCodexThreads.delete(threadId)
+    return !!threadId && importedCodexThreads.has(threadId)
+  },
+  // From here on it's an ordinary Ness tab. Cleared only once the thread
+  // is actually open: a start that died earlier keeps its permission.
+  onThreadOpened: (_sessionId, threadId) => {
+    importedCodexThreads.delete(threadId)
   },
   getModel: (modelOverride) =>
     modelOverride || store.getSnapshot().state.settings.codexModel || undefined,
@@ -1657,8 +1662,34 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
   }
   importedWorktrees.set(wtPath, null)
   const tabType = store.getSnapshot().state.settings.defaultClaudeTabType === 'json' ? 'json' : 'xterm'
+  if (tabType !== 'json') {
+    // A terminal tab has no wake step to fork at: it runs `claude --resume`
+    // the moment the worktree is shown. So a Claude conversation that is
+    // running elsewhere is forked now, and the tab resumes the copy — two
+    // processes must never append to one transcript. If the copy can't be
+    // made, open nothing rather than the live session.
+    //
+    // Codex needs no equivalent: its thread store refuses a second writer
+    // outright, so `codex resume` on a held thread reports it as busy in
+    // the TUI instead of writing to it.
+    let seed = session
+    if (session.agentKind === 'claude' && session.live) {
+      const outcome = jsonClaudeManager.forkIntoWorktree({
+        sourceSessionId: session.sessionId,
+        sourceWorktreePath: wtPath,
+        destWorktreePath: wtPath
+      })
+      if (!outcome.ok || !outcome.newSessionId) {
+        log('onboarding', `fork of live session ${session.sessionId} failed: ${outcome.reason ?? 'unknown'}`)
+        if (activated) panesFSM.ensureInitialized(wtPath)
+        return
+      }
+      seed = { ...session, sessionId: outcome.newSessionId }
+    }
+    panesFSM.seedImportedSession(wtPath, seed, tabType)
+    return
+  }
   if (!panesFSM.seedImportedSession(wtPath, session, tabType)) return
-  if (tabType !== 'json') return
   if (session.agentKind === 'claude') {
     if (session.live) importedLiveChatTabs.add(session.sessionId)
   } else {
