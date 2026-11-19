@@ -349,13 +349,7 @@ export async function scanExistingWork(opts: ScanOptions): Promise<DiscoveredWor
         FILE_CONCURRENCY,
         async (wt): Promise<DiscoveredWorktree> => {
           const found = (byCwd.get(wt.path) ?? []).slice().sort((a, b) => b.mtime - a.mtime)
-          // Only Claude conversations can be opened as a tab today, so one
-          // of those wins over a newer Codex thread that would be shown and
-          // then not opened.
-          const pick =
-            found.find((s) => live.has(s.sessionId)) ??
-            found.find((s) => s.agentKind === 'claude') ??
-            found[0]
+          const pick = found.find((s) => live.has(s.sessionId)) ?? found[0]
           let session: DiscoveredSession | undefined
           if (pick) {
             session = {

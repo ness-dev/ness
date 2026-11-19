@@ -517,6 +517,10 @@ const codexChatProvider = new CodexChatProvider(store, {
   clientVersion: getHarnessVersion(),
   getThreadId: (sessionId) => findJsonClaudeTab(sessionId)?.providerSessionId,
   setThreadId: (sessionId, threadId) => panesFSM.setTabProviderSessionId(sessionId, threadId),
+  forkWhenHeldElsewhere: (sessionId) => {
+    const threadId = findJsonClaudeTab(sessionId)?.providerSessionId
+    return !!threadId && importedCodexThreads.delete(threadId)
+  },
   getModel: (modelOverride) =>
     modelOverride || store.getSnapshot().state.settings.codexModel || undefined,
   requestApproval: (request) => approvalBridge.requestApproval(request),
@@ -1616,6 +1620,8 @@ const importedWorktrees = new Map<string, DiscoveredSession | null>()
 // Imported chat tabs whose session was running in another process at import
 // time and that Ness hasn't woken yet — see forkIfRunningElsewhere.
 const importedLiveChatTabs = new Set<string>()
+// Imported Codex thread ids not yet opened here.
+const importedCodexThreads = new Set<string>()
 
 /** Give a worktree its first tabs. `activated` is the user opening it (the
  *  renderer's panes:ensureInitialized); otherwise it's a background sweep.
@@ -1635,8 +1641,16 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
   }
   importedWorktrees.set(wtPath, null)
   const tabType = store.getSnapshot().state.settings.defaultClaudeTabType === 'json' ? 'json' : 'xterm'
-  if (!panesFSM.seedImportedSession(wtPath, session.sessionId, tabType)) return
-  if (session.live && tabType === 'json') importedLiveChatTabs.add(session.sessionId)
+  if (!panesFSM.seedImportedSession(wtPath, session, tabType)) return
+  if (tabType !== 'json') return
+  if (session.agentKind === 'claude') {
+    if (session.live) importedLiveChatTabs.add(session.sessionId)
+  } else {
+    // Codex keeps no registry of running sessions, so there is no telling
+    // at import time whether this thread is still open somewhere. Codex
+    // itself says so on resume; the provider forks then.
+    importedCodexThreads.add(session.sessionId)
+  }
 }
 
 const forksInFlight = new Map<string, Promise<string>>()
@@ -3662,12 +3676,7 @@ function registerIpcHandlers(): void {
       let focus: { path: string; at: number } | null = null
       for (const repo of chosen) {
         for (const wt of repo.worktrees) {
-          importedWorktrees.set(
-            wt.path,
-            // Codex conversations are found and counted, but opening one as
-            // a tab isn't wired up yet — those worktrees start empty.
-            wt.session?.agentKind === 'claude' ? wt.session : null
-          )
+          importedWorktrees.set(wt.path, wt.session ?? null)
           if (wt.lastActiveAt != null && (!focus || wt.lastActiveAt > focus.at)) {
             focus = { path: wt.path, at: wt.lastActiveAt }
           }

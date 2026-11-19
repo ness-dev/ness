@@ -56,6 +56,7 @@ beforeAll(() => {
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'init')
   git(repo, 'worktree', 'add', '-q', '-b', 'feature', feature)
   git(repo, 'worktree', 'add', '-q', '-b', 'untouched', join(root, 'code', 'app-worktrees', 'untouched'))
+  git(repo, 'worktree', 'add', '-q', '-b', 'codex-only', join(root, 'code', 'app-worktrees', 'codex-only'))
   mkdirSync(join(repo, 'sub'))
 
   writeClaudeSession(repo, 'main-old', { lastPrompt: 'older prompt', mtime: Date.now() - 60_000 })
@@ -82,6 +83,15 @@ beforeAll(() => {
   writeFileSync(
     join(codexDir, 'rollout-a.jsonl'),
     JSON.stringify({ type: 'session_meta', payload: { session_id: 'codex-1', cwd: repo, source: 'cli' } }) + '\n'
+  )
+  // Older than the Claude sessions in the same worktree.
+  utimesSync(join(codexDir, 'rollout-a.jsonl'), (Date.now() - 600_000) / 1000, (Date.now() - 600_000) / 1000)
+  writeFileSync(
+    join(codexDir, 'rollout-c.jsonl'),
+    JSON.stringify({
+      type: 'session_meta',
+      payload: { session_id: 'codex-thread', cwd: join(root, 'code', 'app-worktrees', 'codex-only'), source: 'cli' }
+    }) + '\n'
   )
   writeFileSync(
     join(codexDir, 'rollout-b.jsonl'),
@@ -110,7 +120,7 @@ describe('scanExistingWork', () => {
     expect(found.repoRoot).toBe(repo)
     expect(found.name).toBe('app')
     expect(found.alreadyAdded).toBe(false)
-    expect(found.worktrees.map((w) => w.branch).sort()).toEqual(['feature', 'main', 'untouched'])
+    expect(found.worktrees.map((w) => w.branch).sort()).toEqual(['codex-only', 'feature', 'main', 'untouched'])
     const untouched = found.worktrees.find((w) => w.branch === 'untouched')!
     expect(untouched.session).toBeUndefined()
     expect(untouched.lastActiveAt).toBeNull()
@@ -123,6 +133,11 @@ describe('scanExistingWork', () => {
     // Two Claude sessions plus the interactive Codex one; `codex exec` runs
     // and the subdirectory session don't count.
     expect(main.sessionCount).toBe(3)
+  })
+
+  it('offers a Codex thread where that is what the worktree has', async () => {
+    const wt = (await scan()).repos[0].worktrees.find((w) => w.branch === 'codex-only')!
+    expect(wt.session).toMatchObject({ agentKind: 'codex', sessionId: 'codex-thread' })
   })
 
   it('prefers a conversation that is running elsewhere over a newer idle one', async () => {

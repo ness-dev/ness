@@ -744,12 +744,13 @@ describe('PanesFSM.openReviewerTab', () => {
 
 describe('PanesFSM imported conversations', () => {
   const SESSION = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  const CLAUDE = { agentKind: 'claude', sessionId: SESSION } as const
   const leafOf = (store: Store, wtPath: string): PaneLeaf =>
     store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
 
   it('seeds an existing conversation as a sleeping chat tab whose id is the session id', () => {
     const { fsm, store } = buildFSM()
-    expect(fsm.seedImportedSession('/wt/a', SESSION, 'json')).toBe(true)
+    expect(fsm.seedImportedSession('/wt/a', CLAUDE, 'json')).toBe(true)
     const leaf = leafOf(store, '/wt/a')
     expect(leaf.activeTabId).toBe(SESSION)
     expect(leaf.tabs[0]).toMatchObject({
@@ -763,11 +764,35 @@ describe('PanesFSM imported conversations', () => {
 
   it('seeds a terminal tab that resumes the session when the TUI is preferred', () => {
     const { fsm, store } = buildFSM()
-    fsm.seedImportedSession('/wt/a', SESSION, 'xterm')
+    fsm.seedImportedSession('/wt/a', CLAUDE, 'xterm')
     expect(leafOf(store, '/wt/a').tabs[0]).toMatchObject({
       type: 'agent',
       agentKind: 'claude',
       sessionId: SESSION
+    })
+  })
+
+  it('seeds a Codex thread as a chat tab with its own id pointing at the thread', () => {
+    const { fsm, store } = buildFSM()
+    fsm.seedImportedSession('/wt/a', { agentKind: 'codex', sessionId: 'thread-1' }, 'json')
+    const tab = leafOf(store, '/wt/a').tabs[0]
+    expect(tab).toMatchObject({
+      type: 'json-claude',
+      agentKind: 'codex',
+      providerSessionId: 'thread-1',
+      mode: 'asleep'
+    })
+    expect(tab.id).toMatch(UUID_RE)
+    expect(tab.sessionId).toBe(tab.id)
+  })
+
+  it('seeds a Codex terminal tab that resumes the thread by id', () => {
+    const { fsm, store } = buildFSM()
+    fsm.seedImportedSession('/wt/a', { agentKind: 'codex', sessionId: 'thread-1' }, 'xterm')
+    expect(leafOf(store, '/wt/a').tabs[0]).toMatchObject({
+      type: 'agent',
+      agentKind: 'codex',
+      sessionId: 'thread-1'
     })
   })
 
@@ -779,13 +804,13 @@ describe('PanesFSM imported conversations', () => {
       tabs: [{ id: 'shell-1', type: 'shell', label: 'Shell' }],
       activeTabId: 'shell-1'
     })
-    expect(fsm.seedImportedSession('/wt/a', SESSION, 'json')).toBe(false)
+    expect(fsm.seedImportedSession('/wt/a', CLAUDE, 'json')).toBe(false)
     expect(leafOf(store, '/wt/a').tabs).toHaveLength(1)
   })
 
   it('retargets a sleeping chat tab to a forked session, keeping focus on it', () => {
     const { fsm, store } = buildFSM()
-    fsm.seedImportedSession('/wt/a', SESSION, 'json')
+    fsm.seedImportedSession('/wt/a', CLAUDE, 'json')
     const fork = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
     expect(fsm.retargetSleepingChatTab('/wt/a', SESSION, fork)).toBe(true)
     const leaf = leafOf(store, '/wt/a')

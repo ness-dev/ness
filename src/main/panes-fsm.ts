@@ -319,23 +319,44 @@ export class PanesFSM {
    *  in should come up showing that conversation, not a blank agent — and
    *  asleep, so importing forty worktrees doesn't spawn forty processes.
    *  No-op when the worktree already has tabs. Returns whether it seeded. */
-  seedImportedSession(wtPath: string, sessionId: string, tabType: 'xterm' | 'json'): boolean {
+  seedImportedSession(
+    wtPath: string,
+    session: { agentKind: 'claude' | 'codex'; sessionId: string },
+    tabType: 'xterm' | 'json'
+  ): boolean {
     const existing = this.getTree(wtPath)
     if (existing && hasAnyTabs(existing)) return false
     if (this.sleepingPanes.has(wtPath)) return false
+    const { agentKind, sessionId } = session
     const slug = wtPath.replace(/[^a-zA-Z0-9]/g, '-')
-    const agentTab: TerminalTab =
-      tabType === 'json'
-        ? { id: sessionId, type: 'json-claude', label: 'Chat', sessionId, mode: 'asleep' }
-        : {
-            // Terminal tabs have no asleep mode; XTerminal only spawns once
-            // the worktree is actually shown, which is lazy enough.
-            id: `agent-${slug}-${Date.now()}`,
-            type: 'agent',
-            agentKind: 'claude',
-            label: getAgentInfo('claude').displayName,
-            sessionId
-          }
+    let agentTab: TerminalTab
+    if (tabType !== 'json') {
+      // Terminal tabs have no asleep mode; XTerminal only spawns once the
+      // worktree is actually shown, which is lazy enough. Both CLIs resume
+      // by this id (`claude --resume`, `codex resume`).
+      agentTab = {
+        id: `agent-${slug}-${Date.now()}`,
+        type: 'agent',
+        agentKind,
+        label: getAgentInfo(agentKind).displayName,
+        sessionId
+      }
+    } else if (agentKind === 'claude') {
+      // A Claude chat tab's id IS the session id.
+      agentTab = { id: sessionId, type: 'json-claude', label: 'Chat', sessionId, mode: 'asleep' }
+    } else {
+      // A Codex chat tab has its own id and resumes the thread it points at.
+      const id = crypto.randomUUID()
+      agentTab = {
+        id,
+        type: 'json-claude',
+        agentKind,
+        label: 'Chat',
+        sessionId: id,
+        providerSessionId: sessionId,
+        mode: 'asleep'
+      }
+    }
     this.commit(wtPath, {
       type: 'leaf',
       id: newPaneId(),
