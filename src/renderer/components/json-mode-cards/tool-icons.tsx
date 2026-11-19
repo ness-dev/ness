@@ -23,6 +23,8 @@ import {
   FilePen,
   FilePlus,
   FileText,
+  FolderInput,
+  FolderPlus,
   FolderSearch,
   FolderTree,
   GitBranch,
@@ -128,6 +130,8 @@ export const SkillIcon: ToolIcon = ({ className }) => <Sparkles className={class
 export const AlarmIcon: ToolIcon = ({ className }) => <AlarmClock className={className} />
 export const CronIcon: ToolIcon = ({ className }) => <CalendarClock className={className} />
 export const AskIcon: ToolIcon = ({ className }) => <MessageCircleQuestion className={className} />
+export const NewProjectIcon: ToolIcon = ({ className }) => <FolderPlus className={className} />
+export const AddRepoIcon: ToolIcon = ({ className }) => <FolderInput className={className} />
 export const WorktreeIcon: ToolIcon = ({ className }) => <FolderTree className={className} />
 export const NotebookIcon: ToolIcon = ({ className }) => <Notebook className={className} />
 export const BellIcon: ToolIcon = ({ className }) => <Bell className={className} />

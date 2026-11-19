@@ -25,6 +25,15 @@ import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
+import { isAbsolute, join } from 'path'
+import { statSync } from 'fs'
+import type { AddRepoResult } from '../shared/repo-pick'
+import {
+  validateProjectName,
+  type CreateNewProjectOpts,
+  type CreateNewProjectResult,
+  type GitignorePreset
+} from './repo-create'
 
 export interface BrowserTabSummary {
   id: string
@@ -217,6 +226,12 @@ export interface BrowserPerms {
 
 export interface ControlServerDeps {
   getRepoRoots: () => string[]
+  /** Register an existing repo in the sidebar. Host wires this to the same
+   *  `addRepoAtPath` the `repo:addAtPath` IPC handler uses. */
+  addRepo: (path: string) => Promise<AddRepoResult>
+  /** Create a new git repo on disk and register it. Host wires this to the
+   *  same `createAndRegisterProject` the New Project screen uses. */
+  createProject: (opts: CreateNewProjectOpts) => Promise<CreateNewProjectResult>
   getWorktreeBase: () => 'remote' | 'local'
   /** Default prompt used when an MCP `create_worktree` call provides
    * `prNumber` but no explicit `initialPrompt`. Resolved per-request so
@@ -291,6 +306,9 @@ export interface ControlServerDeps {
     | { ok: false; error: string }
   >
 }
+
+/** Same default the New Project screen starts on. */
+const GITIGNORE_PRESETS: readonly GitignorePreset[] = ['macos', 'node', 'python', 'none']
 
 const FULL_CONTROL_BROWSER_PATHS = new Set([
   '/browser/click',
@@ -368,6 +386,84 @@ async function handleRequest(
   // helps agents understand the overall harness state.
   if (req.method === 'GET' && path === '/repos') {
     return sendJson(res, 200, { repoRoots: deps.getRepoRoots() })
+  }
+
+  // add_repo / create_project are workspace-wide like create_worktree: a
+  // chat asked to "make me an app" has to be able to stand up the repo the
+  // rest of the work happens in. Paths must be absolute so nothing resolves
+  // against the main process's cwd.
+  if (req.method === 'POST' && path === '/repos') {
+    const body = await readJson(req)
+    const picked = typeof body.path === 'string' ? body.path.trim() : ''
+    if (!picked) return sendJson(res, 400, { error: 'path is required' })
+    if (!isAbsolute(picked)) {
+      return sendJson(res, 400, { error: 'path must be absolute' })
+    }
+    const before = new Set(deps.getRepoRoots())
+    const result = await deps.addRepo(picked)
+    if (result.kind === 'added') {
+      return sendJson(res, 200, {
+        repoRoot: result.repoRoot,
+        alreadyOpen: before.has(result.repoRoot)
+      })
+    }
+    if (result.kind === 'walked-up') {
+      return sendJson(res, 400, {
+        error:
+          `${result.picked} is not a repo root — it is inside the git repo at ` +
+          `${result.resolved}. Pass that root if it's the repo you meant.`,
+        resolved: result.resolved
+      })
+    }
+    if (result.kind === 'not-a-repo') {
+      return sendJson(res, 400, {
+        error: `${result.picked} is not a git repository. Use create_project to start a new one.`
+      })
+    }
+    return sendJson(res, 400, { error: 'repo was not added' })
+  }
+
+  if (req.method === 'POST' && path === '/projects') {
+    const body = await readJson(req)
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const nameError = validateProjectName(name)
+    if (nameError) return sendJson(res, 400, { error: nameError })
+    const parentDir = typeof body.parentDir === 'string' ? body.parentDir.trim() : ''
+    if (!parentDir) return sendJson(res, 400, { error: 'parentDir is required' })
+    if (!isAbsolute(parentDir)) {
+      return sendJson(res, 400, { error: 'parentDir must be absolute' })
+    }
+    // createNewProject would mkdir -p the whole chain; for an agent a missing
+    // parent is far more likely a typo than an intent.
+    let parentIsDir = false
+    try { parentIsDir = statSync(parentDir).isDirectory() } catch {}
+    if (!parentIsDir) {
+      return sendJson(res, 400, { error: `parentDir ${parentDir} does not exist or is not a directory` })
+    }
+    if (body.includeReadme !== undefined && typeof body.includeReadme !== 'boolean') {
+      return sendJson(res, 400, { error: 'includeReadme must be a boolean' })
+    }
+    const gitignorePreset = (
+      body.gitignorePreset === undefined ? 'macos' : body.gitignorePreset
+    ) as GitignorePreset
+    if (!GITIGNORE_PRESETS.includes(gitignorePreset)) {
+      return sendJson(res, 400, {
+        error: `gitignorePreset must be one of ${GITIGNORE_PRESETS.join(', ')}`
+      })
+    }
+    const result = await deps.createProject({
+      parentDir,
+      name,
+      includeReadme: body.includeReadme !== false,
+      gitignorePreset
+    })
+    if ('error' in result) {
+      if (result.code === 'exists') {
+        return sendJson(res, 409, { error: `${join(parentDir, name)} already exists` })
+      }
+      return sendJson(res, result.code === 'invalid' ? 400 : 500, { error: result.error })
+    }
+    return sendJson(res, 200, { repoRoot: result.path })
   }
 
   // Worktree management tools are workspace-wide for every caller — a
