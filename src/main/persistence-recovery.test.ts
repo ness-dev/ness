@@ -96,9 +96,14 @@ describe('loadConfig corrupt-file handling', () => {
   })
 
   it('first run creates a missing userData dir and persists the stamp', () => {
-    DIR = join(DIR, 'not-yet-created')
-    const cfg = loadConfig()
-    expect(JSON.parse(readFileSync(configPath(), 'utf-8')).firstLaunchAt).toBe(cfg.firstLaunchAt)
+    const parent = DIR
+    DIR = join(parent, 'not-yet-created')
+    try {
+      const cfg = loadConfig()
+      expect(JSON.parse(readFileSync(configPath(), 'utf-8')).firstLaunchAt).toBe(cfg.firstLaunchAt)
+    } finally {
+      DIR = parent
+    }
   })
 
   it('atomic write leaves no stray .tmp file behind', () => {
