@@ -274,17 +274,17 @@ export interface Config {
   // agents and the corresponding /browser/* control endpoints reject calls.
   // Default is enabled (undefined/true).
   browserToolsEnabled?: boolean
-  // Unless true, chats can't be forked into a new worktree: the Chat tab menu
+  // When false, chats can't be forked into a new worktree: the Chat tab menu
   // action is hidden, create_worktree drops its forkConversation parameter,
   // and the system prompt omits the paragraph describing it.
-  // Default is disabled (undefined/false).
+  // Default is enabled (undefined/true).
   conversationForkEnabled?: boolean
   // 'view' = inspect tabs + spawn/navigate, but no clicking, typing, or
   // scrolling. 'full' = everything. Default 'full' (undefined treated as 'full').
   browserToolsMode?: 'view' | 'full'
-  // When true, the send_message MCP tool is advertised and the /messages
+  // Unless false, the send_message MCP tool is advertised and the /messages
   // endpoint accepts calls, letting an agent write into another worktree's
-  // chat. Default off (undefined treated as false).
+  // chat. Default on (undefined treated as true).
   worktreeMessagingEnabled?: boolean
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */

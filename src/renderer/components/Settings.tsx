@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
-import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, FlaskConical, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, Wrench, Smartphone, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { openReportIssue } from './ReportIssueScreen'
-import { HARNESS_ISSUES_URL, HARNESS_RELEASES_URL, harnessReleaseNotesUrl } from '../../shared/constants'
+import { HARNESS_RELEASES_URL, harnessReleaseNotesUrl } from '../../shared/constants'
 import {
   useSettings,
   useUpdater,
@@ -43,7 +43,7 @@ interface SettingsProps {
   initialSection?: SectionId
 }
 
-type SectionId = 'general' | 'appearance' | 'agent' | 'worktrees' | 'editor' | 'github' | 'hotkeys' | 'updates' | 'support' | 'experimental'
+type SectionId = 'general' | 'appearance' | 'agent' | 'agent-tools' | 'worktrees' | 'editor' | 'github' | 'hotkeys' | 'web-mobile' | 'updates' | 'support'
 type SubSectionId =
   | 'appearance-theme'
   | 'appearance-custom-themes'
@@ -55,6 +55,11 @@ type SubSectionId =
   | 'agent-claude'
   | 'agent-codex'
   | 'agent-cursor'
+  | 'agent-tools-browser-control'
+  | 'agent-tools-conversation-fork'
+  | 'agent-tools-worktree-messaging'
+  | 'agent-tools-agent-reviews'
+  | 'agent-tools-auto-approve'
   | 'hotkeys-navigation'
   | 'hotkeys-backends'
   | 'hotkeys-worktree-mgmt'
@@ -63,12 +68,6 @@ type SubSectionId =
   | 'hotkeys-commands'
   | 'hotkeys-overlays'
   | 'hotkeys-external'
-  | 'experimental-browser-control'
-  | 'experimental-conversation-fork'
-  | 'experimental-worktree-messaging'
-  | 'experimental-agent-reviews'
-  | 'experimental-auto-approve'
-  | 'experimental-web-mobile'
 
 interface SubSection {
   id: SubSectionId
@@ -98,6 +97,13 @@ const SECTIONS: Section[] = [
     { id: 'agent-codex', label: 'Codex' },
     { id: 'agent-cursor', label: 'Cursor Agent' }
   ]},
+  { id: 'agent-tools', label: 'Agent tools', icon: Wrench, children: [
+    { id: 'agent-tools-browser-control', label: 'Browser control' },
+    { id: 'agent-tools-conversation-fork', label: 'Conversation fork' },
+    { id: 'agent-tools-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'agent-tools-agent-reviews', label: 'Agent reviews' },
+    { id: 'agent-tools-auto-approve', label: 'Auto-approve' }
+  ]},
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch },
   { id: 'editor', label: 'Editor', icon: Code2 },
   { id: 'github', label: 'GitHub', icon: GitPullRequest },
@@ -111,16 +117,9 @@ const SECTIONS: Section[] = [
     { id: 'hotkeys-overlays', label: 'App overlays' },
     { id: 'hotkeys-external', label: 'External actions' }
   ]},
+  { id: 'web-mobile', label: 'Web & mobile', icon: Smartphone },
   { id: 'updates', label: 'Updates', icon: DownloadCloud },
-  { id: 'support', label: 'Support', icon: LifeBuoy },
-  { id: 'experimental', label: 'Experimental', icon: FlaskConical, children: [
-    { id: 'experimental-browser-control', label: 'Browser control' },
-    { id: 'experimental-conversation-fork', label: 'Conversation fork' },
-    { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
-    { id: 'experimental-agent-reviews', label: 'Agent reviews' },
-    { id: 'experimental-auto-approve', label: 'Auto-approve' },
-    { id: 'experimental-web-mobile', label: 'Web & mobile' }
-  ]}
+  { id: 'support', label: 'Support', icon: LifeBuoy }
 ]
 
 function agentSubSectionId(kind: AgentKind): SubSectionId {
@@ -220,13 +219,14 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     general: null,
     appearance: null,
     agent: null,
+    'agent-tools': null,
     worktrees: null,
     editor: null,
     github: null,
     hotkeys: null,
+    'web-mobile': null,
     updates: null,
-    support: null,
-    experimental: null
+    support: null
   })
   const subSectionRefs = useRef<Record<SubSectionId, HTMLElement | null>>({
     'appearance-theme': null,
@@ -239,6 +239,11 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'agent-claude': null,
     'agent-codex': null,
     'agent-cursor': null,
+    'agent-tools-browser-control': null,
+    'agent-tools-conversation-fork': null,
+    'agent-tools-worktree-messaging': null,
+    'agent-tools-agent-reviews': null,
+    'agent-tools-auto-approve': null,
     'hotkeys-navigation': null,
     'hotkeys-backends': null,
     'hotkeys-worktree-mgmt': null,
@@ -246,13 +251,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'hotkeys-layout': null,
     'hotkeys-commands': null,
     'hotkeys-overlays': null,
-    'hotkeys-external': null,
-    'experimental-browser-control': null,
-    'experimental-conversation-fork': null,
-    'experimental-worktree-messaging': null,
-    'experimental-agent-reviews': null,
-    'experimental-auto-approve': null,
-    'experimental-web-mobile': null
+    'hotkeys-external': null
   })
   const isProgrammaticScroll = useRef(false)
 
@@ -3098,6 +3097,331 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
               </div>
             </section>
 
+            {/* Agent tools section */}
+            <section ref={(el) => { sectionRefs.current['agent-tools'] = el }} id="agent-tools">
+              <h2 className="text-lg font-semibold text-fg-bright mb-1">Agent tools</h2>
+              <p className="text-sm text-dim mb-4">
+                Extra capabilities Ness gives the agents running in your worktrees.
+              </p>
+
+              {/* Browser control sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-browser-control'] = el }}
+                id="agent-tools-browser-control"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Browser control</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Lets agents see and drive the embedded browser tabs in each
+                  worktree — screenshotting, clicking, typing, navigating.
+                  Only takes effect on the next agent session.
+                </p>
+
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="browser-tools-enabled"
+                    checked={browserToolsEnabled}
+                    onChange={(e) => { void backend.setBrowserToolsEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <label htmlFor="browser-tools-enabled" className="text-sm text-fg-bright cursor-pointer">Enable browser tools</label>
+                    <div className="text-xs text-dim mt-0.5 mb-2">
+                      Exposes <code className="bg-panel px-1 rounded text-xs">ness-control</code> MCP browser_* tools to the agent.
+                    </div>
+                    <select
+                      value={browserToolsMode}
+                      onChange={(e) => { void backend.setBrowserToolsMode(e.target.value === 'view' ? 'view' : 'full') }}
+                      disabled={!browserToolsEnabled}
+                      className="bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <option value="view">View Only — inspect &amp; navigate, no clicks/typing/scrolling</option>
+                      <option value="full">Full Control — click, type, scroll, and move the cursor</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conversation fork sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-conversation-fork'] = el }}
+                id="agent-tools-conversation-fork"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Conversation fork</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Lets a new worktree be seeded with a copy of an existing Chat
+                  conversation, so the new agent resumes it instead of reading a
+                  hand-written briefing. Claude Code only — no other agent can
+                  resume a forked transcript.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={conversationForkEnabled}
+                    onChange={(e) => { void backend.setConversationForkEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable conversation fork</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Adds &quot;Fork into new worktree…&quot; to the Chat tab menu and a{' '}
+                      <code className="bg-panel px-1 rounded text-xs">forkConversation</code>{' '}
+                      option to the <code className="bg-panel px-1 rounded text-xs">create_worktree</code>{' '}
+                      MCP tool. Only takes effect on the next agent session.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Worktree messaging sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-worktree-messaging'] = el }}
+                id="agent-tools-worktree-messaging"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Worktree messaging</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Lets an agent send a message straight into another worktree&apos;s
+                  Chat tab — handing off work, or telling a waiting worktree that
+                  the thing it needed is done. Unlike the browser and shell tools,
+                  this deliberately crosses the worktree boundary. Messages arrive
+                  labelled with the sending worktree, and waking a sleeping Chat
+                  tab counts as activity. Only takes effect on the next agent
+                  session.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={worktreeMessagingEnabled}
+                    onChange={(e) => { void backend.setWorktreeMessagingEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable worktree messaging</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
+                      Also lets agents follow each other: a Chat tab that creates a worktree is told about its PR and CI status, and the agent there sends it progress reports.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Agent reviews sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-agent-reviews'] = el }}
+                id="agent-tools-agent-reviews"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Agent reviews</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  An agent that has finished a piece of work can call
+                  <code className="bg-panel px-1 rounded text-xs">request_review</code>, which opens a
+                  second Chat tab to review the branch and shows the Review tab beside it. The
+                  reviewer leaves inline comments, then submits — and Ness delivers the review back
+                  to whichever tab asked for it. Reviewer tabs start in plan mode and are told not
+                  to change the branch they are reviewing. A requested review is always delivered —
+                  the agent that asked is waiting on it. The choice below is for a review nobody
+                  asked for, e.g. one you started by hand in a Chat tab.
+                </p>
+                <fieldset className="grid grid-cols-2 gap-2">
+                  {([
+                    {
+                      id: 'draft',
+                      label: 'Hold as a draft',
+                      hint: 'An unrequested review waits in the Review tab so you can edit or delete comments, then send it yourself.'
+                    },
+                    {
+                      id: 'auto',
+                      label: 'Send automatically',
+                      hint: "Deliver every review straight to the author's agent tab."
+                    }
+                  ] as const).map((opt) => {
+                    const isActive = agentReviewDelivery === opt.id
+                    return (
+                      <label
+                        key={opt.id}
+                        className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                          isActive
+                            ? 'bg-surface text-fg-bright border-fg'
+                            : 'bg-panel-raised text-muted border-border hover:text-fg hover:border-border-strong'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="agent-review-delivery"
+                          value={opt.id}
+                          checked={isActive}
+                          onChange={() => { void backend.setAgentReviewDelivery(opt.id) }}
+                          className="sr-only"
+                        />
+                        <div className="text-sm">{opt.label}</div>
+                        <div className="text-xs text-dim mt-0.5">{opt.hint}</div>
+                      </label>
+                    )
+                  })}
+                </fieldset>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
+                  <p className="text-xs text-dim mb-2">
+                    Which agent and model review. Pick a different one — or a stronger model — to
+                    get a second opinion rather than the same brain twice. With &quot;same as the
+                    requester&quot; the agent isn&apos;t known until the review starts; a model
+                    that agent doesn&apos;t know is ignored in favour of its own default.
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={reviewAgent}
+                      onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
+                      className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="inherit">Same as the requester</option>
+                      <option value="claude">Claude</option>
+                      <option value="codex">Codex</option>
+                    </select>
+                    <select
+                      value={reviewModel}
+                      onChange={(e) => { void backend.setReviewModel(e.target.value) }}
+                      className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                    >
+                      <option value="">(Default — the agent&apos;s own model)</option>
+                      {reviewModelGroups.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.models.map((m) => (
+                            <option key={`${group.label}-${m.id}`} value={m.id}>
+                              {m.displayName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
+                  <p className="text-xs text-dim mb-2">
+                    What a reviewer is told to look for. The requester&apos;s own description of the
+                    work is added above it, and Ness appends how to use the review tools.
+                  </p>
+                  <textarea
+                    value={reviewPromptDraft}
+                    onChange={(e) => setReviewPromptDraft(e.target.value)}
+                    rows={10}
+                    spellCheck={false}
+                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={handleSaveReviewPrompt}
+                      disabled={reviewPromptDraft === reviewPrompt}
+                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleResetReviewPrompt}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="icon-xs" />
+                      Reset to default
+                    </button>
+                    {reviewPromptSaveResult && (
+                      <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
+                        {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <label className="flex items-start gap-3 cursor-pointer mt-4">
+                  <input
+                    type="checkbox"
+                    checked={autoReviewOnGreenCi}
+                    onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Auto-approve safe tool calls sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-auto-approve'] = el }}
+                id="agent-tools-auto-approve"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Auto-approve safe tool calls</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  In Chat tabs, spawns a Haiku oneshot to approve obviously-safe tool calls (Read, Grep, Edit, …) instead of prompting you. A hardcoded deny-list catches risky calls (<code className="bg-panel px-1 rounded text-xs">rm -rf</code>, <code className="bg-panel px-1 rounded text-xs">git push</code>, <code className="bg-panel px-1 rounded text-xs">WebFetch</code>, …) before Haiku is consulted. Productivity feature only — an LLM judging another LLM is not a security boundary. Has no effect on Terminal tabs.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoApprovePermissions}
+                    onChange={(e) => handleToggleAutoApprovePermissions(e.target.checked)}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable auto-approve</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Manual Allow/Deny still works at any time and wins the race against the reviewer.
+                    </div>
+                  </div>
+                </label>
+
+                {autoApprovePermissions && (
+                  <div className="mt-4 pt-3 border-t border-border">
+                    <label className="block text-xs font-medium text-fg mb-1">
+                      Project-specific guidance <span className="text-faint font-normal">(optional)</span>
+                    </label>
+                    <p className="text-xs text-dim mb-2">
+                      Free-text instructions appended to the reviewer's policy prompt. Use to add carve-outs (e.g. <em>&quot;approve <code className="bg-panel px-1 rounded text-xs">npm install</code> for this project&quot;</em>) or extra strictness (e.g. <em>&quot;deny any Bash that writes outside src/&quot;</em>). The hardcoded safety bullets always run first; this is purely additive guidance. You can also edit + re-review from any rejected approval card.
+                    </p>
+                    <textarea
+                      value={autoApproveSteerDraft}
+                      onChange={(e) => setAutoApproveSteerDraft(e.target.value)}
+                      placeholder="e.g. Approve npm install. Deny any Bash command that touches /etc."
+                      spellCheck={false}
+                      className="w-full bg-panel border border-border-strong rounded p-2 text-xs text-fg-bright placeholder-faint outline-none focus:border-fg font-mono min-h-[80px] resize-y"
+                    />
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={handleSaveAutoApproveSteer}
+                        disabled={autoApproveSteerDraft === autoApproveSteerInstructions}
+                        className="px-2.5 py-1 text-xs rounded bg-success/20 hover:bg-success/30 text-success transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Save guidance
+                      </button>
+                      {autoApproveSteerSaveResult && (
+                        <span
+                          className={`text-xs flex items-center gap-1 ${autoApproveSteerSaveResult.ok ? 'text-success' : 'text-danger'}`}
+                        >
+                          {autoApproveSteerSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}
+                          {autoApproveSteerSaveResult.message}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </section>
+
             {/* Worktrees section */}
             <section ref={(el) => { sectionRefs.current.worktrees = el }} id="worktrees">
               <h2 className="text-lg font-semibold text-fg-bright mb-1">Worktrees</h2>
@@ -3878,6 +4202,176 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
               })()}
             </section>
 
+            {/* Web & mobile section */}
+            <section ref={(el) => { sectionRefs.current['web-mobile'] = el }} id="web-mobile">
+              <h2 className="text-lg font-semibold text-fg-bright mb-4">Web &amp; mobile</h2>
+
+              <div className="bg-panel-raised border border-border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Web &amp; mobile client</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Runs an HTTP + WebSocket server alongside the desktop app so
+                  you can open the same workspace from a browser — useful for a
+                  second laptop or a phone on the same network. Token-gated;
+                  no TLS yet.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={wsTransportEnabled}
+                    onChange={(e) => { void handleToggleWsTransport(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable web / mobile client</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Changes apply on the next app launch.
+                    </div>
+                  </div>
+                </label>
+
+                {wsTransportEnabled && (
+                  <>
+                    <div className="mt-4 pt-3 border-t border-border grid grid-cols-[1fr_auto] gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-fg mb-1">Port</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1024}
+                            max={65535}
+                            value={wsPortDraft}
+                            onChange={(e) => setWsPortDraft(e.target.value)}
+                            onBlur={handleSaveWsPort}
+                            className="w-28 bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg font-mono"
+                          />
+                          <span className="text-xs text-faint">default 37291</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-fg mb-1">Bind to</label>
+                        <select
+                          value={wsTransportHost}
+                          onChange={(e) => { void handleSelectWsHost(e.target.value) }}
+                          className="bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer"
+                        >
+                          <option value="127.0.0.1">This machine only (loopback)</option>
+                          <option value="0.0.0.0">LAN — other devices on this network</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-border">
+                      <label className="block text-xs font-medium text-fg mb-1">Connection URL</label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-panel border border-border rounded px-2 py-1.5 text-xs text-fg-bright font-mono truncate">
+                          {showWsToken ? wsUrl : wsUrlMasked}
+                        </code>
+                        <Tooltip label={showWsToken ? 'Hide token' : 'Show token'}>
+                          <button
+                            onClick={() => setShowWsToken((v) => !v)}
+                            disabled={!wsInfo}
+                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {showWsToken ? <EyeOff className="icon-sm" /> : <Eye className="icon-sm" />}
+                          </button>
+                        </Tooltip>
+                        <Tooltip label={wsUrlCopied ? 'Copied' : 'Copy URL'}>
+                          <button
+                            onClick={handleCopyWsUrl}
+                            disabled={!wsInfo}
+                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {wsUrlCopied ? <Check className="icon-sm text-success" /> : <Copy className="icon-sm" />}
+                          </button>
+                        </Tooltip>
+                        <Tooltip label="Open in browser">
+                          <button
+                            onClick={handleOpenWsUrl}
+                            disabled={!wsInfo}
+                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <ExternalLink className="icon-sm" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip label="Rotate token (invalidates existing URLs)">
+                          <button
+                            onClick={() => { void handleRotateWsToken() }}
+                            disabled={!wsInfo}
+                            className="p-1.5 text-dim hover:text-warning transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <RotateCcw className="icon-sm" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+
+                    {wsTransportHost === '0.0.0.0' && (
+                      <div className="mt-4 pt-3 border-t border-border">
+                        <p className="text-xs text-fg mb-3">
+                          <span className="font-medium text-warning">LAN mode:</span>{' '}
+                          any device on your network can connect if they have
+                          the URL below. The 32-byte token is the only thing
+                          gating access — only enable on trusted networks,
+                          never over the public internet.
+                        </p>
+
+                        {scannableLanUrl ? (
+                          <div className="flex gap-4 items-start">
+                            <div className="bg-white p-2 rounded shrink-0">
+                              <QRCodeSVG value={scannableLanUrl} size={128} level="M" />
+                            </div>
+                            <div className="flex-1 min-w-0 text-xs text-dim space-y-2">
+                              <p>
+                                Scan with your phone's camera to open in
+                                Safari or your default browser.
+                              </p>
+                              {lanAddresses.length > 1 && (
+                                <div>
+                                  <label className="block text-xs font-medium text-fg mb-1">Interface</label>
+                                  <select
+                                    value={selectedLanAddress ?? ''}
+                                    onChange={(e) => setSelectedLanAddress(e.target.value)}
+                                    className="w-full bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer font-mono"
+                                  >
+                                    {lanAddresses.map((a) => (
+                                      <option key={a.iface + a.address} value={a.address}>
+                                        {a.iface} — {a.address}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                              <p className="font-mono text-xs break-all text-fg">
+                                http://{selectedLanAddress}:{wsInfo?.port}/
+                              </p>
+                            </div>
+                          </div>
+                        ) : wsInfo ? (
+                          <p className="text-xs text-dim italic">
+                            No LAN network interface detected on this machine.
+                          </p>
+                        ) : (
+                          <p className="text-xs text-dim italic">
+                            QR code will appear here after you relaunch
+                            Ness with the server enabled.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {wsNeedsRestart && (
+                  <div className="mt-4 pt-3 border-t border-border flex items-center gap-2">
+                    <RefreshCw className="icon-xs text-warning shrink-0" />
+                    <p className="text-xs text-warning">{wsNeedsRestart}</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
             {/* Updates section */}
             <section ref={(el) => { sectionRefs.current.updates = el }} id="updates">
               <h2 className="text-lg font-semibold text-fg-bright mb-1">Updates</h2>
@@ -4048,529 +4542,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     </div>
                   </div>
                 </label>
-              </div>
-            </section>
-
-            {/* Experimental section */}
-            <section ref={(el) => { sectionRefs.current.experimental = el }} id="experimental">
-              <h2 className="text-lg font-semibold text-fg-bright mb-1 flex items-center gap-2">
-                <FlaskConical className="w-[1.125rem] h-[1.125rem] text-warning" />
-                Experimental
-              </h2>
-              <p className="text-sm text-dim mb-4">
-                These features are in active development. APIs and UI may change,
-                and you should expect rough edges. Each one is opt-in below.{' '}
-                <a
-                  onClick={() => backend.openExternal(HARNESS_ISSUES_URL)}
-                  className="text-muted hover:text-fg-bright underline cursor-pointer"
-                >
-                  File an issue
-                </a>{' '}
-                if something breaks.
-              </p>
-
-              {/* Browser control sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-browser-control'] = el }}
-                id="experimental-browser-control"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Browser control</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  Lets agents see and drive the embedded browser tabs in each
-                  worktree — screenshotting, clicking, typing, navigating.
-                  Only takes effect on the next agent session.
-                </p>
-
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    id="browser-tools-enabled"
-                    checked={browserToolsEnabled}
-                    onChange={(e) => { void backend.setBrowserToolsEnabled(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <label htmlFor="browser-tools-enabled" className="text-sm text-fg-bright cursor-pointer">Enable browser tools</label>
-                    <div className="text-xs text-dim mt-0.5 mb-2">
-                      Exposes <code className="bg-panel px-1 rounded text-xs">ness-control</code> MCP browser_* tools to the agent.
-                    </div>
-                    <select
-                      value={browserToolsMode}
-                      onChange={(e) => { void backend.setBrowserToolsMode(e.target.value === 'view' ? 'view' : 'full') }}
-                      disabled={!browserToolsEnabled}
-                      className="bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <option value="view">View Only — inspect &amp; navigate, no clicks/typing/scrolling</option>
-                      <option value="full">Full Control — click, type, scroll, and move the cursor</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Conversation fork sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-conversation-fork'] = el }}
-                id="experimental-conversation-fork"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Conversation fork</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  Lets a new worktree be seeded with a copy of an existing Chat
-                  conversation, so the new agent resumes it instead of reading a
-                  hand-written briefing. Claude Code only — no other agent can
-                  resume a forked transcript.
-                </p>
-
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={conversationForkEnabled}
-                    onChange={(e) => { void backend.setConversationForkEnabled(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Enable conversation fork</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Adds &quot;Fork into new worktree…&quot; to the Chat tab menu and a{' '}
-                      <code className="bg-panel px-1 rounded text-xs">forkConversation</code>{' '}
-                      option to the <code className="bg-panel px-1 rounded text-xs">create_worktree</code>{' '}
-                      MCP tool. Only takes effect on the next agent session.
-                    </div>
-                  </div>
-                </label>
-              </div>
-
-              {/* Worktree messaging sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-worktree-messaging'] = el }}
-                id="experimental-worktree-messaging"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Worktree messaging</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  Lets an agent send a message straight into another worktree&apos;s
-                  Chat tab — handing off work, or telling a waiting worktree that
-                  the thing it needed is done. Unlike the browser and shell tools,
-                  this deliberately crosses the worktree boundary. Messages arrive
-                  labelled with the sending worktree, and waking a sleeping Chat
-                  tab counts as activity. Only takes effect on the next agent
-                  session.
-                </p>
-
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={worktreeMessagingEnabled}
-                    onChange={(e) => { void backend.setWorktreeMessagingEnabled(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Enable worktree messaging</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
-                      Also lets agents follow each other: a Chat tab that creates a worktree is told about its PR and CI status, and the agent there sends it progress reports.
-                    </div>
-                  </div>
-                </label>
-              </div>
-
-              {/* Agent reviews sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-agent-reviews'] = el }}
-                id="experimental-agent-reviews"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Agent reviews</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  An agent that has finished a piece of work can call
-                  <code className="bg-panel px-1 rounded text-xs">request_review</code>, which opens a
-                  second Chat tab to review the branch and shows the Review tab beside it. The
-                  reviewer leaves inline comments, then submits — and Ness delivers the review back
-                  to whichever tab asked for it. Reviewer tabs start in plan mode and are told not
-                  to change the branch they are reviewing. A requested review is always delivered —
-                  the agent that asked is waiting on it. The choice below is for a review nobody
-                  asked for, e.g. one you started by hand in a Chat tab.
-                </p>
-                <fieldset className="grid grid-cols-2 gap-2">
-                  {([
-                    {
-                      id: 'draft',
-                      label: 'Hold as a draft',
-                      hint: 'An unrequested review waits in the Review tab so you can edit or delete comments, then send it yourself.'
-                    },
-                    {
-                      id: 'auto',
-                      label: 'Send automatically',
-                      hint: "Deliver every review straight to the author's agent tab."
-                    }
-                  ] as const).map((opt) => {
-                    const isActive = agentReviewDelivery === opt.id
-                    return (
-                      <label
-                        key={opt.id}
-                        className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-                          isActive
-                            ? 'bg-surface text-fg-bright border-fg'
-                            : 'bg-panel-raised text-muted border-border hover:text-fg hover:border-border-strong'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="agent-review-delivery"
-                          value={opt.id}
-                          checked={isActive}
-                          onChange={() => { void backend.setAgentReviewDelivery(opt.id) }}
-                          className="sr-only"
-                        />
-                        <div className="text-sm">{opt.label}</div>
-                        <div className="text-xs text-dim mt-0.5">{opt.hint}</div>
-                      </label>
-                    )
-                  })}
-                </fieldset>
-
-                <div className="mt-4">
-                  <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
-                  <p className="text-xs text-dim mb-2">
-                    Which agent and model review. Pick a different one — or a stronger model — to
-                    get a second opinion rather than the same brain twice. With &quot;same as the
-                    requester&quot; the agent isn&apos;t known until the review starts; a model
-                    that agent doesn&apos;t know is ignored in favour of its own default.
-                  </p>
-                  <div className="flex gap-2">
-                    <select
-                      value={reviewAgent}
-                      onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
-                      className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
-                    >
-                      <option value="inherit">Same as the requester</option>
-                      <option value="claude">Claude</option>
-                      <option value="codex">Codex</option>
-                    </select>
-                    <select
-                      value={reviewModel}
-                      onChange={(e) => { void backend.setReviewModel(e.target.value) }}
-                      className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
-                    >
-                      <option value="">(Default — the agent&apos;s own model)</option>
-                      {reviewModelGroups.map((group) => (
-                        <optgroup key={group.label} label={group.label}>
-                          {group.models.map((m) => (
-                            <option key={`${group.label}-${m.id}`} value={m.id}>
-                              {m.displayName}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
-                  <p className="text-xs text-dim mb-2">
-                    What a reviewer is told to look for. The requester&apos;s own description of the
-                    work is added above it, and Ness appends how to use the review tools.
-                  </p>
-                  <textarea
-                    value={reviewPromptDraft}
-                    onChange={(e) => setReviewPromptDraft(e.target.value)}
-                    rows={10}
-                    spellCheck={false}
-                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={handleSaveReviewPrompt}
-                      disabled={reviewPromptDraft === reviewPrompt}
-                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={handleResetReviewPrompt}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="icon-xs" />
-                      Reset to default
-                    </button>
-                    {reviewPromptSaveResult && (
-                      <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
-                        {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <label className="flex items-start gap-3 cursor-pointer mt-4">
-                  <input
-                    type="checkbox"
-                    checked={autoReviewOnGreenCi}
-                    onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
-                    </div>
-                  </div>
-                </label>
-              </div>
-
-              {/* Auto-approve safe tool calls sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-auto-approve'] = el }}
-                id="experimental-auto-approve"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Auto-approve safe tool calls</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  In Chat tabs, spawns a Haiku oneshot to approve obviously-safe tool calls (Read, Grep, Edit, …) instead of prompting you. A hardcoded deny-list catches risky calls (<code className="bg-panel px-1 rounded text-xs">rm -rf</code>, <code className="bg-panel px-1 rounded text-xs">git push</code>, <code className="bg-panel px-1 rounded text-xs">WebFetch</code>, …) before Haiku is consulted. Productivity feature only — an LLM judging another LLM is not a security boundary. Has no effect on Terminal tabs.
-                </p>
-
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoApprovePermissions}
-                    onChange={(e) => handleToggleAutoApprovePermissions(e.target.checked)}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Enable auto-approve</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Manual Allow/Deny still works at any time and wins the race against the reviewer.
-                    </div>
-                  </div>
-                </label>
-
-                {autoApprovePermissions && (
-                  <div className="mt-4 pt-3 border-t border-border">
-                    <label className="block text-xs font-medium text-fg mb-1">
-                      Project-specific guidance <span className="text-faint font-normal">(optional)</span>
-                    </label>
-                    <p className="text-xs text-dim mb-2">
-                      Free-text instructions appended to the reviewer's policy prompt. Use to add carve-outs (e.g. <em>&quot;approve <code className="bg-panel px-1 rounded text-xs">npm install</code> for this project&quot;</em>) or extra strictness (e.g. <em>&quot;deny any Bash that writes outside src/&quot;</em>). The hardcoded safety bullets always run first; this is purely additive guidance. You can also edit + re-review from any rejected approval card.
-                    </p>
-                    <textarea
-                      value={autoApproveSteerDraft}
-                      onChange={(e) => setAutoApproveSteerDraft(e.target.value)}
-                      placeholder="e.g. Approve npm install. Deny any Bash command that touches /etc."
-                      spellCheck={false}
-                      className="w-full bg-panel border border-border-strong rounded p-2 text-xs text-fg-bright placeholder-faint outline-none focus:border-fg font-mono min-h-[80px] resize-y"
-                    />
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        onClick={handleSaveAutoApproveSteer}
-                        disabled={autoApproveSteerDraft === autoApproveSteerInstructions}
-                        className="px-2.5 py-1 text-xs rounded bg-success/20 hover:bg-success/30 text-success transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Save guidance
-                      </button>
-                      {autoApproveSteerSaveResult && (
-                        <span
-                          className={`text-xs flex items-center gap-1 ${autoApproveSteerSaveResult.ok ? 'text-success' : 'text-danger'}`}
-                        >
-                          {autoApproveSteerSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}
-                          {autoApproveSteerSaveResult.message}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Web / mobile client sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-web-mobile'] = el }}
-                id="experimental-web-mobile"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Web &amp; mobile client</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  Runs an HTTP + WebSocket server alongside the desktop app so
-                  you can open the same workspace from a browser — useful for a
-                  second laptop or a phone on the same network. Token-gated;
-                  no TLS yet.
-                </p>
-
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={wsTransportEnabled}
-                    onChange={(e) => { void handleToggleWsTransport(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Enable web / mobile client</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Changes apply on the next app launch.
-                    </div>
-                  </div>
-                </label>
-
-                {wsTransportEnabled && (
-                  <>
-                    <div className="mt-4 pt-3 border-t border-border grid grid-cols-[1fr_auto] gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-fg mb-1">Port</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min={1024}
-                            max={65535}
-                            value={wsPortDraft}
-                            onChange={(e) => setWsPortDraft(e.target.value)}
-                            onBlur={handleSaveWsPort}
-                            className="w-28 bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg font-mono"
-                          />
-                          <span className="text-xs text-faint">default 37291</span>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-fg mb-1">Bind to</label>
-                        <select
-                          value={wsTransportHost}
-                          onChange={(e) => { void handleSelectWsHost(e.target.value) }}
-                          className="bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer"
-                        >
-                          <option value="127.0.0.1">This machine only (loopback)</option>
-                          <option value="0.0.0.0">LAN — other devices on this network</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-border">
-                      <label className="block text-xs font-medium text-fg mb-1">Connection URL</label>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-panel border border-border rounded px-2 py-1.5 text-xs text-fg-bright font-mono truncate">
-                          {showWsToken ? wsUrl : wsUrlMasked}
-                        </code>
-                        <Tooltip label={showWsToken ? 'Hide token' : 'Show token'}>
-                          <button
-                            onClick={() => setShowWsToken((v) => !v)}
-                            disabled={!wsInfo}
-                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {showWsToken ? <EyeOff className="icon-sm" /> : <Eye className="icon-sm" />}
-                          </button>
-                        </Tooltip>
-                        <Tooltip label={wsUrlCopied ? 'Copied' : 'Copy URL'}>
-                          <button
-                            onClick={handleCopyWsUrl}
-                            disabled={!wsInfo}
-                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {wsUrlCopied ? <Check className="icon-sm text-success" /> : <Copy className="icon-sm" />}
-                          </button>
-                        </Tooltip>
-                        <Tooltip label="Open in browser">
-                          <button
-                            onClick={handleOpenWsUrl}
-                            disabled={!wsInfo}
-                            className="p-1.5 text-dim hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <ExternalLink className="icon-sm" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip label="Rotate token (invalidates existing URLs)">
-                          <button
-                            onClick={() => { void handleRotateWsToken() }}
-                            disabled={!wsInfo}
-                            className="p-1.5 text-dim hover:text-warning transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <RotateCcw className="icon-sm" />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </div>
-
-                    {wsTransportHost === '0.0.0.0' && (
-                      <div className="mt-4 pt-3 border-t border-border">
-                        <p className="text-xs text-fg mb-3">
-                          <span className="font-medium text-warning">LAN mode:</span>{' '}
-                          any device on your network can connect if they have
-                          the URL below. The 32-byte token is the only thing
-                          gating access — only enable on trusted networks,
-                          never over the public internet.
-                        </p>
-
-                        {scannableLanUrl ? (
-                          <div className="flex gap-4 items-start">
-                            <div className="bg-white p-2 rounded shrink-0">
-                              <QRCodeSVG value={scannableLanUrl} size={128} level="M" />
-                            </div>
-                            <div className="flex-1 min-w-0 text-xs text-dim space-y-2">
-                              <p>
-                                Scan with your phone's camera to open in
-                                Safari or your default browser.
-                              </p>
-                              {lanAddresses.length > 1 && (
-                                <div>
-                                  <label className="block text-xs font-medium text-fg mb-1">Interface</label>
-                                  <select
-                                    value={selectedLanAddress ?? ''}
-                                    onChange={(e) => setSelectedLanAddress(e.target.value)}
-                                    className="w-full bg-panel border border-border-strong rounded px-2 py-1 text-xs text-fg-bright outline-none focus:border-fg cursor-pointer font-mono"
-                                  >
-                                    {lanAddresses.map((a) => (
-                                      <option key={a.iface + a.address} value={a.address}>
-                                        {a.iface} — {a.address}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-                              <p className="font-mono text-xs break-all text-fg">
-                                http://{selectedLanAddress}:{wsInfo?.port}/
-                              </p>
-                            </div>
-                          </div>
-                        ) : wsInfo ? (
-                          <p className="text-xs text-dim italic">
-                            No LAN network interface detected on this machine.
-                          </p>
-                        ) : (
-                          <p className="text-xs text-dim italic">
-                            QR code will appear here after you relaunch
-                            Ness with the server enabled.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {wsNeedsRestart && (
-                  <div className="mt-4 pt-3 border-t border-border flex items-center gap-2">
-                    <RefreshCw className="icon-xs text-warning shrink-0" />
-                    <p className="text-xs text-warning">{wsNeedsRestart}</p>
-                  </div>
-                )}
               </div>
             </section>
           </div>

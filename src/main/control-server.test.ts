@@ -763,7 +763,7 @@ describe('control-server /messages endpoint', () => {
     expect(r.json.error).toMatch(/was not sent/)
   })
 
-  it('refuses delivery when the experimental setting is off', async () => {
+  it('refuses delivery when the messaging setting is off', async () => {
     sendMessage.mockClear()
     messagingEnabled = false
     try {

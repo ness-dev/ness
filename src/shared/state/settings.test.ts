@@ -564,7 +564,7 @@ describe('settingsReducer', () => {
   })
 
   it('conversationForkEnabledChanged toggles flag', () => {
-    expect(initialSettings.conversationForkEnabled).toBe(false)
+    expect(initialSettings.conversationForkEnabled).toBe(true)
     const on = apply(initialSettings, {
       type: 'settings/conversationForkEnabledChanged',
       payload: true
@@ -574,8 +574,8 @@ describe('settingsReducer', () => {
     expect(off.conversationForkEnabled).toBe(false)
   })
 
-  it('worktreeMessagingEnabledChanged toggles flag, defaulting off', () => {
-    expect(initialSettings.worktreeMessagingEnabled).toBe(false)
+  it('worktreeMessagingEnabledChanged toggles flag, defaulting on', () => {
+    expect(initialSettings.worktreeMessagingEnabled).toBe(true)
     const on = apply(initialSettings, {
       type: 'settings/worktreeMessagingEnabledChanged',
       payload: true

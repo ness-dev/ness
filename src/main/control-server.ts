@@ -118,7 +118,7 @@ export interface WorktreeStatusInfo {
 }
 
 export interface MessagingQueries {
-  /** Whether the experimental worktree-messaging setting is on. Re-read per
+  /** Whether the worktree-messaging setting is on. Re-read per
    * request so a toggle takes effect without restarting the bridge. */
   isEnabled: () => boolean
   /** Resolve a caller-supplied handle — absolute path, branch name, or
@@ -1121,7 +1121,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)
@@ -1226,7 +1226,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)

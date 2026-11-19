@@ -1383,7 +1383,7 @@ const notificationBus = new NotificationBus(store, chatDeliveryDeps, startJsonCl
 const subscriptionNotifier = new SubscriptionNotifier(
   store,
   notificationBus,
-  () => config.worktreeMessagingEnabled === true
+  () => config.worktreeMessagingEnabled !== false
 )
 
 const listWorktreeChatTabs = (worktreePath: string) =>
@@ -3121,15 +3121,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setConversationForkEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.conversationForkEnabled = true
-    } else {
       delete config.conversationForkEnabled
+    } else {
+      config.conversationForkEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/conversationForkEnabledChanged',
-      payload: config.conversationForkEnabled === true
+      payload: config.conversationForkEnabled !== false
     })
     return true
   })
@@ -3165,15 +3166,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.worktreeMessagingEnabled = true
-    } else {
       delete config.worktreeMessagingEnabled
+    } else {
+      config.worktreeMessagingEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/worktreeMessagingEnabledChanged',
-      payload: config.worktreeMessagingEnabled === true
+      payload: config.worktreeMessagingEnabled !== false
     })
     return true
   })
@@ -5703,7 +5705,7 @@ async function runBoot(): Promise<void> {
     resolveCallerScope,
     forkableConversationKind: (sessionId: string, worktreePath: string) =>
       chatRouter.forkableConversationKind(sessionId, worktreePath),
-    getConversationForkEnabled: () => config.conversationForkEnabled === true,
+    getConversationForkEnabled: () => config.conversationForkEnabled !== false,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,
       mode: config.browserToolsMode === 'view' ? 'view' : 'full'
@@ -5734,7 +5736,7 @@ async function runBoot(): Promise<void> {
       return result
     },
     messaging: {
-      isEnabled: () => config.worktreeMessagingEnabled === true,
+      isEnabled: () => config.worktreeMessagingEnabled !== false,
       resolveTarget: (query) =>
         resolveWorktreeQuery(store.getSnapshot().state, query),
       describe: (worktreePath) =>
