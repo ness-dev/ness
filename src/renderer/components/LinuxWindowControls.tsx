@@ -3,7 +3,7 @@ import { useBackend } from '../backend'
 
 // Replicates the macOS traffic-light slot on Linux, where the OS frame is
 // hidden (see desktop-shell.ts: `frame: false` on linux). Position mirrors
-// macOS `trafficLightPosition: { x: 12, y: 12 }` so the existing `left-20`
+// macOS `trafficLightPosition: { x: 12, y: 12 }` so the shared `titlebar-lead*`
 // padding on titles in the drag-region stays correct on both platforms.
 // Marked `no-drag` so clicks aren't swallowed by the surrounding drag zone.
 export function LinuxWindowControls(): JSX.Element | null {
