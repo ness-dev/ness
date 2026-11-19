@@ -54,7 +54,8 @@ export function LochBlameCard({
   colorSlot,
   session,
   pinned = false,
-  onAsk
+  onAsk,
+  widthClass = 'w-[34rem]'
 }: {
   conversation: LochConversation
   start: number
@@ -64,6 +65,8 @@ export function LochBlameCard({
   pinned?: boolean
   /** Present only on a pinned card: the explicit, turn-spending action. */
   onAsk?: (atTurn: boolean) => void
+  /** Overrides the card's width — the explainer's preview has less room. */
+  widthClass?: string
 }): JSX.Element {
   const title = conversation.title?.trim() || 'Untitled session'
   const turnPrompt = conversation.prompt?.trim()
@@ -73,7 +76,7 @@ export function LochBlameCard({
   const sameAsFirst =
     !!firstPrompt && !!turnPrompt && firstPrompt.startsWith(turnPrompt.replace(/…$/, ''))
   return (
-    <div className="w-[34rem] max-w-[80vw] rounded-md border border-border bg-panel-raised shadow-lg text-xs text-fg overflow-hidden">
+    <div className={`${widthClass} max-w-[80vw] rounded-md border border-border bg-panel-raised shadow-lg text-xs text-fg overflow-hidden`}>
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
         <span className={`loch-swatch loch-c${colorSlot} shrink-0`} />
         <span className="font-medium text-fg-bright truncate flex-1 min-w-0" title={title}>

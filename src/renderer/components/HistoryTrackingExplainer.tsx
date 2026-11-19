@@ -11,6 +11,7 @@ import {
 import { useAppStateFor } from '../store'
 import { getBackendFor } from '../backend'
 import type { LochRecordingResult } from '../../shared/loch'
+import { BlameGutterPreview } from './BlameGutterPreview'
 
 function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
@@ -25,20 +26,23 @@ type Phase =
 function Feature({
   icon: Icon,
   title,
-  children
+  children,
+  illustration
 }: {
   icon: React.ComponentType<{ className?: string }>
   title: string
   children: React.ReactNode
+  illustration?: React.ReactNode
 }): JSX.Element {
   return (
     <div className="flex gap-3">
       <div className="shrink-0 mt-0.5 w-8 h-8 rounded-md bg-accent/10 flex items-center justify-center">
         <Icon className="icon-base text-accent" />
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-fg-bright">{title}</div>
         <div className="text-sm text-dim mt-0.5 leading-relaxed">{children}</div>
+        {illustration}
       </div>
     </div>
   )
@@ -136,7 +140,7 @@ export function HistoryTrackingExplainer({
         </p>
 
         <div className="mt-10 flex flex-col gap-6">
-          <Feature icon={FileClock} title="Blame in the gutter">
+          <Feature icon={FileClock} title="Blame in the gutter" illustration={<BlameGutterPreview />}>
             Each line in the file viewer gets a mark for the turn that wrote it. Hover for the
             session, how it started, and the prompt for that turn.
           </Feature>
