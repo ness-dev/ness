@@ -10,5 +10,37 @@
       "Bash(npm run typecheck)",
       "Bash(npm run typecheck:*)"
     ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "loch hook prompt 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "loch hook stop 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "loch hook end 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
   }
 }
