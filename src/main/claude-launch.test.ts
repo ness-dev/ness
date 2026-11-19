@@ -8,7 +8,7 @@ import {
 } from './persistence'
 import type { Worktree } from '../shared/state/worktrees'
 
-/** Conversation fork is opt-in, so the default prompt omits its paragraph. */
+/** What the prompt looks like once conversation fork is switched off. */
 const PROMPT_WITHOUT_FORK = DEFAULT_HARNESS_SYSTEM_PROMPT.replace(
   `\n\n${HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH}`,
   ''
@@ -35,18 +35,19 @@ describe('buildClaudeLaunchSettings', () => {
       worktrees: [wt],
       config: {}
     })
-    expect(out.systemPrompt).toBe(PROMPT_WITHOUT_FORK)
+    expect(out.systemPrompt).toBe(DEFAULT_HARNESS_SYSTEM_PROMPT)
   })
 
-  it('includes the fork paragraph only when conversationForkEnabled is true', () => {
+  it('includes the fork paragraph by default and drops it when conversationForkEnabled is false', () => {
     const wt = makeWorktree()
-    const on = buildClaudeLaunchSettings({
+    const on = buildClaudeLaunchSettings({ cwd: wt.path, worktrees: [wt], config: {} })
+    expect(on.systemPrompt).toContain(HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH)
+    const off = buildClaudeLaunchSettings({
       cwd: wt.path,
       worktrees: [wt],
-      config: { conversationForkEnabled: true }
+      config: { conversationForkEnabled: false }
     })
-    expect(on.systemPrompt).toBe(DEFAULT_HARNESS_SYSTEM_PROMPT)
-    expect(on.systemPrompt).toContain(HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH)
+    expect(off.systemPrompt).toBe(PROMPT_WITHOUT_FORK)
     expect(PROMPT_WITHOUT_FORK).not.toContain(HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH)
   })
 
@@ -97,7 +98,7 @@ describe('buildClaudeLaunchSettings', () => {
       config: {}
     })
     expect(out.systemPrompt).toBe(
-      `${PROMPT_WITHOUT_FORK}\n\n${DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN}`
+      `${DEFAULT_HARNESS_SYSTEM_PROMPT}\n\n${DEFAULT_HARNESS_SYSTEM_PROMPT_MAIN}`
     )
   })
 

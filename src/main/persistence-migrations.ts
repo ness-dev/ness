@@ -211,6 +211,24 @@ export const migrations: Migration[] = [
   // on a stable starting point.
   (_c) => {
     // no-op
+  },
+
+  // v8 → v9: auto-approve and agent reviews changed defaults. Only configs
+  // that already exist reach here — a fresh install starts at the current
+  // version — so this pins the old behaviour for upgraders without touching
+  // new users.
+  //  - autoApprovePermissions now defaults on, and the old setter recorded
+  //    "off" by deleting the key. An absent key on an existing install
+  //    therefore means the user chose (or kept) manual approval; write it
+  //    down so the new default can't silently remove that step.
+  //  - agentReviewsEnabled is a new master switch, default off, that also
+  //    gates autoReviewOnGreenCi. Someone already using auto-review gets the
+  //    switch on so it keeps firing.
+  (c) => {
+    if (c.autoApprovePermissions === undefined) c.autoApprovePermissions = false
+    if (c.agentReviewsEnabled === undefined && c.autoReviewOnGreenCi === true) {
+      c.agentReviewsEnabled = true
+    }
   }
 ]
 
