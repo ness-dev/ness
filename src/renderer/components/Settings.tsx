@@ -3607,9 +3607,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 conversation that wrote it, using{' '}
                 <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
                 per-turn attribution. Click a mark to pin its card, then ask a fork
-                of that conversation why it wrote the line. Needs the{' '}
-                <code className="bg-panel px-1 rounded text-xs">loch</code> CLI on
-                your PATH; without it the gutter is simply empty.
+                of that conversation why it wrote the line.
               </p>
 
               <label className="flex items-start gap-3 cursor-pointer mb-6">
@@ -3625,8 +3623,10 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
 
               <div className="text-sm text-fg-bright mb-1">Record conversations in</div>
               <p className="text-xs text-dim mb-3">
-                Nothing is recorded until you tick a repo. Ticking one installs
-                loch&apos;s hooks into every worktree of it (in{' '}
+                Nothing is recorded until you tick a repo. Ticking one downloads loch
+                into <code className="bg-panel px-1 rounded text-xs">~/.loch/bin</code> if
+                it isn&apos;t already installed, then adds loch&apos;s hooks to every
+                worktree of the repo (in{' '}
                 <code className="bg-panel px-1 rounded text-xs">.claude/settings.local.json</code>),
                 so each agent turn snapshots the workspace and transcript into{' '}
                 <code className="bg-panel px-1 rounded text-xs">~/.loch</code>, then backfills

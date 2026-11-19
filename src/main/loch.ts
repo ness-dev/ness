@@ -21,6 +21,7 @@ import { delimiter, isAbsolute, join, relative, resolve } from 'path'
 import { createInterface } from 'readline'
 import { cachedShellEnv, claudeConfigDirFor, knownClaudeConfigDirs } from './claude-env'
 import { log } from './debug'
+import { managedLochPath } from './loch-install'
 import {
   extractFirstPrompt,
   parseBlameDocument,
@@ -71,6 +72,15 @@ export function lochBinary(): string | null {
       break
     } catch {
       // not here
+    }
+  }
+  // The copy Ness downloads for users who had none (see loch-install.ts).
+  if (!cachedBinary) {
+    try {
+      accessSync(managedLochPath(), fsConstants.X_OK)
+      cachedBinary = managedLochPath()
+    } catch {
+      // not installed
     }
   }
   return cachedBinary

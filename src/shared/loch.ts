@@ -34,6 +34,10 @@ export interface LochHunk {
   conversation: LochConversation | null
 }
 
+/** The loch release Ness installs when the user has none (main/loch-install.ts
+ *  pins the matching per-platform checksums). */
+export const LOCH_VERSION = '0.2.0'
+
 /** Ness's own codes, alongside loch's (`file-unreadable`, `internal`, …). */
 export type LochFailureCode = 'not-installed' | 'bad-output' | 'timeout' | string
 

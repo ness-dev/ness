@@ -13,6 +13,7 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
+import { canInstallLoch, installLoch } from './loch-install'
 import {
   backfillRepo,
   installLochHooks,
@@ -1727,6 +1728,7 @@ store.subscribe((event) => {
 })
 void syncLochHooks()
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -4403,7 +4405,13 @@ function registerIpcHandlers(): void {
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
-      if (!lochBinary()) return { ok: false, code: 'not-installed' }
+      // Opting in is the explicit go-ahead to fetch loch when it's missing.
+      if (!lochBinary()) {
+        const got = await installLoch()
+        if (!got.ok) return { ok: false, code: got.code, error: got.error }
+        store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+        if (!lochBinary()) return { ok: false, code: 'not-installed' }
+      }
       let installed = 0
       let viaProject = 0
       let firstFailure: { code: string; error?: string } | null = null

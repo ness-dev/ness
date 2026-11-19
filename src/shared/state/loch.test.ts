@@ -8,4 +8,11 @@ describe('lochReducer', () => {
     expect(on.available).toBe(true)
     expect(lochReducer(on, { type: 'loch/availabilityChanged', payload: true })).toBe(on)
   })
+
+  it('installableChanged sets the flag and keeps identity when unchanged', () => {
+    expect(initialLoch.installable).toBe(false)
+    const on = lochReducer(initialLoch, { type: 'loch/installableChanged', payload: true })
+    expect(on.installable).toBe(true)
+    expect(lochReducer(on, { type: 'loch/installableChanged', payload: true })).toBe(on)
+  })
 })

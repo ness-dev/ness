@@ -12,6 +12,7 @@ import { useAppStateFor } from '../store'
 import { getBackendFor } from '../backend'
 import type { LochRecordingResult } from '../../shared/loch'
 import { BlameGutterPreview } from './BlameGutterPreview'
+import { LOCH_VERSION } from '../../shared/loch'
 
 function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
@@ -68,6 +69,9 @@ export function HistoryTrackingExplainer({
 }): JSX.Element {
   const backend = getBackendFor(backendId)
   const available = useAppStateFor(backendId, (s) => s.loch.available)
+  // Ness downloads loch on install where a release exists for the platform,
+  // so "not installed" only blocks installing where there's nothing to fetch.
+  const installable = useAppStateFor(backendId, (s) => s.loch.installable)
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const [checking, setChecking] = useState(false)
   const name = basename(repoRoot)
@@ -90,9 +94,13 @@ export function HistoryTrackingExplainer({
             : {
                 kind: 'error',
                 message:
-                  r.code === 'not-installed'
-                    ? 'loch isn’t installed on this machine.'
-                    : `Install failed (${r.code})${r.error ? `: ${r.error}` : ''}`
+                  r.code === 'download-failed'
+                    ? `Couldn’t download loch${r.error ? ` (${r.error})` : ''}. Check your connection and try again.`
+                    : r.code === 'checksum-mismatch'
+                      ? 'The loch download didn’t match its expected checksum, so it wasn’t installed.'
+                      : r.code === 'not-installed' || r.code === 'unsupported-platform'
+                        ? 'loch isn’t available for this machine.'
+                        : `Install failed (${r.code})${r.error ? `: ${r.error}` : ''}`
               }
         ),
       (err) => setPhase({ kind: 'error', message: String(err) })
@@ -130,7 +138,7 @@ export function HistoryTrackingExplainer({
           </span>
         </div>
         <h1 className="text-3xl font-semibold text-fg-bright leading-tight">
-          Know which conversation wrote every line — and ask it why.
+          See what turn, conversation &amp; agent wrote every line of code
         </h1>
         <p className="text-base text-dim mt-3 leading-relaxed">
           History tracking records each agent turn in <span className="text-fg">{name}</span> as
@@ -141,17 +149,16 @@ export function HistoryTrackingExplainer({
 
         <div className="mt-10 flex flex-col gap-6">
           <Feature icon={FileClock} title="Blame in the gutter" illustration={<BlameGutterPreview />}>
-            Each line in the file viewer gets a mark for the turn that wrote it. Hover for the
-            session, how it started, and the prompt for that turn.
+            In the file viewer gutter you can hover to see exactly which agent, turn and
+            conversation wrote that line of code.
           </Feature>
           <Feature icon={MessageSquareText} title="Ask the conversation">
-            Open a Chat on a fork of the conversation that wrote a line. The agent resumes with
-            its full context and can tell you why it made that choice. The original session is
-            never touched.
+            Click on the gutter to open the conversation and ask it a question. Opening the
+            conversation will <em>fork</em> the conversation.
           </Feature>
           <Feature icon={GitMerge} title="Survives squashes and rebases">
-            Lines are matched by content, not by commit, so attribution holds after a squash
-            merge or a rewrite of history.
+            Lines are matched by content, not by git commit. This allows it to survive squashes
+            or other git history losses.
           </Feature>
         </div>
 
@@ -161,6 +168,13 @@ export function HistoryTrackingExplainer({
             <h2 className="text-base font-semibold text-fg-bright">What installing does</h2>
           </div>
           <ul className="text-sm text-dim leading-relaxed list-disc pl-5 flex flex-col gap-2">
+            {!available && (
+              <li>
+                Downloads loch {LOCH_VERSION} from its GitHub releases into{' '}
+                <Code>~/.loch/bin</Code>, since it isn&apos;t on this machine yet. The download is
+                checked against a checksum pinned in Ness before it&apos;s installed.
+              </li>
+            )}
             <li>
               Adds three Claude Code hooks (prompt, turn end, session end) to{' '}
               <Code>.claude/settings.local.json</Code> in every worktree of {name}, including
@@ -182,10 +196,6 @@ export function HistoryTrackingExplainer({
               what&apos;s already recorded stays in <Code>~/.loch</Code>.
             </li>
           </ul>
-          <p className="text-xs text-faint mt-4 leading-relaxed">
-            Known limitation: when several agents work in the same worktree at the same time,
-            loch can credit one session&apos;s edits to another.
-          </p>
         </div>
 
         <div className="mt-10">
@@ -213,14 +223,14 @@ export function HistoryTrackingExplainer({
                 </button>
               </div>
             </div>
-          ) : !available ? (
+          ) : !available && !installable ? (
             <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
               <div className="text-sm font-semibold text-fg-bright">
-                loch isn&apos;t installed on this machine
+                loch isn&apos;t available for this machine
               </div>
               <div className="text-sm text-dim mt-1 leading-relaxed">
-                Install the <Code>loch</Code> binary from its GitHub releases and put it on your
-                PATH, then check again.
+                There&apos;s no loch release Ness can install here. If you build or install{' '}
+                <Code>loch</Code> yourself and put it on your PATH, check again.
               </div>
               <div className="flex items-center gap-3 mt-3">
                 <button

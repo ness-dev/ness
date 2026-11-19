@@ -9,9 +9,10 @@ function basename(p: string): string {
 
 function describe(r: LochRecordingResult, enabled: boolean): string {
   if (!r.ok) {
-    return r.code === 'not-installed'
-      ? 'loch isn’t on your PATH — install it first.'
-      : `Failed (${r.code})${r.error ? `: ${r.error}` : ''}`
+    if (r.code === 'download-failed') return `Couldn’t download loch${r.error ? ` (${r.error})` : ''}.`
+    if (r.code === 'checksum-mismatch') return 'The loch download didn’t match its checksum; nothing was installed.'
+    if (r.code === 'not-installed' || r.code === 'unsupported-platform') return 'loch isn’t available for this machine.'
+    return `Failed (${r.code})${r.error ? `: ${r.error}` : ''}`
   }
   if (!enabled) return 'Hooks removed.'
   const parts: string[] = []
