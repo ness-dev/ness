@@ -1238,9 +1238,9 @@ describe('control-server POST /projects and POST /repos', () => {
 
   it('returns 409 when the target directory already exists', async () => {
     mkdirSync(join(tmp, 'taken'))
-    const r = await call('POST', '/projects', { name: 'taken', parentDir: tmp })
+    const r = await call('POST', '/projects', { name: 'taken', parentDir: tmp + '/' })
     expect(r.status).toBe(409)
-    expect(r.json.error).toMatch(/already exists/)
+    expect(r.json.error).toBe(`${join(tmp, 'taken')} already exists`)
   })
 
   it.each([

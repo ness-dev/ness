@@ -57,8 +57,25 @@ describe('repo-roots shared add/create helpers', () => {
       { parentDir: tmp, name: 'taken', includeReadme: true, gitignorePreset: 'none' },
       deps
     )
-    expect(result).toEqual({ error: 'Directory already exists' })
+    expect(result).toEqual({ error: 'Directory already exists', code: 'exists' })
     expect(deps.config.repoRoots).toEqual([])
+  })
+
+  it('concurrent creates of one path: exactly one wins and its repo survives', async () => {
+    const opts = { parentDir: tmp, name: 'race', includeReadme: true, gitignorePreset: 'node' as const }
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => createAndRegisterProject(opts, deps))
+    )
+    const winners = results.filter((r) => 'path' in r)
+    expect(winners).toHaveLength(1)
+    expect(results.filter((r) => 'error' in r && r.code === 'exists')).toHaveLength(3)
+    // The losers' cleanup must not have deleted the winner's folder.
+    const log = execFileSync('git', ['log', '--oneline'], {
+      cwd: join(tmp, 'race'),
+      encoding: 'utf-8'
+    })
+    expect(log).toContain('Initial commit')
+    expect(deps.config.repoRoots).toHaveLength(1)
   })
 
   it('addRepoAtPath is idempotent and only refreshes on a new root', async () => {

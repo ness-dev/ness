@@ -25,7 +25,7 @@ import type { CaptureResult } from './browser-manager-types'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
-import { isAbsolute } from 'path'
+import { isAbsolute, join } from 'path'
 import { statSync } from 'fs'
 import type { AddRepoResult } from '../shared/repo-pick'
 import {
@@ -458,10 +458,10 @@ async function handleRequest(
       gitignorePreset
     })
     if ('error' in result) {
-      const status = result.error === 'Directory already exists' ? 409 : 500
-      return sendJson(res, status, {
-        error: status === 409 ? `${parentDir}/${name} already exists` : result.error
-      })
+      if (result.code === 'exists') {
+        return sendJson(res, 409, { error: `${join(parentDir, name)} already exists` })
+      }
+      return sendJson(res, result.code === 'invalid' ? 400 : 500, { error: result.error })
     }
     return sendJson(res, 200, { repoRoot: result.path })
   }
