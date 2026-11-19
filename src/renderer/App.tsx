@@ -67,7 +67,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useViewport } from './hooks/useViewport'
 import { MobileApp } from './components/MobileApp'
 import { harnessReleaseNotesUrl } from '../shared/constants'
-import { hasWindowControls } from './window-controls'
+import { windowControlsKind } from './window-controls'
 
 function isPendingId(id: string | null | undefined): id is string {
   return typeof id === 'string' && id.startsWith('pending:')
@@ -78,12 +78,13 @@ function isPendingId(id: string | null | undefined): id is string {
 // the "Ness" title segment when it sits above the sidebar.
 const TITLE_LEADING_PX = 80
 
+const WINDOW_CONTROLS = windowControlsKind()
+
 // Set at module load — before first paint — by both the Electron and the
 // web-client entry, which share only App. Drives the titlebar clearance
-// overrides in styles.css; the web client has no traffic lights or
-// LinuxWindowControls to clear.
+// overrides in styles.css.
 if (typeof document !== 'undefined') {
-  document.documentElement.dataset.windowControls = hasWindowControls() ? 'native' : 'none'
+  document.documentElement.dataset.windowControls = WINDOW_CONTROLS
 }
 
 // Static cap for the sidebar's resizable width. The title segment above the
@@ -628,7 +629,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
 
   // Mirrors the styles.css titlebar-lead overrides for the inline-styled
   // single-screen top bars, which a root-attribute selector can't reach.
-  const singleScreenLeadingPx = isFullscreen || !hasWindowControls() ? 0 : TITLE_LEADING_PX
+  // Only macOS hides its controls in fullscreen; LinuxWindowControls stay.
+  const singleScreenLeadingPx =
+    WINDOW_CONTROLS === 'none' || (WINDOW_CONTROLS === 'mac' && isFullscreen) ? 0 : TITLE_LEADING_PX
 
   // Open Keyboard Shortcuts from the menu
   useEffect(() => {

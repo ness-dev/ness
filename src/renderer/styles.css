@@ -646,17 +646,19 @@ button, [role="button"], a[href], [onclick] {
 }
 
 /* macOS native fullscreen hides the traffic lights, and the web client never
- * had any (data-window-controls is set in main.tsx), so the leading clearance
- * used on every top-of-window drag bar collapses. Scoped to .drag-region so
- * unrelated titlebar-lead uses are untouched. The inset control keeps a
- * normal gutter instead of sitting flush against the window edge. */
-:root[data-fullscreen="true"] .drag-region.titlebar-lead,
-:root[data-fullscreen="true"] .drag-region.titlebar-lead-wide,
+ * had any, so the leading clearance used on every top-of-window drag bar
+ * collapses (data-window-controls is set at module load in App.tsx). Linux
+ * is excluded from the fullscreen case: LinuxWindowControls stay rendered
+ * there, and a collapsed Back button would sit under Close. Scoped to
+ * .drag-region so unrelated titlebar-lead uses are untouched. The inset
+ * control keeps a normal gutter instead of sitting flush against the edge. */
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region.titlebar-lead,
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region.titlebar-lead-wide,
 :root[data-window-controls="none"] .drag-region.titlebar-lead,
 :root[data-window-controls="none"] .drag-region.titlebar-lead-wide {
   padding-left: 0;
 }
-:root[data-fullscreen="true"] .drag-region .titlebar-lead-inset,
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region .titlebar-lead-inset,
 :root[data-window-controls="none"] .drag-region .titlebar-lead-inset {
   left: 1rem;
 }
