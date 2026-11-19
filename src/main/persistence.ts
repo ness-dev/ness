@@ -8,7 +8,7 @@ import {
   copyFileSync,
   renameSync
 } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { userDataDir } from './paths'
 import type { ConfigLoadError } from '../shared/state/config-health'
 import {
@@ -388,6 +388,10 @@ export interface Config {
   // When true, all announcement banners are suppressed regardless of
   // feed contents.
   announcementsMuted?: boolean
+  // Epoch ms of this install's first launch. Announcements published at
+  // or before it are hidden so new users don't get a backlog of old news.
+  // Installs that predate the field are stamped 0 (see applyFirstLaunchDefault).
+  firstLaunchAt?: number
   // When true, the sidebar's Reviewing group surfaces PRs where the user
   // is a requested reviewer (across all Ness repos) as phantom entries
   // that open the "new worktree from PR" screen on click. Default off.
@@ -481,6 +485,8 @@ export const DEFAULT_HARNESS_SYSTEM_PROMPT = `You are running inside Ness, a des
 
 - mcp__ness-control__create_worktree: Create a new worktree with its own agent session. Always provide a detailed initialPrompt so the new session has full context. Pass an optional alias — a short, human-readable label (Title Case with spaces, like "Auth Refactor" or "PR 214 Review"), not a kebab-case branch-style slug. Think tab title, not branch name.
 - mcp__ness-control__list_worktrees: List all active worktrees.
+- mcp__ness-control__create_project: Create a brand-new git repo (with an initial commit) and add it to the Ness sidebar. Use when the user asks you to start a new project. Then call create_worktree with the returned repoRoot to start building in it.
+- mcp__ness-control__add_repo: Add an existing git repo on disk to the Ness sidebar, so create_worktree can target it by repoRoot.
 - mcp__ness-control__set_worktree_alias: Give a worktree a short display name shown in the sidebar, window title, and tab strip. Defaults to the caller's worktree. Cosmetic only — never touches git. Aliases should read like a human-written tab title ("Auth Refactor", "Fix Login Bug", "PR 214 Review") — Title Case with spaces, a few words max — NOT a kebab-case slug like "auth-refactor" or "fix-login-bug" (that just duplicates what the branch name already conveys). Use it when the user gives the task a memorable label, or when the generated branch name is too long or technical to scan at a glance.
 - mcp__ness-control__clear_worktree_alias: Remove a worktree's display alias so its branch name shows again. Defaults to the caller's worktree.
 ${HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION}
@@ -568,11 +574,14 @@ export function loadConfig(): Config {
     runMigrations(parsed)
     configLoadError = null
     writesSuspended = false
-    return applyConnectionDefaults({
-      ...DEFAULT_CONFIG,
-      ...(parsed as Partial<Config>),
-      schemaVersion: SCHEMA_VERSION
-    })
+    return applyFirstLaunchDefault(
+      applyConnectionDefaults({
+        ...DEFAULT_CONFIG,
+        ...(parsed as Partial<Config>),
+        schemaVersion: SCHEMA_VERSION
+      }),
+      true
+    )
   } catch (e) {
     // A missing file is the normal first-run case — nothing to preserve,
     // nothing the user broke, so just load defaults. Anything else (bad
@@ -581,6 +590,11 @@ export function loadConfig(): Config {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       configLoadError = null
       writesSuspended = false
+      // Persist right away so the first-launch stamp survives even if
+      // nothing else triggers a save before the next boot.
+      const fresh = applyFirstLaunchDefault(defaultConfig(), false)
+      saveConfigSync(fresh)
+      return fresh
     } else {
       configLoadError = {
         message: e instanceof Error ? e.message : String(e),
@@ -590,8 +604,26 @@ export function loadConfig(): Config {
       writesSuspended = true
       console.error('Failed to load config (quarantined, writes suspended):', e)
     }
-    return defaultConfig()
+    // A corrupt file still means an existing install.
+    return applyFirstLaunchDefault(defaultConfig(), true)
   }
+}
+
+/** Stamp `firstLaunchAt` if it's missing. A fresh install (no config.json
+ *  before this boot) gets `now`; an install that already had a config but
+ *  predates the field gets 0, so existing users keep seeing every
+ *  announcement. An existing value is never changed.
+ *
+ *  Pure for testability; `loadConfig` calls it on the loaded config. */
+export function applyFirstLaunchDefault(
+  config: Config,
+  configExisted: boolean,
+  now: number = Date.now()
+): Config {
+  if (typeof config.firstLaunchAt === 'number' && Number.isFinite(config.firstLaunchAt)) {
+    return config
+  }
+  return { ...config, firstLaunchAt: configExisted ? 0 : now }
 }
 
 /** Raw bytes of config.json for the in-app recovery editor; '' if unreadable. */
@@ -635,7 +667,7 @@ export function validateConfigFile(): { ok: true } | { ok: false; error: string 
 export function discardCorruptConfigAndReset(): Config {
   writesSuspended = false
   configLoadError = null
-  const fresh = defaultConfig()
+  const fresh = applyFirstLaunchDefault(defaultConfig(), true)
   saveConfigSync(fresh)
   return fresh
 }
@@ -674,6 +706,9 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null
 function writeFileAtomic(contents: string): void {
   const target = getConfigPath()
   const tmp = `${target}.tmp`
+  // Electron's userData dir may not exist yet on a fresh install (loadConfig
+  // runs before app.ready), and the first-run save would otherwise ENOENT.
+  mkdirSync(dirname(target), { recursive: true })
   writeFileSync(tmp, contents)
   renameSync(tmp, target)
 }

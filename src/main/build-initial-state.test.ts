@@ -82,6 +82,16 @@ describe('buildInitialAppState', () => {
     expect(result.worktrees.repoRoots).toEqual(['/a', '/b'])
   })
 
+  it('seeds firstLaunchAt from config, falling back to 0 when invalid', () => {
+    const seed = (v: unknown): number =>
+      buildInitialAppState({ ...emptyConfig, firstLaunchAt: v as number }, { hasGithubToken: false })
+        .settings.firstLaunchAt
+    expect(seed(1700000000000)).toBe(1700000000000)
+    expect(seed(undefined)).toBe(0)
+    expect(seed(NaN)).toBe(0)
+    expect(seed('1700000000000')).toBe(0)
+  })
+
   it('gives a fresh install auto-approve on and agent reviews off', () => {
     expect(seeded.settings.autoApprovePermissions).toBe(true)
     expect(seeded.settings.agentReviewsEnabled).toBe(false)

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
 import { NessMark } from './components/NessMark'
+import { pickActiveAnnouncement } from '../shared/announcement-pick'
 import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, selectHistoryPromptRepos, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
@@ -533,23 +534,21 @@ function DesktopApp(): JSX.Element {
     [worktrees]
   )
 
-  const activeAnnouncement = useMemo(() => {
-    if (settings.announcementsMuted) return null
-    const dismissed = new Set(settings.dismissedAnnouncementIds)
-    const now = Date.now()
-    const eligible = announcements.items.filter((a) => {
-      if (dismissed.has(a.id)) return false
-      if (a.expiresAt) {
-        const exp = Date.parse(a.expiresAt)
-        if (Number.isFinite(exp) && exp < now) return false
-      }
-      return true
-    })
-    if (eligible.length === 0) return null
-    return eligible.reduce((best, cur) =>
-      Date.parse(cur.publishedAt) > Date.parse(best.publishedAt) ? cur : best
-    )
-  }, [announcements.items, settings.announcementsMuted, settings.dismissedAnnouncementIds])
+  const activeAnnouncement = useMemo(
+    () =>
+      pickActiveAnnouncement(announcements.items, {
+        muted: settings.announcementsMuted,
+        dismissedIds: settings.dismissedAnnouncementIds,
+        firstLaunchAt: settings.firstLaunchAt,
+        now: Date.now()
+      }),
+    [
+      announcements.items,
+      settings.announcementsMuted,
+      settings.dismissedAnnouncementIds,
+      settings.firstLaunchAt
+    ]
+  )
   // Track which worktrees already have hooks installed so we only prompt once
 
 const setQuestStep = useCallback((next: QuestStep) => {

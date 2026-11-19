@@ -385,6 +385,10 @@ export function buildInitialAppState(
         ? config.dismissedAnnouncementIds.filter((x): x is string => typeof x === 'string')
         : [],
       announcementsMuted: config.announcementsMuted === true,
+      firstLaunchAt:
+        typeof config.firstLaunchAt === 'number' && Number.isFinite(config.firstLaunchAt)
+          ? config.firstLaunchAt
+          : 0,
       showAssignedPRs: config.showAssignedPRs === true,
       preventSleepMode: PREVENT_SLEEP_MODES.includes(config.preventSleepMode as PreventSleepMode)
         ? (config.preventSleepMode as PreventSleepMode)

@@ -15,3 +15,4 @@ release/
 .headless-alpha/
 .headless-beta/
 .headless-data/
+.loch/

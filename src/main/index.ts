@@ -138,9 +138,8 @@ import {
   migrateRepoConfigFilename,
   type RepoConfig
 } from './repo-config'
-import { createNewProject, type GitignorePreset } from './repo-create'
-import { resolveRepoPath } from './repo-resolve'
-import { registerRepoRoot } from './repo-roots'
+import type { GitignorePreset } from './repo-create'
+import { addRepoAtPath, createAndRegisterProject } from './repo-roots'
 import type { AddRepoResult } from '../shared/repo-pick'
 import { isWorktreeMerged } from '../shared/state/prs'
 import type { ForkSource } from '../shared/state/worktrees'
@@ -2209,20 +2208,9 @@ function registerIpcHandlers(): void {
   // Native repo:add (folder picker) and dialog:pickDirectory live in
   // desktop-shell.ts. The web client uses repo:addAtPath below combined
   // with the renderer-side RemoteFilePicker.
-  transport.onRequest('repo:addAtPath', async (_ctx, picked: string): Promise<AddRepoResult> => {
-    if (!picked || typeof picked !== 'string') {
-      return { kind: 'not-a-repo', picked: picked || '' }
-    }
-    const resolution = await resolveRepoPath(picked)
-    if (resolution.kind === 'ok') {
-      const repoRoot = resolution.root
-      if (registerRepoRoot(repoRoot, { config, store, worktreesFSM })) {
-        void worktreesFSM.refreshList()
-      }
-      return { kind: 'added', repoRoot }
-    }
-    return resolution
-  })
+  transport.onRequest('repo:addAtPath', (_ctx, picked: string): Promise<AddRepoResult> =>
+    addRepoAtPath(picked, { config, store, worktreesFSM })
+  )
 
   transport.onRequest(
     'fs:listDir',
@@ -2233,20 +2221,12 @@ function registerIpcHandlers(): void {
 
   transport.onRequest(
     'repo:createNewProject',
-    async (_ctx, opts: {
+    (_ctx, opts: {
       parentDir: string
       name: string
       includeReadme: boolean
       gitignorePreset: GitignorePreset
-    }) => {
-      const result = await createNewProject(opts)
-      if ('error' in result) return result
-      const repoRoot = result.path
-      if (registerRepoRoot(repoRoot, { config, store, worktreesFSM })) {
-        void worktreesFSM.refreshList()
-      }
-      return { path: repoRoot }
-    }
+    }) => createAndRegisterProject(opts, { config, store, worktreesFSM })
   )
 
   transport.onRequest('repo:remove', (_ctx, repoRoot: string) => {
@@ -5990,6 +5970,8 @@ async function runBoot(): Promise<void> {
   // Local HTTP control server for the bundled ness-control MCP bridge.
   startControlServer({
     getRepoRoots: () => config.repoRoots,
+    addRepo: (path) => addRepoAtPath(path, { config, store, worktreesFSM }),
+    createProject: (opts) => createAndRegisterProject(opts, { config, store, worktreesFSM }),
     getWorktreeBase: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
     getPrReviewPrompt: () => config.prReviewPrompt || DEFAULT_PR_REVIEW_PROMPT,
     resolveCallerScope,

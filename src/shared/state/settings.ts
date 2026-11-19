@@ -528,6 +528,10 @@ export interface SettingsState {
    *  the feed contents. Set by the "Hide all announcements" action and
    *  cleared only by the user. */
   announcementsMuted: boolean
+  /** Epoch ms of this install's first launch; announcements published at
+   *  or before it are hidden. 0 for installs that predate the field, so
+   *  they see everything. Seeded once at boot and never changes. */
+  firstLaunchAt: number
   /** When true, PRs that have you as a requested reviewer (across every
    *  repo added to Ness) show up as phantom entries in the sidebar's
    *  Reviewing group — click one and it opens the "new worktree from PR"
@@ -742,6 +746,7 @@ export const initialSettings: SettingsState = {
   prReviewPrompt: DEFAULT_PR_REVIEW_PROMPT,
   dismissedAnnouncementIds: [],
   announcementsMuted: false,
+  firstLaunchAt: 0,
   showAssignedPRs: false,
   preventSleepMode: 'off',
   agentReviewDelivery: 'draft',
@@ -820,7 +825,7 @@ function patchOverrides(
  *      whichever token that backend resolved.
  *    - `wsTransport*` — that backend's own listener config. Overwriting
  *      it from the client could tear down the connection in use.
- *    - `dismissedAnnouncementIds` / `announcementsMuted` — entangled
+ *    - `dismissedAnnouncementIds` / `announcementsMuted` / `firstLaunchAt` — entangled
  *      with the per-backend `announcements` slice they filter; moving
  *      one without the other just relocates the inconsistency. */
 export const CLIENT_OWNED_SETTING_KEYS = [

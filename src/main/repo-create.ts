@@ -1,6 +1,5 @@
 import { execFile } from 'child_process'
 import { mkdir, writeFile, rm } from 'fs/promises'
-import { existsSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { log } from './debug'
@@ -54,7 +53,9 @@ export interface CreateNewProjectOpts {
   gitignorePreset: GitignorePreset
 }
 
-export type CreateNewProjectResult = { path: string } | { error: string }
+export type CreateNewProjectResult =
+  | { path: string }
+  | { error: string; code?: 'exists' | 'invalid' | 'failed' }
 
 const VALID_NAME = /^[^/\\:*?"<>|\x00]+$/
 
@@ -71,14 +72,26 @@ export async function createNewProject(
 ): Promise<CreateNewProjectResult> {
   const name = opts.name.trim()
   const nameError = validateProjectName(name)
-  if (nameError) return { error: nameError }
-  if (!opts.parentDir) return { error: 'Location is required' }
+  if (nameError) return { error: nameError, code: 'invalid' }
+  if (!opts.parentDir) return { error: 'Location is required', code: 'invalid' }
 
   const targetPath = join(opts.parentDir, name)
-  if (existsSync(targetPath)) return { error: 'Directory already exists' }
+
+  // The non-recursive leaf mkdir is the atomic claim: two concurrent creates
+  // of the same path (two agents, or a retry after a timeout) can't both
+  // win, so the cleanup below only ever deletes a folder this call made.
+  try {
+    await mkdir(opts.parentDir, { recursive: true })
+    await mkdir(targetPath)
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+      return { error: 'Directory already exists', code: 'exists' }
+    }
+    const message = e instanceof Error ? e.message : String(e)
+    return { error: `Failed to create project: ${message}`, code: 'failed' }
+  }
 
   try {
-    await mkdir(targetPath, { recursive: true })
     await execFileAsync('git', ['init'], { cwd: targetPath })
 
     if (opts.includeReadme) {
@@ -111,6 +124,6 @@ export async function createNewProject(
         }`
       )
     }
-    return { error: `Failed to create project: ${message}` }
+    return { error: `Failed to create project: ${message}`, code: 'failed' }
   }
 }
