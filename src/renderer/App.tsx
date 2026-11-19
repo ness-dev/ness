@@ -13,7 +13,7 @@ import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
 import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
 import { getLeaves, findLeaf } from '../shared/state/terminals'
-import { CheckCircle2, FolderOpen } from 'lucide-react'
+import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
 import { SCALES, scaleSpec } from '../shared/state/settings'
 import { useActiveTheme } from './hooks/useActiveTheme'
@@ -41,9 +41,10 @@ import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
 import { WeeklyWrappedScreen } from './components/WeeklyWrappedScreen'
 import { Guide } from './components/Guide'
-import { AGENT_REGISTRY } from '../shared/agent-registry'
+import { AGENT_REGISTRY, getAgentInfo, supportsChat } from '../shared/agent-registry'
+import { defaultSelectedRepoRoots, type DiscoveredWork } from '../shared/work-discovery'
+import { ImportWorkStep } from './components/ImportWorkStep'
 import { AgentIcon } from './components/AgentIcon'
-import { InterfaceToggle } from './components/InterfaceToggle'
 import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
 import { CommandCenter } from './components/CommandCenter'
@@ -483,6 +484,63 @@ function DesktopApp(): JSX.Element {
   // explicit confirmation separately for the onboarding step checkmarks.
   const [themeChosen, setThemeChosen] = useState(false)
   const [agentChosen, setAgentChosen] = useState(false)
+  // Onboarding import. The scan result is a picker for this one wizard —
+  // per-client form state, not something another viewer needs to mirror.
+  const [existingWork, setExistingWork] = useState<DiscoveredWork | null>(null)
+  const [workScanned, setWorkScanned] = useState(false)
+  const [importSelection, setImportSelection] = useState<ReadonlySet<string>>(() => new Set())
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  // The agent step was answered from the scan rather than by a click.
+  const [agentInferred, setAgentInferred] = useState(false)
+  const [importFocusPath, setImportFocusPath] = useState<string | null>(null)
+  // Land on the worktree the user touched last, once the imported list
+  // has reached this client.
+  useEffect(() => {
+    if (!importFocusPath) return
+    if (!worktrees.some((w) => w.path === importFocusPath)) return
+    setActiveWorktreeId(importFocusPath)
+    setImportFocusPath(null)
+  }, [importFocusPath, worktrees])
+  const onboardingVisible = mergedData.repoRoots.length === 0 || previewOnboarding
+  const workScanStarted = useRef(false)
+  useEffect(() => {
+    if (!onboardingVisible) {
+      workScanStarted.current = false
+      return
+    }
+    if (workScanStarted.current) return
+    workScanStarted.current = true
+    setWorkScanned(false)
+    const scanStartedAt = Date.now()
+    backend
+      .scanExistingWork()
+      .then((work) => {
+        setExistingWork(work)
+        setImportSelection(new Set(defaultSelectedRepoRoots(work.repos, work.scannedAt)))
+        if (work.suggestedAgent && (work.mayPreselectAgent || previewOnboarding)) {
+          // Someone with a history of Claude or Codex sessions has already
+          // told us which agent they use. Chat is the interface we steer
+          // toward; the TUI stays one click away in the step itself.
+          // Only on a genuine first run: this screen also shows for an
+          // existing user with no repos left, whose settings are theirs.
+          // Preview mode must not rewrite the real settings just by opening.
+          if (!previewOnboarding) {
+            void backend.setDefaultAgent(work.suggestedAgent)
+            void backend.setDefaultClaudeTabType('json')
+          }
+          setAgentInferred(true)
+          setAgentChosen(true)
+        }
+      })
+      .catch(() => setExistingWork(null))
+      .finally(() => {
+        // The scan usually returns in well under a second. Hold the status
+        // row long enough to read, so it doesn't register as a flicker.
+        const remaining = 900 - (Date.now() - scanStartedAt)
+        window.setTimeout(() => setWorkScanned(true), Math.max(0, remaining))
+      })
+  }, [onboardingVisible, previewOnboarding, backend])
   // Only subscribe to the PTY stream when CommandCenter is open. Without
   // this gate, a chatty PTY pegs the renderer with re-renders for output
   // nobody is currently looking at.
@@ -1286,6 +1344,34 @@ const setQuestStep = useCallback((next: QuestStep) => {
         : !step3Complete
           ? 3
           : 4
+    // "Found work" means something the import could actually add. In preview
+    // mode everything is usually already added, and the step still renders
+    // so the layout can be inspected.
+    const foundWork =
+      existingWork && existingWork.repos.some((r) => previewOnboarding || !r.alreadyAdded)
+        ? existingWork
+        : null
+    const showImportStep = !!foundWork
+    const shownAgent = agentInferred && previewOnboarding ? (existingWork?.suggestedAgent ?? defaultAgent) : defaultAgent
+    const chatIsDefault = settings.defaultClaudeTabType === 'json'
+    const handleImportWork = async (): Promise<void> => {
+      if (previewOnboarding) {
+        setPreviewOnboarding(false)
+        return
+      }
+      setImporting(true)
+      setImportError(null)
+      try {
+        const result = await backend.importExistingWork([...importSelection])
+        if (result.focusWorktreePath) setImportFocusPath(result.focusWorktreePath)
+      } catch (err) {
+        // Repos are registered one at a time, so a failure part-way can
+        // leave some already added; say so instead of failing silently.
+        setImportError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setImporting(false)
+      }
+    }
     return (
       <HotkeysProvider bindings={resolvedHotkeys}>
       <div className="flex h-full flex-col">
@@ -1306,17 +1392,17 @@ const setQuestStep = useCallback((next: QuestStep) => {
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-xl w-full px-6 py-6">
+          <div className="mx-auto max-w-3xl w-full px-6 py-6">
+           <div className="mx-auto max-w-xl">
             <div className="text-center mb-6">
               <NessMark className="h-14 w-auto mx-auto mb-4 text-brand" />
               <h1 className="gradient-text text-3xl font-extrabold tracking-tight mb-2">Ness</h1>
               <p className="text-fg text-sm leading-relaxed max-w-md mx-auto">
-                Run many coding agents in parallel — one window, isolated git worktrees,
-                clear status on who needs you.
+                Run many coding agents in parallel
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 mb-8">
+            <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="rounded-lg border border-border bg-panel p-3">
                 <div className="h-14 mb-3 flex flex-col justify-center gap-1.5 bg-app/50 rounded border border-border px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
@@ -1371,10 +1457,21 @@ const setQuestStep = useCallback((next: QuestStep) => {
                 <div className="text-[11px] text-dim leading-snug">Dots show who's waiting</div>
               </div>
             </div>
+            {/* Collapses once the scan settles; what it found is reported in
+                the last step, next to the list it applies to. */}
+            <div className="mb-8">
+              {!workScanned && (
+                <div className="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-2.5 text-xs text-dim">
+                  <Loader2 className="icon-sm animate-spin shrink-0" />
+                  Looking for conversations and projects already on this machine…
+                </div>
+              )}
+            </div>
+           </div>
 
             <div className="space-y-3">
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 1
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1431,7 +1528,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 2
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1450,45 +1547,86 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Choose your default agent</div>
-                    <div className="text-xs text-dim mt-0.5">This is what new tabs will spawn. You can change it later in Settings.</div>
-                  </div>
-                </div>
-                <div className="flex gap-2 ml-8">
-                  {AGENT_REGISTRY.map((agent) => (
-                    <button
-                      key={agent.kind}
-                      onClick={() => {
-                        backend.setDefaultAgent(agent.kind)
-                        setAgentChosen(true)
-                      }}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                        defaultAgent === agent.kind && agentChosen
-                          ? 'bg-surface text-fg-bright border border-fg'
-                          : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
-                      }`}
-                    >
-                      <AgentIcon kind={agent.kind} className="icon-sm" />
-                      {agent.displayName}
-                    </button>
-                  ))}
-                </div>
-                {agentChosen && defaultAgent === 'claude' && (
-                  <div className="ml-8 mt-4 pl-4 border-l-2 border-border">
-                    <div className="text-xs text-dim mb-2">
-                      Which interface should new Claude tabs use?
+                    <div className="text-fg-bright text-sm font-medium">
+                      {agentInferred && agentChosen
+                        ? `You use ${getAgentInfo(shownAgent).displayName}`
+                        : 'Choose your default agent'}
                     </div>
-                    <InterfaceToggle
-                      value={settings.defaultClaudeTabType}
-                      onChange={(value) => { void backend.setDefaultClaudeTabType(value) }}
-                      size="compact"
-                    />
+                    <div className="text-xs text-dim mt-0.5">
+                      {agentInferred && agentChosen
+                        ? 'Automatically detected from the conversations on this machine'
+                        : 'This is what new tabs will spawn. You can change it later in Settings.'}
+                    </div>
+                  </div>
+                  {agentInferred && agentChosen && (
+                    <button
+                      onClick={() => {
+                        setAgentInferred(false)
+                        setAgentChosen(false)
+                      }}
+                      className="text-xs text-accent hover:underline cursor-pointer shrink-0 mt-0.5"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+                {!(agentInferred && agentChosen) && (
+                  <div className="flex gap-2 ml-8">
+                    {AGENT_REGISTRY.map((agent) => (
+                      <button
+                        key={agent.kind}
+                        onClick={() => {
+                          backend.setDefaultAgent(agent.kind)
+                          // Chat is the default interface for any agent that
+                          // has one; the line below is the way back to the TUI.
+                          if (!agentChosen && existingWork?.mayPreselectAgent === true && !previewOnboarding && supportsChat(agent.kind)) {
+                            void backend.setDefaultClaudeTabType('json')
+                          }
+                          setAgentChosen(true)
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                          defaultAgent === agent.kind && agentChosen
+                            ? 'bg-surface text-fg-bright border border-fg'
+                            : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
+                        }`}
+                      >
+                        <AgentIcon kind={agent.kind} className="icon-sm" />
+                        {agent.displayName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {agentChosen && supportsChat(shownAgent) && (
+                  <div className={`ml-8 text-xs text-dim leading-relaxed ${agentInferred ? '' : 'mt-3'}`}>
+                    {chatIsDefault ? (
+                      <>
+                        <span className="text-fg">Conversations open in Ness Chat</span>, with your full
+                        history. Same {getAgentInfo(shownAgent).displayName}, same config, same permissions.{' '}
+                        <button
+                          onClick={() => { void backend.setDefaultClaudeTabType('xterm') }}
+                          className="text-fg-bright hover:underline cursor-pointer whitespace-nowrap"
+                        >
+                          Prefer the terminal UI? Use the TUI instead
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-fg">Conversations open in the terminal UI</span>, exactly as you
+                        run it today.{' '}
+                        <button
+                          onClick={() => { void backend.setDefaultClaudeTabType('json') }}
+                          className="text-fg-bright hover:underline cursor-pointer whitespace-nowrap"
+                        >
+                          Switch to Ness Chat
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 3
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1521,7 +1659,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-danger" />
                         <span className="text-fg">asking for approval</span>
-                      </span>. Only fires for sessions Ness launches — others are untouched.
+                      </span>. Only fires for sessions Ness launches. Others are untouched.
                     </div>
                   </div>
                 </div>
@@ -1552,7 +1690,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto transition-[max-width] duration-300 ${showImportStep && activeStep === 4 ? 'max-w-3xl' : 'max-w-xl'} rounded-xl border bg-panel p-4 ${
                   activeStep === 4
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1567,32 +1705,51 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     4
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Open a git repository</div>
-                    <div className="text-xs text-dim mt-0.5">Ness creates worktrees inside a sibling folder — your original repo stays untouched.</div>
+                    <div className="text-fg-bright text-sm font-medium">
+                      {showImportStep ? 'Bring in your work' : 'Open a git repository'}
+                    </div>
+                    <div className="text-xs text-dim mt-0.5">
+                      {showImportStep
+                        ? 'We automatically detected your conversation history. Select projects to import your existing conversations. Nothing is moved or changed while importing.'
+                        : 'Ness creates worktrees inside a sibling folder — your original repo stays untouched.'}
+                    </div>
                   </div>
                 </div>
-                <div className="ml-8 flex items-center gap-3 flex-wrap">
-                  <button
-                    onClick={handleAddRepo}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer bg-fg-bright text-app hover:bg-fg border border-fg-bright"
-                  >
-                    <FolderOpen className="icon-base" />
-                    Open Repository
-                  </button>
-                  <span className="text-xs text-dim">
-                    or{' '}
+                {foundWork ? (
+                  <ImportWorkStep
+                    work={foundWork}
+                    selected={importSelection}
+                    onSelectedChange={setImportSelection}
+                    importing={importing}
+                    error={importError}
+                    onImport={() => { void handleImportWork() }}
+                    onAddManually={handleAddRepo}
+                    onNewProject={() => setShowNewProject(true)}
+                  />
+                ) : (
+                  <div className="ml-8 flex items-center gap-3 flex-wrap">
                     <button
-                      onClick={() => setShowNewProject(true)}
-                      className="text-fg-bright hover:underline cursor-pointer"
+                      onClick={handleAddRepo}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer bg-fg-bright text-app hover:bg-fg border border-fg-bright"
                     >
-                      start a new project
+                      <FolderOpen className="icon-base" />
+                      Open Repository
                     </button>
-                  </span>
-                </div>
+                    <span className="text-xs text-dim">
+                      or{' '}
+                      <button
+                        onClick={() => setShowNewProject(true)}
+                        className="text-fg-bright hover:underline cursor-pointer"
+                      >
+                        start a new project
+                      </button>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="mt-6 pt-5 border-t border-border/60 text-center">
+            <div className="mx-auto max-w-xl mt-6 pt-5 border-t border-border/60 text-center">
               <button
                 onClick={() => setShowGuide(true)}
                 className="text-xs text-accent hover:underline cursor-pointer"

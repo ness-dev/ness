@@ -642,6 +642,28 @@ hard dependency on `gh`.
   boot warm-up finishes can leave hooks in a custom home; they no-op
   outside Ness (gated on `HARNESS_TERMINAL_ID`).
 
+- **Onboarding import** — when the welcome wizard shows, main scans for
+  work already on the machine (`src/main/work-discovery.ts`): Claude Code
+  transcripts, Claude's live-session registry (`<claude home>/sessions/<pid>.json`,
+  undocumented — every field is read defensively) and Codex rollouts, each
+  mapped to its git repo and worktree. Only sessions started at a
+  worktree's root count, and transcripts with no assistant turn are
+  dropped — Ness's own slash-command probe leaves hundreds of those and
+  one is often the newest file in a worktree. The result is returned to
+  the asking client, not put in a slice (it's a picker for one wizard);
+  main keeps the last one so `onboarding:importWork` can only register
+  repos the scan found. Imported worktrees are tracked in `importedWorktrees`
+  in `main/index.ts` so `initWorktreePanes` seeds each with its
+  conversation as a sleeping tab instead of the default agent + Shell
+  pair, and leaves worktrees with no conversation empty until opened.
+  A conversation still running elsewhere is never blocked: Claude chat
+  tabs fork the transcript on wake (`forkIfRunningElsewhere`), Codex
+  forks the thread when resume reports an active writer
+  (`forkWhenHeldElsewhere`). Both lists are in-memory, so this only holds
+  until Ness restarts. The scan pre-answers the agent step only when
+  `mayPreselectAgent` says this is a genuine first run — the wizard also
+  shows for an existing user with no repos left.
+
 ## Workflow conventions
 
 These are how the user wants Claude to behave when working on this repo:
