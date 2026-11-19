@@ -1366,8 +1366,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               <NessMark className="h-14 w-auto mx-auto mb-4 text-brand" />
               <h1 className="gradient-text text-3xl font-extrabold tracking-tight mb-2">Ness</h1>
               <p className="text-fg text-sm leading-relaxed max-w-md mx-auto">
-                Run many coding agents in parallel — one window, isolated git worktrees,
-                clear status on who needs you.
+                Run many coding agents in parallel
               </p>
             </div>
 
@@ -1523,7 +1522,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                     <div className="text-xs text-dim mt-0.5">
                       {agentInferred && agentChosen
-                        ? 'Picked from the conversations already on this machine. New tabs will use it too.'
+                        ? 'Automatically detected from the conversations on this machine'
                         : 'This is what new tabs will spawn. You can change it later in Settings.'}
                     </div>
                   </div>
@@ -1628,7 +1627,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-danger" />
                         <span className="text-fg">asking for approval</span>
-                      </span>. Only fires for sessions Ness launches — others are untouched.
+                      </span>. Only fires for sessions Ness launches. Others are untouched.
                     </div>
                   </div>
                 </div>
@@ -1679,7 +1678,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                     <div className="text-xs text-dim mt-0.5">
                       {showImportStep
-                        ? 'Repos you have been working in, with their worktrees and conversations. Nothing is moved or changed.'
+                        ? 'We automatically detected your conversation history. Select projects to import your existing conversations. Nothing is moved or changed while importing.'
                         : 'Ness creates worktrees inside a sibling folder — your original repo stays untouched.'}
                     </div>
                   </div>
