@@ -468,29 +468,27 @@ export interface BackendStateEntry {
   state: AppState
 }
 
-/** Projects every registered backend into a `BackendStateEntry`, reusing
- *  entries whose state and connection metadata are unchanged.
- *
- *  Reference stability is mandatory, not an optimization: this feeds
- *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
- *  read — and it is read on every store event from every backend. */
-const allBackendStatesSelector = new SegmentedSelector<
-  { state: AppState; connection: BackendConnection | undefined },
-  BackendStateEntry
->(
+export function backendStateEntryDeps(source: {
+  state: AppState
+  connection: BackendConnection | undefined
+}): readonly unknown[] {
   // Keyed on the SLICES the merged sidebar reads, never on `source.state`.
   // The store does `this.state = rootReducer(this.state, event)`, so the
   // AppState object is replaced on every event — keying on it means every
   // backend's segment is rebuilt dozens of times a second while an agent
   // streams, and `useMergedWorktrees` re-walks every worktree's pane tree
   // each time. With ~80 worktrees across backends that is a beachball.
+  // The same goes for keying on the whole `settings` object: pick fields.
   //
   // (backend-segments.ts documents exactly this trap. I wrote that comment
   // and then keyed on the state object anyway — hence this one.)
   //
-  // Must stay in step with what `useMergedWorktrees` actually reads: a
-  // slice consumed there but missing here is a stale sidebar.
-  (source) => [
+  // Must stay in step with what every `useAllBackendStatesSelector`
+  // projection actually reads — `useMergedWorktrees`,
+  // `getFleetWorktreeLists`, `selectHistoryPromptRepos`. A slice consumed
+  // there but missing here is stale UI: the entry keeps the old AppState
+  // until some unrelated keyed slice changes.
+  return [
     source.connection,
     source.state.worktrees.list,
     source.state.worktrees.repoRoots,
@@ -506,8 +504,26 @@ const allBackendStatesSelector = new SegmentedSelector<
     source.state.snooze.byPath,
     source.state.pinned.byPath,
     source.state.aliases.byPath,
-    source.state.assignedPRs.byRepo
-  ],
+    source.state.assignedPRs.byRepo,
+    // selectHistoryPromptRepos
+    source.state.loch,
+    source.state.settings.lochBlameEnabled,
+    source.state.settings.lochRecordingRepos,
+    source.state.settings.lochPromptDismissedRepos
+  ]
+}
+
+/** Projects every registered backend into a `BackendStateEntry`, reusing
+ *  entries whose state and connection metadata are unchanged.
+ *
+ *  Reference stability is mandatory, not an optimization: this feeds
+ *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
+ *  read — and it is read on every store event from every backend. */
+const allBackendStatesSelector = new SegmentedSelector<
+  { state: AppState; connection: BackendConnection | undefined },
+  BackendStateEntry
+>(
+  backendStateEntryDeps,
   (source, backendId) => ({
     backendId,
     label: source.connection?.label ?? backendId,
