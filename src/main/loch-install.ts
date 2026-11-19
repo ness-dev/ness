@@ -15,7 +15,7 @@ import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import { log } from './debug'
-import { LOCH_VERSION } from '../shared/loch'
+import { LOCH_VERSION, compareVersions } from '../shared/loch'
 
 const execFileAsync = promisify(execFile)
 
@@ -62,6 +62,26 @@ export function canInstallLoch(): boolean {
   return `${process.platform}-${process.arch}` in ASSETS
 }
 
+/** `loch --version --json` of a binary, or null if it won't say. */
+export async function binaryVersion(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(path, ['--version', '--json'], { timeout: 10_000 })
+    const doc = JSON.parse(stdout) as { ok?: unknown; version?: unknown }
+    return doc.ok === true && typeof doc.version === 'string' ? doc.version : null
+  } catch {
+    return null
+  }
+}
+
+/** At boot: bring Ness's own copy up to LOCH_VERSION, but only for users who
+ *  already have that copy and are recording somewhere — nobody else gets a
+ *  download they didn't ask for. A loch on PATH is the user's to manage. */
+export async function upgradeManagedLochIfStale(recordingAnywhere: boolean): Promise<void> {
+  if (!recordingAnywhere || !existsSync(managedLochPath())) return
+  const r = await installLoch()
+  if (!r.ok) log('loch', `managed loch upgrade failed code=${r.code}`, r.error ?? '')
+}
+
 let inflight: Promise<InstallOutcome> | null = null
 
 export type InstallOutcome = { ok: true; path: string } | { ok: false; code: string; error?: string }
@@ -77,11 +97,14 @@ async function doInstall(): Promise<InstallOutcome> {
   const asset = ASSETS[`${process.platform}-${process.arch}`]
   if (!asset) return { ok: false, code: 'unsupported-platform' }
   const dest = managedLochPath()
-  // An existing copy is trusted as-is: no version or checksum check. So when
-  // LOCH_VERSION is bumped, users who already have ~/.loch/bin/loch keep the
-  // old one. Before relying on anything newer than 0.2.0 emits, compare
-  // `loch --version --json` here and replace an older binary.
-  if (existsSync(dest)) return { ok: true, path: dest }
+  // An existing copy at least as new as the pinned release is kept. An older
+  // one — or one whose version can't be read — is replaced, so bumping
+  // LOCH_VERSION reaches users who already have ~/.loch/bin/loch.
+  if (existsSync(dest)) {
+    const have = await binaryVersion(dest)
+    if (have && compareVersions(have, LOCH_VERSION) >= 0) return { ok: true, path: dest }
+    log('loch', `replacing ${dest} (version ${have ?? 'unreadable'}) with ${LOCH_VERSION}`)
+  }
 
   const name = `loch-${LOCH_VERSION}-${asset.triple}`
   const url = `https://github.com/ness-dev/loch/releases/download/v${LOCH_VERSION}/${name}.tar.gz`

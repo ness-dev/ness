@@ -13,7 +13,7 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
-import { canInstallLoch, installLoch } from './loch-install'
+import { canInstallLoch, installLoch, upgradeManagedLochIfStale } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
 import {
   backfillRepo,
@@ -1759,6 +1759,11 @@ store.subscribe((event) => {
 void syncLochHooks()
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
+void upgradeManagedLochIfStale((config.lochRecordingRepos ?? []).length > 0).then(() => {
+  // A replaced binary has the same path, but drop the cache so the next
+  // lookup re-probes rather than trusting a pre-upgrade answer.
+  resetLochBinaryCache()
+})
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.

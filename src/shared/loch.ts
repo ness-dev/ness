@@ -38,6 +38,20 @@ export interface LochHunk {
  *  pins the matching per-platform checksums). */
 export const LOCH_VERSION = '0.2.0'
 
+/** Compare dotted numeric versions (`0.2.0` vs `0.10.1`). Pre-release or
+ *  build suffixes are ignored; missing parts count as 0. */
+export function compareVersions(a: string, b: string): number {
+  const parts = (v: string): number[] =>
+    v.trim().replace(/^v/, '').split(/[-+]/)[0].split('.').map((n) => Number.parseInt(n, 10) || 0)
+  const pa = parts(a)
+  const pb = parts(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return 0
+}
+
 /** Ness's own codes, alongside loch's (`file-unreadable`, `internal`, …). */
 export type LochFailureCode = 'not-installed' | 'bad-output' | 'timeout' | string
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assignTurnColors,
   buildBlameAskBody,
+  compareVersions,
   extractFirstPrompt,
   FIRST_PROMPT_MAX_CHARS,
   hunkAtLine,
@@ -88,6 +89,17 @@ describe('assignTurnColors', () => {
       ['sha256:s2-1', 1],
       ['sha256:s1-2', 2]
     ])
+  })
+})
+
+describe('compareVersions', () => {
+  it('orders dotted versions numerically, not lexically', () => {
+    expect(compareVersions('0.2.0', '0.2.0')).toBe(0)
+    expect(compareVersions('0.1.0', '0.2.0')).toBe(-1)
+    expect(compareVersions('0.10.0', '0.9.9')).toBe(1)
+    expect(compareVersions('v1.0', '1.0.0')).toBe(0)
+    expect(compareVersions('0.2.0-beta.1', '0.2.0')).toBe(0)
+    expect(compareVersions('1.0.0', '0.99.99')).toBe(1)
   })
 })
 
