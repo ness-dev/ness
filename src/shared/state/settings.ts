@@ -406,6 +406,11 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default off. */
   worktreeMessagingEnabled: boolean
+  /** Show loch's per-line conversation blame in the file viewer's gutter,
+   *  with an action to open a Chat on a fork of the conversation that wrote
+   *  a line. Needs the `loch` CLI on PATH; without it the gutter is simply
+   *  empty. Default off (experimental). */
+  lochBlameEnabled: boolean
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — unlike the
    *  experimental toggles this gates a cosmetic, reversible action. Off
@@ -604,6 +609,7 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -693,6 +699,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: false,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
+  lochBlameEnabled: false,
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1013,6 +1020,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/lochBlameEnabledChanged':
+      return { ...state, lochBlameEnabled: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

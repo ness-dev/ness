@@ -66,6 +66,7 @@ type SubSectionId =
   | 'experimental-browser-control'
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
+  | 'experimental-loch-blame'
   | 'experimental-agent-reviews'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
@@ -117,6 +118,7 @@ const SECTIONS: Section[] = [
     { id: 'experimental-browser-control', label: 'Browser control' },
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'experimental-loch-blame', label: 'Conversation blame' },
     { id: 'experimental-agent-reviews', label: 'Agent reviews' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
@@ -250,6 +252,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-browser-control': null,
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
+    'experimental-loch-blame': null,
     'experimental-agent-reviews': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
@@ -442,6 +445,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    lochBlameEnabled,
     agentTabNamingEnabled,
     agentReviewDelivery,
     autoReviewOnGreenCi,
@@ -4145,6 +4149,39 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       option to the <code className="bg-panel px-1 rounded text-xs">create_worktree</code>{' '}
                       MCP tool. Only takes effect on the next agent session.
                     </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* loch conversation blame sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['experimental-loch-blame'] = el }}
+                id="experimental-loch-blame"
+                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Conversation blame</h3>
+                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
+                    Experimental
+                  </span>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Marks each line in the file viewer&apos;s gutter with the agent
+                  conversation that wrote it, using{' '}
+                  <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
+                  per-turn attribution. Click a mark to open a Chat on a fork of
+                  that conversation and ask it why. Requires the{' '}
+                  <code className="bg-panel px-1 rounded text-xs">loch</code> CLI on
+                  your PATH with its hooks installed.
+                </p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lochBlameEnabled}
+                    onChange={(e) => { void backend.setLochBlameEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Show conversation blame in the gutter</div>
                   </div>
                 </label>
               </div>

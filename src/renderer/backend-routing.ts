@@ -66,6 +66,8 @@ export type WorktreeScopedMethod =
   | 'listDir'
   | 'listRecentCommitShas'
   | 'listTools'
+  | 'lochAsk'
+  | 'lochBlame'
   | 'mergePR'
   | 'openInEditor'
   | 'openJsonClaudeAuthLoginTab'

@@ -6,13 +6,15 @@
 // silently upgraded.
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16'
 
-import { existsSync, lstatSync, readFileSync } from 'fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from 'fs'
 import { createRequire } from 'module'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
-import { JsonClaudeManager, bundledClaudeBinPath } from './json-claude-manager'
+import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
+import { lochAsk, lochBlame, worktreeRelativePath } from './loch'
+import { buildBlameAskBody, type LochAskResult } from '../shared/loch'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
@@ -3164,6 +3166,20 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setLochBlameEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      config.lochBlameEnabled = true
+    } else {
+      delete config.lochBlameEnabled
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/lochBlameEnabledChanged',
+      payload: config.lochBlameEnabled === true
+    })
+    return true
+  })
+
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.worktreeMessagingEnabled = true
@@ -4291,6 +4307,97 @@ function registerIpcHandlers(): void {
       startJsonClaudeSession(newSessionId, source.worktreePath)
 
       return { ok: true, newSessionId }
+    }
+  )
+
+  // loch blame gutter. Gated here as well as in the renderer so a stale or
+  // remote client can't run loch on a backend that has it switched off.
+  onWorktreeRequest('loch:blame', async (_ctx, worktreePath: string, filePath: string) => {
+    if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+      return { ok: false, code: 'disabled' }
+    }
+    return lochBlame(worktreePath, filePath)
+  })
+
+  // "Ask the conversation that wrote this": loch forks the session that wrote
+  // the line, then Ness re-files that fork under THIS worktree (loch writes it
+  // under the original session's cwd, which may be another worktree or one
+  // that's gone) and opens it as a Chat tab with a kickoff turn about the line.
+  onWorktreeRequest(
+    'loch:ask',
+    async (
+      _ctx,
+      worktreePath: string,
+      filePath: string,
+      line: number,
+      opts?: { atTurn?: boolean }
+    ): Promise<LochAskResult> => {
+      if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+        return { ok: false, code: 'disabled' }
+      }
+      const rel = worktreeRelativePath(worktreePath, filePath)
+      if (!rel || !Number.isInteger(line) || line < 1) {
+        return { ok: false, code: 'usage', error: 'bad file or line' }
+      }
+      await resolveShellEnv(worktreePath)
+      const asked = await lochAsk(worktreePath, rel, line, { atTurn: opts?.atTurn === true })
+      if (!asked.ok) return asked
+      const { fork } = asked
+
+      const copied = forkTranscript({
+        sourceSessionId: fork.sessionId,
+        sourceWorktreePath: fork.cwd,
+        sourceTranscriptPath: fork.path,
+        destWorktreePath: worktreePath
+      })
+      if (!copied.ok || !copied.newSessionId) {
+        return { ok: false, code: 'fork-failed', error: copied.reason }
+      }
+      const newSessionId = copied.newSessionId
+      // loch's fork was only ever an intermediate — ours is the one that gets
+      // resumed. Leaving it would add an orphan session to the other
+      // directory's `claude --resume` picker on every ask.
+      try {
+        unlinkSync(fork.path)
+      } catch (err) {
+        log('loch', `could not remove intermediate fork ${fork.path}`, err instanceof Error ? err.message : err)
+      }
+
+      const real = (p: string): string => {
+        try {
+          return realpathSync(p)
+        } catch {
+          return resolvePath(p)
+        }
+      }
+      const relocated = real(fork.cwd) !== real(worktreePath)
+      const relocationPreamble = relocated
+        ? await buildRelocationPreamble({ sourceWorktreePath: fork.cwd, destWorktreePath: worktreePath })
+        : undefined
+
+      let lineText: string | null = null
+      try {
+        lineText = readFileSync(resolvePath(worktreePath, rel), 'utf8').split('\n')[line - 1] ?? null
+      } catch {
+        lineText = null
+      }
+
+      panesFSM.addTab(worktreePath, {
+        id: newSessionId,
+        type: 'json-claude',
+        label: `Ask · ${basename(rel)}:${line}`,
+        sessionId: newSessionId,
+        mode: 'awake'
+      })
+      notificationBus.startWithPrompt(
+        newSessionId,
+        worktreePath,
+        wrapAutomatedMessage(
+          'blame-ask',
+          buildBlameAskBody({ relPath: rel, line, lineText, conversation: fork.conversation, relocationPreamble })
+        )
+      )
+      return { ok: true, sessionId: newSessionId, relocated }
     }
   )
 

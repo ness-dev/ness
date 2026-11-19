@@ -588,6 +588,14 @@ describe('settingsReducer', () => {
     expect(off.worktreeMessagingEnabled).toBe(false)
   })
 
+  it('lochBlameEnabledChanged toggles flag, defaulting off', () => {
+    expect(initialSettings.lochBlameEnabled).toBe(false)
+    const on = apply(initialSettings, { type: 'settings/lochBlameEnabledChanged', payload: true })
+    expect(on.lochBlameEnabled).toBe(true)
+    const off = apply(on, { type: 'settings/lochBlameEnabledChanged', payload: false })
+    expect(off.lochBlameEnabled).toBe(false)
+  })
+
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
     expect(initialSettings.agentTabNamingEnabled).toBe(true)
     const off = apply(initialSettings, {

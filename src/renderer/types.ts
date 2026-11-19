@@ -27,6 +27,7 @@ export type {
 }
 
 import type { ChatTabInfo } from '../shared/agent-tabs'
+import type { LochAskResult, LochBlameResult } from '../shared/loch'
 export type { ChatTabInfo }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
@@ -358,6 +359,15 @@ export interface ElectronAPI {
   listAllFiles(worktreePath: string): Promise<string[]>
   listRecentCommitShas(worktreePath: string): Promise<string[]>
   readWorktreeFile(worktreePath: string, filePath: string): Promise<FileReadResult>
+  /** loch conversation blame for a file; `ok: false` with a quiet code when loch isn't set up. */
+  lochBlame(worktreePath: string, filePath: string): Promise<LochBlameResult>
+  /** Fork the conversation that wrote `line` and open it as a Chat tab here. */
+  lochAsk(
+    worktreePath: string,
+    filePath: string,
+    line: number,
+    opts?: { atTurn?: boolean }
+  ): Promise<LochAskResult>
   readWorktreeFileBinary(
     worktreePath: string,
     filePath: string
@@ -409,6 +419,7 @@ export interface ElectronAPI {
   setBrowserToolsMode(mode: 'view' | 'full'): Promise<boolean>
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
+  setLochBlameEnabled(enabled: boolean): Promise<boolean>
   setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
