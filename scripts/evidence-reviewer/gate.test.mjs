@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MARKER, RERUN_LABEL, canWrite, rerunRejection, rerunTicked, touchesUi } from './gate.mjs'
+import { MARKER, RERUN_LABEL, canWrite, isSameRepo, rerunRejection, rerunTicked, touchesUi } from './gate.mjs'
 
 const body = (mark) => `${MARKER}\n## Evidence\n\nstuff\n\n- [${mark}] ${RERUN_LABEL}\n\n<sub>footer</sub>`
 
@@ -72,5 +72,15 @@ describe('touchesUi', () => {
     expect(touchesUi(['.github/workflows/ci.yml', 'scripts/release.sh', 'src/main/index.ts'])).toBe(false)
     expect(touchesUi(['src/rendererish.ts'])).toBe(false)
     expect(touchesUi([])).toBe(false)
+  })
+})
+
+describe('isSameRepo', () => {
+  it('is true only when the head lives in this repo', () => {
+    expect(isSameRepo({ head: { repo: { full_name: 'ness-dev/ness' } } }, 'ness-dev/ness')).toBe(true)
+    expect(isSameRepo({ head: { repo: { full_name: 'someone/ness' } } }, 'ness-dev/ness')).toBe(false)
+  })
+  it('treats a deleted fork (null head repo) as a fork', () => {
+    expect(isSameRepo({ head: { repo: null } }, 'ness-dev/ness')).toBe(false)
   })
 })

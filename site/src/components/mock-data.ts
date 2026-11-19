@@ -34,8 +34,20 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
     },
     // The edit lands in the uncommitted src/welcome.tsx listed above.
     chat: {
+      earlier: {
+        prompt: 'Add a first-run welcome screen after signup.',
+        duration: '2m 14s',
+        toolCount: 11,
+        filesEdited: 3,
+        answer: 'Added `Welcome` at `/welcome` and sent new signups there.'
+      },
       prompt:
         'The welcome screen still says "Sign up" right after login. Show their name and a Continue button instead.',
+      tools: [
+        { tool: 'Read' },
+        { tool: 'Grep' },
+        { tool: 'Bash', intent: 'Reproduce the signed-out flash' }
+      ],
       explanation:
         '`Welcome` reads the session before it has loaded, so it always renders the signed-out copy. Waiting on `status` fixes it.',
       edit: {
@@ -49,11 +61,7 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
         ]
       },
       working: {
-        todos: [
-          { status: 'completed', text: 'Find why the signed-out copy shows' },
-          { status: 'in_progress', text: 'Wait for the session before rendering' },
-          { status: 'pending', text: 'Test the loading state' }
-        ],
+        todos: { done: 1, total: 3 },
         streaming: 'Adding a test for the loading state'
       },
       approval: {
@@ -74,7 +82,19 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
     },
     // The edit lands in the uncommitted src/router.ts listed above.
     chat: {
-      prompt: 'Logging out flashes the dashboard for a frame before the redirect. Fix it.',
+      earlier: {
+        prompt: 'Write an e2e test that reproduces the logout flash.',
+        duration: '58s',
+        toolCount: 6,
+        filesEdited: 1,
+        answer: '`e2e/logout.spec.ts` now catches the flash and fails on `main`.'
+      },
+      prompt: 'Logging out flashes the dashboard for a frame. Fix it.',
+      tools: [
+        { tool: 'Grep' },
+        { tool: 'Read' },
+        { tool: 'Bash', intent: 'Run the logout e2e test' }
+      ],
       explanation:
         'The redirect runs in an effect, after first paint. Guarding the route in its `loader` means a signed-out user never renders `Dashboard` at all.',
       edit: {
@@ -83,16 +103,11 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
           { kind: 'ctx', old: 21, next: 21, text: '  {' },
           { kind: 'ctx', old: 22, next: 22, text: "    path: '/dashboard'," },
           { kind: 'add', next: 23, text: '    loader: requireSession,' },
-          { kind: 'ctx', old: 23, next: 24, text: '    element: <Dashboard />' },
-          { kind: 'ctx', old: 24, next: 25, text: '  },' }
+          { kind: 'ctx', old: 23, next: 24, text: '    element: <Dashboard />' }
         ]
       },
       working: {
-        todos: [
-          { status: 'completed', text: 'Find where the redirect happens' },
-          { status: 'in_progress', text: 'Move the guard into the loader' },
-          { status: 'pending', text: 'Check it in the e2e suite' }
-        ],
+        todos: { done: 1, total: 3 },
         streaming: 'Running the logout e2e test'
       },
       approval: {

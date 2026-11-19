@@ -102,9 +102,9 @@ export interface ModelOption {
 }
 
 /** Family aliases the `claude` CLI resolves at launch. Resolution read
- *  out of the bundled binary's own `init` event (2.1.285): `opus` → Opus
- *  5.5, `sonnet` → Sonnet 5.5, `haiku` → Haiku 4.5, `fable` → Fable 5.1,
- *  `best` → Fable 5.1, `opusplan` → Opus while planning then Sonnet 5.5.
+ *  out of the bundled binary's own `init` event (2.1.327): `opus` → Opus
+ *  5.5, `sonnet` → Sonnet 5.5, `haiku` → Haiku 5.5, `fable` → Fable 5.2,
+ *  `best` → Opus 5.5, `opusplan` → Opus while planning then Sonnet 5.5.
  *
  *  Whatever an alias resolves to needs a pricing entry: the resolved id
  *  is what lands in the transcript and what priceFor() bills against, so
@@ -140,6 +140,7 @@ export const CLAUDE_MODELS: ModelOption[] = [
   ...CLAUDE_MODEL_ALIASES,
   { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', tier: 'current' },
   { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5', tier: 'current' },
+  { id: 'claude-fable-5-2', displayName: 'Claude Fable 5.2', tier: 'current' },
   { id: 'claude-fable-5-1', displayName: 'Claude Fable 5.1', tier: 'current' },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', tier: 'current' },
   { id: 'claude-opus-5', displayName: 'Claude Opus 5', tier: 'current' },
