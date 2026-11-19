@@ -30,6 +30,11 @@ interface BlameHover {
   left: number
   /** Near the bottom of the editor the card opens upward instead. */
   above: boolean
+  /** The line the card was opened from — what an Ask from the card targets. */
+  line: number
+  /** Opened by a click: stays put, takes pointer input, and offers Ask.
+   *  A plain hover card is pointer-transparent and vanishes on mouse-out. */
+  pinned: boolean
 }
 
 export function MonacoEditor({
@@ -61,6 +66,9 @@ export function MonacoEditor({
   const attributedKeyRef = useRef<monaco.editor.IContextKey<boolean> | null>(null)
   const [blameHover, setBlameHover] = useState<BlameHover | null>(null)
   const hoverHunkRef = useRef<LochHunk | null>(null)
+  const pinnedRef = useRef(false)
+  const hideBlameHoverRef = useRef<() => void>(() => {})
+  const cardRef = useRef<HTMLDivElement | null>(null)
 
   // Construct the editor once and tear it down on unmount. Subsequent
   // prop updates are pushed imperatively so we don't recreate the model
@@ -141,12 +149,32 @@ export function MonacoEditor({
       const h = hunkAtLine(b.hunks, ln)
       return h?.conversation ? h : null
     }
-    const hideBlameHover = (): void => {
+    const hideBlameHover = (opts?: { evenPinned?: boolean }): void => {
       if (hoverHunkRef.current === null) return
+      if (pinnedRef.current && !opts?.evenPinned) return
       hoverHunkRef.current = null
+      pinnedRef.current = false
       setBlameHover(null)
     }
+    hideBlameHoverRef.current = () => hideBlameHover({ evenPinned: true })
+    const showBlameCard = (hunk: LochHunk, ln: number, pinned: boolean): void => {
+      hoverHunkRef.current = hunk
+      pinnedRef.current = pinned
+      const layout = editor.getLayoutInfo()
+      const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight)
+      const lineTop = editor.getTopForLineNumber(ln) - editor.getScrollTop()
+      const above = lineTop > layout.height - 260
+      setBlameHover({
+        hunk,
+        top: above ? lineTop : lineTop + lineHeight,
+        left: layout.decorationsLeft + layout.decorationsWidth + 4,
+        above,
+        line: ln,
+        pinned
+      })
+    }
     const blameMoveSub = editor.onMouseMove((e) => {
+      if (pinnedRef.current) return
       if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) {
         hideBlameHover()
         return
@@ -158,30 +186,33 @@ export function MonacoEditor({
         return
       }
       if (hoverHunkRef.current === hunk) return
-      hoverHunkRef.current = hunk
-      const layout = editor.getLayoutInfo()
-      const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight)
-      const lineTop = editor.getTopForLineNumber(ln) - editor.getScrollTop()
-      const above = lineTop > layout.height - 240
-      setBlameHover({
-        hunk,
-        top: above ? lineTop : lineTop + lineHeight,
-        left: layout.decorationsLeft + layout.decorationsWidth + 4,
-        above
-      })
+      showBlameCard(hunk, ln, false)
     })
-    const blameLeaveSub = editor.onMouseLeave(hideBlameHover)
-    const blameScrollSub = editor.onDidScrollChange(hideBlameHover)
+    const blameLeaveSub = editor.onMouseLeave(() => hideBlameHover())
+    const blameScrollSub = editor.onDidScrollChange(() => hideBlameHover({ evenPinned: true }))
+    // A click on a bar only pins its card. Forking writes a transcript and
+    // spends a turn, so it waits for the card's explicit Ask button (or the
+    // context-menu action) rather than riding on a gutter click.
     const blameDownSub = editor.onMouseDown((e) => {
-      if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) return
-      // A fork writes a transcript and spends a turn — only a deliberate
-      // left click on the bar should start one, never a right-click.
-      if (!e.event.leftButton) return
+      const onBar = e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS
       const ln = e.target.position?.lineNumber
-      const hunk = attributedAt(ln)
-      if (!hunk || ln == null || !hunk.conversation?.available) return
-      hideBlameHover()
-      onAskRef.current?.(ln, { atTurn: false })
+      const hunk = onBar ? attributedAt(ln) : null
+      if (!hunk || ln == null || !e.event.leftButton) {
+        hideBlameHover({ evenPinned: true })
+        return
+      }
+      if (pinnedRef.current && hoverHunkRef.current === hunk) {
+        hideBlameHover({ evenPinned: true })
+        return
+      }
+      showBlameCard(hunk, ln, true)
+    })
+    const blameKeySub = editor.onKeyDown((e) => {
+      if (e.keyCode === monaco.KeyCode.Escape && pinnedRef.current) {
+        hideBlameHover({ evenPinned: true })
+        e.preventDefault()
+        e.stopPropagation()
+      }
     })
 
     // Context-menu actions act on the cursor line (a right-click moves the
@@ -226,6 +257,7 @@ export function MonacoEditor({
       blameLeaveSub.dispose()
       blameScrollSub.dispose()
       blameDownSub.dispose()
+      blameKeySub.dispose()
       cursorSub.dispose()
       askAction.dispose()
       askAtTurnAction.dispose()
@@ -310,13 +342,35 @@ export function MonacoEditor({
     attributedKeyRef.current?.set(!!h?.conversation?.available && !!onAskRef.current)
   }, [blame])
 
+  // A pinned card closes on any press outside it — including outside the
+  // editor, where Monaco's own mouse events can't see the click.
+  const pinned = !!blameHover?.pinned
+  useEffect(() => {
+    if (!pinned) return
+    const onDown = (e: MouseEvent): void => {
+      const t = e.target as Node | null
+      if (t && cardRef.current?.contains(t)) return
+      if (t && hostRef.current?.contains(t)) return // Monaco's onMouseDown decides
+      hideBlameHoverRef.current()
+    }
+    document.addEventListener('mousedown', onDown, true)
+    return () => document.removeEventListener('mousedown', onDown, true)
+  }, [pinned])
+
   const hoverConv = blameHover?.hunk.conversation
+  const askFromCard = (atTurn: boolean): void => {
+    if (!blameHover) return
+    const ln = blameHover.line
+    hideBlameHoverRef.current()
+    onAskRef.current?.(ln, { atTurn })
+  }
   return (
     <div className="h-full w-full relative">
       <div ref={hostRef} className="h-full w-full" />
       {blameHover && hoverConv && (
         <div
-          className="absolute z-20 pointer-events-none"
+          ref={cardRef}
+          className={`absolute z-20 ${blameHover.pinned ? '' : 'pointer-events-none'}`}
           style={{
             top: blameHover.top,
             left: blameHover.left,
@@ -328,6 +382,7 @@ export function MonacoEditor({
             start={blameHover.hunk.start}
             end={blameHover.hunk.end}
             colorSlot={blameColors.current.get(hoverConv.turn) ?? 0}
+            onAsk={blameHover.pinned && onAskLine ? askFromCard : undefined}
           />
         </div>
       )}

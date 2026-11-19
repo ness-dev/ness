@@ -19,12 +19,15 @@ export function LochBlameCard({
   conversation,
   start,
   end,
-  colorSlot
+  colorSlot,
+  onAsk
 }: {
   conversation: LochConversation
   start: number
   end: number
   colorSlot: number
+  /** Present only on a pinned card: the explicit, turn-spending action. */
+  onAsk?: (atTurn: boolean) => void
 }): JSX.Element {
   const title = conversation.title?.trim() || 'Untitled session'
   const prompt = conversation.prompt?.trim()
@@ -57,11 +60,32 @@ export function LochBlameCard({
           {prompt}
         </div>
       )}
-      <div className="px-3 py-1.5 border-t border-border text-faint">
-        {conversation.available
-          ? 'Click the bar to ask this conversation about it'
-          : 'Transcript not available — can’t open a chat'}
-      </div>
+      {!conversation.available ? (
+        <div className="px-3 py-1.5 border-t border-border text-faint">
+          Transcript not available — can’t open a chat
+        </div>
+      ) : onAsk ? (
+        <div className="px-3 py-2 border-t border-border flex items-center gap-2">
+          <button
+            onClick={() => onAsk(false)}
+            className="px-2 py-1 rounded bg-accent/15 text-fg-bright hover:bg-accent/25 cursor-pointer"
+            title="Fork this conversation into a new Chat tab and ask it about this line"
+          >
+            Ask this conversation
+          </button>
+          <button
+            onClick={() => onAsk(true)}
+            className="px-2 py-1 rounded text-dim hover:text-fg hover:bg-panel cursor-pointer"
+            title="Fork from the end of the turn that wrote the line, before anything later in the session"
+          >
+            As of this turn
+          </button>
+        </div>
+      ) : (
+        <div className="px-3 py-1.5 border-t border-border text-faint">
+          Click the bar to pin this card
+        </div>
+      )}
     </div>
   )
 }
