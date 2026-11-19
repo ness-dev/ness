@@ -331,7 +331,7 @@ export function buildInitialAppState(
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,
-      autoApprovePermissions: config.autoApprovePermissions === true,
+      autoApprovePermissions: config.autoApprovePermissions !== false,
       autoApproveSteerInstructions: config.autoApproveSteerInstructions || '',
       useSystemClaudeForJsonMode: config.useSystemClaudeForJsonMode === true,
       jsonModeChatDensity: config.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact',
@@ -382,6 +382,7 @@ export function buildInitialAppState(
         ? (config.preventSleepMode as PreventSleepMode)
         : 'off',
       agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
+      agentReviewsEnabled: config.agentReviewsEnabled === true,
       autoReviewOnGreenCi: config.autoReviewOnGreenCi === true,
       reviewAgent:
         config.reviewAgent === 'claude' ||

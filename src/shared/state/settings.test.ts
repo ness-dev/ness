@@ -641,18 +641,18 @@ describe('settingsReducer', () => {
     expect(xterm.defaultClaudeTabType).toBe('xterm')
   })
 
-  it('autoApprovePermissionsChanged toggles the flag', () => {
-    expect(initialSettings.autoApprovePermissions).toBe(false)
-    const on = apply(initialSettings, {
-      type: 'settings/autoApprovePermissionsChanged',
-      payload: true
-    })
-    expect(on.autoApprovePermissions).toBe(true)
-    const off = apply(on, {
+  it('autoApprovePermissionsChanged toggles the flag, defaulting on', () => {
+    expect(initialSettings.autoApprovePermissions).toBe(true)
+    const off = apply(initialSettings, {
       type: 'settings/autoApprovePermissionsChanged',
       payload: false
     })
     expect(off.autoApprovePermissions).toBe(false)
+    const on = apply(off, {
+      type: 'settings/autoApprovePermissionsChanged',
+      payload: true
+    })
+    expect(on.autoApprovePermissions).toBe(true)
   })
 
   it('autoApproveSteerInstructionsChanged sets the steer text', () => {
@@ -962,6 +962,16 @@ describe('settingsReducer', () => {
     expect(
       apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
     ).toBe(auto)
+  })
+
+  it('agentReviewsEnabledChanged toggles, defaulting off, and keeps identity on a no-op', () => {
+    expect(initialSettings.agentReviewsEnabled).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/agentReviewsEnabledChanged',
+      payload: true
+    })
+    expect(on.agentReviewsEnabled).toBe(true)
+    expect(apply(on, { type: 'settings/agentReviewsEnabledChanged', payload: true })).toBe(on)
   })
 
   it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {

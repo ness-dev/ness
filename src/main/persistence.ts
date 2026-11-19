@@ -295,10 +295,10 @@ export interface Config {
   // True once the user dismisses the "Switch to the new Chat mode"
   // overlay shown on Terminal Claude tabs.
   chatPromotionDismissed?: boolean
-  // When true, JSON-mode tabs delegate per-tool approval decisions to a
+  // Unless false, JSON-mode tabs delegate per-tool approval decisions to a
   // Haiku oneshot for obviously-safe tool calls. Productivity feature
-  // only — not a security boundary. Default off (undefined treated as
-  // false).
+  // only — not a security boundary. Default on (undefined treated as
+  // true), so only an explicit opt-out is written.
   autoApprovePermissions?: boolean
   // Optional project-specific guidance appended to the auto-approver's
   // policy prompt. Empty by default. Has no effect unless
@@ -406,6 +406,8 @@ export interface Config {
   preventSleepMode?: PreventSleepMode
   /** Absent ⇒ 'draft'. */
   agentReviewDelivery?: 'auto'
+  /** Default off; only `true` is written. */
+  agentReviewsEnabled?: boolean
   autoReviewOnGreenCi?: boolean
   /** Absent ⇒ 'inherit' (same agent as the requester). */
   reviewAgent?: 'claude' | 'codex' | 'cursor'

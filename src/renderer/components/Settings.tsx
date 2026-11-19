@@ -443,6 +443,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     worktreeMessagingEnabled,
     agentTabNamingEnabled,
     agentReviewDelivery,
+    agentReviewsEnabled,
     autoReviewOnGreenCi,
     reviewAgent,
     reviewModel,
@@ -3232,6 +3233,21 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   the agent that asked is waiting on it. The choice below is for a review nobody
                   asked for, e.g. one you started by hand in a Chat tab.
                 </p>
+
+                <label className="flex items-start gap-3 cursor-pointer mb-4">
+                  <input
+                    type="checkbox"
+                    checked={agentReviewsEnabled}
+                    onChange={(e) => { void backend.setAgentReviewsEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable agent reviews</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">request_review</code> MCP tool and the &quot;Request AI review&quot; button. Off by default: every review starts another agent. Only takes effect on the next agent session.
+                    </div>
+                  </div>
+                </label>
+
                 <fieldset className="grid grid-cols-2 gap-2">
                   {([
                     {
@@ -3270,91 +3286,95 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   })}
                 </fieldset>
 
-                <div className="mt-4">
-                  <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
-                  <p className="text-xs text-dim mb-2">
-                    Which agent and model review. Pick a different one — or a stronger model — to
-                    get a second opinion rather than the same brain twice. With &quot;same as the
-                    requester&quot; the agent isn&apos;t known until the review starts; a model
-                    that agent doesn&apos;t know is ignored in favour of its own default.
-                  </p>
-                  <div className="flex gap-2">
-                    <select
-                      value={reviewAgent}
-                      onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
-                      className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
-                    >
-                      <option value="inherit">Same as the requester</option>
-                      <option value="claude">Claude</option>
-                      <option value="codex">Codex</option>
-                    </select>
-                    <select
-                      value={reviewModel}
-                      onChange={(e) => { void backend.setReviewModel(e.target.value) }}
-                      className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
-                    >
-                      <option value="">(Default — the agent&apos;s own model)</option>
-                      {reviewModelGroups.map((group) => (
-                        <optgroup key={group.label} label={group.label}>
-                          {group.models.map((m) => (
-                            <option key={`${group.label}-${m.id}`} value={m.id}>
-                              {m.displayName}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
-                  <p className="text-xs text-dim mb-2">
-                    What a reviewer is told to look for. The requester&apos;s own description of the
-                    work is added above it, and Ness appends how to use the review tools.
-                  </p>
-                  <textarea
-                    value={reviewPromptDraft}
-                    onChange={(e) => setReviewPromptDraft(e.target.value)}
-                    rows={10}
-                    spellCheck={false}
-                    className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={handleSaveReviewPrompt}
-                      disabled={reviewPromptDraft === reviewPrompt}
-                      className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={handleResetReviewPrompt}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="icon-xs" />
-                      Reset to default
-                    </button>
-                    {reviewPromptSaveResult && (
-                      <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
-                        {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <label className="flex items-start gap-3 cursor-pointer mt-4">
-                  <input
-                    type="checkbox"
-                    checked={autoReviewOnGreenCi}
-                    onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
-                    <div className="text-xs text-dim mt-0.5">
-                      Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                {agentReviewsEnabled && (
+                  <>
+                  <div className="mt-4">
+                    <label className="block text-sm text-fg-bright mb-1">Reviewer agent</label>
+                    <p className="text-xs text-dim mb-2">
+                      Which agent and model review. Pick a different one — or a stronger model — to
+                      get a second opinion rather than the same brain twice. With &quot;same as the
+                      requester&quot; the agent isn&apos;t known until the review starts; a model
+                      that agent doesn&apos;t know is ignored in favour of its own default.
+                    </p>
+                    <div className="flex gap-2">
+                      <select
+                        value={reviewAgent}
+                        onChange={(e) => { void backend.setReviewAgent(e.target.value as ReviewAgentChoice) }}
+                        className="bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                      >
+                        <option value="inherit">Same as the requester</option>
+                        <option value="claude">Claude</option>
+                        <option value="codex">Codex</option>
+                      </select>
+                      <select
+                        value={reviewModel}
+                        onChange={(e) => { void backend.setReviewModel(e.target.value) }}
+                        className="flex-1 min-w-0 bg-panel border border-border rounded px-2 py-1.5 text-sm text-fg cursor-pointer"
+                      >
+                        <option value="">(Default — the agent&apos;s own model)</option>
+                        {reviewModelGroups.map((group) => (
+                          <optgroup key={group.label} label={group.label}>
+                            {group.models.map((m) => (
+                              <option key={`${group.label}-${m.id}`} value={m.id}>
+                                {m.displayName}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                </label>
+
+                  <div className="mt-4">
+                    <label className="block text-sm text-fg-bright mb-1">Review prompt</label>
+                    <p className="text-xs text-dim mb-2">
+                      What a reviewer is told to look for. The requester&apos;s own description of the
+                      work is added above it, and Ness appends how to use the review tools.
+                    </p>
+                    <textarea
+                      value={reviewPromptDraft}
+                      onChange={(e) => setReviewPromptDraft(e.target.value)}
+                      rows={10}
+                      spellCheck={false}
+                      className="w-full bg-panel border border-border rounded px-3 py-2 text-xs text-fg font-mono resize-y" />
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        onClick={handleSaveReviewPrompt}
+                        disabled={reviewPromptDraft === reviewPrompt}
+                        className="px-3 py-1.5 text-sm rounded bg-accent text-fg font-medium hover:bg-accent/80 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleResetReviewPrompt}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm text-dim hover:text-fg transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="icon-xs" />
+                        Reset to default
+                      </button>
+                      {reviewPromptSaveResult && (
+                        <span className={`text-xs flex items-center gap-1.5 ${reviewPromptSaveResult.ok ? 'text-success' : 'text-danger'}`}>
+                          {reviewPromptSaveResult.ok ? <Check className="icon-xs" /> : <X className="icon-xs" />}{reviewPromptSaveResult.message}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <label className="flex items-start gap-3 cursor-pointer mt-4">
+                    <input
+                      type="checkbox"
+                      checked={autoReviewOnGreenCi}
+                      onChange={(e) => { void backend.setAutoReviewOnGreenCi(e.target.checked) }}
+                      className="mt-0.5 cursor-pointer icon-base" />
+                    <div className="flex-1">
+                      <div className="text-sm text-fg-bright">Review automatically when CI goes green</div>
+                      <div className="text-xs text-dim mt-0.5">
+                        Opens a reviewer for the worktree&apos;s Chat tab as soon as its PR checks pass, without anyone asking. Off by default: it starts an agent on its own, and every green commit costs a review.
+                      </div>
+                    </div>
+                  </label>
+                  </>
+                )}
               </div>
 
               {/* Auto-approve safe tool calls sub-card */}

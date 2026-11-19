@@ -999,7 +999,7 @@ export function PRStatusPanel({
         <div className="px-3 py-2 text-xs text-faint">No PR for this branch</div>
       )}
 
-      {!needsGithubToken && pr !== undefined && aiReview.row}
+      {!needsGithubToken && pr !== undefined && settings.agentReviewsEnabled && aiReview.row}
 
       {!needsGithubToken && pr === undefined && (
         <div className="px-3 py-2 text-xs text-faint">Loading...</div>

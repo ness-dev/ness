@@ -533,6 +533,11 @@ export interface SettingsState {
   reviewModel: string
   /** Instructions handed to a reviewer. See DEFAULT_REVIEW_PROMPT. */
   reviewPrompt: string
+  /** Master switch for agent-run reviews: the request_review MCP tool,
+   *  the "Request AI review" button and the CI-green spawner. Off by
+   *  default — each review starts another agent. The Review tab and its
+   *  comment tools work regardless; they serve human reviews too. */
+  agentReviewsEnabled: boolean
   /** Open a reviewer Chat tab automatically when a worktree's PR checks
    *  go green. Off by default — it spawns an agent on its own. */
   autoReviewOnGreenCi: boolean
@@ -636,6 +641,7 @@ export type SettingsEvent =
   | { type: 'settings/reviewAgentChanged'; payload: ReviewAgentChoice }
   | { type: 'settings/reviewModelChanged'; payload: string }
   | { type: 'settings/reviewPromptChanged'; payload: string }
+  | { type: 'settings/agentReviewsEnabledChanged'; payload: boolean }
   | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
@@ -696,7 +702,7 @@ export const initialSettings: SettingsState = {
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
-  autoApprovePermissions: false,
+  autoApprovePermissions: true,
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
@@ -722,6 +728,7 @@ export const initialSettings: SettingsState = {
   reviewAgent: 'inherit',
   reviewModel: '',
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  agentReviewsEnabled: false,
   autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
@@ -1068,6 +1075,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/agentReviewsEnabledChanged':
+      return state.agentReviewsEnabled === event.payload
+        ? state
+        : { ...state, agentReviewsEnabled: event.payload }
     case 'settings/autoReviewOnGreenCiChanged':
       return state.autoReviewOnGreenCi === event.payload
         ? state

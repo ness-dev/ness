@@ -135,6 +135,7 @@ const scope: CallerScope = {
 /** Mutable so a test can flip the setting off without restarting the server —
  * mirrors how the real dep re-reads config per request. */
 let conversationForkEnabled = true
+let agentReviewsEnabled = true
 let callerForkKind: 'claude' | 'codex' = 'claude'
 let prReviewPrompt = ''
 
@@ -225,6 +226,7 @@ const deps: ControlServerDeps = {
   setAlias: (path, alias) => setAlias(path, alias),
   clearAlias: (path) => clearAlias(path),
   getAgentTabNamingEnabled: () => agentTabNamingEnabled,
+  getAgentReviewsEnabled: () => agentReviewsEnabled,
   renameTab: (path, tabId, label, source) => renameTab(path, tabId, label, source),
   messaging: {
     isEnabled: () => messagingEnabled,
@@ -922,6 +924,19 @@ describe('control-server /reviews endpoints', () => {
     const refused = await call('POST', '/reviews/request', { context: 'fail please' })
     expect(refused.status).toBe(409)
     expect(refused.json.error).toMatch(/only a Chat tab/)
+  })
+
+  it('refuses request_review when agent reviews are off', async () => {
+    reviews.request.mockClear()
+    agentReviewsEnabled = false
+    try {
+      const r = await call('POST', '/reviews/request', { context: 'please check' })
+      expect(r.status).toBe(403)
+      expect(r.json.error).toMatch(/disabled in Ness settings/)
+      expect(reviews.request).not.toHaveBeenCalled()
+    } finally {
+      agentReviewsEnabled = true
+    }
   })
 
   it('submits a review and reports where it is going', async () => {

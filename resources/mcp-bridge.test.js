@@ -442,10 +442,14 @@ describe('mcp-bridge review tools', () => {
     res.end(JSON.stringify(body))
   }
 
-  async function start(handler) {
+  async function start(handler, reviewsEnabled = true) {
     stub = await startStub((req, body, res, captured) => {
       if (req.url === '/scope') {
-        return json(res, 200, { scope: null, messaging: { enabled: true } })
+        return json(res, 200, {
+          scope: null,
+          messaging: { enabled: true },
+          reviews: { enabled: reviewsEnabled }
+        })
       }
       return handler(req, body, res, captured)
     })
@@ -480,6 +484,15 @@ describe('mcp-bridge review tools', () => {
     ]) {
       expect(names).toContain(n)
     }
+  })
+
+  it('hides request_review but keeps the comment tools when agent reviews are off', async () => {
+    await start((req, body, res) => json(res, 404, {}), false)
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const names = (await bridge.next()).result.tools.map((t) => t.name)
+    expect(names).not.toContain('request_review')
+    expect(names).toContain('add_review_comment')
+    expect(names).toContain('submit_review')
   })
 
   it('add_review_comment forwards to POST /reviews/comments', async () => {
