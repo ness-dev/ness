@@ -857,6 +857,45 @@ button, [role="button"], a[href], [onclick] {
   background-color: var(--color-fg);
 }
 
+/* loch conversation blame: a thin bar per line in the line-decorations lane,
+   coloured by the session that wrote it. Fixed mid-saturation hues so they
+   read on both light and dark themes. */
+.loch-c0 { --loch-c: #e5734d; }
+.loch-c1 { --loch-c: #4d9de5; }
+.loch-c2 { --loch-c: #5dbb63; }
+.loch-c3 { --loch-c: #c46be0; }
+.loch-c4 { --loch-c: #e0b43a; }
+.loch-c5 { --loch-c: #3fbfb3; }
+.loch-c6 { --loch-c: #e05d8f; }
+.loch-c7 { --loch-c: #8a8fe8; }
+.loch-c8 { --loch-c: #a3b83a; }
+.loch-c9 { --loch-c: #b98a5e; }
+.monaco-editor .loch-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 3px;
+  border-radius: 1px;
+  background: var(--loch-c);
+  opacity: 0.75;
+}
+.monaco-editor .loch-bar.loch-askable { cursor: pointer; }
+.monaco-editor .loch-bar.loch-askable:hover::before { opacity: 1; width: 4px; }
+/* Backfilled turns are reconstructed and coarser — dashed, not solid. */
+.monaco-editor .loch-bar.loch-backfilled::before {
+  background: repeating-linear-gradient(to bottom, var(--loch-c) 0 3px, transparent 3px 5px);
+  opacity: 0.6;
+}
+.loch-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--loch-c);
+}
+
 /* Review screen: per-line "add comment" button (+ icon). */
 .monaco-editor .comment-line-glyph {
   cursor: pointer;

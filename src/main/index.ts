@@ -6,13 +6,27 @@
 // silently upgraded.
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16'
 
-import { existsSync, lstatSync, readFileSync } from 'fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from 'fs'
 import { createRequire } from 'module'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
-import { JsonClaudeManager, bundledClaudeBinPath } from './json-claude-manager'
+import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
+import { canInstallLoch, installLoch, upgradeManagedLochIfStale } from './loch-install'
+import { LochHooksCoordinator } from './loch-hooks-coordinator'
+import {
+  backfillRepo,
+  installLochHooks,
+  lochAsk,
+  isLochForkPath,
+  lochBinary,
+  lochBlame,
+  resetLochBinaryCache,
+  removeLochHooks,
+  worktreeRelativePath
+} from './loch'
+import { buildBlameAskBody, type LochAskResult, type LochRecordingResult } from '../shared/loch'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
@@ -1699,6 +1713,57 @@ store.subscribe((event) => {
   }
 })
 
+// loch recording: every worktree of an opted-in repo gets loch's hooks,
+// including ones created after the opt-in. listChanged is infrequent and the
+// in-memory set means each path is installed once per process (the first
+// pass after boot re-installs everything, which refreshes the binary path).
+// Installs and removals go through one coordinator: serialized per path,
+// and an opt-out wins over an install still in flight (see
+// loch-hooks-coordinator.ts for how).
+function isLochRecording(repoRoot: string): boolean {
+  return (config.lochRecordingRepos ?? []).includes(repoRoot)
+}
+const lochHooks = new LochHooksCoordinator({
+  isRecording: isLochRecording,
+  install: installLochHooks,
+  remove: (path) => {
+    removeLochHooks(path)
+  },
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
+async function syncLochHooks(): Promise<void> {
+  if ((config.lochRecordingRepos ?? []).length === 0) return
+  for (const wt of store.getSnapshot().state.worktrees.list) {
+    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.hooked.has(wt.path)) continue
+    await lochHooks.installIfRecording(wt)
+  }
+}
+function setLochRecordingRepos(next: string[]): void {
+  if (next.length > 0) config.lochRecordingRepos = next
+  else delete config.lochRecordingRepos
+  saveConfig(config)
+  store.dispatch({ type: 'settings/lochRecordingReposChanged', payload: next })
+}
+/** Opt a repo out: drop it from the list first (so in-flight installs roll
+ *  themselves back), then strip hooks from each worktree. */
+async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Promise<number> {
+  const current = config.lochRecordingRepos ?? []
+  if (current.includes(repoRoot)) setLochRecordingRepos(current.filter((r) => r !== repoRoot))
+  const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
+  return results.filter((ok) => !ok).length
+}
+store.subscribe((event) => {
+  if (event.type === 'worktrees/listChanged') void syncLochHooks()
+})
+void syncLochHooks()
+store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
+void upgradeManagedLochIfStale((config.lochRecordingRepos ?? []).length > 0).then(() => {
+  // A replaced binary has the same path, but drop the cache so the next
+  // lookup re-probes rather than trusting a pre-upgrade answer.
+  resetLochBinaryCache()
+})
+
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
 store.subscribe((event) => {
@@ -2168,6 +2233,22 @@ function registerIpcHandlers(): void {
     const idx = config.repoRoots.indexOf(repoRoot)
     if (idx === -1) return false
     config.repoRoots.splice(idx, 1)
+    // A removed repo stops recording: strip loch's hooks from its worktrees
+    // (captured now, before the list refresh drops them) and forget its
+    // history-tracking prompt state.
+    if (isLochRecording(repoRoot)) {
+      const paths = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot)
+        .map((w) => w.path)
+      void stopLochRecording(repoRoot, paths)
+    }
+    if (config.lochPromptDismissedRepos?.includes(repoRoot)) {
+      const next = config.lochPromptDismissedRepos.filter((r) => r !== repoRoot)
+      if (next.length > 0) config.lochPromptDismissedRepos = next
+      else delete config.lochPromptDismissedRepos
+      store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    }
     // Also drop any persisted panes for the removed repo so they don't
     // linger as orphans.
     if (config.panes && config.panes[repoRoot]) {
@@ -3145,6 +3226,20 @@ function registerIpcHandlers(): void {
     store.dispatch({
       type: 'settings/agentTabNamingEnabledChanged',
       payload: config.agentTabNamingEnabled !== false
+    })
+    return true
+  })
+
+  transport.onRequest('config:setLochBlameEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      delete config.lochBlameEnabled
+    } else {
+      config.lochBlameEnabled = false
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/lochBlameEnabledChanged',
+      payload: config.lochBlameEnabled !== false
     })
     return true
   })
@@ -4277,6 +4372,184 @@ function registerIpcHandlers(): void {
       startJsonClaudeSession(newSessionId, source.worktreePath)
 
       return { ok: true, newSessionId }
+    }
+  )
+
+  // loch blame gutter. Gated here as well as in the renderer so a stale or
+  // remote client can't run loch on a backend that has it switched off.
+  onWorktreeRequest('loch:blame', async (_ctx, worktreePath: string, filePath: string) => {
+    if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+      return { ok: false, code: 'disabled' }
+    }
+    return lochBlame(worktreePath, filePath)
+  })
+
+  // Re-probe for the loch binary — the explainer's "Check again" after the
+  // user installs it.
+  transport.onRequest('loch:refreshAvailability', () => {
+    resetLochBinaryCache()
+    const available = !!lochBinary()
+    store.dispatch({ type: 'loch/availabilityChanged', payload: available })
+    return available
+  })
+
+  transport.onRequest('loch:setPromptDismissed', (_ctx, repoRoot: string, dismissed: boolean) => {
+    const current = config.lochPromptDismissedRepos ?? []
+    const next = dismissed
+      ? current.includes(repoRoot)
+        ? current
+        : [...current, repoRoot]
+      : current.filter((r) => r !== repoRoot)
+    if (next.length > 0) config.lochPromptDismissedRepos = next
+    else delete config.lochPromptDismissedRepos
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    return true
+  })
+
+  // Explicit per-repo opt-in to loch recording. Nothing is installed
+  // anywhere until the user asks for it here, and turning it off removes the
+  // hook lines Ness wrote (loch has no uninstall of its own).
+  transport.onRequest(
+    'loch:setRecording',
+    async (_ctx, repoRoot: string, enabled: boolean): Promise<LochRecordingResult> => {
+      if (!(config.repoRoots || []).includes(repoRoot)) return { ok: false, code: 'unknown-repo' }
+      const worktrees = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot && !w.prunable)
+      if (!enabled) {
+        const failed = await stopLochRecording(
+          repoRoot,
+          worktrees.map((w) => w.path)
+        )
+        return { ok: true, installed: 0, viaProject: 0, failed }
+      }
+
+      // Opting in is the explicit go-ahead to fetch loch when it's missing.
+      if (!lochBinary()) {
+        const got = await installLoch()
+        if (!got.ok) return { ok: false, code: got.code, error: got.error }
+        store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+        if (!lochBinary()) return { ok: false, code: 'not-installed' }
+      }
+      // Opt in BEFORE installing: the installs re-check the list, so a
+      // concurrent opt-out during them rolls them back rather than losing.
+      const wasRecording = isLochRecording(repoRoot)
+      if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
+      let installed = 0
+      let viaProject = 0
+      let firstFailure: { code: string; error?: string } | null = null
+      for (const wt of worktrees) {
+        const r = await lochHooks.installIfRecording(wt)
+        if (!r) continue
+        if (r.ok) {
+          if (r.viaProject) viaProject++
+          else installed++
+        } else {
+          firstFailure ??= { code: r.code, error: r.error }
+        }
+      }
+      if (installed + viaProject === 0) {
+        if (!wasRecording && isLochRecording(repoRoot)) {
+          setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
+        }
+        return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
+      }
+      // Recording only covers turns from now on; backfill reconstructs what
+      // it can of the history so the gutter isn't empty on day one.
+      void backfillRepo(repoRoot)
+      return {
+        ok: true,
+        installed,
+        viaProject,
+        failed: worktrees.length - installed - viaProject
+      }
+    }
+  )
+
+  // "Ask the conversation that wrote this": loch forks the session that wrote
+  // the line, then Ness re-files that fork under THIS worktree (loch writes it
+  // under the original session's cwd, which may be another worktree or one
+  // that's gone) and opens it as a Chat tab with a kickoff turn about the line.
+  onWorktreeRequest(
+    'loch:ask',
+    async (
+      _ctx,
+      worktreePath: string,
+      filePath: string,
+      line: number,
+      opts?: { atTurn?: boolean }
+    ): Promise<LochAskResult> => {
+      if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+        return { ok: false, code: 'disabled' }
+      }
+      const rel = worktreeRelativePath(worktreePath, filePath)
+      if (!rel || !Number.isInteger(line) || line < 1) {
+        return { ok: false, code: 'usage', error: 'bad file or line' }
+      }
+      await resolveShellEnv(worktreePath)
+      const asked = await lochAsk(worktreePath, rel, line, { atTurn: opts?.atTurn === true })
+      if (!asked.ok) return asked
+      const { fork } = asked
+
+      const copied = forkTranscript({
+        sourceSessionId: fork.sessionId,
+        sourceWorktreePath: fork.cwd,
+        sourceTranscriptPath: fork.path,
+        destWorktreePath: worktreePath
+      })
+      if (!copied.ok || !copied.newSessionId) {
+        return { ok: false, code: 'fork-failed', error: copied.reason }
+      }
+      const newSessionId = copied.newSessionId
+      // loch's fork was only ever an intermediate — ours is the one that gets
+      // resumed. Leaving it would add an orphan session to the other
+      // directory's `claude --resume` picker on every ask.
+      try {
+        if (isLochForkPath(fork.path, fork.sessionId, fork.conversation.session, knownClaudeConfigDirs())) {
+          unlinkSync(fork.path)
+        } else {
+          log('loch', `not deleting ${fork.path}: doesn't look like loch's fork of ${fork.conversation.session}`)
+        }
+      } catch (err) {
+        log('loch', `could not remove intermediate fork ${fork.path}`, err instanceof Error ? err.message : err)
+      }
+
+      const real = (p: string): string => {
+        try {
+          return realpathSync(p)
+        } catch {
+          return resolvePath(p)
+        }
+      }
+      const relocated = real(fork.cwd) !== real(worktreePath)
+      const relocationPreamble = relocated
+        ? await buildRelocationPreamble({ sourceWorktreePath: fork.cwd, destWorktreePath: worktreePath })
+        : undefined
+
+      let lineText: string | null = null
+      try {
+        lineText = readFileSync(resolvePath(worktreePath, rel), 'utf8').split('\n')[line - 1] ?? null
+      } catch {
+        lineText = null
+      }
+
+      panesFSM.addTab(worktreePath, {
+        id: newSessionId,
+        type: 'json-claude',
+        label: `Ask · ${basename(rel)}:${line}`,
+        sessionId: newSessionId,
+        mode: 'awake'
+      })
+      notificationBus.startWithPrompt(
+        newSessionId,
+        worktreePath,
+        wrapAutomatedMessage(
+          'blame-ask',
+          buildBlameAskBody({ relPath: rel, line, lineText, conversation: fork.conversation, relocationPreamble })
+        )
+      )
+      return { ok: true, sessionId: newSessionId, relocated }
     }
   )
 

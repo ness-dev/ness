@@ -406,6 +406,20 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default on. */
   worktreeMessagingEnabled: boolean
+  /** Show loch's per-line conversation blame in the file viewer's gutter,
+   *  with an action to open a Chat on a fork of the conversation that wrote
+   *  a line. Without loch (on PATH, or the copy Ness installs on opt-in) the
+   *  gutter is simply empty, which is why this defaults ON — it's read-only
+   *  and costs nothing where loch isn't set up. Recording is the separate,
+   *  opt-in part. */
+  lochBlameEnabled: boolean
+  /** Repo roots the user has explicitly opted in to loch recording: Ness
+   *  installs loch's hooks into every worktree of these repos. Separate from
+   *  `lochBlameEnabled`, which only governs showing blame that exists. */
+  lochRecordingRepos: string[]
+  /** Repo roots whose sidebar "Install history tracking" prompt the user
+   *  closed. A preference, so it's persisted and shared across clients. */
+  lochPromptDismissedRepos: string[]
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — it gates a
    *  cosmetic, reversible action. Off
@@ -613,6 +627,9 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
+  | { type: 'settings/lochPromptDismissedReposChanged'; payload: string[] }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -703,6 +720,9 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: true,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: true,
+  lochBlameEnabled: true,
+  lochRecordingRepos: [],
+  lochPromptDismissedRepos: [],
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1025,6 +1045,12 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/lochBlameEnabledChanged':
+      return { ...state, lochBlameEnabled: event.payload }
+    case 'settings/lochRecordingReposChanged':
+      return { ...state, lochRecordingRepos: event.payload }
+    case 'settings/lochPromptDismissedReposChanged':
+      return { ...state, lochPromptDismissedRepos: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

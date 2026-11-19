@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
-import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, Wrench, Smartphone, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, History, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, Wrench, Smartphone, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { openReportIssue } from './ReportIssueScreen'
 import { HARNESS_RELEASES_URL, harnessReleaseNotesUrl } from '../../shared/constants'
 import {
@@ -22,6 +22,7 @@ import { AGENT_REGISTRY, agentDisplayName, CLAUDE_MODELS, CODEX_MODELS, CURSOR_M
 import { getToolDisplay } from './json-mode-cards/tool-display'
 import type { StoredPermissionRule } from '../../shared/permission-match'
 import { AgentIcon } from './AgentIcon'
+import { LochRecordingRepos } from './LochRecordingRepos'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
 import { SEMANTIC_KEYS } from '../theme-apply'
@@ -43,7 +44,7 @@ interface SettingsProps {
   initialSection?: SectionId
 }
 
-type SectionId = 'general' | 'appearance' | 'agent' | 'agent-tools' | 'worktrees' | 'editor' | 'github' | 'hotkeys' | 'web-mobile' | 'updates' | 'support'
+type SectionId = 'general' | 'appearance' | 'agent' | 'agent-tools' | 'worktrees' | 'editor' | 'blame' | 'github' | 'hotkeys' | 'web-mobile' | 'updates' | 'support'
 type SubSectionId =
   | 'appearance-theme'
   | 'appearance-custom-themes'
@@ -106,6 +107,7 @@ const SECTIONS: Section[] = [
   ]},
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch },
   { id: 'editor', label: 'Editor', icon: Code2 },
+  { id: 'blame', label: 'Conversation blame', icon: History },
   { id: 'github', label: 'GitHub', icon: GitPullRequest },
   { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, children: [
     { id: 'hotkeys-navigation', label: 'Worktree navigation' },
@@ -222,6 +224,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'agent-tools': null,
     worktrees: null,
     editor: null,
+    blame: null,
     github: null,
     hotkeys: null,
     'web-mobile': null,
@@ -441,6 +444,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    lochBlameEnabled,
     agentTabNamingEnabled,
     agentReviewDelivery,
     agentReviewsEnabled,
@@ -3937,6 +3941,43 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   </button>
                 </p>
               )}
+            </section>
+
+            {/* Conversation blame section */}
+            <section ref={(el) => { sectionRefs.current.blame = el }} id="blame">
+              <h2 className="text-lg font-semibold text-fg-bright mb-1">Conversation blame</h2>
+              <p className="text-sm text-dim mb-4">
+                Marks each line in the file viewer&apos;s gutter with the agent
+                conversation that wrote it, using{' '}
+                <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
+                per-turn attribution. Click a mark to pin its card, then ask a fork
+                of that conversation why it wrote the line.
+              </p>
+
+              <label className="flex items-start gap-3 cursor-pointer mb-6">
+                <input
+                  type="checkbox"
+                  checked={lochBlameEnabled}
+                  onChange={(e) => { void backend.setLochBlameEnabled(e.target.checked) }}
+                  className="mt-0.5 cursor-pointer icon-base" />
+                <div className="flex-1">
+                  <div className="text-sm text-fg-bright">Show conversation blame in the gutter</div>
+                </div>
+              </label>
+
+              <div className="text-sm text-fg-bright mb-1">Record conversations in</div>
+              <p className="text-xs text-dim mb-3">
+                Nothing is recorded until you tick a repo. Ticking one downloads loch
+                into <code className="bg-panel px-1 rounded text-xs">~/.loch/bin</code> if
+                it isn&apos;t already installed, then adds loch&apos;s hooks to every
+                worktree of the repo (in{' '}
+                <code className="bg-panel px-1 rounded text-xs">.claude/settings.local.json</code>),
+                so each agent turn snapshots the workspace and transcript into{' '}
+                <code className="bg-panel px-1 rounded text-xs">~/.loch</code>, then backfills
+                what it can of earlier history. Unticking removes the hooks; recorded
+                data stays.
+              </p>
+              <LochRecordingRepos />
             </section>
 
             {/* GitHub section */}

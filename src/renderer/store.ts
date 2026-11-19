@@ -575,6 +575,27 @@ export function useAllBackendStatesSelector<T>(
 }
 
 const EMPTY_BACKEND_STATES: readonly BackendStateEntry[] = []
+
+/** Repos that should show the sidebar "Install history tracking" prompt,
+ *  across every backend: loch is installed (or installable) on the repo's machine, the
+ *  gutter is on, and the repo is neither recording nor dismissed. Cached on
+ *  a string key so the array keeps its identity until the answer changes —
+ *  a requirement of `useAllBackendStatesSelector`. */
+let historyPromptCache: { key: string; value: readonly string[] } = { key: '', value: [] }
+export function selectHistoryPromptRepos(entries: readonly BackendStateEntry[]): readonly string[] {
+  const out: string[] = []
+  for (const { state } of entries) {
+    if (!(state.loch.available || state.loch.installable) || !state.settings.lochBlameEnabled) continue
+    const { lochRecordingRepos, lochPromptDismissedRepos } = state.settings
+    for (const root of state.worktrees.repoRoots) {
+      if (lochRecordingRepos.includes(root) || lochPromptDismissedRepos.includes(root)) continue
+      out.push(root)
+    }
+  }
+  const key = out.join('\0')
+  if (key !== historyPromptCache.key) historyPromptCache = { key, value: out }
+  return historyPromptCache.value
+}
 const getAllBackendStatesServerSnapshot = (): readonly BackendStateEntry[] =>
   EMPTY_BACKEND_STATES
 

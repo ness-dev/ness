@@ -286,6 +286,13 @@ export interface Config {
   // endpoint accepts calls, letting an agent write into another worktree's
   // chat. Default on (undefined treated as true).
   worktreeMessagingEnabled?: boolean
+  /** loch blame gutter in the file viewer. Default ON, so only an explicit
+   *  `false` is written — absence means enabled. */
+  lochBlameEnabled?: boolean
+  // Repo roots opted in to loch recording (hooks installed in their worktrees).
+  lochRecordingRepos?: string[]
+  // Repo roots whose "Install history tracking" sidebar prompt was closed.
+  lochPromptDismissedRepos?: string[]
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */
   agentTabNamingEnabled?: boolean

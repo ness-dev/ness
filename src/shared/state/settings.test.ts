@@ -588,6 +588,34 @@ describe('settingsReducer', () => {
     expect(off.worktreeMessagingEnabled).toBe(false)
   })
 
+  it('lochBlameEnabledChanged toggles flag, defaulting ON', () => {
+    expect(initialSettings.lochBlameEnabled).toBe(true)
+    const off = apply(initialSettings, { type: 'settings/lochBlameEnabledChanged', payload: false })
+    expect(off.lochBlameEnabled).toBe(false)
+    const on = apply(off, { type: 'settings/lochBlameEnabledChanged', payload: true })
+    expect(on.lochBlameEnabled).toBe(true)
+  })
+
+  it('lochRecordingReposChanged replaces the opted-in repo list, defaulting empty', () => {
+    expect(initialSettings.lochRecordingRepos).toEqual([])
+    const on = apply(initialSettings, {
+      type: 'settings/lochRecordingReposChanged',
+      payload: ['/repo/a']
+    })
+    expect(on.lochRecordingRepos).toEqual(['/repo/a'])
+    const off = apply(on, { type: 'settings/lochRecordingReposChanged', payload: [] })
+    expect(off.lochRecordingRepos).toEqual([])
+  })
+
+  it('lochPromptDismissedReposChanged replaces the dismissed list, defaulting empty', () => {
+    expect(initialSettings.lochPromptDismissedRepos).toEqual([])
+    const next = apply(initialSettings, {
+      type: 'settings/lochPromptDismissedReposChanged',
+      payload: ['/repo/a']
+    })
+    expect(next.lochPromptDismissedRepos).toEqual(['/repo/a'])
+  })
+
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
     expect(initialSettings.agentTabNamingEnabled).toBe(true)
     const off = apply(initialSettings, {

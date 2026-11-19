@@ -18,6 +18,7 @@ import { initialCiNotify } from '../shared/state/ci-notify'
 import { initialPinned } from '../shared/state/pinned'
 import { initialAnnouncements } from '../shared/state/announcements'
 import { initialScratchpad } from '../shared/state/scratchpad'
+import { initialLoch } from '../shared/state/loch'
 import { initialSshBootstrap } from '../shared/state/ssh-bootstrap'
 import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
@@ -256,6 +257,8 @@ export function buildInitialAppState(
     pinned: config.pinned ? { byPath: { ...config.pinned } } : initialPinned,
     announcements: initialAnnouncements,
     scratchpad: { byWorktreePath: flattenScratchpadNotes(config.scratchpadNotes) },
+    // Probed after boot (needs the login-shell PATH merge) — see index.ts.
+    loch: initialLoch,
     sshBootstrap: initialSshBootstrap,
     assignedPRs: initialAssignedPRs,
     aliases: config.aliases
@@ -328,6 +331,11 @@ export function buildInitialAppState(
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
       conversationForkEnabled: config.conversationForkEnabled !== false,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled !== false,
+      lochBlameEnabled: config.lochBlameEnabled !== false,
+      lochRecordingRepos: Array.isArray(config.lochRecordingRepos) ? config.lochRecordingRepos : [],
+      lochPromptDismissedRepos: Array.isArray(config.lochPromptDismissedRepos)
+        ? config.lochPromptDismissedRepos
+        : [],
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,

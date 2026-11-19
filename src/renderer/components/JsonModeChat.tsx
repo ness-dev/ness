@@ -977,6 +977,9 @@ function automationLabel(
   if (source === 'ci-failure') {
     return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
   }
+  if (source === 'blame-ask') {
+    return { label: 'Blame · Ask about a line', note: 'you opened this from the gutter', brand: true }
+  }
   const unhandled: never = source
   return { label: `Ness · ${unhandled}`, note: 'sent automatically', brand: false }
 }
