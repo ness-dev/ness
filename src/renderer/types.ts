@@ -445,6 +445,7 @@ export interface ElectronAPI {
   setAutoSleepMinutes(value: number): Promise<boolean>
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
   setAgentReviewDelivery(value: AgentReviewDelivery): Promise<boolean>
+  setAgentReviewsEnabled(enabled: boolean): Promise<boolean>
   setAutoReviewOnGreenCi(enabled: boolean): Promise<boolean>
   setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
   setReviewModel(value: string): Promise<boolean>

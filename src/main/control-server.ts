@@ -118,7 +118,7 @@ export interface WorktreeStatusInfo {
 }
 
 export interface MessagingQueries {
-  /** Whether the experimental worktree-messaging setting is on. Re-read per
+  /** Whether the worktree-messaging setting is on. Re-read per
    * request so a toggle takes effect without restarting the bridge. */
   isEnabled: () => boolean
   /** Resolve a caller-supplied handle — absolute path, branch name, or
@@ -269,6 +269,8 @@ export interface ControlServerDeps {
   /** Whether agents may name their own tab. Re-read per request so the
    * toggle takes effect without restarting the bridge. */
   getAgentTabNamingEnabled: () => boolean
+  /** Whether agents may call request_review. Re-read per request. */
+  getAgentReviewsEnabled: () => boolean
   /** Rename one tab in the pane tree. Returns false when the rename was
    *  refused — for `source: 'agent'`, that means the user had already
    *  named the tab themselves. */
@@ -1069,6 +1071,11 @@ async function handleRequest(
     }
 
     if (req.method === 'POST' && path === '/reviews/request') {
+      if (!deps.getAgentReviewsEnabled()) {
+        return sendJson(res, 403, {
+          error: 'agent reviews are disabled in Ness settings (Settings → Agent tools → Agent reviews)'
+        })
+      }
       const context = typeof body.context === 'string' ? body.context.trim() : ''
       if (!context) return sendJson(res, 400, { error: 'context required' })
       const result = deps.reviews.request(wt, terminalId, context)
@@ -1121,7 +1128,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)
@@ -1226,7 +1233,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)
@@ -1330,7 +1337,8 @@ async function handleRequest(
       browser: deps.getBrowserPerms(),
       conversationFork: { enabled: deps.getConversationForkEnabled() },
       messaging: { enabled: deps.messaging.isEnabled() },
-      tabNaming: { enabled: deps.getAgentTabNamingEnabled() }
+      tabNaming: { enabled: deps.getAgentTabNamingEnabled() },
+      reviews: { enabled: deps.getAgentReviewsEnabled() }
     })
   }
 

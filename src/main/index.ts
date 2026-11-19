@@ -1397,7 +1397,7 @@ const notificationBus = new NotificationBus(store, chatDeliveryDeps, startJsonCl
 const subscriptionNotifier = new SubscriptionNotifier(
   store,
   notificationBus,
-  () => config.worktreeMessagingEnabled === true
+  () => config.worktreeMessagingEnabled !== false
 )
 
 const listWorktreeChatTabs = (worktreePath: string) =>
@@ -1422,7 +1422,10 @@ const reviewServiceDeps: ReviewServiceDeps = {
 // green, open a reviewer for its author tab on the same path a hand-made
 // request takes. Declared after reviewServiceDeps, which it closes over.
 const reviewSpawner = new ReviewSpawner(store, {
-  isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
+  isEnabled: () => {
+    const s = store.getSnapshot().state.settings
+    return s.agentReviewsEnabled && s.autoReviewOnGreenCi
+  },
   requestReview: (worktreePath, requesterTabId, context) =>
     requestReview(reviewServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
 })
@@ -3039,15 +3042,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setAutoApprovePermissions', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.autoApprovePermissions = true
-    } else {
       delete config.autoApprovePermissions
+    } else {
+      config.autoApprovePermissions = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/autoApprovePermissionsChanged',
-      payload: config.autoApprovePermissions === true
+      payload: config.autoApprovePermissions !== false
     })
     return true
   })
@@ -3197,15 +3201,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setConversationForkEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.conversationForkEnabled = true
-    } else {
       delete config.conversationForkEnabled
+    } else {
+      config.conversationForkEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/conversationForkEnabledChanged',
-      payload: config.conversationForkEnabled === true
+      payload: config.conversationForkEnabled !== false
     })
     return true
   })
@@ -3255,15 +3260,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.worktreeMessagingEnabled = true
-    } else {
       delete config.worktreeMessagingEnabled
+    } else {
+      config.worktreeMessagingEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/worktreeMessagingEnabledChanged',
-      payload: config.worktreeMessagingEnabled === true
+      payload: config.worktreeMessagingEnabled !== false
     })
     return true
   })
@@ -5031,6 +5037,16 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setAgentReviewsEnabled', (_ctx, enabled: boolean) => {
+    config.agentReviewsEnabled = enabled === true
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/agentReviewsEnabledChanged',
+      payload: config.agentReviewsEnabled === true
+    })
+    return true
+  })
+
   transport.onRequest('config:setAutoReviewOnGreenCi', (_ctx, enabled: boolean) => {
     if (enabled) config.autoReviewOnGreenCi = true
     else delete config.autoReviewOnGreenCi
@@ -5558,6 +5574,9 @@ function registerIpcHandlers(): void {
       return { ok: false, error: 'No worktree' }
     }
     const state = store.getSnapshot().state
+    if (!state.settings.agentReviewsEnabled) {
+      return { ok: false, error: 'Agent reviews are off — turn them on in Settings → Agent tools' }
+    }
     const author = pickAuthorTab(state, worktreePath)
     if (!author) {
       return {
@@ -5971,7 +5990,7 @@ async function runBoot(): Promise<void> {
     resolveCallerScope,
     forkableConversationKind: (sessionId: string, worktreePath: string) =>
       chatRouter.forkableConversationKind(sessionId, worktreePath),
-    getConversationForkEnabled: () => config.conversationForkEnabled === true,
+    getConversationForkEnabled: () => config.conversationForkEnabled !== false,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,
       mode: config.browserToolsMode === 'view' ? 'view' : 'full'
@@ -5992,6 +6011,7 @@ async function runBoot(): Promise<void> {
       store.dispatch({ type: 'aliases/cleared', payload: { path: worktreePath } })
     },
     getAgentTabNamingEnabled: () => config.agentTabNamingEnabled !== false,
+    getAgentReviewsEnabled: () => store.getSnapshot().state.settings.agentReviewsEnabled,
     renameTab: (worktreePath, tabId, label, source) =>
       panesFSM.renameTab(worktreePath, tabId, label, source),
     renameBranch: async (worktreePath, newBranch) => {
@@ -6002,7 +6022,7 @@ async function runBoot(): Promise<void> {
       return result
     },
     messaging: {
-      isEnabled: () => config.worktreeMessagingEnabled === true,
+      isEnabled: () => config.worktreeMessagingEnabled !== false,
       resolveTarget: (query) =>
         resolveWorktreeQuery(store.getSnapshot().state, query),
       describe: (worktreePath) =>

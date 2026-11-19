@@ -904,10 +904,10 @@ const FULL_CONTROL_BROWSER_TOOLS = new Set([
 ])
 
 // One /scope fetch backs every capability gate below. Defaults on failure are
-// permissive for browser tools (pre-existing behaviour) but the fork and
-// messaging gates default off — both are opt-in, and a server that doesn't
-// report them would reject the call anyway, so advertising them would only
-// waste a turn.
+// permissive for browser tools (pre-existing behaviour) but the fork,
+// messaging and review gates default off — a server that doesn't report
+// them is too old to honour the call, so advertising them would only waste
+// a turn.
 let cachedScope = null
 async function getScopeInfo() {
   if (cachedScope) return cachedScope
@@ -927,7 +927,8 @@ async function getToolPerms() {
     // Defaults on when /scope can't say, matching the setting's own
     // default — and matching the browser gates' permissive-on-failure
     // posture rather than hiding a feature the user has enabled.
-    tabNaming: s.tabNaming || { enabled: true }
+    tabNaming: s.tabNaming || { enabled: true },
+    reviews: s.reviews || { enabled: false }
   }
 }
 
@@ -949,6 +950,7 @@ function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
     if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
+    if (t.name === 'request_review') return perms.reviews.enabled === true
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true

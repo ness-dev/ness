@@ -436,3 +436,35 @@ describe('v6 → v7: legacy theme → themeMode + themeLight/themeDark', () => {
     expect(c.theme).toBeUndefined()
   })
 })
+
+describe('v8 → v9: pin auto-approve and agent reviews for upgraders', () => {
+  it('records auto-approve as off when the key is absent', () => {
+    const c: AnyConfig = { repoRoots: ['/a/repo'] }
+    runOne(8, c)
+    expect(c.autoApprovePermissions).toBe(false)
+  })
+
+  it('leaves an explicit auto-approve choice alone', () => {
+    const c: AnyConfig = { autoApprovePermissions: true }
+    runOne(8, c)
+    expect(c.autoApprovePermissions).toBe(true)
+  })
+
+  it('turns agent reviews on for someone already using auto-review on green CI', () => {
+    const c: AnyConfig = { autoReviewOnGreenCi: true }
+    runOne(8, c)
+    expect(c.agentReviewsEnabled).toBe(true)
+  })
+
+  it('leaves agent reviews at the default otherwise', () => {
+    const c: AnyConfig = {}
+    runOne(8, c)
+    expect(c.agentReviewsEnabled).toBeUndefined()
+  })
+
+  it('does not override an explicit agent-reviews choice', () => {
+    const c: AnyConfig = { autoReviewOnGreenCi: true, agentReviewsEnabled: false }
+    runOne(8, c)
+    expect(c.agentReviewsEnabled).toBe(false)
+  })
+})
