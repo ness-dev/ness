@@ -31,6 +31,9 @@ describe('loadConfig corrupt-file handling', () => {
     const cfg = loadConfig()
     expect(getConfigLoadError()).toBeNull()
     expect(cfg.repoRoots).toEqual([])
+    // First run stamps firstLaunchAt and persists it immediately.
+    expect(cfg.firstLaunchAt).toBeGreaterThan(0)
+    expect(JSON.parse(readFileSync(configPath(), 'utf-8')).firstLaunchAt).toBe(cfg.firstLaunchAt)
     // Writes work after a clean load.
     saveConfigSync({ ...cfg, repoRoots: ['/x'] })
     expect(JSON.parse(readFileSync(configPath(), 'utf-8')).repoRoots).toEqual(['/x'])
@@ -83,6 +86,24 @@ describe('loadConfig corrupt-file handling', () => {
     // Writes resumed.
     saveConfigSync({ ...fresh, repoRoots: ['/y'] })
     expect(JSON.parse(readFileSync(configPath(), 'utf-8')).repoRoots).toEqual(['/y'])
+  })
+
+  it('an existing config without firstLaunchAt is stamped 0; an existing stamp is kept', () => {
+    writeFileSync(configPath(), JSON.stringify({ repoRoots: [] }))
+    expect(loadConfig().firstLaunchAt).toBe(0)
+    writeFileSync(configPath(), JSON.stringify({ repoRoots: [], firstLaunchAt: 123 }))
+    expect(loadConfig().firstLaunchAt).toBe(123)
+  })
+
+  it('first run creates a missing userData dir and persists the stamp', () => {
+    const parent = DIR
+    DIR = join(parent, 'not-yet-created')
+    try {
+      const cfg = loadConfig()
+      expect(JSON.parse(readFileSync(configPath(), 'utf-8')).firstLaunchAt).toBe(cfg.firstLaunchAt)
+    } finally {
+      DIR = parent
+    }
   })
 
   it('atomic write leaves no stray .tmp file behind', () => {

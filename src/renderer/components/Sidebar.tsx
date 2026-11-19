@@ -17,6 +17,9 @@ interface SidebarProps {
   snoozeDefaultDays?: number
   prLoading: boolean
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
+  historyPromptRepos?: readonly string[]
+  onOpenHistoryTracking?: (repoRoot: string) => void
+  onDismissHistoryPrompt?: (repoRoot: string) => void
   /** Non-main worktrees. Used to decide whether to show the "spawn your first agent" nudge. */
   agentCount: number
   onSelectWorktree: (path: string) => void
@@ -60,6 +63,9 @@ export function Sidebar({
   snoozeDefaultDays,
   prLoading,
   onOpenAssignedPR,
+  historyPromptRepos,
+  onOpenHistoryTracking,
+  onDismissHistoryPrompt,
   agentCount,
   onSelectWorktree,
   pathBackendId,
@@ -180,6 +186,9 @@ export function Sidebar({
           onPruneWorktrees={onPruneWorktrees}
           onRemoveRepo={onRemoveRepo}
           onOpenAssignedPR={onOpenAssignedPR}
+          historyPromptRepos={historyPromptRepos}
+          onOpenHistoryTracking={onOpenHistoryTracking}
+          onDismissHistoryPrompt={onDismissHistoryPrompt}
         />
       </div>
 

@@ -442,10 +442,14 @@ describe('mcp-bridge review tools', () => {
     res.end(JSON.stringify(body))
   }
 
-  async function start(handler) {
+  async function start(handler, reviewsEnabled = true) {
     stub = await startStub((req, body, res, captured) => {
       if (req.url === '/scope') {
-        return json(res, 200, { scope: null, messaging: { enabled: true } })
+        return json(res, 200, {
+          scope: null,
+          messaging: { enabled: true },
+          reviews: { enabled: reviewsEnabled }
+        })
       }
       return handler(req, body, res, captured)
     })
@@ -480,6 +484,15 @@ describe('mcp-bridge review tools', () => {
     ]) {
       expect(names).toContain(n)
     }
+  })
+
+  it('hides request_review but keeps the comment tools when agent reviews are off', async () => {
+    await start((req, body, res) => json(res, 404, {}), false)
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const names = (await bridge.next()).result.tools.map((t) => t.name)
+    expect(names).not.toContain('request_review')
+    expect(names).toContain('add_review_comment')
+    expect(names).toContain('submit_review')
   })
 
   it('add_review_comment forwards to POST /reviews/comments', async () => {
@@ -644,5 +657,95 @@ describe('mcp-bridge review tools', () => {
     await start((req, body, res) => json(res, 200, { delivered: [], failed: [] }))
     const r = await callTool('report_progress', { message: 'x' })
     expect(r.result.content[0].text).toMatch(/^Nobody is following/)
+  })
+})
+
+describe('mcp-bridge create_project / add_repo', () => {
+  let stub
+  let bridge
+
+  afterEach(async () => {
+    if (bridge) await bridge.kill()
+    if (stub) await stub.close()
+  })
+
+  function json(res, status, body) {
+    res.writeHead(status, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(body))
+  }
+
+  async function start(handler) {
+    stub = await startStub((req, body, res, captured) => {
+      if (req.url === '/scope') return json(res, 200, { scope: null })
+      return handler(req, body, res, captured)
+    })
+    bridge = spawnBridge(stub.port, 'tok')
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+  }
+
+  let nextId = 10
+  async function callTool(name, args) {
+    bridge.send({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name, arguments: args } })
+    return bridge.next()
+  }
+
+  it('advertises both tools, pointing at create_worktree as the next step', async () => {
+    await start((req, body, res) => json(res, 404, {}))
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    const tools = (await bridge.next()).result.tools
+    const create = tools.find((t) => t.name === 'create_project')
+    const add = tools.find((t) => t.name === 'add_repo')
+    expect(create.inputSchema.required).toEqual(['name', 'parentDir'])
+    expect(add.inputSchema.required).toEqual(['path'])
+    expect(create.description).toContain('create_worktree')
+    expect(add.description).toContain('create_worktree')
+  })
+
+  it('create_project forwards to POST /projects and returns the repoRoot', async () => {
+    await start((req, body, res) => json(res, 200, { repoRoot: '/p/finance' }))
+    const r = await callTool('create_project', {
+      name: ' finance ',
+      parentDir: '/p',
+      gitignorePreset: 'node'
+    })
+    expect(r.result.isError).toBeFalsy()
+    expect(r.result.content[0].text).toContain('/p/finance')
+    expect(r.result.content[0].text).toContain('create_worktree')
+    const post = stub.captured.find((c) => c.method === 'POST' && c.url === '/projects')
+    expect(post.body).toEqual({ name: 'finance', parentDir: '/p', gitignorePreset: 'node' })
+  })
+
+  it('create_project validates locally and surfaces a name collision', async () => {
+    await start((req, body, res) => json(res, 409, { error: '/p/taken already exists' }))
+    expect((await callTool('create_project', { parentDir: '/p' })).result.isError).toBe(true)
+    expect((await callTool('create_project', { name: 'x' })).result.isError).toBe(true)
+    const badPreset = await callTool('create_project', { name: 'x', parentDir: '/p', gitignorePreset: 'rust' })
+    expect(badPreset.result.isError).toBe(true)
+    expect(stub.captured.some((c) => c.url === '/projects')).toBe(false)
+
+    const taken = await callTool('create_project', { name: 'taken', parentDir: '/p' })
+    expect(taken.result.isError).toBe(true)
+    expect(taken.result.content[0].text).toContain('already exists')
+  })
+
+  it('add_repo forwards to POST /repos and distinguishes already-open', async () => {
+    let alreadyOpen = false
+    await start((req, body, res) => json(res, 200, { repoRoot: body.path, alreadyOpen }))
+    const added = await callTool('add_repo', { path: '/code/app' })
+    expect(added.result.content[0].text).toContain('Added /code/app')
+    alreadyOpen = true
+    const again = await callTool('add_repo', { path: '/code/app' })
+    expect(again.result.content[0].text).toContain('already open')
+    const post = stub.captured.find((c) => c.method === 'POST' && c.url === '/repos')
+    expect(post.body).toEqual({ path: '/code/app' })
+  })
+
+  it('add_repo surfaces not-a-repo from the server', async () => {
+    await start((req, body, res) => json(res, 400, { error: '/x is not a git repository.' }))
+    const r = await callTool('add_repo', { path: '/x' })
+    expect(r.result.isError).toBe(true)
+    expect(r.result.content[0].text).toContain('not a git repository')
+    expect((await callTool('add_repo', {})).result.isError).toBe(true)
   })
 })

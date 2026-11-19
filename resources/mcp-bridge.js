@@ -180,6 +180,8 @@ const FORK_DESCRIPTION_SENTENCE =
 const EMBED_DESCRIPTION_SENTENCE =
   ' Also returns the path the capture was saved to: embed that path as markdown (`![caption](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show a UI change you just made. Append a `#w=` fragment to set its displayed width — `![login form](path#w=500)` for 500px, `#w=50%` to fill half the column, `#w=400x300` for both dimensions; with no fragment it renders at a default size. Prefer the fragment over a `|` size spec: a pipe breaks the embed when it lands inside a markdown table cell.'
 
+const GITIGNORE_PRESETS = ['macos', 'node', 'python', 'none']
+
 const TOOLS = [
   {
     name: 'create_worktree',
@@ -257,6 +259,52 @@ const TOOLS = [
     name: 'list_repos',
     description: 'List the repo roots currently open in Ness.',
     inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'create_project',
+    description:
+      "Create a brand-new project: a fresh git repo at <parentDir>/<name> with an initial commit, added to the Ness sidebar. Use it when the user asks you to start something new (\"make me a personal finance app\"). Returns the new repoRoot. Next step: call create_worktree with that repoRoot and a branchName (plus an initialPrompt describing the work) to open an agent session in it — the initial commit is the base the worktree forks from. The repo has no remote, so there are no PRs until one is added. Fails if <parentDir>/<name> already exists; to bring in a repo that's already on disk, use add_repo instead.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Folder name for the new project, e.g. "personal-finance". A single path segment: no slashes, no "." or "..".'
+        },
+        parentDir: {
+          type: 'string',
+          description:
+            'Absolute path of an existing folder to create the project in. Ness has no default here — the sibling folder of a repo from list_repos is often a good choice, and if you have no good guess, ask the user where they keep their projects.'
+        },
+        includeReadme: {
+          type: 'boolean',
+          description: 'Write a README.md with the project name as its heading. Defaults to true.'
+        },
+        gitignorePreset: {
+          type: 'string',
+          enum: ['macos', 'node', 'python', 'none'],
+          description:
+            'Starter .gitignore: "macos" (.DS_Store and friends), "node" (node_modules, dist, .env), "python" (__pycache__, venv, dist), or "none" to skip the file. Defaults to "macos".'
+        }
+      },
+      required: ['name', 'parentDir']
+    }
+  },
+  {
+    name: 'add_repo',
+    description:
+      'Add an existing git repo on disk to the Ness sidebar. Returns its repoRoot (succeeds without change if it was already open). Next step: call create_worktree with that repoRoot to start work in it. The path must be the repo root itself — a subfolder of a repo, or a folder that is not a git repo, is rejected rather than registered. To start a new project from scratch, use create_project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute path of the git repo root.'
+        }
+      },
+      required: ['path']
+    }
   },
   {
     name: 'set_worktree_alias',
@@ -904,10 +952,10 @@ const FULL_CONTROL_BROWSER_TOOLS = new Set([
 ])
 
 // One /scope fetch backs every capability gate below. Defaults on failure are
-// permissive for browser tools (pre-existing behaviour) but the fork and
-// messaging gates default off — both are opt-in, and a server that doesn't
-// report them would reject the call anyway, so advertising them would only
-// waste a turn.
+// permissive for browser tools (pre-existing behaviour) but the fork,
+// messaging and review gates default off — a server that doesn't report
+// them is too old to honour the call, so advertising them would only waste
+// a turn.
 let cachedScope = null
 async function getScopeInfo() {
   if (cachedScope) return cachedScope
@@ -927,7 +975,8 @@ async function getToolPerms() {
     // Defaults on when /scope can't say, matching the setting's own
     // default — and matching the browser gates' permissive-on-failure
     // posture rather than hiding a feature the user has enabled.
-    tabNaming: s.tabNaming || { enabled: true }
+    tabNaming: s.tabNaming || { enabled: true },
+    reviews: s.reviews || { enabled: false }
   }
 }
 
@@ -949,6 +998,7 @@ function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
     if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
+    if (t.name === 'request_review') return perms.reviews.enabled === true
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true
@@ -1036,6 +1086,34 @@ async function handleToolCall(name, args) {
   if (name === 'list_repos') {
     const r = await callControl('GET', '/repos')
     return JSON.stringify(r, null, 2)
+  }
+  if (name === 'create_project') {
+    const projectName = args && typeof args.name === 'string' ? args.name.trim() : ''
+    const parentDir = args && typeof args.parentDir === 'string' ? args.parentDir.trim() : ''
+    if (!projectName) throw new Error('name is required')
+    if (!parentDir) throw new Error('parentDir is required')
+    if (args.gitignorePreset !== undefined && !GITIGNORE_PRESETS.includes(args.gitignorePreset)) {
+      throw new Error('gitignorePreset must be one of ' + GITIGNORE_PRESETS.join(', '))
+    }
+    const r = await callControl('POST', '/projects', {
+      name: projectName,
+      parentDir,
+      includeReadme: args.includeReadme,
+      gitignorePreset: args.gitignorePreset
+    })
+    return (
+      'Created project ' + r.repoRoot + ' with an initial commit and added it to Ness. ' +
+      'Next: call create_worktree with repoRoot "' + r.repoRoot + '" and a branchName to start work in it.'
+    )
+  }
+  if (name === 'add_repo') {
+    const repoPath = args && typeof args.path === 'string' ? args.path.trim() : ''
+    if (!repoPath) throw new Error('path is required')
+    const r = await callControl('POST', '/repos', { path: repoPath })
+    return (
+      (r.alreadyOpen ? r.repoRoot + ' was already open in Ness. ' : 'Added ' + r.repoRoot + ' to Ness. ') +
+      'Next: call create_worktree with repoRoot "' + r.repoRoot + '" to start work in it.'
+    )
   }
   if (name === 'set_worktree_alias') {
     if (!args || typeof args.alias !== 'string') {

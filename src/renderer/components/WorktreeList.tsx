@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, History } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
 import type { GroupKey } from '../../shared/worktree-sort'
@@ -61,6 +61,59 @@ interface WorktreeListProps {
   onPruneWorktrees?: (repoRoot: string) => Promise<void>
   onRemoveRepo?: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
+  /** Repos to offer "Install history tracking" for (loch installed, not yet
+   *  recording, not dismissed). Omit to hide the prompt entirely. */
+  historyPromptRepos?: readonly string[]
+  onOpenHistoryTracking?: (repoRoot: string) => void
+  onDismissHistoryPrompt?: (repoRoot: string) => void
+}
+
+/** The per-repo "Install history tracking" nudge. Opens the full-screen
+ *  explainer; the X closes it for that repo for good. */
+function HistoryPrompt({
+  repoRoot,
+  showRepoName,
+  touch,
+  onOpen,
+  onDismiss
+}: {
+  repoRoot: string
+  showRepoName: boolean
+  touch: boolean
+  onOpen: (repoRoot: string) => void
+  onDismiss: (repoRoot: string) => void
+}): JSX.Element {
+  return (
+    <div
+      className={`group relative mx-2 my-1 flex items-center gap-2 rounded-md border border-border bg-panel-raised hover:border-accent transition-colors ${
+        touch ? 'min-h-11' : ''
+      }`}
+    >
+      <button
+        onClick={() => onOpen(repoRoot)}
+        className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-1.5 text-left cursor-pointer"
+      >
+        <History className="icon-sm shrink-0 text-accent" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium text-fg-bright truncate">
+            Install history tracking
+          </span>
+          {showRepoName && (
+            <span className="block text-xs text-faint truncate">{repoLabelFor(repoRoot)}</span>
+          )}
+        </span>
+      </button>
+      <Tooltip label="Don’t ask for this repo">
+        <button
+          onClick={() => onDismiss(repoRoot)}
+          className="shrink-0 mr-1.5 p-1 rounded text-faint hover:text-fg hover:bg-panel cursor-pointer"
+          aria-label="Dismiss history tracking prompt"
+        >
+          <X className="icon-xs" />
+        </button>
+      </Tooltip>
+    </div>
+  )
 }
 
 export function WorktreeList({
@@ -86,7 +139,10 @@ export function WorktreeList({
   onDeleteWorktree,
   onPruneWorktrees,
   onRemoveRepo,
-  onOpenAssignedPR
+  onOpenAssignedPR,
+  historyPromptRepos,
+  onOpenHistoryTracking,
+  onDismissHistoryPrompt
 }: WorktreeListProps): JSX.Element {
   const backend = useBackend()
   const touch = variant === 'touch'
@@ -337,7 +393,23 @@ export function WorktreeList({
           </div>
         </button>
       )}
-      {model.sections.map((section) => (
+      {/* With no repo headers there's nowhere per-repo to put the nudge, so
+          offer one repo at a time at the top; closing it moves to the next. */}
+      {!model.showRepoHeaders && historyPromptRepos?.[0] && onOpenHistoryTracking && onDismissHistoryPrompt && (
+        <HistoryPrompt
+          repoRoot={historyPromptRepos[0]}
+          showRepoName
+          touch={touch}
+          onOpen={onOpenHistoryTracking}
+          onDismiss={onDismissHistoryPrompt}
+        />
+      )}
+      {model.sections.map((section) => {
+        const promptRoot =
+          model.showRepoHeaders && !section.collapsed
+            ? section.repoRoots.find((r) => historyPromptRepos?.includes(r.repoRoot))?.repoRoot
+            : undefined
+        return (
         <div key={section.scope}>
           {model.showRepoHeaders && (
             <RepoHeader
@@ -345,6 +417,15 @@ export function WorktreeList({
               variant={variant}
               onToggle={() => onToggleRepo(section.scope)}
               onRemove={onRemoveRepo}
+            />
+          )}
+          {promptRoot && onOpenHistoryTracking && onDismissHistoryPrompt && (
+            <HistoryPrompt
+              repoRoot={promptRoot}
+              showRepoName={false}
+              touch={touch}
+              onOpen={onOpenHistoryTracking}
+              onDismiss={onDismissHistoryPrompt}
             />
           )}
           {!section.collapsed && agentCount > 0 && onNewWorktree && (
@@ -377,7 +458,8 @@ export function WorktreeList({
             ))}
           {!section.collapsed && section.groups.map((group) => renderGroup(section, group))}
         </div>
-      ))}
+        )
+      })}
       {model.totalWorktrees === 0 &&
         (onNewWorktree ? (
           agentCount > 0 && <div className="px-4 py-3 text-xs text-faint">No worktrees found</div>

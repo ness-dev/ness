@@ -18,6 +18,7 @@ import { initialCiNotify } from '../shared/state/ci-notify'
 import { initialPinned } from '../shared/state/pinned'
 import { initialAnnouncements } from '../shared/state/announcements'
 import { initialScratchpad } from '../shared/state/scratchpad'
+import { initialLoch } from '../shared/state/loch'
 import { initialSshBootstrap } from '../shared/state/ssh-bootstrap'
 import { initialAssignedPRs } from '../shared/state/assigned-prs'
 import { initialConfigHealth, type ConfigLoadError } from '../shared/state/config-health'
@@ -256,6 +257,8 @@ export function buildInitialAppState(
     pinned: config.pinned ? { byPath: { ...config.pinned } } : initialPinned,
     announcements: initialAnnouncements,
     scratchpad: { byWorktreePath: flattenScratchpadNotes(config.scratchpadNotes) },
+    // Probed after boot (needs the login-shell PATH merge) — see index.ts.
+    loch: initialLoch,
     sshBootstrap: initialSshBootstrap,
     assignedPRs: initialAssignedPRs,
     aliases: config.aliases
@@ -326,12 +329,17 @@ export function buildInitialAppState(
       wsTransportHost: config.wsTransportHost ?? '127.0.0.1',
       browserToolsEnabled: config.browserToolsEnabled !== false,
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
-      conversationForkEnabled: config.conversationForkEnabled === true,
-      worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
+      conversationForkEnabled: config.conversationForkEnabled !== false,
+      worktreeMessagingEnabled: config.worktreeMessagingEnabled !== false,
+      lochBlameEnabled: config.lochBlameEnabled !== false,
+      lochRecordingRepos: Array.isArray(config.lochRecordingRepos) ? config.lochRecordingRepos : [],
+      lochPromptDismissedRepos: Array.isArray(config.lochPromptDismissedRepos)
+        ? config.lochPromptDismissedRepos
+        : [],
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,
-      autoApprovePermissions: config.autoApprovePermissions === true,
+      autoApprovePermissions: config.autoApprovePermissions !== false,
       autoApproveSteerInstructions: config.autoApproveSteerInstructions || '',
       useSystemClaudeForJsonMode: config.useSystemClaudeForJsonMode === true,
       jsonModeChatDensity: config.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact',
@@ -377,11 +385,16 @@ export function buildInitialAppState(
         ? config.dismissedAnnouncementIds.filter((x): x is string => typeof x === 'string')
         : [],
       announcementsMuted: config.announcementsMuted === true,
+      firstLaunchAt:
+        typeof config.firstLaunchAt === 'number' && Number.isFinite(config.firstLaunchAt)
+          ? config.firstLaunchAt
+          : 0,
       showAssignedPRs: config.showAssignedPRs === true,
       preventSleepMode: PREVENT_SLEEP_MODES.includes(config.preventSleepMode as PreventSleepMode)
         ? (config.preventSleepMode as PreventSleepMode)
         : 'off',
       agentReviewDelivery: config.agentReviewDelivery === 'auto' ? 'auto' : 'draft',
+      agentReviewsEnabled: config.agentReviewsEnabled === true,
       autoReviewOnGreenCi: config.autoReviewOnGreenCi === true,
       reviewAgent:
         config.reviewAgent === 'claude' ||

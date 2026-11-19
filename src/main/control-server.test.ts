@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   startControlServer,
   getControlServerInfo,
@@ -11,6 +11,12 @@ import type { ReviewComment } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { followedByCreatorNote } from './control-server'
+import { createNewProject } from './repo-create'
+import { resolveRepoPath } from './repo-resolve'
+import { execFileSync } from 'child_process'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 // Integration test for the local HTTP control server. Exercises the
 // `/aliases` endpoint end-to-end (POST + DELETE, both scoped and
@@ -135,6 +141,7 @@ const scope: CallerScope = {
 /** Mutable so a test can flip the setting off without restarting the server —
  * mirrors how the real dep re-reads config per request. */
 let conversationForkEnabled = true
+let agentReviewsEnabled = true
 let callerForkKind: 'claude' | 'codex' = 'claude'
 let prReviewPrompt = ''
 
@@ -183,8 +190,29 @@ let captureResult: CaptureResult | null = null
  * evaluated (load failed, or the eval timed out). */
 let domResult: () => Promise<string | null> = async () => null
 
+/** Mutable so the add_repo / create_project tests can register roots; reset
+ *  after each of those so the rest of the file still sees one repo. */
+let repoRoots = ['/repo']
+/** Thin stand-ins for addRepoAtPath / createAndRegisterProject: the real
+ *  resolver and creator against temp dirs, minus config persistence. */
+const addRepo: ControlServerDeps['addRepo'] = async (picked) => {
+  const resolution = await resolveRepoPath(picked)
+  if (resolution.kind !== 'ok') return resolution
+  if (!repoRoots.includes(resolution.root)) repoRoots.push(resolution.root)
+  return { kind: 'added', repoRoot: resolution.root }
+}
+const createProject = vi.fn<ControlServerDeps['createProject']>(async (opts) => {
+  const result = await createNewProject(opts)
+  if ('error' in result) return result
+  const root = realpathSync(result.path)
+  repoRoots.push(root)
+  return { path: root }
+})
+
 const deps: ControlServerDeps = {
-  getRepoRoots: () => ['/repo'],
+  getRepoRoots: () => repoRoots,
+  addRepo,
+  createProject,
   getWorktreeBase: () => 'remote',
   getPrReviewPrompt: () => prReviewPrompt,
   broadcast: () => {},
@@ -225,6 +253,7 @@ const deps: ControlServerDeps = {
   setAlias: (path, alias) => setAlias(path, alias),
   clearAlias: (path) => clearAlias(path),
   getAgentTabNamingEnabled: () => agentTabNamingEnabled,
+  getAgentReviewsEnabled: () => agentReviewsEnabled,
   renameTab: (path, tabId, label, source) => renameTab(path, tabId, label, source),
   messaging: {
     isEnabled: () => messagingEnabled,
@@ -763,7 +792,7 @@ describe('control-server /messages endpoint', () => {
     expect(r.json.error).toMatch(/was not sent/)
   })
 
-  it('refuses delivery when the experimental setting is off', async () => {
+  it('refuses delivery when the messaging setting is off', async () => {
     sendMessage.mockClear()
     messagingEnabled = false
     try {
@@ -922,6 +951,19 @@ describe('control-server /reviews endpoints', () => {
     const refused = await call('POST', '/reviews/request', { context: 'fail please' })
     expect(refused.status).toBe(409)
     expect(refused.json.error).toMatch(/only a Chat tab/)
+  })
+
+  it('refuses request_review when agent reviews are off', async () => {
+    reviews.request.mockClear()
+    agentReviewsEnabled = false
+    try {
+      const r = await call('POST', '/reviews/request', { context: 'please check' })
+      expect(r.status).toBe(403)
+      expect(r.json.error).toMatch(/disabled in Ness settings/)
+      expect(reviews.request).not.toHaveBeenCalled()
+    } finally {
+      agentReviewsEnabled = true
+    }
   })
 
   it('submits a review and reports where it is going', async () => {
@@ -1132,5 +1174,125 @@ describe('control-server subscription endpoints', () => {
   it('reports worktree status for a named worktree or the caller', async () => {
     expect((await get('/worktree-status?worktree=Other%20Tree')).json.worktreePath).toBe(EXPLICIT_WORKTREE)
     expect((await get('/worktree-status')).json.worktreePath).toBe(CALLER_WORKTREE)
+  })
+})
+
+describe('control-server POST /projects and POST /repos', () => {
+  let tmp: string
+  const savedEnv = { ...process.env }
+
+  beforeAll(() => {
+    // CI runners have no git identity; createNewProject commits.
+    process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Test'
+    process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'test@example.com'
+  })
+  afterAll(() => {
+    process.env = savedEnv
+  })
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), 'ness-cs-project-')))
+    createProject.mockClear()
+  })
+  afterEach(() => {
+    repoRoots = ['/repo']
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('creates a committed repo, registers it, and create_worktree can fork from it', async () => {
+    const r = await call('POST', '/projects', { name: 'finance-app', parentDir: tmp })
+    expect(r.status).toBe(200)
+    const repoRoot = join(tmp, 'finance-app')
+    expect(r.json.repoRoot).toBe(repoRoot)
+    expect(repoRoots).toContain(repoRoot)
+    // UI defaults: README on, macOS .gitignore.
+    expect(createProject).toHaveBeenCalledWith({
+      parentDir: tmp,
+      name: 'finance-app',
+      includeReadme: true,
+      gitignorePreset: 'macos'
+    })
+    expect(existsSync(join(repoRoot, 'README.md'))).toBe(true)
+    const log = execFileSync('git', ['log', '--oneline'], { cwd: repoRoot, encoding: 'utf-8' })
+    expect(log).toContain('Initial commit')
+
+    // The follow-up the tool description points at: a fresh repo with no
+    // remote must still accept a worktree (base falls back to HEAD).
+    const wt = await call('POST', '/worktrees', { repoRoot, branchName: 'first-feature' })
+    expect(wt.status).toBe(200)
+    expect(wt.json.branch).toBe('first-feature')
+    expect(existsSync(join(String(wt.json.path), 'README.md'))).toBe(true)
+  })
+
+  it('passes includeReadme / gitignorePreset through', async () => {
+    const r = await call('POST', '/projects', {
+      name: 'py',
+      parentDir: tmp,
+      includeReadme: false,
+      gitignorePreset: 'python'
+    })
+    expect(r.status).toBe(200)
+    expect(existsSync(join(tmp, 'py', 'README.md'))).toBe(false)
+    expect(existsSync(join(tmp, 'py', '.gitignore'))).toBe(true)
+  })
+
+  it('returns 409 when the target directory already exists', async () => {
+    mkdirSync(join(tmp, 'taken'))
+    const r = await call('POST', '/projects', { name: 'taken', parentDir: tmp + '/' })
+    expect(r.status).toBe(409)
+    expect(r.json.error).toBe(`${join(tmp, 'taken')} already exists`)
+  })
+
+  it.each([
+    [{ name: '../escape', parentDir: '/tmp' }, /invalid characters/],
+    [{ name: '..', parentDir: '/tmp' }, /Invalid name/],
+    [{ name: '', parentDir: '/tmp' }, /Name is required/],
+    [{ name: 'ok' }, /parentDir is required/],
+    [{ name: 'ok', parentDir: 'relative/dir' }, /must be absolute/],
+    [{ name: 'ok', parentDir: '/definitely/not/a/real/dir' }, /does not exist/],
+    [{ name: 'ok', parentDir: '/tmp', gitignorePreset: 'rust' }, /gitignorePreset/],
+    [{ name: 'ok', parentDir: '/tmp', includeReadme: 'yes' }, /includeReadme/]
+  ])('rejects bad project input %j before touching disk', async (body, error) => {
+    const r = await call('POST', '/projects', body)
+    expect(r.status).toBe(400)
+    expect(r.json.error).toMatch(error)
+    expect(createProject).not.toHaveBeenCalled()
+  })
+
+  it('adds an existing repo, and reports alreadyOpen on a second add', async () => {
+    const repo = join(tmp, 'existing')
+    mkdirSync(repo)
+    execFileSync('git', ['init', '-q'], { cwd: repo })
+    const first = await call('POST', '/repos', { path: repo })
+    expect(first.status).toBe(200)
+    expect(first.json).toEqual({ repoRoot: repo, alreadyOpen: false })
+    const second = await call('POST', '/repos', { path: repo })
+    expect(second.json).toEqual({ repoRoot: repo, alreadyOpen: true })
+    expect(repoRoots.filter((r) => r === repo)).toHaveLength(1)
+  })
+
+  it('rejects a folder that is not a git repo without registering it', async () => {
+    const plain = join(tmp, 'plain')
+    mkdirSync(plain)
+    const r = await call('POST', '/repos', { path: plain })
+    expect(r.status).toBe(400)
+    expect(r.json.error).toMatch(/is not a git repository/)
+    expect(repoRoots).toEqual(['/repo'])
+  })
+
+  it('rejects a subfolder of a repo and names the root instead', async () => {
+    const repo = join(tmp, 'outer')
+    mkdirSync(join(repo, 'sub'), { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: repo })
+    writeFileSync(join(repo, 'sub', 'f.txt'), 'x')
+    const r = await call('POST', '/repos', { path: join(repo, 'sub') })
+    expect(r.status).toBe(400)
+    expect(r.json.resolved).toBe(repo)
+    expect(repoRoots).toEqual(['/repo'])
+  })
+
+  it('requires an absolute path', async () => {
+    expect((await call('POST', '/repos', {})).json.error).toMatch(/path is required/)
+    expect((await call('POST', '/repos', { path: 'rel' })).json.error).toMatch(/absolute/)
   })
 })

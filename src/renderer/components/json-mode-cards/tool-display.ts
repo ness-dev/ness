@@ -5,6 +5,7 @@
 // as "Brand · Title Cased Action" with a brand icon when we have one.
 
 import {
+  AddRepoIcon,
   AlarmIcon,
   AnthropicIcon,
   AsanaIcon,
@@ -54,6 +55,7 @@ import {
   MysqlIcon,
   NavigateIcon,
   NetlifyIcon,
+  NewProjectIcon,
   NewTabIcon,
   NotebookIcon,
   NotionIcon,
@@ -421,6 +423,8 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   create_worktree: { icon: BranchIcon, one: 'worktree', many: 'worktrees' },
   list_worktrees: { icon: ListIcon, one: 'worktree list', many: 'worktree lists' },
   list_repos: { icon: ListIcon, one: 'repo list', many: 'repo lists' },
+  create_project: { icon: NewProjectIcon, one: 'new project', many: 'new projects' },
+  add_repo: { icon: AddRepoIcon, one: 'repo add', many: 'repo adds' },
   rename_worktree: { icon: RenameIcon, one: 'rename', many: 'renames' },
   set_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },
   clear_worktree_alias: { icon: RenameIcon, one: 'rename', many: 'renames' },

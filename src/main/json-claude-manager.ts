@@ -225,6 +225,11 @@ export interface ForkTranscriptParams {
   /** Cut the copy after the LAST jsonl line whose inner `message.id`
    *  matches. Omit to copy the whole transcript. */
   throughApiMessageId?: string
+  /** Read the source from this exact file instead of deriving it from
+   *  `sourceWorktreePath`. For transcripts another tool wrote (loch's
+   *  `ask` fork) under a cwd that may not exist anymore, where the probe-
+   *  resolved Claude home and encoding can't be trusted to find it. */
+  sourceTranscriptPath?: string
 }
 
 /** Copy a session's transcript into a new jsonl under a fresh session id,
@@ -256,7 +261,8 @@ export interface ForkTranscriptParams {
 export function forkTranscript(params: ForkTranscriptParams): ForkOutcome {
   const { sourceSessionId, sourceWorktreePath, destWorktreePath, throughApiMessageId } = params
   const newSessionId = randomUUID()
-  const sourcePath = transcriptPathFor(sourceSessionId, sourceWorktreePath)
+  const sourcePath =
+    params.sourceTranscriptPath ?? transcriptPathFor(sourceSessionId, sourceWorktreePath)
   if (!existsSync(sourcePath)) {
     return { ok: false, reason: 'source transcript missing' }
   }

@@ -41,7 +41,7 @@ export function buildClaudeLaunchSettings(input: {
   let systemPrompt: string | undefined
   if (config.harnessSystemPromptEnabled !== false) {
     let base = config.harnessSystemPrompt || DEFAULT_HARNESS_SYSTEM_PROMPT
-    if (config.conversationForkEnabled !== true) {
+    if (config.conversationForkEnabled === false) {
       base = base.replace(`\n\n${HARNESS_SYSTEM_PROMPT_FORK_PARAGRAPH}`, '')
     }
     if (config.agentTabNamingEnabled === false) {

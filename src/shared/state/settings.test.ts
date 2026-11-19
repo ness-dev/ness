@@ -564,7 +564,7 @@ describe('settingsReducer', () => {
   })
 
   it('conversationForkEnabledChanged toggles flag', () => {
-    expect(initialSettings.conversationForkEnabled).toBe(false)
+    expect(initialSettings.conversationForkEnabled).toBe(true)
     const on = apply(initialSettings, {
       type: 'settings/conversationForkEnabledChanged',
       payload: true
@@ -574,8 +574,8 @@ describe('settingsReducer', () => {
     expect(off.conversationForkEnabled).toBe(false)
   })
 
-  it('worktreeMessagingEnabledChanged toggles flag, defaulting off', () => {
-    expect(initialSettings.worktreeMessagingEnabled).toBe(false)
+  it('worktreeMessagingEnabledChanged toggles flag, defaulting on', () => {
+    expect(initialSettings.worktreeMessagingEnabled).toBe(true)
     const on = apply(initialSettings, {
       type: 'settings/worktreeMessagingEnabledChanged',
       payload: true
@@ -586,6 +586,34 @@ describe('settingsReducer', () => {
       payload: false
     })
     expect(off.worktreeMessagingEnabled).toBe(false)
+  })
+
+  it('lochBlameEnabledChanged toggles flag, defaulting ON', () => {
+    expect(initialSettings.lochBlameEnabled).toBe(true)
+    const off = apply(initialSettings, { type: 'settings/lochBlameEnabledChanged', payload: false })
+    expect(off.lochBlameEnabled).toBe(false)
+    const on = apply(off, { type: 'settings/lochBlameEnabledChanged', payload: true })
+    expect(on.lochBlameEnabled).toBe(true)
+  })
+
+  it('lochRecordingReposChanged replaces the opted-in repo list, defaulting empty', () => {
+    expect(initialSettings.lochRecordingRepos).toEqual([])
+    const on = apply(initialSettings, {
+      type: 'settings/lochRecordingReposChanged',
+      payload: ['/repo/a']
+    })
+    expect(on.lochRecordingRepos).toEqual(['/repo/a'])
+    const off = apply(on, { type: 'settings/lochRecordingReposChanged', payload: [] })
+    expect(off.lochRecordingRepos).toEqual([])
+  })
+
+  it('lochPromptDismissedReposChanged replaces the dismissed list, defaulting empty', () => {
+    expect(initialSettings.lochPromptDismissedRepos).toEqual([])
+    const next = apply(initialSettings, {
+      type: 'settings/lochPromptDismissedReposChanged',
+      payload: ['/repo/a']
+    })
+    expect(next.lochPromptDismissedRepos).toEqual(['/repo/a'])
   })
 
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
@@ -641,18 +669,18 @@ describe('settingsReducer', () => {
     expect(xterm.defaultClaudeTabType).toBe('xterm')
   })
 
-  it('autoApprovePermissionsChanged toggles the flag', () => {
-    expect(initialSettings.autoApprovePermissions).toBe(false)
-    const on = apply(initialSettings, {
-      type: 'settings/autoApprovePermissionsChanged',
-      payload: true
-    })
-    expect(on.autoApprovePermissions).toBe(true)
-    const off = apply(on, {
+  it('autoApprovePermissionsChanged toggles the flag, defaulting on', () => {
+    expect(initialSettings.autoApprovePermissions).toBe(true)
+    const off = apply(initialSettings, {
       type: 'settings/autoApprovePermissionsChanged',
       payload: false
     })
     expect(off.autoApprovePermissions).toBe(false)
+    const on = apply(off, {
+      type: 'settings/autoApprovePermissionsChanged',
+      payload: true
+    })
+    expect(on.autoApprovePermissions).toBe(true)
   })
 
   it('autoApproveSteerInstructionsChanged sets the steer text', () => {
@@ -962,6 +990,16 @@ describe('settingsReducer', () => {
     expect(
       apply(auto, { type: 'settings/agentReviewDeliveryChanged', payload: 'auto' })
     ).toBe(auto)
+  })
+
+  it('agentReviewsEnabledChanged toggles, defaulting off, and keeps identity on a no-op', () => {
+    expect(initialSettings.agentReviewsEnabled).toBe(false)
+    const on = apply(initialSettings, {
+      type: 'settings/agentReviewsEnabledChanged',
+      payload: true
+    })
+    expect(on.agentReviewsEnabled).toBe(true)
+    expect(apply(on, { type: 'settings/agentReviewsEnabledChanged', payload: true })).toBe(on)
   })
 
   it('autoReviewOnGreenCiChanged toggles and keeps identity on a no-op', () => {

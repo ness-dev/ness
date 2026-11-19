@@ -186,6 +186,10 @@ export function buildBackend(
       req('worktree:recentCommitShas', worktreePath),
     readWorktreeFile: (worktreePath: string, filePath: string) =>
       req('worktree:readFile', worktreePath, filePath),
+    lochBlame: (worktreePath: string, filePath: string) =>
+      req('loch:blame', worktreePath, filePath),
+    lochAsk: (worktreePath: string, filePath: string, line: number, opts?: { atTurn?: boolean }) =>
+      req('loch:ask', worktreePath, filePath, line, opts),
     readWorktreeFileBinary: (worktreePath: string, filePath: string) =>
       req('worktree:readFileBinary', worktreePath, filePath),
     writeWorktreeFile: (worktreePath: string, filePath: string, contents: string) =>
@@ -307,6 +311,12 @@ export function buildBackend(
       reqConfig('config:setConversationForkEnabled', enabled),
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
+    setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
+    setLochRecording: (repoRoot: string, enabled: boolean) =>
+      req('loch:setRecording', repoRoot, enabled),
+    setLochPromptDismissed: (repoRoot: string, dismissed: boolean) =>
+      req('loch:setPromptDismissed', repoRoot, dismissed),
+    refreshLochAvailability: () => req('loch:refreshAvailability'),
     setAgentTabNamingEnabled: (enabled: boolean) =>
       reqConfig('config:setAgentTabNamingEnabled', enabled),
     setDefaultClaudeTabType: (value: 'xterm' | 'json') =>
@@ -339,6 +349,8 @@ export function buildBackend(
     // reviewer, so every client of a workspace wants the same value.
     setAgentReviewDelivery: (value: AgentReviewDelivery) =>
       req('config:setAgentReviewDelivery', value),
+    setAgentReviewsEnabled: (enabled: boolean) =>
+      req('config:setAgentReviewsEnabled', enabled),
     setAutoReviewOnGreenCi: (enabled: boolean) =>
       req('config:setAutoReviewOnGreenCi', enabled),
     setReviewAgent: (value: ReviewAgentChoice) => req('config:setReviewAgent', value),
