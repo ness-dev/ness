@@ -3196,14 +3196,14 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('config:setLochBlameEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
-      config.lochBlameEnabled = true
-    } else {
       delete config.lochBlameEnabled
+    } else {
+      config.lochBlameEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/lochBlameEnabledChanged',
-      payload: config.lochBlameEnabled === true
+      payload: config.lochBlameEnabled !== false
     })
     return true
   })

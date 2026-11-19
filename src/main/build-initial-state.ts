@@ -328,7 +328,7 @@ export function buildInitialAppState(
       browserToolsMode: config.browserToolsMode === 'view' ? 'view' : 'full',
       conversationForkEnabled: config.conversationForkEnabled === true,
       worktreeMessagingEnabled: config.worktreeMessagingEnabled === true,
-      lochBlameEnabled: config.lochBlameEnabled === true,
+      lochBlameEnabled: config.lochBlameEnabled !== false,
       lochRecordingRepos: Array.isArray(config.lochRecordingRepos) ? config.lochRecordingRepos : [],
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',

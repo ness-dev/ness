@@ -588,12 +588,12 @@ describe('settingsReducer', () => {
     expect(off.worktreeMessagingEnabled).toBe(false)
   })
 
-  it('lochBlameEnabledChanged toggles flag, defaulting off', () => {
-    expect(initialSettings.lochBlameEnabled).toBe(false)
-    const on = apply(initialSettings, { type: 'settings/lochBlameEnabledChanged', payload: true })
-    expect(on.lochBlameEnabled).toBe(true)
-    const off = apply(on, { type: 'settings/lochBlameEnabledChanged', payload: false })
+  it('lochBlameEnabledChanged toggles flag, defaulting ON', () => {
+    expect(initialSettings.lochBlameEnabled).toBe(true)
+    const off = apply(initialSettings, { type: 'settings/lochBlameEnabledChanged', payload: false })
     expect(off.lochBlameEnabled).toBe(false)
+    const on = apply(off, { type: 'settings/lochBlameEnabledChanged', payload: true })
+    expect(on.lochBlameEnabled).toBe(true)
   })
 
   it('lochRecordingReposChanged replaces the opted-in repo list, defaulting empty', () => {

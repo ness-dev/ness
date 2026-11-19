@@ -286,7 +286,8 @@ export interface Config {
   // endpoint accepts calls, letting an agent write into another worktree's
   // chat. Default off (undefined treated as false).
   worktreeMessagingEnabled?: boolean
-  // loch blame gutter in the file viewer. Default off.
+  /** loch blame gutter in the file viewer. Default ON, so only an explicit
+   *  `false` is written — absence means enabled. */
   lochBlameEnabled?: boolean
   // Repo roots opted in to loch recording (hooks installed in their worktrees).
   lochRecordingRepos?: string[]

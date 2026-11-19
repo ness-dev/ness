@@ -409,7 +409,8 @@ export interface SettingsState {
   /** Show loch's per-line conversation blame in the file viewer's gutter,
    *  with an action to open a Chat on a fork of the conversation that wrote
    *  a line. Needs the `loch` CLI on PATH; without it the gutter is simply
-   *  empty. Default off (experimental). */
+   *  empty, which is why this defaults ON — it's read-only and costs nothing
+   *  where loch isn't set up. Recording is the separate, opt-in part. */
   lochBlameEnabled: boolean
   /** Repo roots the user has explicitly opted in to loch recording: Ness
    *  installs loch's hooks into every worktree of these repos. Separate from
@@ -704,7 +705,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: false,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: false,
-  lochBlameEnabled: false,
+  lochBlameEnabled: true,
   lochRecordingRepos: [],
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',

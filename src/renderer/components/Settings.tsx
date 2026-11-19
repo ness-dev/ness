@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
-import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, FlaskConical, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, X, Eye, EyeOff, Star, RefreshCw, Download, RotateCw, GitPullRequest, History, DownloadCloud, Keyboard, RotateCcw, Terminal as TerminalIcon, Palette, BookOpen, Code2, GitBranch, Plus, Trash2, Moon, LifeBuoy, Bug, Lightbulb, FlaskConical, Copy, CopyCheck, ExternalLink, CalendarDays, FileText, FolderOpen, Search, ChevronDown, ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { openReportIssue } from './ReportIssueScreen'
 import { HARNESS_ISSUES_URL, HARNESS_RELEASES_URL, harnessReleaseNotesUrl } from '../../shared/constants'
 import {
@@ -44,7 +44,7 @@ interface SettingsProps {
   initialSection?: SectionId
 }
 
-type SectionId = 'general' | 'appearance' | 'agent' | 'worktrees' | 'editor' | 'github' | 'hotkeys' | 'updates' | 'support' | 'experimental'
+type SectionId = 'general' | 'appearance' | 'agent' | 'worktrees' | 'editor' | 'blame' | 'github' | 'hotkeys' | 'updates' | 'support' | 'experimental'
 type SubSectionId =
   | 'appearance-theme'
   | 'appearance-custom-themes'
@@ -67,7 +67,6 @@ type SubSectionId =
   | 'experimental-browser-control'
   | 'experimental-conversation-fork'
   | 'experimental-worktree-messaging'
-  | 'experimental-loch-blame'
   | 'experimental-agent-reviews'
   | 'experimental-auto-approve'
   | 'experimental-web-mobile'
@@ -102,6 +101,7 @@ const SECTIONS: Section[] = [
   ]},
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch },
   { id: 'editor', label: 'Editor', icon: Code2 },
+  { id: 'blame', label: 'Conversation blame', icon: History },
   { id: 'github', label: 'GitHub', icon: GitPullRequest },
   { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, children: [
     { id: 'hotkeys-navigation', label: 'Worktree navigation' },
@@ -119,7 +119,6 @@ const SECTIONS: Section[] = [
     { id: 'experimental-browser-control', label: 'Browser control' },
     { id: 'experimental-conversation-fork', label: 'Conversation fork' },
     { id: 'experimental-worktree-messaging', label: 'Worktree messaging' },
-    { id: 'experimental-loch-blame', label: 'Conversation blame' },
     { id: 'experimental-agent-reviews', label: 'Agent reviews' },
     { id: 'experimental-auto-approve', label: 'Auto-approve' },
     { id: 'experimental-web-mobile', label: 'Web & mobile' }
@@ -225,6 +224,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     agent: null,
     worktrees: null,
     editor: null,
+    blame: null,
     github: null,
     hotkeys: null,
     updates: null,
@@ -253,7 +253,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'experimental-browser-control': null,
     'experimental-conversation-fork': null,
     'experimental-worktree-messaging': null,
-    'experimental-loch-blame': null,
     'experimental-agent-reviews': null,
     'experimental-auto-approve': null,
     'experimental-web-mobile': null
@@ -3600,6 +3599,43 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
               )}
             </section>
 
+            {/* Conversation blame section */}
+            <section ref={(el) => { sectionRefs.current.blame = el }} id="blame">
+              <h2 className="text-lg font-semibold text-fg-bright mb-1">Conversation blame</h2>
+              <p className="text-sm text-dim mb-4">
+                Marks each line in the file viewer&apos;s gutter with the agent
+                conversation that wrote it, using{' '}
+                <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
+                per-turn attribution. Click a mark to pin its card, then ask a fork
+                of that conversation why it wrote the line. Needs the{' '}
+                <code className="bg-panel px-1 rounded text-xs">loch</code> CLI on
+                your PATH; without it the gutter is simply empty.
+              </p>
+
+              <label className="flex items-start gap-3 cursor-pointer mb-6">
+                <input
+                  type="checkbox"
+                  checked={lochBlameEnabled}
+                  onChange={(e) => { void backend.setLochBlameEnabled(e.target.checked) }}
+                  className="mt-0.5 cursor-pointer icon-base" />
+                <div className="flex-1">
+                  <div className="text-sm text-fg-bright">Show conversation blame in the gutter</div>
+                </div>
+              </label>
+
+              <div className="text-sm text-fg-bright mb-1">Record conversations in</div>
+              <p className="text-xs text-dim mb-3">
+                Nothing is recorded until you tick a repo. Ticking one installs
+                loch&apos;s hooks into every worktree of it (in{' '}
+                <code className="bg-panel px-1 rounded text-xs">.claude/settings.local.json</code>),
+                so each agent turn snapshots the workspace and transcript into{' '}
+                <code className="bg-panel px-1 rounded text-xs">~/.loch</code>, then backfills
+                what it can of earlier history. Unticking removes the hooks; recorded
+                data stays.
+              </p>
+              <LochRecordingRepos />
+            </section>
+
             {/* GitHub section */}
             <section ref={(el) => { sectionRefs.current.github = el }} id="github">
               {(() => {
@@ -4152,51 +4188,6 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     </div>
                   </div>
                 </label>
-              </div>
-
-              {/* loch conversation blame sub-card */}
-              <div
-                ref={(el) => { subSectionRefs.current['experimental-loch-blame'] = el }}
-                id="experimental-loch-blame"
-                className="bg-panel-raised border border-warning/30 rounded-lg p-4 mb-4"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-fg-bright">Conversation blame</h3>
-                  <span className="text-xs font-medium text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-0.5">
-                    Experimental
-                  </span>
-                </div>
-                <p className="text-xs text-dim mb-3">
-                  Marks each line in the file viewer&apos;s gutter with the agent
-                  conversation that wrote it, using{' '}
-                  <code className="bg-panel px-1 rounded text-xs">loch</code>&apos;s
-                  per-turn attribution. Click a mark to pin its card, then ask
-                  a fork of that conversation why it wrote the line. Requires the{' '}
-                  <code className="bg-panel px-1 rounded text-xs">loch</code> CLI on
-                  your PATH; repos only record once you opt them in below.
-                </p>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={lochBlameEnabled}
-                    onChange={(e) => { void backend.setLochBlameEnabled(e.target.checked) }}
-                    className="mt-0.5 cursor-pointer icon-base" />
-                  <div className="flex-1">
-                    <div className="text-sm text-fg-bright">Show conversation blame in the gutter</div>
-                  </div>
-                </label>
-
-                <div className="mt-4 pt-3 border-t border-border">
-                  <div className="text-sm text-fg-bright mb-1">Record conversations in</div>
-                  <p className="text-xs text-dim mb-3">
-                    Ticking a repo installs loch&apos;s hooks into every worktree of it
-                    (in <code className="bg-panel px-1 rounded text-xs">.claude/settings.local.json</code>),
-                    so each agent turn snapshots the workspace and transcript into{' '}
-                    <code className="bg-panel px-1 rounded text-xs">~/.loch</code>, then backfills
-                    what it can of earlier history. Unticking removes the hooks; recorded data stays.
-                  </p>
-                  <LochRecordingRepos />
-                </div>
               </div>
 
               {/* Worktree messaging sub-card */}
