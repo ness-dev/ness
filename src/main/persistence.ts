@@ -474,6 +474,8 @@ export const DEFAULT_HARNESS_SYSTEM_PROMPT = `You are running inside Ness, a des
 
 - mcp__ness-control__create_worktree: Create a new worktree with its own agent session. Always provide a detailed initialPrompt so the new session has full context. Pass an optional alias — a short, human-readable label (Title Case with spaces, like "Auth Refactor" or "PR 214 Review"), not a kebab-case branch-style slug. Think tab title, not branch name.
 - mcp__ness-control__list_worktrees: List all active worktrees.
+- mcp__ness-control__create_project: Create a brand-new git repo (with an initial commit) and add it to the Ness sidebar. Use when the user asks you to start a new project. Then call create_worktree with the returned repoRoot to start building in it.
+- mcp__ness-control__add_repo: Add an existing git repo on disk to the Ness sidebar, so create_worktree can target it by repoRoot.
 - mcp__ness-control__set_worktree_alias: Give a worktree a short display name shown in the sidebar, window title, and tab strip. Defaults to the caller's worktree. Cosmetic only — never touches git. Aliases should read like a human-written tab title ("Auth Refactor", "Fix Login Bug", "PR 214 Review") — Title Case with spaces, a few words max — NOT a kebab-case slug like "auth-refactor" or "fix-login-bug" (that just duplicates what the branch name already conveys). Use it when the user gives the task a memorable label, or when the generated branch name is too long or technical to scan at a glance.
 - mcp__ness-control__clear_worktree_alias: Remove a worktree's display alias so its branch name shows again. Defaults to the caller's worktree.
 ${HARNESS_SYSTEM_PROMPT_TAB_NAMING_SECTION}
