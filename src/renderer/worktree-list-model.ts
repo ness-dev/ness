@@ -65,10 +65,6 @@ export interface ProjectHomeModel {
   /** Show the branch on the project row. Only when main isn't sitting on a
    *  base branch — "main" on the main checkout says nothing. */
   showBranch: boolean
-  /** The repo's other in-flight worktrees (not merged, not snoozed). */
-  agents: number
-  /** Those worktrees bucketed by their (worst-tab) status. */
-  byStatus: Record<PtyStatus, number>
 }
 
 /** Archive groups folded into one collapsed line at the bottom of a section. */
@@ -130,6 +126,8 @@ export interface WorktreeRepoSectionModel {
   collapsed: boolean
   /** The user pinned this project open so it stays expanded anywhere. */
   pinnedOpen: boolean
+  /** Holds the active worktree (or pending creation). */
+  holdsActive: boolean
   /** Every worktree grouped by status, main included. Overview surfaces
    *  (command center, task list) render this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
@@ -160,12 +158,15 @@ export interface WorktreeListModel {
   /** Every worktree path in sidebar display order (homes first), collapsed
    *  or not — prev/next navigation walks this. */
   orderedPaths: string[]
-  /** The paths actually on screen, in order — Cmd+1..9 indexes this. */
-  visiblePaths: string[]
-  /** Mains drawn as a project row, which is on screen even when its
-   *  project is collapsed: every home in unified mode, the primary one
-   *  otherwise. */
-  projectRowPaths: string[]
+  /** The paths Cmd+1..9 indexes, in order. Deliberately independent of the
+   *  project accordion: it skips collapsed status groups and the folded
+   *  tail, but counts a collapsed project's work as if it were open, so the
+   *  numbers don't shift every time you cross projects. Jumping into a
+   *  collapsed project opens it. */
+  numberedPaths: string[]
+  /** repoRoot of the active worktree, or null. Set by the accordion pass;
+   *  lets unified mode mark the project row you're working under. */
+  activeRepoRoot: string | null
 }
 
 export interface WorktreeListModelInput {
@@ -201,7 +202,8 @@ export interface WorktreeListModelInput {
   pinnedOpenRepos: Record<string, boolean>
   /** The selected worktree (or pending creation). Its project expands; the
    *  others collapse to their project row unless pinned open. Absent →
-   *  nothing collapses. */
+   *  nothing collapses. Applied by `applyProjectAccordion`, a separate
+   *  cheap pass, so switching worktrees doesn't rebuild every row. */
   activeWorktreeId?: string | null
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   /** Touch surfaces don't bind Cmd+N, so they skip ordinal assignment. */
@@ -227,7 +229,23 @@ function aggregate(
   return { status, pendingTool: null }
 }
 
+/** Full model in one call — the base build plus the accordion pass. The
+ *  renderer memoises the two halves separately (see useWorktreeListModel);
+ *  this composition is for tests and one-shot callers. */
 export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeListModel {
+  return applyProjectAccordion(
+    buildWorktreeListBase(input),
+    input.activeWorktreeId ?? null,
+    input.pinnedOpenRepos
+  )
+}
+
+/** Everything that doesn't depend on which worktree is selected: grouping,
+ *  rows, ordinals. Row objects are allocated here, so this must not re-run
+ *  on a plain worktree switch — WorktreeTab memoises on row identity. */
+export function buildWorktreeListBase(
+  input: Omit<WorktreeListModelInput, 'activeWorktreeId' | 'pinnedOpenRepos'>
+): WorktreeListModel {
   const {
     worktrees,
     repoRoots,
@@ -247,8 +265,6 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     viewerLogin,
     assignedPRsByRepo,
     unifiedRepos,
-    pinnedOpenRepos,
-    activeWorktreeId,
     isGroupCollapsed,
     assignOrdinals = true
   } = input
@@ -403,11 +419,6 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     const homes: WorktreeRowModel[] = []
     const workGroups: WorktreeListGroupModel[] = []
     const tailGroups: WorktreeListGroupModel[] = []
-    const agentStats = new Map<string, { agents: number; byStatus: Record<PtyStatus, number> }>()
-    const emptyStats = (): { agents: number; byStatus: Record<PtyStatus, number> } => ({
-      agents: 0,
-      byStatus: { processing: 0, 'needs-approval': 0, waiting: 0, idle: 0 }
-    })
     for (const group of groups) {
       const isTail = TAIL_KEYS.includes(group.key)
       const rest: WorktreeRowModel[] = []
@@ -417,11 +428,6 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
           continue
         }
         rest.push(row)
-        if (isTail) continue
-        const stats = agentStats.get(row.worktree.repoRoot) ?? emptyStats()
-        stats.agents += 1
-        stats.byStatus[row.status] += 1
-        agentStats.set(row.worktree.repoRoot, stats)
       }
       const split =
         rest.length === group.rows.length
@@ -444,21 +450,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       const primaryIdx = homes.findIndex((h) => h.worktree.repoRoot === bucket.repoRoot)
       if (primaryIdx > 0) homes.unshift(...homes.splice(primaryIdx, 1))
     }
-    // Unified mode stacks one row per repo, so each counts its own repo. A
-    // section's project row heads every host's worktrees, so it counts all
-    // of them — otherwise remote ones that need you vanish from the tally.
-    const sectionStats = emptyStats()
-    for (const stats of agentStats.values()) {
-      sectionStats.agents += stats.agents
-      for (const k of Object.keys(stats.byStatus) as PtyStatus[]) sectionStats.byStatus[k] += stats.byStatus[k]
+    for (const row of homes) {
+      row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch) }
     }
-    homes.forEach((row, i) => {
-      const stats =
-        bucket.repoRoot !== UNIFIED_REPO_ROOT && i === 0
-          ? sectionStats
-          : (agentStats.get(row.worktree.repoRoot) ?? emptyStats())
-      row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
-    })
     const tail: WorktreeTailModel | null =
       tailGroups.length === 0
         ? null
@@ -473,21 +467,16 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       bucket.repoRoot === UNIFIED_REPO_ROOT
         ? pendingWorktrees
         : pendingWorktrees.filter((p) => memberRoots.has(p.repoRoot))
-    const unifiedSection = bucket.repoRoot === UNIFIED_REPO_ROOT
-    const holdsActive =
-      !!activeWorktreeId &&
-      (bucket.worktrees.some((w) => w.path === activeWorktreeId) ||
-        sectionPending.some((p) => p.id === activeWorktreeId))
-    const pinnedOpen = pinnedOpenRepos[bucket.scope] === true
     return {
       repoRoot: bucket.repoRoot,
       repoRoots: bucket.repoRoots,
       scope: bucket.scope,
       repoName: bucket.repoRoot === UNIFIED_REPO_ROOT ? 'All repos' : repoLabelFor(bucket.repoRoot),
       unified: bucket.repoRoot === UNIFIED_REPO_ROOT,
-      // Accordion: the project you're in is open, plus any pinned open.
-      collapsed: !unifiedSection && !!activeWorktreeId && !holdsActive && !pinnedOpen,
-      pinnedOpen,
+      // Filled in by applyProjectAccordion.
+      collapsed: false,
+      pinnedOpen: false,
+      holdsActive: false,
       groups,
       homes,
       workGroups,
@@ -498,37 +487,33 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
   })
 
   // Sidebar display order: project homes, then live work, then the tail
-  // fold. Cmd+1..9 ordinals follow the visible subset — skipping collapsed
-  // groups, the folded tail, and everything but the project row in a
-  // collapsed repo (that row never hides) — so the badge on
-  // a row matches the hotkey that actually switches to it. The hotkey handlers read these same lists
-  // rather than re-deriving the order.
+  // fold. Cmd+1..9 numbers rows in that order, skipping collapsed status
+  // groups and the folded tail — but NOT a collapsed project: the
+  // accordion follows the selection, and numbering that followed it too
+  // would reshuffle on every project switch. The hotkey handlers read these
+  // lists rather than re-deriving the order.
   const orderedPaths: string[] = []
-  const visibleRows: WorktreeRowModel[] = []
-  const projectRowPaths: string[] = []
+  const numberedRows: WorktreeRowModel[] = []
   for (const section of sections) {
-    const visible = !section.collapsed
-    section.homes.forEach((row, i) => {
+    for (const row of section.homes) {
       orderedPaths.push(row.path)
-      const isProjectRow = section.unified || i === 0
-      if (isProjectRow) projectRowPaths.push(row.path)
-      if (isProjectRow || visible) visibleRows.push(row)
-    })
+      numberedRows.push(row)
+    }
     for (const group of section.workGroups) {
       for (const row of group.rows) {
         orderedPaths.push(row.path)
-        if (visible && !group.collapsed) visibleRows.push(row)
+        if (!group.collapsed) numberedRows.push(row)
       }
     }
     for (const group of section.tail?.groups ?? []) {
       for (const row of group.rows) {
         orderedPaths.push(row.path)
-        if (visible && !section.tail!.collapsed) visibleRows.push(row)
+        if (!section.tail!.collapsed) numberedRows.push(row)
       }
     }
   }
   if (assignOrdinals) {
-    visibleRows.slice(0, MAX_ORDINALS).forEach((row, i) => {
+    numberedRows.slice(0, MAX_ORDINALS).forEach((row, i) => {
       row.cmdOrdinal = i + 1
     })
   }
@@ -543,9 +528,56 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     snoozedPaths,
     totalWorktrees: worktrees.length,
     orderedPaths,
-    visiblePaths: visibleRows.map((row) => row.path),
-    projectRowPaths
+    numberedPaths: numberedRows.map((row) => row.path),
+    activeRepoRoot: null
   }
+}
+
+/** The project accordion: the project holding the active worktree is open,
+ *  others collapse to their row unless pinned open. Cheap and
+ *  allocation-light — sections whose state didn't change, and every row,
+ *  keep their identity, so a worktree switch only re-renders what moved.
+ *
+ *  When no project holds the active id (it was just deleted, or belongs to
+ *  a backend whose list hasn't loaded) nothing collapses, same as having no
+ *  selection — the sidebar shouldn't snap shut on a transient state. */
+export function applyProjectAccordion(
+  base: WorktreeListModel,
+  activeWorktreeId: string | null,
+  pinnedOpenRepos: Record<string, boolean>
+): WorktreeListModel {
+  let activeRepoRoot: string | null = null
+  const holds = base.sections.map((section) => {
+    if (!activeWorktreeId) return false
+    for (const group of section.groups) {
+      const row = group.rows.find((r) => r.path === activeWorktreeId)
+      if (row) {
+        activeRepoRoot = row.worktree.repoRoot
+        return true
+      }
+    }
+    const pending = section.pending.find((p) => p.id === activeWorktreeId)
+    if (pending) activeRepoRoot = pending.repoRoot
+    return !!pending
+  })
+  const anyHolds = holds.some(Boolean)
+  let changed = false
+  const sections = base.sections.map((section, i) => {
+    const pinnedOpen = pinnedOpenRepos[section.scope] === true
+    const holdsActive = holds[i]
+    const collapsed = !section.unified && anyHolds && !holdsActive && !pinnedOpen
+    if (
+      section.collapsed === collapsed &&
+      section.pinnedOpen === pinnedOpen &&
+      section.holdsActive === holdsActive
+    ) {
+      return section
+    }
+    changed = true
+    return { ...section, collapsed, pinnedOpen, holdsActive }
+  })
+  if (!changed && base.activeRepoRoot === activeRepoRoot) return base
+  return { ...base, sections, activeRepoRoot }
 }
 
 export function repoLabelFor(repoRoot: string): string {

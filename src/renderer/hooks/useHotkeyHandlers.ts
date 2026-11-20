@@ -134,7 +134,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 
   const visibleWorktrees = useMemo(() => {
     const byPath = new Map(worktrees.map((w) => [w.path, w]))
-    return listModel.visiblePaths.flatMap((p) => byPath.get(p) ?? [])
+    return listModel.numberedPaths.flatMap((p) => byPath.get(p) ?? [])
   }, [listModel, worktrees])
 
   const scopeForWorktree = useCallback(
@@ -145,8 +145,6 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 
   const ensureWorktreeVisible = useCallback(
     (wt: Worktree) => {
-      // A project row is always on screen. Other hosts' mains in a merged
-      // section are ordinary rows and fall through to the repo expand below.
       // Selecting a worktree makes its project the active one, which opens
       // it, so only a collapsed status group can still hide it. Mains sit
       // outside the groups entirely.

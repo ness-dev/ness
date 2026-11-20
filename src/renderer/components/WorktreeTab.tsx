@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
-import type { PtyStatus, SidebarDetailPrefs } from '../types'
+import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { RepoIcon, repoNameColor } from './RepoIcon'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
@@ -14,7 +14,7 @@ import { useEditorOverrideScope, useResolvedEditorId } from '../store'
 import { displayLabel } from '../worktree-display'
 import { ALIAS_MAX_LEN } from '../../shared/state/aliases'
 import { STATUS_COLORS, STATUS_LABELS, detachedLikeTooltip, prIconStyle, prIconTitle } from '../worktree-row-style'
-import type { ProjectHomeModel, WorktreeRowModel } from '../worktree-list-model'
+import type { WorktreeRowModel } from '../worktree-list-model'
 import {
   buildRowActions,
   buildAliasActions,
@@ -200,7 +200,9 @@ export const WorktreeTab = memo(function WorktreeTab({
         onClick={() => onSelect(row.path)}
         onContextMenu={onContextMenu}
         className={`group flex items-center gap-2.5 px-2 transition-colors cursor-pointer ${
-          touch ? 'min-h-14 py-2.5' : 'py-2'
+          // Fixed height whether or not the pending-tool line shows, so the
+          // title sits centred and rows don't jump when main asks for approval.
+          touch ? 'min-h-14 py-2.5' : 'min-h-14 py-2'
         } ${isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'}`}
       >
         <span className="relative shrink-0 inline-flex">
@@ -243,12 +245,10 @@ export const WorktreeTab = memo(function WorktreeTab({
               </div>
             </RowTooltip>
           )}
-          {showPendingTool ? (
+          {showPendingTool && (
             <div className="text-xs text-danger truncate font-mono" title={formatPendingTool(pendingTool!)}>
               {formatPendingTool(pendingTool!)}
             </div>
-          ) : (
-            <ProjectStatusCounts home={home} />
           )}
         </div>
         {/* Desktop: "+" appears on hover, out of layout until then so the
@@ -425,37 +425,6 @@ export const WorktreeTab = memo(function WorktreeTab({
 /** Tooltip for a project row — the main checkout is where work gets
  *  planned before it's spun off into worktrees. */
 export const PROJECT_HOME_HINT = 'Main workspace'
-
-/** Order and marks of the project row's status tally: the row dots'
- *  colours minus the pulse, so a row of them stays calm. Needs-approval is
- *  a diamond rather than a dot, so the state that wants you doesn't rely on
- *  telling red from green. */
-const STATUS_TALLY: { status: PtyStatus; mark: string }[] = [
-  { status: 'processing', mark: 'w-1.5 h-1.5 rounded-full bg-success' },
-  { status: 'needs-approval', mark: 'w-1.5 h-1.5 rotate-45 bg-danger' },
-  { status: 'waiting', mark: 'w-1.5 h-1.5 rounded-full bg-warning' },
-  { status: 'idle', mark: 'w-1.5 h-1.5 rounded-full bg-faint' }
-]
-
-/** `● 3  ◆ 1  ● 2` — one coloured mark + count per status present across
- *  the project's worktrees (a diamond for needs-approval, dots otherwise).
- *  Zero counts are omitted. */
-function ProjectStatusCounts({ home }: { home: ProjectHomeModel }): JSX.Element {
-  if (home.agents === 0) return <div className="text-xs text-faint truncate">No worktrees yet</div>
-  return (
-    <div className="flex items-center gap-2.5 text-xs text-dim tabular-nums">
-      {STATUS_TALLY.filter(({ status }) => home.byStatus[status] > 0).map(({ status, mark }) => {
-        const label = `${home.byStatus[status]} ${STATUS_LABELS[status].toLowerCase().replace(/\.+$/, '')}`
-        return (
-          <span key={status} className="inline-flex items-center gap-1" title={label} aria-label={label} role="img">
-            <span className={mark} aria-hidden />
-            <span aria-hidden>{home.byStatus[status]}</span>
-          </span>
-        )
-      })}
-    </div>
-  )
-}
 
 /** Hover-revealed icon buttons. Desktop only — there is no hover on touch. */
 function DesktopRowActions({ actions }: { actions: WorktreeRowAction[] }): JSX.Element | null {

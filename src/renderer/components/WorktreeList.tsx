@@ -477,13 +477,13 @@ export function WorktreeList({
             ? section.repoRoots.find((r) => historyPromptRepos?.includes(r.repoRoot))?.repoRoot
             : undefined
         return (
-        <div key={section.scope} className={i > 0 ? 'mt-2 pt-2 border-t border-border' : ''}>
+        <div key={section.scope} className={i > 0 ? 'mt-3' : ''}>
           {/* Every real project gets a row, even when it's the only one.
               Clicking the project opens its main workspace; the chevron
               alone collapses it. */}
           {!section.unified &&
             (home ? (
-              <RowBlock active={home.path === activeWorktreeId}>
+              <RowBlock active={home.path === activeWorktreeId} context={section.holdsActive}>
                 {renderTab(home, {
                   name: section.repoName,
                   collapsed: section.collapsed,
@@ -504,11 +504,15 @@ export function WorktreeList({
             ))}
           {/* Unified mode lists every project up top, then the shared groups. */}
           {section.unified && section.homes.length > 0 && (
-            <div className="pb-2 mb-1 border-b border-border">
+            <div className="mb-2">
               {section.homes.map((h) => {
                 const name = repoLabelFor(h.worktree.repoRoot)
                 return (
-                  <RowBlock key={h.path} active={h.path === activeWorktreeId}>
+                  <RowBlock
+                    key={h.path}
+                    active={h.path === activeWorktreeId}
+                    context={h.worktree.repoRoot === model.activeRepoRoot}
+                  >
                     {renderTab(h, {
                       name,
                       actions: projectActions(name, [
@@ -576,8 +580,22 @@ export function WorktreeList({
  *  background covers the whole block as one pill rather than bleeding to
  *  the sidebar edges. Pending and assigned-PR rows use the same mx-1.5
  *  inset so every pill lines up. */
-function RowBlock({ active, children }: { active: boolean; children: ReactNode }): JSX.Element {
-  return <div className={`mx-1.5 rounded-md overflow-hidden ${active ? 'bg-surface' : ''}`}>{children}</div>
+function RowBlock({
+  active,
+  context = false,
+  children
+}: {
+  active: boolean
+  /** A faint version of the selected pill: you're working inside this
+   *  project (on one of its worktrees), just not on the row itself. */
+  context?: boolean
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <div className={`mx-1.5 rounded-md overflow-hidden ${active ? 'bg-surface' : context ? 'bg-surface/50' : ''}`}>
+      {children}
+    </div>
+  )
 }
 
 /** Quiet by design: group headers organise the work, they shouldn't compete

@@ -10,7 +10,7 @@ import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
 import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
 import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
-import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
+import { useProjectAccordion, useTabsByWorktree, useWorktreeListBase } from './hooks/useWorktreeListModel'
 import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
 import { getLeaves, findLeaf, findLeafByTabId } from '../shared/state/terminals'
 import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
@@ -399,7 +399,10 @@ function DesktopApp(): JSX.Element {
     toggleGroup,
     togglePinnedOpen
   } = collapse
-  const worktreeListModel = useWorktreeListModel(collapse, { activeWorktreeId })
+  // Two halves: hotkeys only need order + grouping, so they read the base
+  // and don't rebuild their action map on every worktree switch.
+  const worktreeListBase = useWorktreeListBase(collapse)
+  const worktreeListModel = useProjectAccordion(worktreeListBase, activeWorktreeId, collapse.pinnedOpenRepos)
   const handleSidebarResize = useCallback((delta: number) => {
     setSidebarWidth((w) => Math.max(160, Math.min(SIDEBAR_MAX_PX, w + delta)))
   }, [])
@@ -1182,7 +1185,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
     pathBackendId: fleetData.pathBackendId,
     worktrees,
-    listModel: worktreeListModel,
+    listModel: worktreeListBase,
     repoRoots,
     unifiedRepos,
     prStatuses,
