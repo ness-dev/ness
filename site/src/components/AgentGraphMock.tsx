@@ -20,6 +20,8 @@ import AGENT_GRAPH_BOXES from './agent-graph-boxes.json'
 
 const BOXES: Record<string, Box> = AGENT_GRAPH_BOXES
 
+const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`
+
 const PAD = 24
 /** Fitting the whole graph on a phone shrinks the cards past reading.
  *  Below this zoom, show it at SCROLL_ZOOM and scroll sideways instead. */
@@ -39,23 +41,18 @@ function useWidth(ref: RefObject<HTMLElement | null>): number {
   return w
 }
 
-function bounds(boxes: Record<string, Box>): { w: number; h: number } {
-  let w = 0
-  let h = 0
-  for (const g of FULL.groups) {
-    const b = boxes[g.id]
-    if (b) {
-      w = Math.max(w, b.x + b.width)
-      h = Math.max(h, b.y + b.height)
-    }
-  }
-  return { w, h }
-}
+/** The laid-out graph's extent, from the origin. */
+const SIZE = FULL.groups.reduce(
+  (acc, g) => ({
+    w: Math.max(acc.w, BOXES[g.id].x + BOXES[g.id].width),
+    h: Math.max(acc.h, BOXES[g.id].y + BOXES[g.id].height)
+  }),
+  { w: 0, h: 0 }
+)
 
 export default function AgentGraphMock({ reduced, playing }: { reduced: boolean; playing: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const width = useWidth(hostRef)
-  const boxes = BOXES
   const [beat, setBeat] = useState(reduced ? BEATS.length - 1 : 0)
 
   // Restart from the top whenever it scrolls back into view.
@@ -73,32 +70,32 @@ export default function AgentGraphMock({ reduced, playing }: { reduced: boolean;
 
   const { graph, shown } = useMemo(() => graphAt(beat), [beat])
   const flow = useMemo(() => {
-    if (!boxes) return null
-    const { nodes, edges } = toFlow(graph, boxes)
+    const { nodes, edges } = toFlow(graph, BOXES)
     const pending = (id: string): string | undefined => (shown.has(id) ? undefined : 'agm-pending')
     return {
       nodes: nodes.map((n) => ({ ...n, className: pending(n.id) })),
       edges: edges.map((e) => ({ ...e, className: pending(e.id) }))
     }
-  }, [graph, shown, boxes])
+  }, [graph, shown])
 
   // Height follows the layout, so the graph is never letterboxed in a
   // fixed box.
-  const size = boxes ? bounds(boxes) : null
-  const fit = size ? Math.min(1, (width - 2 * PAD) / size.w) : 1
+  // Before the first measure (width 0) assume it fits; the layout effect
+  // measures before paint.
+  const fit = width > 0 ? Math.min(1, (width - 2 * PAD) / SIZE.w) : 1
   const scrolls = fit < MIN_FIT_ZOOM
   const zoom = scrolls ? SCROLL_ZOOM : fit
-  const canvasW = size && scrolls ? Math.round(size.w * zoom + 2 * PAD) : width
-  const height = size ? Math.round(size.h * zoom + 2 * PAD) : 420
-  const viewport = boxes ? fitViewport(boxes, FULL.groups, canvasW, height, PAD) : undefined
+  const canvasW = scrolls ? Math.round(SIZE.w * zoom + 2 * PAD) : width
+  const height = Math.round(SIZE.h * zoom + 2 * PAD)
+  const viewport = fitViewport(BOXES, FULL.groups, canvasW, height, PAD)
 
   // Keep whatever the story just revealed in view when the canvas is wider
   // than the screen.
   useEffect(() => {
     const el = hostRef.current
-    if (!el || !boxes || !viewport || !scrolls) return
+    if (!el || !scrolls) return
     const added = BEATS[beat].adds.map((id) => FULL.nodes.find((n) => n.id === id)?.groupId ?? id)
-    const b = boxes[added.find((id) => id.startsWith('wt:')) ?? '']
+    const b = BOXES[added.find((id) => id.startsWith('wt:')) ?? '']
     if (!b) return
     const cx = viewport.x + (b.x + b.width / 2) * viewport.zoom
     el.scrollTo({
@@ -106,7 +103,7 @@ export default function AgentGraphMock({ reduced, playing }: { reduced: boolean;
       behavior: reduced ? 'auto' : 'smooth'
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per beat
-  }, [beat, boxes, scrolls, width])
+  }, [beat, scrolls, width])
 
   return (
     <div className="agm rounded-xl overflow-hidden border border-border-strong shadow-2xl shadow-black/70 bg-app font-sans select-none">
@@ -119,15 +116,15 @@ export default function AgentGraphMock({ reduced, playing }: { reduced: boolean;
       </div>
       <div className="min-h-9 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 border-b border-border bg-panel">
         <span className="text-xs text-faint tabular-nums">
-          {FULL.groups.filter((g) => shown.has(g.id)).length} worktrees ·{' '}
-          {FULL.nodes.filter((n) => n.kind === 'agent' && shown.has(n.id)).length} agents ·{' '}
-          {FULL.edges.filter((e) => shown.has(e.id)).length} links
+          {count(FULL.groups.filter((g) => shown.has(g.id)).length, 'worktree')} ·{' '}
+          {count(FULL.nodes.filter((n) => n.kind === 'agent' && shown.has(n.id)).length, 'agent')} ·{' '}
+          {count(FULL.edges.filter((e) => shown.has(e.id)).length, 'link')}
         </span>
         <span className="flex-1" />
         <Legend className="flex-wrap gap-y-1" />
       </div>
       <div ref={hostRef} className="agm-scroll overflow-x-auto overflow-y-hidden" style={{ height }}>
-        {flow && viewport && width > 0 && (
+        {width > 0 && (
           <div className="relative h-full" style={{ width: canvasW }}>
             <GraphInteractiveContext.Provider value={false}>
               <ReactFlow
