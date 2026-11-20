@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, History, Waypoints } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
@@ -481,7 +481,7 @@ export function WorktreeList({
               alone collapses it. */}
           {!section.unified &&
             (home ? (
-              <>
+              <ProjectBlock active={home.path === activeWorktreeId}>
                 {renderTab(home, {
                   name: section.repoName,
                   collapsed: section.collapsed,
@@ -490,7 +490,7 @@ export function WorktreeList({
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}
                 {renderTabRows(home)}
-              </>
+              </ProjectBlock>
             ) : (
               <RepoHeader
                 section={section}
@@ -505,7 +505,7 @@ export function WorktreeList({
               {section.homes.map((h) => {
                 const name = repoLabelFor(h.worktree.repoRoot)
                 return (
-                  <div key={h.path}>
+                  <ProjectBlock key={h.path} active={h.path === activeWorktreeId}>
                     {renderTab(h, {
                       name,
                       actions: projectActions(name, [
@@ -513,7 +513,7 @@ export function WorktreeList({
                       ])
                     })}
                     {renderTabRows(h)}
-                  </div>
+                  </ProjectBlock>
                 )
               })}
             </div>
@@ -567,6 +567,12 @@ export function WorktreeList({
       )}
     </>
   )
+}
+
+/** A project row plus its tab rows. While main is open the whole block
+ *  shares the selected background, like an ordinary active row does. */
+function ProjectBlock({ active, children }: { active: boolean; children: ReactNode }): JSX.Element {
+  return <div className={`mx-1 rounded-md overflow-hidden ${active ? 'bg-surface' : ''}`}>{children}</div>
 }
 
 /** Quiet by design: group headers organise the work, they shouldn't compete
@@ -722,7 +728,7 @@ function buildProjectActions(
     })
   }
   if (onNewWorktree) {
-    out.push({ key: 'project-new', label: 'New worktree', icon: Plus, onSelect: onNewWorktree })
+    out.push({ key: 'project-new', label: 'New worktree', icon: Plus, hotkey: 'newWorktree', onSelect: onNewWorktree })
   }
   return out
 }

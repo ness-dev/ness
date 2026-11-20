@@ -181,7 +181,7 @@ export const WorktreeTab = memo(function WorktreeTab({
       <div
         onClick={() => onSelect(row.path)}
         onContextMenu={onContextMenu}
-        className={`group mx-1 flex items-center gap-2.5 rounded-md px-2 transition-colors cursor-pointer ${
+        className={`group flex items-center gap-2.5 px-2 transition-colors cursor-pointer ${
           touch ? 'min-h-14 py-2.5' : 'py-2'
         } ${isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'}`}
       >
@@ -425,8 +425,14 @@ function DesktopRowActions({ actions }: { actions: WorktreeRowAction[] }): JSX.E
               ? 'text-faint hover:text-danger'
               : 'text-faint hover:text-accent'
         return (
-          <Tooltip key={action.key} label={`${action.label}${action.tooltipExtra ?? ''}`} side="left">
+          <Tooltip
+            key={action.key}
+            label={`${action.label}${action.tooltipExtra ?? ''}`}
+            action={action.hotkey}
+            side="left"
+          >
             <button
+              aria-label={action.label}
               onClick={(e) => {
                 e.stopPropagation()
                 action.onSelect(e)
