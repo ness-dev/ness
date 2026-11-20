@@ -322,7 +322,9 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
         <MockProjectRow state={state} />
-        {state.pendingBranch && <MockPendingRow branch={state.pendingBranch} />}
+        <AnimatePresence initial={false}>
+          {state.pendingBranch && <MockPendingRow key={state.pendingBranch} branch={state.pendingBranch} />}
+        </AnimatePresence>
         {renderGroup('Needs Attention', needsAttention)}
         {renderGroup('Open PRs', openPRs)}
         {renderGroup('Active', activeNoPR)}
@@ -430,9 +432,7 @@ function MockProjectRow({ state }: { state: MockHarnessState }) {
         <div className="min-w-0 flex-1">
           <span className="text-base font-semibold truncate text-fg-bright">{REPO_NAME}</span>
         </div>
-        <span
-          className={`shrink-0 text-faint ${highlighted ? 'flex text-fg' : 'hidden group-hover:flex'}`}
-        >
+        <span className="shrink-0 text-faint hidden group-hover:flex">
           <Plus size={12} />
         </span>
         <span className="shrink-0 p-0.5 text-faint hidden group-hover:inline-flex">
@@ -450,6 +450,7 @@ function MockPendingRow({ branch }: { branch: string }) {
     <motion.div
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
       transition={{ duration: 0.3 }}
       className="overflow-hidden"
     >

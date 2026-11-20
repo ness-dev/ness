@@ -36,6 +36,22 @@ export const LEAD_WORKTREE: Omit<MockWorktree, 'status'> = {
   }
 }
 
+/** The same main workspace a moment later, asked for one more piece of
+ * work: the diorama's "start new work" section, while the worktree it asked
+ * for is still being created in the sidebar. */
+export const LEAD_SPAWNING_CHAT: NonNullable<MockWorktree['chat']> = {
+  earlier: LEAD_WORKTREE.chat!.earlier,
+  prompt: 'Let admins invite teammates by email.',
+  tools: [{ tool: 'Worktree', intent: 'Create Worktree · feat/team-invites' }],
+  explanation:
+    'Started `feat/team-invites` with its own agent and handed it the brief. It’ll show up in the sidebar once setup finishes.',
+  working: {
+    todos: { done: 1, total: 2 },
+    streaming: 'Waiting for `feat/team-invites` to finish its setup script'
+  },
+  approval: LEAD_WORKTREE.chat!.approval
+}
+
 /** The fleet both the hero and the scroll diorama show. Each worktree
  * carries its own chat and right-column contents so whichever one is active
  * reads as a single coherent piece of work. */

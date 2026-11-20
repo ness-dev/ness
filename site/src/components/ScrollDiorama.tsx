@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { motion, useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion'
 import type { MockHarnessState, MockStatus } from './MockHarness'
-import { BASE_WORKTREES, LEAD_WORKTREE } from './mock-data'
+import { BASE_WORKTREES, LEAD_SPAWNING_CHAT, LEAD_WORKTREE } from './mock-data'
 import { ScaledMock } from './ScaledMock'
 
 type SectionIndex = 0 | 1 | 2 | 3
@@ -252,16 +252,17 @@ function sectionThreeState(progress: number): MockHarnessState {
     ...w,
     status: i === 1 ? ('needs-approval' as MockStatus) : sectionOneStatusFor(i, 0.8)
   }))
-  // First half: ask the project, and a worktree starts creating under it.
-  // Second half: the quieter manual path, the header's "+" (⌘N).
+  // First half: ask the project, and a worktree starts creating under it —
+  // and stays there through the second half, the quieter manual path via the
+  // header's "+" (⌘N), so it never vanishes mid-scroll.
   const manual = progress > 0.5
   const showForm = progress > 0.65
   return {
     activeWorktreeId: showForm ? 'new' : LEAD.id,
-    lead: LEAD,
+    lead: { ...LEAD, chat: LEAD_SPAWNING_CHAT },
     worktrees,
     highlightedElement: manual ? 'new-worktree-button' : 'project-row',
-    pendingBranch: !manual && progress > 0.2 ? 'feat/presence-indicator' : undefined,
+    pendingBranch: progress > 0.2 ? 'feat/team-invites' : undefined,
     panelMode: showForm ? 'new-worktree-flow' : 'terminal',
     snoozedCount: 1,
     mergedClosedCount: 3
