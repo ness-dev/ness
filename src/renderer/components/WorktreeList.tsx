@@ -224,8 +224,9 @@ export function WorktreeList({
         onSnooze: locked ? undefined : (e?: ReactMouseEvent) => onSnoozeRow(worktree.path, e),
         onUnsnooze: locked ? undefined : () => void backend.unsnooze(worktree.path),
         // The main worktree is the project's Lead, already fixed at the top
-        // of its section, so pinning it would do nothing.
-        onTogglePin: locked
+        // of its section, so pinning it would do nothing — but a pin set
+        // before Leads existed stays clearable rather than stranded.
+        onTogglePin: deleting || (worktree.isMain && !row.isPinned)
           ? undefined
           : () =>
               void (row.isPinned
@@ -260,8 +261,10 @@ export function WorktreeList({
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // A Lead's sub-chats are always listed — that's where the planning lives.
-    (!!row.lead || tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
+    // A Lead's sub-chats are listed unless tab rows are switched off entirely
+    // — that's where the planning lives, so 'selected' doesn't hide them.
+    (tabsExpansion === 'all' ||
+      (tabsExpansion === 'selected' && (!!row.lead || row.path === activeWorktreeId)))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -595,10 +598,21 @@ function RepoHeader({
   // work is asking the Lead, so "+" is a fallback rather than a call to action.
   const hoverAction = touch ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
   return (
+    // A div, not a <button>, because it holds real buttons and those can't
+    // nest — so it carries the button keyboard contract itself.
     <div
       onClick={onToggle}
       role="button"
-      className={`group w-full flex items-center gap-2 px-3 cursor-pointer ${touch ? 'min-h-11 py-2' : 'py-1.5'}`}
+      tabIndex={0}
+      aria-expanded={!section.collapsed}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggle()
+        }
+      }}
+      className={`group w-full flex items-center gap-2 px-3 cursor-pointer outline-none focus-visible:bg-surface ${touch ? 'min-h-11 py-2' : 'py-1.5'}`}
       title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
       <RepoIcon repoName={section.repoName} className="text-base" />

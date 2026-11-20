@@ -332,8 +332,18 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     }
   }
 
-  const baseBranches = new Set(COMMON_BASE_BRANCHES)
-  for (const pr of Object.values(prStatuses)) if (pr?.baseBranch) baseBranches.add(pr.baseBranch)
+  // Per repo: a PR into `release` in one repo says nothing about another.
+  const repoOfPath = new Map(worktrees.map((w) => [w.path, w.repoRoot]))
+  const baseBranchesByRepo = new Map<string, Set<string>>()
+  for (const [path, pr] of Object.entries(prStatuses)) {
+    const repo = repoOfPath.get(path)
+    if (!pr?.baseBranch || repo === undefined) continue
+    let set = baseBranchesByRepo.get(repo)
+    if (!set) baseBranchesByRepo.set(repo, (set = new Set()))
+    set.add(pr.baseBranch)
+  }
+  const isBaseBranch = (repoRoot: string, branch: string): boolean =>
+    COMMON_BASE_BRANCHES.includes(branch) || (baseBranchesByRepo.get(repoRoot)?.has(branch) ?? false)
 
   const sections: WorktreeRepoSectionModel[] = buckets.map((bucket) => {
     const groups = groupWorktrees(
@@ -412,7 +422,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     )
     for (const row of leads) {
       const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
-      row.lead = { showBranch: !baseBranches.has(row.worktree.branch), ...stats }
+      row.lead = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
     }
     const tail: WorktreeTailModel | null =
       tailGroups.length === 0

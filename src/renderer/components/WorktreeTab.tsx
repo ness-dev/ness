@@ -201,6 +201,11 @@ export const WorktreeTab = memo(function WorktreeTab({
                     {worktree.branch}
                   </span>
                 )}
+                {prStatus && (
+                  <span className="shrink-0 inline-flex" title={prIconTitle(prStatus)}>
+                    <GitPullRequest className={`icon-xs ${iconColor}`} />
+                  </span>
+                )}
                 {shellActive && (
                   <Loader2 className="icon-xs animate-spin text-fg-bright shrink-0" aria-label="Shell activity" />
                 )}

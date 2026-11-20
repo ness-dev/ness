@@ -714,6 +714,21 @@ describe('leads', () => {
     expect(prBase.sections[0].leads[0].lead!.showBranch).toBe(false)
   })
 
+  it('scopes PR base branches to their own repo', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta'],
+        worktrees: [
+          main('/repos/alpha', 'release'),
+          main('/repos/beta', 'release'),
+          wt({ path: '/w/a', repoRoot: '/repos/alpha' })
+        ],
+        prStatuses: { '/w/a': pr({ number: 1, baseBranch: 'release' }) }
+      })
+    )
+    expect(model.sections.map((s) => s.leads[0].lead!.showBranch)).toEqual([false, true])
+  })
+
   it('stacks every repo’s lead in repo order in unified mode, each counting only its repo', () => {
     const model = buildWorktreeListModel(
       input({
