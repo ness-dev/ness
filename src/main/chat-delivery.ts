@@ -4,12 +4,17 @@ import { worktreeHandle } from '../shared/state/worktrees'
 import { findTabInWorktree } from '../shared/agent-tabs'
 
 export interface ChatDeliveryDeps {
-  /** Injects a user turn into a running json-mode chat session. */
+  /** Injects a user turn into a json-mode chat session. A session that is
+   *  still starting gets it once the start completes. */
   send: (sessionId: string, text: string) => void
   /** True when the session has a live subprocess to receive the message. */
   hasSession: (sessionId: string) => boolean
-  /** Re-spawns a slept json-claude tab's subprocess. Synchronous — the
-   *  session is live by the time this returns (or the spawn failed). */
+  /** True while the session's start is in flight — waiting on the
+   *  worktree's shell-env probe before it spawns. */
+  isStarting: (sessionId: string) => boolean
+  /** Re-spawns a slept json-claude tab's subprocess. Asynchronous: the
+   *  start usually waits on the shell-env probe, so the session is
+   *  typically still starting when this returns. */
   wake: (worktreePath: string, tabId: string) => void
   /** Starts the subprocess of an awake json-claude tab whose process is
    *  gone (crashed, or not yet respawned by a client). Idempotent with the
@@ -148,7 +153,9 @@ export function deliverToTab(
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
   if ((tab.mode ?? 'awake') === 'asleep') deps.wake(worktreePath, tabId)
   else deps.respawn(worktreePath, tabId)
-  if (!deps.hasSession(tabId)) return { ok: false, reason: 'wake-failed' }
+  // Only a start that never began (or already failed) is a failure; one
+  // still in flight receives the message through `send` once it's up.
+  if (!deps.hasSession(tabId) && !deps.isStarting(tabId)) return { ok: false, reason: 'wake-failed' }
   deps.send(tabId, message)
   return { ok: true, tabId, woke: true }
 }

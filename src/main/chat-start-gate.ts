@@ -79,6 +79,12 @@ export class ChatStartGate {
     })
   }
 
+  /** True while a start for this session is in flight (not yet running,
+   *  failed, or cancelled). */
+  isStarting(sessionId: string): boolean {
+    return this.pending.has(sessionId)
+  }
+
   /** Resolves once no start is in flight: true unless the one in flight
    *  failed or was cancelled without a replacement. */
   async settled(sessionId: string): Promise<boolean> {

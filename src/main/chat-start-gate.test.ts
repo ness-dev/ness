@@ -137,4 +137,25 @@ describe('ChatStartGate', () => {
     expect(await settled).toBe(false)
     expect(await gate.settled('s1')).toBe(true)
   })
+
+  it('reports isStarting only while a start is in flight', async () => {
+    const gate = new ChatStartGate()
+    const probe = deferred()
+    expect(gate.isStarting('s1')).toBe(false)
+    const started = gate.begin('s1', async () => {
+      await probe.promise
+      return true
+    })
+    expect(gate.isStarting('s1')).toBe(true)
+    probe.resolve()
+    await started
+    expect(gate.isStarting('s1')).toBe(false)
+  })
+
+  it('stops reporting isStarting once cancelled', () => {
+    const gate = new ChatStartGate()
+    void gate.begin('s1', () => new Promise<boolean>(() => {}))
+    gate.cancel('s1')
+    expect(gate.isStarting('s1')).toBe(false)
+  })
 })

@@ -1386,8 +1386,12 @@ const activityDeriver = new ActivityDeriver(store)
 // The primitives for reaching a worktree's agent chat. Only the
 // notification bus below uses them directly.
 const chatDeliveryDeps = {
-  send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
+  // A woken tab is usually still waiting on its shell-env probe, so the
+  // send has to wait for the start rather than hit a missing instance.
+  send: (sessionId: string, text: string) =>
+    chatStarts.afterStart(sessionId, () => chatRouter.send(sessionId, text)),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
+  isStarting: (sessionId: string) => chatStarts.isStarting(sessionId),
   wake: (worktreePath: string, tabId: string) =>
     panesFSM.wakeJsonClaudeTab(worktreePath, tabId),
   respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)

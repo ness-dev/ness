@@ -94,7 +94,7 @@ function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   const respawn = vi.fn((_wt: string, tabId: string) => {
     live.add(tabId)
   })
-  return { send, wake, respawn, hasSession: (id) => live.has(id) }
+  return { send, wake, respawn, hasSession: (id) => live.has(id), isStarting: () => false }
 }
 
 describe('resolveWorktreeQuery', () => {
@@ -239,7 +239,7 @@ describe('deliverToWorktreeChat', () => {
     const send = vi.fn()
     const result = deliverToWorktreeChat(
       state,
-      { send, hasSession: () => false, wake: () => {}, respawn: () => {} },
+      { send, hasSession: () => false, isStarting: () => false, wake: () => {}, respawn: () => {} },
       A,
       'hi'
     )
@@ -301,6 +301,37 @@ describe('deliverToTab', () => {
     })
     expect(deliverToTab(state, deps(), A, 'sh', 'hi')).toEqual({ ok: false, reason: 'not-agent-tab' })
     expect(deliverToTab(state, deps(), A, 'nope', 'hi')).toEqual({ ok: false, reason: 'no-tab' })
+  })
+
+  it('delivers to a woken tab whose start is still in flight, deferring the send', () => {
+    const state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    // Mirrors main's wiring: the wake only begins the start (it waits on the
+    // shell-env probe), and send is held until the start completes.
+    const starting = new Set<string>()
+    const live = new Set<string>()
+    const held: Array<() => void> = []
+    const delivered: string[] = []
+    const d: ChatDeliveryDeps = {
+      hasSession: (id) => live.has(id),
+      isStarting: (id) => starting.has(id),
+      wake: (_wt, id) => {
+        starting.add(id)
+      },
+      respawn: () => {},
+      send: (id, text) => {
+        const run = (): void => {
+          delivered.push(`${id}:${text}`)
+        }
+        if (starting.has(id)) held.push(run)
+        else run()
+      }
+    }
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: true, tabId: 's1', woke: true })
+    expect(delivered).toEqual([])
+    starting.delete('s1')
+    live.add('s1')
+    held.forEach((fn) => fn())
+    expect(delivered).toEqual(['s1:hi'])
   })
 
   it('reports a failed wake', () => {
