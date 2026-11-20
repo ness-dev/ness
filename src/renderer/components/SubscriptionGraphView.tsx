@@ -1,7 +1,6 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
-  ReactFlowProvider,
   Background,
   BackgroundVariant,
   Controls,
@@ -10,7 +9,8 @@ import {
   BaseEdge,
   getBezierPath,
   MarkerType,
-  useReactFlow,
+  ControlButton,
+  type ReactFlowInstance,
   type Node,
   type Edge,
   type NodeProps,
@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
 import './subscription-graph.css'
-import { ArrowLeft, GitPullRequest, Loader2, Moon, SquareTerminal, X } from 'lucide-react'
+import { ArrowLeft, GitPullRequest, Loader2, Maximize, Moon, SquareTerminal, X } from 'lucide-react'
 import { useAppState } from '../store'
 import { useBackend } from '../backend'
 import { AgentIcon } from './AgentIcon'
@@ -86,7 +86,9 @@ function edgeTitle(e: GraphEdge): string {
   const base = EDGE_STYLE[e.kind].hint
   const parts = [base]
   if (e.kind === 'subscription' && e.mode) {
-    parts.push(e.mode === 'interrupt' ? 'Interrupts with every update' : 'Routine updates held for the next turn')
+    parts.push(
+      e.mode === 'interrupt' ? 'Interrupts with every update' : 'Routine updates held for the next turn'
+    )
   }
   if (e.kind === 'spawned' && !e.live) parts.push('Creator tab is closed, so nobody follows it from here')
   if (e.note) parts.push(`Watching for: ${e.note}`)
@@ -107,13 +109,56 @@ function rootScale(): number {
   return Number.isFinite(px) && px > 0 ? px / 16 : 1
 }
 
+/** Left/right for edges between worktrees; top/bottom for edges between
+ *  nodes stacked in the same worktree (own PR, reviewer). */
 function Handles(): JSX.Element {
   return (
     <>
-      <Handle type="target" position={Position.Left} isConnectable={false} className="sg-handle" />
-      <Handle type="source" position={Position.Right} isConnectable={false} className="sg-handle" />
+      <Handle
+        id="t-left"
+        type="target"
+        position={Position.Left}
+        isConnectable={false}
+        className="sg-handle"
+      />
+      <Handle
+        id="s-right"
+        type="source"
+        position={Position.Right}
+        isConnectable={false}
+        className="sg-handle"
+      />
+      <Handle id="t-top" type="target" position={Position.Top} isConnectable={false} className="sg-handle" />
+      <Handle id="s-top" type="source" position={Position.Top} isConnectable={false} className="sg-handle" />
+      <Handle
+        id="t-bottom"
+        type="target"
+        position={Position.Bottom}
+        isConnectable={false}
+        className="sg-handle"
+      />
+      <Handle
+        id="s-bottom"
+        type="source"
+        position={Position.Bottom}
+        isConnectable={false}
+        className="sg-handle"
+      />
     </>
   )
+}
+
+function edgeHandles(
+  e: GraphEdge,
+  groupOf: Map<string, string>,
+  boxes: Record<string, Box>
+): { sourceHandle: string; targetHandle: string } {
+  const a = groupOf.get(e.source)
+  if (a === undefined || a !== groupOf.get(e.target))
+    return { sourceHandle: 's-right', targetHandle: 't-left' }
+  return boxes[e.source].y < boxes[e.target].y
+    ? { sourceHandle: 's-bottom', targetHandle: 't-top' }
+    : { sourceHandle: 's-top', targetHandle: 't-bottom' }
 }
 
 function StatusDot({ status }: { status: GraphGroup['status'] }): JSX.Element {
@@ -136,7 +181,9 @@ const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupFlowNode>): J
       <Handles />
       <div className="flex items-center gap-2 px-3 h-10 min-w-0 cursor-pointer">
         <StatusDot status={g.merged ? 'idle' : g.status} />
-        <span className={`text-sm font-medium truncate ${g.merged ? 'text-dim' : 'text-fg-bright'}`}>{g.name}</span>
+        <span className={`text-sm font-medium truncate ${g.merged ? 'text-dim' : 'text-fg-bright'}`}>
+          {g.name}
+        </span>
         {g.name !== g.branch && <span className="text-xs text-faint truncate">{g.branch}</span>}
         <span className="flex-1" />
         {g.isMain && <span className="text-xs text-faint shrink-0">main</span>}
@@ -148,10 +195,19 @@ const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupFlowNode>): J
 })
 
 function AgentStatus({ n }: { n: GraphAgentNode }): JSX.Element | null {
-  if (n.status === 'processing') return <Loader2 className="icon-xs shrink-0 animate-spin text-success" aria-label={STATUS_LABELS.processing} />
-  if (n.status === 'waiting') return <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-warning" title={STATUS_LABELS.waiting} />
+  if (n.status === 'processing')
+    return (
+      <Loader2 className="icon-xs shrink-0 animate-spin text-success" aria-label={STATUS_LABELS.processing} />
+    )
+  if (n.status === 'waiting')
+    return <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-warning" title={STATUS_LABELS.waiting} />
   if (n.status === 'needs-approval') {
-    return <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger animate-pulse" title={STATUS_LABELS['needs-approval']} />
+    return (
+      <span
+        className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger animate-pulse"
+        title={STATUS_LABELS['needs-approval']}
+      />
+    )
   }
   if (n.asleep) return <Moon className="icon-xs shrink-0 text-faint" aria-label="Asleep" />
   return null
@@ -244,7 +300,14 @@ function GraphEdgeView({
   if (!data) return null
   const e = data.edge
   const style = EDGE_STYLE[e.kind]
-  const [path] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  const [path] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition
+  })
   const faded = !e.live || e.mode === 'silent'
   return (
     <g className="sg-edge">
@@ -298,8 +361,13 @@ function toFlow(g: SubscriptionGraph, boxes: Record<string, Box>): { nodes: Flow
       selectable: false,
       zIndex: 1
     }
-    nodes.push(n.kind === 'agent' ? { ...base, type: 'agent', data: { node: n } } : { ...base, type: 'pr', data: { node: n } })
+    nodes.push(
+      n.kind === 'agent'
+        ? { ...base, type: 'agent', data: { node: n } }
+        : { ...base, type: 'pr', data: { node: n } }
+    )
   }
+  const groupOf = new Map(g.nodes.map((n) => [n.id, n.groupId]))
   const edges: FlowEdge[] = g.edges
     .filter((e) => boxes[e.source] && boxes[e.target])
     .map((e) => ({
@@ -307,9 +375,17 @@ function toFlow(g: SubscriptionGraph, boxes: Record<string, Box>): { nodes: Flow
       type: 'graph',
       source: e.source,
       target: e.target,
+      ...edgeHandles(e, groupOf, boxes),
+      // Between worktrees, behind the opaque boxes so a long edge doesn't
+      // scribble over the cards it passes; inside one, above its box.
+      zIndex: groupOf.get(e.source) !== undefined && groupOf.get(e.source) === groupOf.get(e.target) ? 2 : 0,
       data: { edge: e },
-      zIndex: 2,
-      markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_STYLE[e.kind].color, width: 16, height: 16 }
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: EDGE_STYLE[e.kind].color,
+        width: 16,
+        height: 16
+      }
     }))
   return { nodes, edges }
 }
@@ -332,6 +408,43 @@ function Legend(): JSX.Element {
   )
 }
 
+const MIN_ZOOM = 0.2
+const MAX_FIT_ZOOM = 1.1
+const FIT_PAD = 32
+
+/** The viewport that centres every group in a `width`×`height` pane.
+ *  Computed from the layout boxes rather than React Flow's fitView, which
+ *  reads its own measurements and fit the graph off-centre here. */
+function fitViewport(
+  boxes: Record<string, Box>,
+  groups: GraphGroup[],
+  width: number,
+  height: number
+): { x: number; y: number; zoom: number } {
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const g of groups) {
+    const b = boxes[g.id]
+    if (!b) continue
+    x0 = Math.min(x0, b.x)
+    y0 = Math.min(y0, b.y)
+    x1 = Math.max(x1, b.x + b.width)
+    y1 = Math.max(y1, b.y + b.height)
+  }
+  if (!Number.isFinite(x0) || width <= 0 || height <= 0) return { x: 0, y: 0, zoom: 1 }
+  const zoom = Math.max(
+    MIN_ZOOM,
+    Math.min(MAX_FIT_ZOOM, (width - 2 * FIT_PAD) / (x1 - x0), (height - 2 * FIT_PAD) / (y1 - y0))
+  )
+  return {
+    x: (width - (x1 - x0) * zoom) / 2 - x0 * zoom,
+    y: (height - (y1 - y0) * zoom) / 2 - y0 * zoom,
+    zoom
+  }
+}
+
 function GraphCanvas({
   graph,
   onFocusTab,
@@ -342,9 +455,11 @@ function GraphCanvas({
   onOpenWorktree: SubscriptionGraphViewProps['onOpenWorktree']
 }): JSX.Element {
   const backend = useBackend()
-  const flow = useReactFlow()
   const topology = graphTopologyKey(graph)
-  const [layout, setLayout] = useState<{ key: string; boxes: Record<string, Box> } | null>(null)
+  const [layout, setLayout] = useState<{
+    key: string
+    boxes: Record<string, Box>
+  } | null>(null)
 
   // Layout runs only when the node/edge set changes, so status and label
   // updates repaint in place instead of reshuffling the boxes.
@@ -368,44 +483,61 @@ function GraphCanvas({
     [graph, layout]
   )
 
-  // Re-fit when the shape changes; a status flip leaves the viewport alone.
-  useEffect(() => {
-    if (!layout) return
-    const id = requestAnimationFrame(() => void flow.fitView({ padding: 0.15, maxZoom: 1.1, duration: 200 }))
-    return () => cancelAnimationFrame(id)
-  }, [layout, flow])
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const instanceRef = useRef<ReactFlowInstance<FlowNode, FlowEdge> | null>(null)
+  const fit = useCallback(() => {
+    const el = wrapRef.current
+    const inst = instanceRef.current
+    if (!el || !inst || !layout) return
+    const r = el.getBoundingClientRect()
+    void inst.setViewport(fitViewport(layout.boxes, graph.groups, r.width, r.height), { duration: 200 })
+  }, [layout, graph.groups])
 
   if (!layout) {
     return (
-      <div className="flex-1 flex items-center justify-center text-faint">
+      <div className="h-full flex items-center justify-center text-faint">
         <Loader2 className="icon-base animate-spin" />
       </div>
     )
   }
 
   return (
-    <ReactFlow<FlowNode, FlowEdge>
-      className="sg-flow"
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      edgesFocusable={false}
-      minZoom={0.2}
-      maxZoom={2}
-      proOptions={{ hideAttribution: true }}
-      onNodeClick={(_e, node) => {
-        if (node.type === 'agent') onFocusTab(node.data.node.worktreePath, node.data.node.tabId)
-        else if (node.type === 'pr') backend.openExternal(node.data.node.url)
-        else if (node.type === 'worktree') onOpenWorktree(node.data.group.path)
-      }}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-border-strong)" />
-      <Controls showInteractive={false} position="bottom-right" />
-    </ReactFlow>
+    <div ref={wrapRef} className="w-full h-full">
+      {/* Keyed on topology: a new shape remounts and is fitted on init;
+          a status flip re-renders in place and keeps the viewport. */}
+      <ReactFlow<FlowNode, FlowEdge>
+        key={layout.key}
+        className="sg-flow"
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        edgesFocusable={false}
+        minZoom={MIN_ZOOM}
+        onInit={(inst) => {
+          instanceRef.current = inst
+          const r = wrapRef.current?.getBoundingClientRect()
+          if (r) void inst.setViewport(fitViewport(layout.boxes, graph.groups, r.width, r.height))
+        }}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+        onNodeClick={(_e, node) => {
+          if (node.type === 'agent') onFocusTab(node.data.node.worktreePath, node.data.node.tabId)
+          else if (node.type === 'pr') backend.openExternal(node.data.node.url)
+          else if (node.type === 'worktree') onOpenWorktree(node.data.group.path)
+        }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-border-strong)" />
+        <Controls showInteractive={false} showFitView={false} position="bottom-right">
+          <ControlButton onClick={fit} title="Fit graph" aria-label="Fit graph">
+            <Maximize />
+          </ControlButton>
+        </Controls>
+      </ReactFlow>
+    </div>
   )
 }
 
@@ -484,9 +616,11 @@ export default function SubscriptionGraphView({
             No worktrees in {repoName}.
           </div>
         ) : (
-          <ReactFlowProvider>
+          // A definite box: as a flex item React Flow measured itself
+          // wider than the visible pane and fit the graph off-centre.
+          <div className="absolute inset-0">
             <GraphCanvas graph={graph} onFocusTab={onFocusTab} onOpenWorktree={onOpenWorktree} />
-          </ReactFlowProvider>
+          </div>
         )}
         {graph.groups.length > 0 && linkCount === 0 && (
           <div className="absolute left-1/2 -translate-x-1/2 bottom-4 text-xs text-faint bg-panel border border-border rounded px-3 py-1.5 pointer-events-none">

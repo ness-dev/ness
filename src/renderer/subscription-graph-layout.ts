@@ -13,66 +13,76 @@ export interface Box {
  *  uiScale rung. */
 export const NODE_SIZE = {
   agent: { width: 220, height: 44 },
-  pr: { width: 220, height: 56 },
-  emptyGroup: { width: 220, height: 28 },
+  pr: { width: 220, height: 52 },
   groupHeader: 40,
-  groupPad: 12
+  groupPad: 12,
+  gap: 16
 }
 
 const elk = new ELK()
 
 /** Positions for every group and node. Groups are absolute; their
  *  children are relative to the group, which is what React Flow's
- *  `parentId` expects. Edges are routed by React Flow, so ELK's edge
- *  sections are ignored — ELK only needs them to order the layers. */
+ *  `parentId` expects.
+ *
+ *  Two passes: each worktree stacks its agents and PR in a column, then
+ *  ELK places the worktree boxes with edges lifted to worktree level.
+ *  Laying the members out inside ELK too put each PR in a layer of its
+ *  own, which doubled the width of every worktree and of the graph. */
 export async function layoutSubscriptionGraph(
   g: SubscriptionGraph,
   scale: number
 ): Promise<Record<string, Box>> {
   const s = (n: number): number => Math.round(n * scale)
   const pad = s(NODE_SIZE.groupPad)
+  const gap = s(NODE_SIZE.gap)
+  const boxes: Record<string, Box> = {}
+  const groupOf = new Map<string, string>()
+
   const children: ElkNode[] = g.groups.map((group) => {
-    const members = g.nodes.filter((n) => n.groupId === group.id)
-    return {
-      id: group.id,
-      layoutOptions: {
-        'elk.padding': `[top=${s(NODE_SIZE.groupHeader)},left=${pad},bottom=${pad},right=${pad}]`,
-        'elk.nodeSize.constraints': 'MINIMUM_SIZE',
-        'elk.nodeSize.minimum': `(${s(NODE_SIZE.emptyGroup.width) + 2 * pad}, ${s(NODE_SIZE.groupHeader + NODE_SIZE.emptyGroup.height)})`
-      },
-      children: members.map((n) => ({
-        id: n.id,
-        width: s(NODE_SIZE[n.kind].width),
-        height: s(NODE_SIZE[n.kind].height)
-      }))
+    let y = s(NODE_SIZE.groupHeader)
+    const width = s(NODE_SIZE.agent.width) + 2 * pad
+    for (const n of g.nodes) {
+      if (n.groupId !== group.id) continue
+      groupOf.set(n.id, group.id)
+      const size = NODE_SIZE[n.kind]
+      boxes[n.id] = { x: pad, y, width: s(size.width), height: s(size.height) }
+      y += s(size.height) + gap
     }
+    const height = y === s(NODE_SIZE.groupHeader) ? y : y - gap + pad
+    return { id: group.id, width, height }
   })
-  const root: ElkNode = {
+
+  const seen = new Set<string>()
+  const edges: { id: string; sources: string[]; targets: string[] }[] = []
+  for (const e of g.edges) {
+    const a = groupOf.get(e.source) ?? e.source
+    const b = groupOf.get(e.target) ?? e.target
+    if (a === b || seen.has(`${a}>${b}`)) continue
+    seen.add(`${a}>${b}`)
+    edges.push({ id: e.id, sources: [a], targets: [b] })
+  }
+
+  const out = await elk.layout({
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.layered.spacing.nodeNodeBetweenLayers': String(s(72)),
+      'elk.layered.spacing.nodeNodeBetweenLayers': String(s(64)),
       'elk.spacing.nodeNode': String(s(20)),
       'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
       'elk.separateConnectedComponents': 'true',
-      'elk.spacing.componentComponent': String(s(40))
+      'elk.spacing.componentComponent': String(s(32))
     },
     children,
-    edges: g.edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] }))
-  }
-  const out = await elk.layout(root)
-  const boxes: Record<string, Box> = {}
+    edges
+  })
   for (const group of out.children ?? []) {
     boxes[group.id] = {
       x: group.x ?? 0,
       y: group.y ?? 0,
       width: group.width ?? 0,
       height: group.height ?? 0
-    }
-    for (const n of group.children ?? []) {
-      boxes[n.id] = { x: n.x ?? 0, y: n.y ?? 0, width: n.width ?? 0, height: n.height ?? 0 }
     }
   }
   return boxes
