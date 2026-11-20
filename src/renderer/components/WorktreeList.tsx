@@ -261,8 +261,8 @@ export function WorktreeList({
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // Project rows never reach here — their chats live in the tab strip once
-    // open, not as a tree hanging off the project name.
+    // Project rows follow the same rule, and show their tabs even while the
+    // project is collapsed: collapsing hides the worktrees, not main.
     (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
@@ -481,13 +481,16 @@ export function WorktreeList({
               alone collapses it. */}
           {!section.unified &&
             (home ? (
-              renderTab(home, {
-                name: section.repoName,
-                collapsed: section.collapsed,
-                count: section.count,
-                onToggleCollapse: () => onToggleRepo(section.scope),
-                actions: projectActions(section.repoName, section.repoRoots)
-              })
+              <>
+                {renderTab(home, {
+                  name: section.repoName,
+                  collapsed: section.collapsed,
+                  count: section.count,
+                  onToggleCollapse: () => onToggleRepo(section.scope),
+                  actions: projectActions(section.repoName, section.repoRoots)
+                })}
+                {renderTabRows(home)}
+              </>
             ) : (
               <RepoHeader
                 section={section}
@@ -509,6 +512,7 @@ export function WorktreeList({
                         { backendId: pathBackendId?.[h.path] ?? null, repoRoot: h.worktree.repoRoot }
                       ])
                     })}
+                    {renderTabRows(h)}
                   </div>
                 )
               })}
