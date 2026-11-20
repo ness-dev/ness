@@ -214,6 +214,9 @@ export interface WorktreeListModelInput {
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   /** Touch surfaces don't bind Cmd+N, so they skip ordinal assignment. */
   assignOrdinals?: boolean
+  /** The user's dragged project order, as section scope keys
+   *  (`settings.sidebarProjectOrder`). See `applyProjectOrder`. */
+  projectOrder?: readonly string[]
 }
 
 /** Rolls a worktree's tabs up by `ROLLUP_STATUS_RANK`, plus the pending tool
@@ -273,7 +276,8 @@ export function buildWorktreeListBase(
     assignedPRsByRepo,
     unifiedRepos,
     isGroupCollapsed,
-    assignOrdinals = true
+    assignOrdinals = true,
+    projectOrder = EMPTY_ORDER
   } = input
 
   const statusByPath: Record<string, PtyStatus> = {}
@@ -369,6 +373,8 @@ export function buildWorktreeListBase(
     }
   }
 
+  const orderedBuckets = applyProjectOrder(buckets, projectOrder)
+
   // Per repo: a PR into `release` in one repo says nothing about another.
   const repoOfPath = new Map(worktrees.map((w) => [w.path, w.repoRoot]))
   const baseBranchesByRepo = new Map<string, Set<string>>()
@@ -382,7 +388,7 @@ export function buildWorktreeListBase(
   const isBaseBranch = (repoRoot: string, branch: string): boolean =>
     COMMON_BASE_BRANCHES.includes(branch) || (baseBranchesByRepo.get(repoRoot)?.has(branch) ?? false)
 
-  const sections: WorktreeRepoSectionModel[] = buckets.map((bucket) => {
+  const sections: WorktreeRepoSectionModel[] = orderedBuckets.map((bucket) => {
     const groups = groupWorktrees(
       bucket.worktrees,
       prStatuses,
@@ -444,8 +450,14 @@ export function buildWorktreeListBase(
       ;(isTail ? tailGroups : workGroups).push(split)
     }
     // Unified mode's single bucket collects mains in group order; restore the
-    // user's repo order so the stacked project rows don't reshuffle on status changes.
-    const repoOrder = new Map(repoRoots.map((root, i) => [root, i]))
+    // user's repo order so the stacked project rows don't reshuffle on status
+    // changes. A dragged order (keyed by root, which is a single-root
+    // section's scope) wins over the repoRoots order.
+    const repoOrder = new Map(
+      applyProjectOrder(repoRoots.map((root) => ({ scope: root, repoRoots: [{ repoRoot: root }] })), projectOrder).map(
+        (b, i) => [b.scope, i]
+      )
+    )
     homes.sort(
       (a, b) =>
         (repoOrder.get(a.worktree.repoRoot) ?? Infinity) - (repoOrder.get(b.worktree.repoRoot) ?? Infinity)
@@ -539,6 +551,55 @@ export function buildWorktreeListBase(
     numberedPaths: numberedRows.map((row) => row.path),
     activeRepoRoot: null
   }
+}
+
+const EMPTY_ORDER: readonly string[] = []
+
+/** Sorts sections by the user's dragged order. A section is placed by its
+ *  scope, or failing that by the earliest of its member roots — so a
+ *  project that becomes a cross-host merged section (scope `repo:<key>`)
+ *  keeps the slot it had as a plain root. Sections the order doesn't
+ *  mention (a repo added since the last drag, a backend not shown at the
+ *  time) keep their default relative order after every placed one, which
+ *  is where a newly added repo lands anyway. Stale keys are ignored. Stable,
+ *  and returns the input array when there's nothing to apply. */
+export function applyProjectOrder<T extends { scope: string; repoRoots: readonly { repoRoot: string }[] }>(
+  sections: readonly T[],
+  order: readonly string[]
+): T[] {
+  if (order.length === 0 || sections.length < 2) return sections as T[]
+  const rank = new Map<string, number>()
+  order.forEach((key, i) => {
+    if (!rank.has(key)) rank.set(key, i)
+  })
+  const rankOf = (section: T): number => {
+    const own = rank.get(section.scope)
+    if (own !== undefined) return own
+    let best = Infinity
+    for (const r of section.repoRoots) best = Math.min(best, rank.get(r.repoRoot) ?? Infinity)
+    return best
+  }
+  return sections
+    .map((section, i) => ({ section, i, r: rankOf(section) }))
+    .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r - b.r))
+    .map((x) => x.section)
+}
+
+/** The stored order after the user drags `nextVisible` (every visible
+ *  section's scope, top to bottom) into place. Keys for sections not on
+ *  screen — another backend's repos outside fleet view — keep their slots,
+ *  so reordering one backend's projects doesn't scramble where another's
+ *  sit when the views are merged again. */
+export function mergeProjectOrder(stored: readonly string[], nextVisible: readonly string[]): string[] {
+  const visible = new Set(nextVisible)
+  const out: string[] = []
+  let i = 0
+  for (const key of stored) {
+    if (!visible.has(key)) out.push(key)
+    else if (i < nextVisible.length) out.push(nextVisible[i++])
+  }
+  while (i < nextVisible.length) out.push(nextVisible[i++])
+  return [...new Set(out)]
 }
 
 /** The project accordion: the project holding the active worktree is open,

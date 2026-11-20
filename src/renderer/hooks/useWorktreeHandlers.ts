@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AddRepoResult, Worktree, PendingWorktree, PRStatus, TerminalTab, AgentKind, ForkSource } from '../types'
 import { markTerminalClosing } from '../components/XTerminal'
-import { useActiveBackend } from '../store'
+import { useActiveBackend, useLocalAppState } from '../store'
 import { useGlobalBackend, useBackendForWorktree, useBackendForRepo } from '../backend-routing'
 import { getBackendFor } from '../backend'
 import type { SectionRepoRoot } from '../worktree-list-model'
@@ -70,6 +70,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
   const backendFor = useBackendForWorktree(pathBackendId)
   const backendForRepo = useBackendForRepo(repoBackendId)
   const backendForPending = useBackendForRepo(pendingBackendId)
+  const projectOrder = useLocalAppState((s) => s.settings.sidebarProjectOrder)
 
   // Path of a freshly-created worktree we want to focus once it appears in the
   // worktrees list. Set on a successful create; the effect below switches to it
@@ -188,6 +189,11 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Main dispatches reposChanged + listChanged. If our current focus is
       // about to disappear, switch to whatever's first in the remaining list.
       const removed = new Set(roots.map((entry) => entry.repoRoot))
+      // Forget the project's dragged slot, so re-adding it later lands at
+      // the end like any new repo instead of jumping back to where it was.
+      if (projectOrder.some((key) => removed.has(key))) {
+        void backend.setSidebarProjectOrder(projectOrder.filter((key) => !removed.has(key)))
+      }
       if (activeWorktreeId) {
         const stillExists = worktrees.some(
           (w) => w.path === activeWorktreeId && !removed.has(w.repoRoot)
@@ -198,7 +204,7 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
         }
       }
     },
-    [activeWorktreeId, worktrees, setActiveWorktreeId]
+    [activeWorktreeId, worktrees, setActiveWorktreeId, projectOrder]
   )
 
   const handleRefreshWorktrees = useCallback(async () => {

@@ -514,6 +514,8 @@ export interface ElectronAPI {
   setSidebarDetails(prefs: SidebarDetailPrefsByMode): Promise<boolean>
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
+  /** Section scope keys, top to bottom. Client-owned. */
+  setSidebarProjectOrder(order: string[]): Promise<boolean>
   setEditor(editorId: string): Promise<boolean>
   /** Set (or clear, with `null`) the per-repo editor override. */
   setRepoEditor(repoRoot: string, editorId: string | null): Promise<boolean>

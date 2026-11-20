@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useAppState, usePanes } from '../store'
+import { useAppState, useLocalAppState, usePanes } from '../store'
 import { useMergedWorktrees } from './useMergedWorktrees'
 import { getLeaves } from '../../shared/state/terminals'
 import type { TerminalTab } from '../types'
@@ -54,6 +54,9 @@ export function useWorktreeListBase(
   const { assignOrdinals = true } = options
   const merged = useMergedWorktrees()
   const viewerLogin = useAppState((s) => s.settings.viewerLogin)
+  // Client-owned (CLIENT_OWNED_SETTING_KEYS), so read from this client's
+  // own store: the order spans every backend fleet view shows.
+  const projectOrder = useLocalAppState((s) => s.settings.sidebarProjectOrder)
 
   const { unifiedRepos, isGroupCollapsed } = collapse
 
@@ -79,9 +82,10 @@ export function useWorktreeListBase(
         assignedPRsByRepo: merged.assignedPRsByRepo,
         unifiedRepos,
         isGroupCollapsed,
-        assignOrdinals
+        assignOrdinals,
+        projectOrder
       }),
-    [merged, viewerLogin, unifiedRepos, isGroupCollapsed, assignOrdinals]
+    [merged, viewerLogin, unifiedRepos, isGroupCollapsed, assignOrdinals, projectOrder]
   )
 }
 

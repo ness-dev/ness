@@ -220,7 +220,7 @@ import { recordActivity, getActivityLog, clearAllActivity, clearActivityForWorkt
 import { log, getLogFilePath } from './debug'
 import { loadCustomThemes } from './themes-loader'
 import { perfLog, flushPerfLogSync } from './perf-log'
-import { buildInitialAppState } from './build-initial-state'
+import { buildInitialAppState, sanitizeProjectOrder } from './build-initial-state'
 import { AnnouncementsPoller } from './announcements-poller'
 
 function toAgentKind(value: string | undefined): AgentKind {
@@ -3767,6 +3767,16 @@ function registerIpcHandlers(): void {
       return true
     }
   )
+
+  transport.onRequest('config:setSidebarProjectOrder', (_ctx, order: unknown) => {
+    if (!Array.isArray(order)) return false
+    const clean = sanitizeProjectOrder(order)
+    if (clean.length === 0) delete config.sidebarProjectOrder
+    else config.sidebarProjectOrder = clean
+    saveConfig(config)
+    store.dispatch({ type: 'settings/sidebarProjectOrderChanged', payload: clean })
+    return true
+  })
 
   transport.onRequest('config:getAvailableThemes', (_ctx) => {
     return AVAILABLE_THEMES

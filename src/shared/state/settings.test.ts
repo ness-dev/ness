@@ -1063,6 +1063,14 @@ describe('settingsReducer', () => {
     expect(reordered.bottomIconOrder).toEqual(['settings', 'commandCenter', 'newProject'])
   })
 
+  it('sidebarProjectOrderChanged replaces the project order', () => {
+    const next = apply(initialSettings, {
+      type: 'settings/sidebarProjectOrderChanged',
+      payload: ['/repos/b', 'repo:remote:github.com/org/a']
+    })
+    expect(next.sidebarProjectOrder).toEqual(['/repos/b', 'repo:remote:github.com/org/a'])
+  })
+
   it('returns a new object reference (no mutation)', () => {
     const next = apply(initialSettings, { type: 'settings/themeDarkChanged', payload: 'dracula' })
     expect(next).not.toBe(initialSettings)

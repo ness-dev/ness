@@ -577,6 +577,14 @@ export interface SettingsState {
    *  at read time (so adding a new icon to the codebase just shows up on the
    *  end). Managed via up/down chevrons in the hamburger dropdown. */
   bottomIconOrder: BottomIconKey[]
+  /** User's drag order for sidebar projects, as section scope keys (the
+   *  repo root, or `repo:<key>` for a section merged across hosts).
+   *  Client-owned rather than a reorder of `worktrees.repoRoots`, because
+   *  fleet view interleaves several backends' repos and merges same-repo
+   *  roots into one section — an order no single backend's list can hold.
+   *  Sections not listed keep their default order after the listed ones;
+   *  stale keys are harmless and ignored (see `applyProjectOrder`). */
+  sidebarProjectOrder: string[]
 }
 
 export type SettingsEvent =
@@ -669,6 +677,7 @@ export type SettingsEvent =
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
+  | { type: 'settings/sidebarProjectOrderChanged'; payload: string[] }
 
 // Client-side placeholder. Real values are seeded in the main-process Store
 // constructor from the on-disk config and secrets.
@@ -759,7 +768,8 @@ export const initialSettings: SettingsState = {
   autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
-  bottomIconOrder: [...BOTTOM_ICON_KEYS]
+  bottomIconOrder: [...BOTTOM_ICON_KEYS],
+  sidebarProjectOrder: []
 }
 
 /** Read helper: return the user's stored order with any missing keys
@@ -861,7 +871,8 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'jsonModeTranscriptWindow',
   'snoozeDefaultDays',
   'hiddenBottomIcons',
-  'bottomIconOrder'
+  'bottomIconOrder',
+  'sidebarProjectOrder'
 ] as const satisfies readonly (keyof SettingsState)[]
 
 /** The `config:*` transport channels that mutate (or probe for) a
@@ -915,6 +926,7 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setSnoozeDefaultDays',
   'config:setHiddenBottomIcons',
   'config:setBottomIconOrder',
+  'config:setSidebarProjectOrder',
   'config:setLastEffectiveAppBg'
 ])
 
@@ -1132,6 +1144,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, hiddenBottomIcons: event.payload }
     case 'settings/bottomIconOrderChanged':
       return { ...state, bottomIconOrder: event.payload }
+    case 'settings/sidebarProjectOrderChanged':
+      return { ...state, sidebarProjectOrder: event.payload }
     default: {
       const _exhaustive: never = event
       void _exhaustive

@@ -5,6 +5,7 @@ import {
   applyProjectAccordion,
   buildWorktreeListBase,
   buildWorktreeListModel,
+  mergeProjectOrder,
   UNIFIED_REPO_ROOT,
   type WorktreeListModelInput
 } from './worktree-list-model'
@@ -999,5 +1000,67 @@ describe('project worst status', () => {
     expect(twoRepos({ t1: 'processing', t2: 'waiting' }).sections[1].worstStatus).toBe('waiting')
     expect(twoRepos({ t1: 'idle', t2: 'waiting' }).sections[1].worstStatus).toBe('waiting')
     expect(twoRepos({ tm: 'needs-approval' }).sections[1].worstStatus).toBe('idle')
+  })
+})
+
+describe('project order', () => {
+  const roots = ['/repos/alpha', '/repos/beta', '/repos/gamma']
+  const mains = roots.map((r) => wt({ path: r, repoRoot: r, isMain: true, branch: 'main' }))
+  const scopes = (m: ReturnType<typeof buildWorktreeListModel>): string[] => m.sections.map((s) => s.scope)
+
+  it('defaults to repoRoots order', () => {
+    expect(scopes(buildWorktreeListModel(input({ worktrees: mains, repoRoots: roots })))).toEqual(roots)
+  })
+
+  it('applies the dragged order, and Cmd+N follows it', () => {
+    const model = buildWorktreeListModel(
+      input({ worktrees: mains, repoRoots: roots, projectOrder: ['/repos/gamma', '/repos/alpha', '/repos/beta'] })
+    )
+    expect(scopes(model)).toEqual(['/repos/gamma', '/repos/alpha', '/repos/beta'])
+    expect(model.numberedPaths).toEqual(['/repos/gamma', '/repos/alpha', '/repos/beta'])
+    expect(model.orderedPaths[0]).toBe('/repos/gamma')
+  })
+
+  it('appends projects the order does not mention, in default order, and ignores stale keys', () => {
+    const model = buildWorktreeListModel(
+      input({ worktrees: mains, repoRoots: roots, projectOrder: ['/repos/removed', '/repos/beta'] })
+    )
+    expect(scopes(model)).toEqual(['/repos/beta', '/repos/alpha', '/repos/gamma'])
+  })
+
+  it('places a cross-host merged section by its scope, or by a member root', () => {
+    const base = {
+      worktrees: [],
+      repoRoots: ['/l/api', '/l/web', '/r/api'],
+      repoBackendId: { '/l/api': 'local', '/l/web': 'local', '/r/api': 'remote' },
+      repoRemotes: { '/l/api': 'github.com/o/api', '/l/web': 'github.com/o/web', '/r/api': 'github.com/o/api' }
+    }
+    const byScope = buildWorktreeListModel(input({ ...base, projectOrder: ['/l/web', 'repo:remote:github.com/o/api'] }))
+    expect(scopes(byScope)).toEqual(['/l/web', 'repo:remote:github.com/o/api'])
+    // Saved back when api was a plain local root, before the remote joined.
+    const byRoot = buildWorktreeListModel(input({ ...base, projectOrder: ['/l/web', '/l/api'] }))
+    expect(scopes(byRoot)).toEqual(['/l/web', 'repo:remote:github.com/o/api'])
+  })
+
+  it('orders unified-mode project rows by the dragged order too', () => {
+    const model = buildWorktreeListModel(
+      input({ worktrees: mains, repoRoots: roots, unifiedRepos: true, projectOrder: ['/repos/beta'] })
+    )
+    expect(model.sections[0].homes.map((h) => h.path)).toEqual(['/repos/beta', '/repos/alpha', '/repos/gamma'])
+  })
+})
+
+describe('mergeProjectOrder', () => {
+  it('takes the visible order when nothing else is stored', () => {
+    expect(mergeProjectOrder([], ['b', 'a'])).toEqual(['b', 'a'])
+  })
+
+  it('keeps keys for sections not on screen in their slots', () => {
+    // x is another backend's project, interleaved in fleet view.
+    expect(mergeProjectOrder(['a', 'x', 'b', 'c'], ['c', 'a', 'b'])).toEqual(['c', 'x', 'a', 'b'])
+  })
+
+  it('appends visible sections the stored order never saw', () => {
+    expect(mergeProjectOrder(['a', 'x'], ['n', 'a'])).toEqual(['n', 'x', 'a'])
   })
 })
