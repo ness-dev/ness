@@ -7,6 +7,7 @@ import type { ReviewSubmission } from './state/reviews'
 import {
   agentId,
   buildSubscriptionGraph,
+  filterSubscriptionGraph,
   graphTopologyKey,
   groupId,
   prId,
@@ -225,5 +226,66 @@ describe('buildSubscriptionGraph', () => {
       REPO
     )
     expect(graphTopologyKey(a)).toBe(graphTopologyKey(b))
+  })
+})
+
+describe('filterSubscriptionGraph', () => {
+  const C = '/repo-wt/c'
+  const D = '/repo-wt/d'
+  function big(): AppState {
+    return {
+      ...initialState,
+      worktrees: {
+        ...initialState.worktrees,
+        list: [wt(A, 'a'), wt(B, 'b'), wt(C, 'c'), wt(D, 'd')],
+        repoRoots: [REPO]
+      },
+      terminals: {
+        ...initialState.terminals,
+        panes: { [A]: leaf(chat('ta')), [B]: leaf(chat('tb')), [C]: leaf(chat('tc')), [D]: leaf(chat('td')) }
+      },
+      // A created B; C is merged and on its own; D is on its own.
+      origins: { byPath: { [B]: { creatorPath: A, creatorTabId: 'ta', createdAt: 1 } } },
+      prs: { ...initialState.prs, mergedByPath: { [C]: true } }
+    }
+  }
+  const paths = (g: { groups: { path: string }[] }): string[] => g.groups.map((x) => x.path)
+
+  it('hides merged and unlinked worktrees by default, and counts them', () => {
+    const r = filterSubscriptionGraph(buildSubscriptionGraph(big(), REPO), {
+      showMerged: false,
+      showUnlinked: false
+    })
+    expect(paths(r.graph)).toEqual([A, B])
+    expect(r.hidden).toEqual({ merged: 1, unlinked: 1 })
+  })
+
+  it('shows everything with both toggles on', () => {
+    const g = buildSubscriptionGraph(big(), REPO)
+    const r = filterSubscriptionGraph(g, { showMerged: true, showUnlinked: true })
+    expect(r.graph).toEqual(g)
+    expect(r.hidden).toEqual({ merged: 0, unlinked: 0 })
+  })
+
+  it('keeps a merged worktree that an unmerged one still links to', () => {
+    const s = big()
+    s.prs = { ...s.prs, mergedByPath: { [B]: true } }
+    const r = filterSubscriptionGraph(buildSubscriptionGraph(s, REPO), {
+      showMerged: false,
+      showUnlinked: false
+    })
+    expect(paths(r.graph)).toEqual([A, B])
+  })
+
+  it("doesn't count a worktree's own PR edge as a link", () => {
+    const s = { ...big(), origins: { byPath: {} } }
+    s.prs = { ...s.prs, byPath: { [A]: pr() } }
+    s.settings = { ...s.settings, notifyChatOnCiFailure: true }
+    const r = filterSubscriptionGraph(buildSubscriptionGraph(s, REPO), {
+      showMerged: true,
+      showUnlinked: false
+    })
+    expect(r.graph.groups).toEqual([])
+    expect(r.hidden.unlinked).toBe(4)
   })
 })

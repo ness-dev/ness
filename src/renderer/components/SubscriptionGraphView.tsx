@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
 import './subscription-graph.css'
-import { ArrowLeft, GitPullRequest, Loader2, Maximize, Moon, SquareTerminal, X } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, GitPullRequest, Loader2, Maximize, Moon, SquareTerminal, X } from 'lucide-react'
 import { useAppState } from '../store'
 import { useBackend } from '../backend'
 import { AgentIcon } from './AgentIcon'
@@ -27,6 +27,7 @@ import { STATUS_COLORS, STATUS_LABELS, prIconStyle } from '../worktree-row-style
 import type { PRStatus } from '../types'
 import {
   buildSubscriptionGraph,
+  filterSubscriptionGraph,
   graphTopologyKey,
   type GraphAgentNode,
   type GraphEdge,
@@ -410,6 +411,40 @@ function toFlow(g: SubscriptionGraph, boxes: Record<string, Box>): { nodes: Flow
   return { nodes, edges }
 }
 
+/** A pill in the toolbar that reveals a class of hidden worktrees. Shows
+ *  how many it's hiding while off, so nothing disappears silently. */
+function FilterToggle({
+  on,
+  count,
+  label,
+  title,
+  onToggle
+}: {
+  on: boolean
+  count: number | undefined
+  label: string
+  title: string
+  onToggle: () => void
+}): JSX.Element | null {
+  if (!on && !count) return null
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={on}
+      title={on ? `${title}. Click to hide them.` : `${title}. Click to show them.`}
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs cursor-pointer transition-colors ${
+        on
+          ? 'border-accent/50 bg-accent/10 text-fg'
+          : 'border-border-strong text-muted hover:text-fg hover:border-fg/40'
+      }`}
+    >
+      {on ? <EyeOff className="icon-xs" /> : <Eye className="icon-xs" />}
+      {on ? `Hide ${label.toLowerCase()}` : `${label} (${count})`}
+    </button>
+  )
+}
+
 function Legend(): JSX.Element {
   return (
     <div className="flex items-center gap-4 text-xs text-muted">
@@ -578,11 +613,21 @@ export default function SubscriptionGraphView({
 }: SubscriptionGraphViewProps): JSX.Element {
   const selector = useMemo(() => selectGraph(repoRoot), [repoRoot])
   const json = useAppState(selector)
-  const graph = useMemo<SubscriptionGraph>(() => JSON.parse(json), [json])
+  const full = useMemo<SubscriptionGraph>(() => JSON.parse(json), [json])
+  // Per-viewer, like any view filter. Off by default: with dozens of
+  // worktrees the links are what this view is for, and drawing every
+  // merged or standalone worktree shrank them out of reach.
+  const [showMerged, setShowMerged] = useState(false)
+  const [showUnlinked, setShowUnlinked] = useState(false)
+  const { graph, hidden } = useMemo(
+    () => filterSubscriptionGraph(full, { showMerged, showUnlinked }),
+    [full, showMerged, showUnlinked]
+  )
   const repoRoots = useAppState((s) => s.worktrees.repoRoots)
   const repoName = repoRoot.split('/').pop() || repoRoot
   const agentCount = graph.nodes.filter((n) => n.kind === 'agent').length
   const linkCount = graph.edges.length
+  const totalWorktrees = full.groups.filter((g) => !g.external).length
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -631,15 +676,49 @@ export default function SubscriptionGraphView({
       </div>
       <div className="h-9 shrink-0 flex items-center gap-4 px-4 border-b border-border bg-panel">
         <span className="text-xs text-faint tabular-nums">
-          {graph.groups.filter((g) => !g.external).length} worktrees · {agentCount} agents · {linkCount} links
+          {graph.groups.filter((g) => !g.external).length} of {totalWorktrees} worktrees · {agentCount} agents ·{' '}
+          {linkCount} links
         </span>
+        <FilterToggle
+          on={showUnlinked}
+          count={showUnlinked ? undefined : hidden.unlinked}
+          label="Without links"
+          title="Worktrees with no subscription, spawn or review link to another worktree"
+          onToggle={() => setShowUnlinked((v) => !v)}
+        />
+        <FilterToggle
+          on={showMerged}
+          count={showMerged ? undefined : hidden.merged}
+          label="Merged"
+          title="Merged worktrees. One an unmerged worktree still links to is always shown."
+          onToggle={() => setShowMerged((v) => !v)}
+        />
         <span className="flex-1" />
         <Legend />
       </div>
       <div className="flex-1 min-h-0 flex relative">
         {graph.groups.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-faint">
-            No worktrees in {repoName}.
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-sm text-faint">
+            {totalWorktrees === 0 ? (
+              `No worktrees in ${repoName}.`
+            ) : (
+              <>
+                <span>No links between worktrees in {repoName} yet.</span>
+                <span className="text-xs">
+                  Agents link to worktrees they create, ones they subscribe to, and the tabs they review.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUnlinked(true)
+                    setShowMerged(true)
+                  }}
+                  className="text-xs text-accent hover:underline cursor-pointer"
+                >
+                  Show all {totalWorktrees} worktrees
+                </button>
+              </>
+            )}
           </div>
         ) : (
           // A definite box: as a flex item React Flow measured itself

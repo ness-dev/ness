@@ -289,3 +289,71 @@ export function graphTopologyKey(g: SubscriptionGraph): string {
     g.edges.map((e) => `${e.source}>${e.target}`).join(',')
   ].join('|')
 }
+
+export interface GraphFilter {
+  showMerged: boolean
+  showUnlinked: boolean
+}
+
+export interface FilteredGraph {
+  graph: SubscriptionGraph
+  /** Worktrees each filter is hiding right now, for the toggles' counts. */
+  hidden: { merged: number; unlinked: number }
+}
+
+/** Trims the graph for a project with many worktrees, where it's the links
+ *  that matter. Applied in order:
+ *    1. merged worktrees go, unless an unmerged one links to them; a live
+ *       link into a merged worktree is still state worth seeing
+ *    2. worktrees with no link to another worktree go; a worktree's own
+ *       PR and reviewer edges don't count, they're inside the box
+ *  Edges touching a hidden worktree go with it. */
+export function filterSubscriptionGraph(g: SubscriptionGraph, f: GraphFilter): FilteredGraph {
+  const groupOf = new Map<string, string>(g.groups.map((x) => [x.id, x.id]))
+  for (const n of g.nodes) groupOf.set(n.id, n.groupId)
+  const crossLinks = (edges: GraphEdge[]): Array<[string, string]> =>
+    edges
+      .map((e) => [groupOf.get(e.source), groupOf.get(e.target)] as const)
+      .filter((p): p is readonly [string, string] => !!p[0] && !!p[1] && p[0] !== p[1])
+      .map(([a, b]) => [a, b])
+
+  const byId = new Map(g.groups.map((x) => [x.id, x]))
+  const keep = new Set(g.groups.map((x) => x.id))
+  let merged = 0
+  if (!f.showMerged) {
+    const linkedToUnmerged = new Set<string>()
+    for (const [a, b] of crossLinks(g.edges)) {
+      if (!byId.get(a)?.merged) linkedToUnmerged.add(b)
+      if (!byId.get(b)?.merged) linkedToUnmerged.add(a)
+    }
+    for (const x of g.groups) {
+      if (x.merged && !linkedToUnmerged.has(x.id)) {
+        keep.delete(x.id)
+        merged++
+      }
+    }
+  }
+  const live = (e: GraphEdge): boolean => {
+    const a = groupOf.get(e.source)
+    const b = groupOf.get(e.target)
+    return !!a && !!b && keep.has(a) && keep.has(b)
+  }
+  let unlinked = 0
+  if (!f.showUnlinked) {
+    const linked = new Set(crossLinks(g.edges.filter(live)).flat())
+    for (const id of [...keep]) {
+      if (!linked.has(id)) {
+        keep.delete(id)
+        unlinked++
+      }
+    }
+  }
+  return {
+    graph: {
+      groups: g.groups.filter((x) => keep.has(x.id)),
+      nodes: g.nodes.filter((n) => keep.has(n.groupId)),
+      edges: g.edges.filter(live)
+    },
+    hidden: { merged, unlinked }
+  }
+}
