@@ -43,9 +43,11 @@ export interface ChatMentionTarget {
   tabId: string
   label: string
   agentKind: AgentKind
-  /** Alias when set, else branch — the row's description. */
+  /** Alias when set, else `<repo>/<branch>` — the row's description. A
+   *  bare branch would read `main` for every repo's main checkout. */
   worktreeName: string
   alias?: string
+  branch: string
   /** Token without the leading `@`. */
   token: string
 }
@@ -78,8 +80,9 @@ export function listChatMentionTargets(
         tabId: t.id,
         label: tabLabel(t),
         agentKind: t.agentKind ?? 'claude',
-        worktreeName: alias || w.branch,
+        worktreeName: alias || handle,
         ...(alias ? { alias } : {}),
+        branch: w.branch,
         token: chatMentionToken(handle, unique ? slug : t.id)
       })
     })
@@ -89,10 +92,13 @@ export function listChatMentionTargets(
 
 export const MAX_CHAT_MENTION_RESULTS = 8
 
-/** Substring match on the tab name, the token, and the worktree alias, so
+/** Substring match on the tab name and the worktree's alias and branch, so
  *  `@Site` lists the chats inside the Site worktree as well as any tab
- *  named Site. A tab-name hit ranks above a worktree hit; ties keep list
- *  order. Returns the label match offset for highlighting (-1 when the hit
+ *  named Site. Not the repo name: one repo holds dozens of chats, and
+ *  `@<repo>` would bury the worktree rows under all of them. The full
+ *  token only counts once the query starts with the `chat:` prefix, which
+ *  is how `@chat:` lists everything. A tab-name hit ranks above a worktree
+ *  hit; ties keep list order. Returns the label match offset for highlighting (-1 when the hit
  *  wasn't on the label). */
 export function matchChatMentions(
   query: string,
@@ -104,9 +110,11 @@ export function matchChatMentions(
   const ranked: { rank: number; order: number; target: ChatMentionTarget; labelAt: number }[] = []
   targets.forEach((t, order) => {
     const labelAt = t.label.toLowerCase().indexOf(q)
-    const tokenAt = t.token.toLowerCase().indexOf(q)
-    const aliasHit = t.alias?.toLowerCase().includes(q) ?? false
-    if (labelAt === -1 && tokenAt === -1 && !aliasHit) return
+    const worktreeHit =
+      (t.alias?.toLowerCase().includes(q) ?? false) ||
+      t.branch.toLowerCase().includes(q) ||
+      (q.startsWith(CHAT_MENTION_PREFIX) && t.token.toLowerCase().startsWith(q))
+    if (labelAt === -1 && !worktreeHit) return
     const rank = labelAt !== -1 ? labelAt : Number.MAX_SAFE_INTEGER
     ranked.push({ rank, order, target: t, labelAt })
   })

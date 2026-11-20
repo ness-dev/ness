@@ -59,7 +59,7 @@ describe('listChatMentionTargets', () => {
       'chat:ness/feat-b#emoji'
     ])
     expect(targets[0]).toMatchObject({ label: 'Fix Bug', worktreeName: 'Site', alias: 'Site' })
-    expect(targets[3].worktreeName).toBe('feat-b')
+    expect(targets[3].worktreeName).toBe('ness/feat-b')
   })
 
   it('round-trips through parseChatMention', () => {
@@ -83,6 +83,11 @@ describe('matchChatMentions', () => {
       ['Site copy', 5]
     ])
     expect(matchChatMentions('feat-b', targets).map((m) => m.target.label)).toEqual(['Site copy'])
+  })
+
+  it('ignores the repo name unless the query is a chat: token', () => {
+    expect(matchChatMentions('ness', targets)).toEqual([])
+    expect(matchChatMentions('chat:ness/feat-a', targets).map((m) => m.target.label)).toEqual(['Deploy', 'Copy'])
   })
 
   it('returns nothing for an empty query and respects the limit', () => {
