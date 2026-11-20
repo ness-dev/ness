@@ -2773,24 +2773,44 @@ function registerIpcHandlers(): void {
     return prepareMainForMerge(repoRoot)
   })
 
+  // Every local merge for a repo runs in that repo's main worktree, so two at
+  // once (a double click, a second client, or another worktree's panel) would
+  // fight over the same index. One per repo; the rest are refused up front.
+  const localMergesInFlight = new Set<string>()
   transport.onRequest(
     'worktree:mergeLocal',
     async (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) => {
       if (!repoRoot) throw new Error('No repo root provided')
-      let branch = sourceBranch
+      if (localMergesInFlight.has(repoRoot)) {
+        throw new Error('Another merge into this repo is already in progress.')
+      }
+      localMergesInFlight.add(repoRoot)
       if (worktreePath) {
-        const resolved = await getCurrentBranch(worktreePath)
-        if (resolved) branch = resolved
+        store.dispatch({ type: 'prs/localMergeStarted', payload: { path: worktreePath } })
       }
-      const result = await mergeWorktreeLocally(repoRoot, branch, strategy)
-      const sha = await getBranchSha(repoRoot, branch)
-      if (sha) {
-        if (!config.locallyMerged) config.locallyMerged = {}
-        config.locallyMerged[branch] = sha
-        saveConfig(config)
+      let merged = false
+      try {
+        let branch = sourceBranch
+        if (worktreePath) {
+          const resolved = await getCurrentBranch(worktreePath)
+          if (resolved) branch = resolved
+        }
+        const result = await mergeWorktreeLocally(repoRoot, branch, strategy)
+        merged = true
+        const sha = await getBranchSha(repoRoot, branch)
+        if (sha) {
+          if (!config.locallyMerged) config.locallyMerged = {}
+          config.locallyMerged[branch] = sha
+          saveConfig(config)
+        }
+        void prPoller.refreshAll()
+        return result
+      } finally {
+        localMergesInFlight.delete(repoRoot)
+        if (worktreePath) {
+          store.dispatch({ type: 'prs/localMergeFinished', payload: { path: worktreePath, merged } })
+        }
       }
-      void prPoller.refreshAll()
-      return result
     }
   )
 

@@ -1137,6 +1137,13 @@ export function usePrs() {
   return useAppState((s) => s.prs)
 }
 
+/** Per-worktree local-merge state for the Merge Locally panel. */
+export function useLocalMergeState(worktreePath: string): { merging: boolean; merged: boolean } {
+  const merging = useAppState((s) => !!s.prs.mergingByPath[worktreePath])
+  const merged = useAppState((s) => !!s.prs.mergedByPath[worktreePath])
+  return { merging, merged }
+}
+
 export function useOnboarding() {
   return useAppState((s) => s.onboarding)
 }
