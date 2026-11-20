@@ -75,6 +75,10 @@ export interface GraphEdge {
   live: boolean
   mode?: NotifyMode
   note?: string
+  /** Spawned edges that aren't `live`: why. A closed creator tab falls
+   *  back to its worktree; a terminal-agent creator is still open but
+   *  can't receive updates. */
+  notLiveReason?: 'creator-closed' | 'terminal-creator'
   /** Review edges: the reviewer's latest submitted verdict. */
   verdict?: ReviewVerdict
 }
@@ -237,7 +241,14 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
     // so the edge falls back to the creator's worktree.
     const source = tab && isAgentTab(tab) ? addAgent(o.creatorPath, tab) : ensureGroup(o.creatorPath)?.id
     if (!source) continue
-    edges.push({ id: `spawn:${path}`, kind: 'spawned', source, target: target.id, live })
+    edges.push({
+      id: `spawn:${path}`,
+      kind: 'spawned',
+      source,
+      target: target.id,
+      live,
+      ...(live ? {} : { notLiveReason: tab && isAgentTab(tab) ? 'terminal-creator' : 'creator-closed' })
+    })
   }
 
   for (const g of [...groups.values()]) {

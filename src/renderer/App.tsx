@@ -2215,6 +2215,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
         )}
         {graphRepo !== null && (
           <div className="flex-1 min-w-0 flex">
+            {/* The repo can be on any backend (the sidebar merges them all),
+                so the view reads the one that owns it, not the active one. */}
+            <BackendScope backendId={mergedData.repoBackendId[graphRepo] ?? null}>
             <Suspense fallback={<div className="flex-1 bg-app" />}>
               <SubscriptionGraphView
                 repoRoot={graphRepo}
@@ -2224,6 +2227,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                 onOpenWorktree={handleSidebarSelectWorktree}
               />
             </Suspense>
+            </BackendScope>
           </div>
         )}
         {showCommandCenter && (
@@ -2241,6 +2245,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(false)
               setShowActivity(false)
               setShowCleanup(false)
+              setGraphRepo(null)
               setActiveWorktreeId(path)
             }}
             onToggleGroup={toggleGroup}
@@ -2377,6 +2382,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowNewWorktree(false)
           setShowActivity(false)
           setShowCleanup(false)
+          setGraphRepo(null)
           setShowCommandCenter(false)
           setActiveWorktreeId(path)
         }}

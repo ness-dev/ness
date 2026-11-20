@@ -47,6 +47,25 @@ export function stackOrder(g: SubscriptionGraph, groupId: string): GraphNode[] {
   return [...agents, ...prs]
 }
 
+/** The graph's edges as ELK sees them: between groups, one per ordered
+ *  pair, with edges inside a group dropped (the stack handles those).
+ *  Ids that aren't a member (a group itself) stand for themselves. */
+export function liftEdges(
+  g: SubscriptionGraph,
+  groupOf: Map<string, string>
+): { id: string; sources: string[]; targets: string[] }[] {
+  const seen = new Set<string>()
+  const out: { id: string; sources: string[]; targets: string[] }[] = []
+  for (const e of g.edges) {
+    const a = groupOf.get(e.source) ?? e.source
+    const b = groupOf.get(e.target) ?? e.target
+    if (a === b || seen.has(`${a}>${b}`)) continue
+    seen.add(`${a}>${b}`)
+    out.push({ id: e.id, sources: [a], targets: [b] })
+  }
+  return out
+}
+
 /** Positions for every group and node. Groups are absolute; their
  *  children are relative to the group, which is what React Flow's
  *  `parentId` expects.
@@ -78,15 +97,7 @@ export async function layoutSubscriptionGraph(
     return { id: group.id, width, height }
   })
 
-  const seen = new Set<string>()
-  const edges: { id: string; sources: string[]; targets: string[] }[] = []
-  for (const e of g.edges) {
-    const a = groupOf.get(e.source) ?? e.source
-    const b = groupOf.get(e.target) ?? e.target
-    if (a === b || seen.has(`${a}>${b}`)) continue
-    seen.add(`${a}>${b}`)
-    edges.push({ id: e.id, sources: [a], targets: [b] })
-  }
+  const edges = liftEdges(g, groupOf)
 
   const out = await elk.layout({
     id: 'root',

@@ -90,7 +90,8 @@ function edgeTitle(e: GraphEdge): string {
       e.mode === 'interrupt' ? 'Interrupts with every update' : 'Routine updates held for the next turn'
     )
   }
-  if (e.kind === 'spawned' && !e.live) parts.push('Creator tab is closed, so nobody follows it from here')
+  if (e.notLiveReason === 'creator-closed') parts.push('Creator tab is closed, so nobody follows it from here')
+  if (e.notLiveReason === 'terminal-creator') parts.push('Created from a terminal tab, which doesn’t receive updates')
   if (e.note) parts.push(`Watching for: ${e.note}`)
   if (e.verdict) parts.push(`Last verdict: ${VERDICT_LABEL[e.verdict]}`)
   return parts.join('\n')
@@ -98,7 +99,13 @@ function edgeTitle(e: GraphEdge): string {
 
 /** The graph as one string, so the selector result only changes when
  *  something the view draws does. The derivation reads chat sessions
- *  (author-tab recency), which churn per streamed token. */
+ *  (author-tab recency), which churn per streamed token.
+ *
+ *  Known cost: while the view is open, every store event (each streamed
+ *  token included) re-runs the derivation and the stringify, O(worktrees ×
+ *  tabs + subscriptions). Comparing strings saves the re-render, not that
+ *  work. Fine for a view that's open briefly. If it shows up in
+ *  `[renderer-slow]`, key it on its inputs by reference first. */
 function selectGraph(repoRoot: string) {
   return (s: Parameters<typeof buildSubscriptionGraph>[0]): string =>
     JSON.stringify(buildSubscriptionGraph(s, repoRoot))
@@ -107,6 +114,19 @@ function selectGraph(repoRoot: string) {
 function rootScale(): number {
   const px = parseFloat(getComputedStyle(document.documentElement).fontSize)
   return Number.isFinite(px) && px > 0 ? px / 16 : 1
+}
+
+/** The root font-size ratio, tracked live. Read from the DOM rather than
+ *  settings: under a remote backend's scope, settings are that backend's,
+ *  but the root font-size is this window's. */
+function useRootScale(): number {
+  const [scale, setScale] = useState(rootScale)
+  useEffect(() => {
+    const mo = new MutationObserver(() => setScale(rootScale()))
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+    return () => mo.disconnect()
+  }, [])
+  return scale
 }
 
 /** Left/right for edges between worktrees; top/bottom for edges between
@@ -455,7 +475,9 @@ function GraphCanvas({
   onOpenWorktree: SubscriptionGraphViewProps['onOpenWorktree']
 }): JSX.Element {
   const backend = useBackend()
-  const topology = graphTopologyKey(graph)
+  const scale = useRootScale()
+  // Layout sizes are px scaled from rem, so a uiScale change re-lays out.
+  const topology = `${graphTopologyKey(graph)}@${scale}`
   const [layout, setLayout] = useState<{
     key: string
     boxes: Record<string, Box>
@@ -465,7 +487,7 @@ function GraphCanvas({
   // updates repaint in place instead of reshuffling the boxes.
   useEffect(() => {
     let cancelled = false
-    layoutSubscriptionGraph(graph, rootScale())
+    layoutSubscriptionGraph(graph, scale)
       .then((boxes) => {
         if (!cancelled) setLayout({ key: topology, boxes })
       })

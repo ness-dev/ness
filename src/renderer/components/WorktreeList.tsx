@@ -521,6 +521,7 @@ function RepoHeader({
       {onOpenGraph && (
         <span
           role="button"
+          aria-label={`Subscription graph for ${section.repoName}`}
           className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 text-faint hover:text-fg transition-opacity"
           title={`Subscription graph for ${section.repoName}`}
           onClick={(e) => {

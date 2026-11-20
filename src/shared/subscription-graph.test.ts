@@ -122,10 +122,35 @@ describe('buildSubscriptionGraph', () => {
     ])
     const closed = state({ origins }, { [A]: leaf(chat('other')), [B]: leaf(chat('tb')) })
     expect(edgesOf(closed, 'spawned')).toEqual([
-      { id: `spawn:${B}`, kind: 'spawned', source: groupId(A), target: groupId(B), live: false }
+      {
+        id: `spawn:${B}`,
+        kind: 'spawned',
+        source: groupId(A),
+        target: groupId(B),
+        live: false,
+        notLiveReason: 'creator-closed'
+      }
     ])
     // The created-worktree follow is the spawn edge, not a second edge.
     expect(edgesOf(state({ origins }), 'subscription')).toEqual([])
+  })
+
+  it('marks a spawn from a terminal agent as not live, but still draws it from that tab', () => {
+    const origins = { byPath: { [B]: { creatorPath: A, creatorTabId: 'term', createdAt: 1 } } }
+    const s = state({ origins }, {
+      [A]: leaf({ id: 'term', type: 'agent', label: 'Claude' }),
+      [B]: leaf(chat('tb'))
+    })
+    expect(edgesOf(s, 'spawned')).toEqual([
+      {
+        id: `spawn:${B}`,
+        kind: 'spawned',
+        source: agentId('term'),
+        target: groupId(B),
+        live: false,
+        notLiveReason: 'terminal-creator'
+      }
+    ])
   })
 
   it('links an agent to its own PR only while it follows it', () => {
