@@ -73,8 +73,8 @@ describe('createLocalMergeOps', () => {
     const deps = makeDeps({ mergeWorktreeLocally: vi.fn(() => gate.promise) })
     const ops = createLocalMergeOps(deps)
     const first = ops.mergeLocal('/repo', 'feat', 'squash', '/wt/a')
-    await expect(ops.mergeLocal('/repo', 'other', 'squash', '/wt/b')).rejects.toThrow(/already in progress/)
-    await expect(ops.prepareMain('/repo')).rejects.toThrow(/already in progress/)
+    await expect(ops.mergeLocal('/repo', 'other', 'squash', '/wt/b')).rejects.toThrow(/in progress/)
+    await expect(ops.prepareMain('/repo')).rejects.toThrow(/in progress/)
     // The refused attempt must not mark its worktree as merging.
     expect(deps.dispatch).not.toHaveBeenCalledWith({
       type: 'prs/localMergeStarted',

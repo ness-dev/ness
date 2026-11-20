@@ -34,7 +34,7 @@ export function createLocalMergeOps(deps: LocalMergeDeps): {
 
   function claim(repoRoot: string): void {
     if (busyRepos.has(repoRoot)) {
-      throw new Error('Another merge into this repo is already in progress.')
+      throw new Error('Another merge operation on this repo is in progress.')
     }
     busyRepos.add(repoRoot)
   }
@@ -53,13 +53,14 @@ export function createLocalMergeOps(deps: LocalMergeDeps): {
     async mergeLocal(repoRoot, sourceBranch, strategy, worktreePath) {
       if (!repoRoot) throw new Error('No repo root provided')
       claim(repoRoot)
-      if (worktreePath) {
-        deps.dispatch({ type: 'prs/localMergeStarted', payload: { path: worktreePath } })
-      }
       // Only true once the merge SHA is persisted, so the optimistic
       // mergedByPath flag matches what the poller will derive next time.
       let merged = false
       try {
+        // Inside the try so a throwing listener can't strand the lock.
+        if (worktreePath) {
+          deps.dispatch({ type: 'prs/localMergeStarted', payload: { path: worktreePath } })
+        }
         let branch = sourceBranch
         if (worktreePath) {
           const resolved = await deps.getCurrentBranch(worktreePath)
