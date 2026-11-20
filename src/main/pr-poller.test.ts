@@ -520,3 +520,53 @@ describe('PRPoller.refreshAll — branch independence', () => {
     expect(store.getSnapshot().state.prs.byPath['/wt/a']?.number).toBe(7)
   })
 })
+
+describe('PRPoller.refreshAll — merge landing during an in-flight refresh', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getRepoContext).mockResolvedValue({
+      origin: { owner: 'o', repo: 'r' },
+      upstream: { owner: 'o', repo: 'r' }
+    })
+    vi.mocked(fetchPRStatusesForRepo).mockResolvedValue(new Map())
+  })
+
+  it('reruns instead of dropping a call that arrives mid-pass, and keeps a SHA recorded mid-pass', async () => {
+    // /wt/x has a stale record (will be pruned); /wt/m is merged while the
+    // first pass is awaiting its rev-parse round.
+    let locallyMerged: Record<string, string> = { x: 'old-sha' }
+    const store = new Store({ ...initialState })
+    const poller = new PRPoller(store, {
+      getRepoRoots: () => ['/repo'],
+      getLocallyMerged: () => locallyMerged,
+      setLocallyMerged: (next) => {
+        locallyMerged = next
+      }
+    })
+    vi.mocked(listWorktrees).mockResolvedValue([wt('/wt/x', 'x', 'new-sha'), wt('/wt/m', 'm', 'm-sha')])
+
+    let releaseFirst!: () => void
+    const firstRound = new Promise<void>((r) => {
+      releaseFirst = r
+    })
+    let calls = 0
+    vi.mocked(getBranchSha).mockImplementation(async (_root, branch) => {
+      calls++
+      if (calls === 1) await firstRound
+      return branch === 'x' ? 'new-sha' : 'm-sha'
+    })
+
+    const first = poller.refreshAll()
+    await vi.waitFor(() => expect(calls).toBe(1))
+
+    // The merge handler records the SHA and asks for a refresh while the
+    // first pass is still in flight.
+    locallyMerged = { ...locallyMerged, m: 'm-sha' }
+    await poller.refreshAll()
+
+    releaseFirst()
+    await first
+    await vi.waitFor(() => expect(store.getSnapshot().state.prs.mergedByPath['/wt/m']).toBe(true))
+    expect(locallyMerged).toEqual({ m: 'm-sha' })
+  })
+})
