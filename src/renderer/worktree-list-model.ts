@@ -34,7 +34,7 @@ const MAX_ORDINALS = 9
 export interface WorktreeRowModel {
   worktree: Worktree
   path: string
-  /** Worst pty status across every tab in this worktree. */
+  /** Rolled-up pty status across every tab in this worktree (see `aggregate`). */
   status: PtyStatus
   /** `status`, except merged worktrees read as 'merged' for the status dot. */
   displayStatus: DisplayStatus
@@ -150,8 +150,10 @@ export interface WorktreeListModelInput {
   assignOrdinals?: boolean
 }
 
-/** Worst-status-wins aggregation across a worktree's tabs, plus the pending
- *  tool belonging to whichever tab is actually blocking on approval. */
+/** Rolls a worktree's tabs up to one status, plus the pending tool belonging
+ *  to whichever tab is actually blocking on approval. Needs-approval wins
+ *  because the user must act; otherwise any working tab makes the worktree
+ *  read as working, so a busy reviewer beside an idle chat shows green. */
 function aggregate(
   tabs: TerminalTab[],
   statuses: Record<string, PtyStatus>,
@@ -163,8 +165,8 @@ function aggregate(
     if (s === 'needs-approval') {
       return { status: 'needs-approval', pendingTool: pendingTools[tab.id] || null }
     }
-    if (s === 'waiting') status = 'waiting'
-    if (s === 'processing' && status === 'idle') status = 'processing'
+    if (s === 'processing') status = 'processing'
+    if (s === 'waiting' && status === 'idle') status = 'waiting'
   }
   return { status, pendingTool: null }
 }

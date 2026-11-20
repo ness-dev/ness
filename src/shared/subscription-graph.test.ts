@@ -219,6 +219,17 @@ describe('buildSubscriptionGraph', () => {
     expect(buildSubscriptionGraph(s, REPO).groups[0].status).toBe('needs-approval')
   })
 
+  it('a working agent beats a waiting one in the worktree rollup', () => {
+    const s = state({
+      terminals: {
+        ...initialState.terminals,
+        panes: { [A]: leaf(chat('t1'), chat('t2')) },
+        statuses: { t1: 'waiting', t2: 'processing' }
+      }
+    })
+    expect(buildSubscriptionGraph(s, REPO).groups[0].status).toBe('processing')
+  })
+
   it('keeps the topology key stable across status changes', () => {
     const a = buildSubscriptionGraph(state(), REPO)
     const b = buildSubscriptionGraph(

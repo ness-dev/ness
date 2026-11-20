@@ -14,6 +14,7 @@ import {
   type DisplayStatus
 } from '../worktree-row-style'
 import { repoNameColor } from './RepoIcon'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 import { formatPendingTool } from '../pending-tool'
 
 interface CommandCenterProps {
@@ -374,6 +375,7 @@ function SessionCard({
               <GitPullRequest className={`icon-xs ${iconColor}`} />
             </span>
           )}
+          <ReviewStatusIcon worktreePath={row.path} className="icon-xs" hideWhenNone />
           <span className="text-faint">{relTime(lastActiveAt)}</span>
         </div>
       </div>

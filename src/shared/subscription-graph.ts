@@ -93,10 +93,12 @@ export const groupId = (path: string): string => `wt:${path}`
 export const agentId = (tabId: string): string => `tab:${tabId}`
 export const prId = (path: string): string => `pr:${path}`
 
+/** Matches the sidebar rollup: any working agent makes the group read as
+ *  working unless one is blocked on approval. */
 const STATUS_RANK: Record<PtyStatus, number> = {
   idle: 0,
-  processing: 1,
-  waiting: 2,
+  waiting: 1,
+  processing: 2,
   'needs-approval': 3
 }
 
