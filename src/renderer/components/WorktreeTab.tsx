@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
-import type { SidebarDetailPrefs } from '../types'
+import type { PtyStatus, SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { RepoIcon, repoNameColor } from './RepoIcon'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
@@ -55,6 +55,9 @@ export interface ProjectRowProps {
   count?: number
   /** Kept expanded even when you're working elsewhere. */
   pinnedOpen?: boolean
+  /** Set only while collapsed: the project's most urgent status, shown on
+   *  the icon dot in place of main's own. */
+  collapsedStatus?: PtyStatus
   /** Absent in unified mode, where projects don't collapse individually. */
   onTogglePinnedOpen?: () => void
   /** Project-level actions (graph, remove, new worktree). Desktop shows
@@ -195,6 +198,9 @@ export const WorktreeTab = memo(function WorktreeTab({
   if (row.home && project) {
     const home = row.home
     const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? project.name)
+    // Collapsed, the dot speaks for the whole project so an agent waiting on
+    // you there isn't hidden; open, its worktrees show their own dots.
+    const dotStatus = project.collapsedStatus ?? displayStatus
     return (
       <div
         onClick={() => onSelect(row.path)}
@@ -208,8 +214,8 @@ export const WorktreeTab = memo(function WorktreeTab({
         <span className="relative shrink-0 inline-flex">
           <RepoIcon repoName={project.name} className="text-2xl" />
           <span
-            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel ${STATUS_COLORS[displayStatus]}`}
-            title={STATUS_LABELS[displayStatus]}
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel ${STATUS_COLORS[dotStatus]}`}
+            title={project.collapsedStatus ? `Most urgent in ${project.name}: ${STATUS_LABELS[dotStatus]}` : STATUS_LABELS[dotStatus]}
           />
         </span>
         <div className="min-w-0 flex-1">

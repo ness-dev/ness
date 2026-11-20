@@ -128,6 +128,11 @@ export interface WorktreeRepoSectionModel {
   pinnedOpen: boolean
   /** Holds the active worktree (or pending creation). */
   holdsActive: boolean
+  /** Most urgent status across the project's live worktrees, main
+   *  included (merged and snoozed ones left out). A collapsed project's row
+   *  shows this so an agent waiting on you elsewhere still surfaces.
+   *  Selection-independent, so it lives in the base build. */
+  worstStatus: PtyStatus
   /** Every worktree grouped by status, main included. Overview surfaces
    *  (command center, task list) render this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
@@ -477,6 +482,7 @@ export function buildWorktreeListBase(
       collapsed: false,
       pinnedOpen: false,
       holdsActive: false,
+      worstStatus: worstOf([...homes, ...workGroups.flatMap((g) => g.rows)]),
       groups,
       homes,
       workGroups,
@@ -535,8 +541,10 @@ export function buildWorktreeListBase(
 
 /** The project accordion: the project holding the active worktree is open,
  *  others collapse to their row unless pinned open. Cheap and
- *  allocation-light — sections whose state didn't change, and every row,
- *  keep their identity, so a worktree switch only re-renders what moved.
+ *  allocation-light: rows are never copied, so they keep their identity
+ *  and a worktree switch only re-renders what moved. Sections are compared
+ *  against the base (where nothing is collapsed), so a collapsed section is
+ *  a fresh shallow copy each pass — cheap, and the rows inside are shared.
  *
  *  When no project holds the active id (it was just deleted, or belongs to
  *  a backend whose list hasn't loaded) nothing collapses, same as having no
@@ -578,6 +586,15 @@ export function applyProjectAccordion(
   })
   if (!changed && base.activeRepoRoot === activeRepoRoot) return base
   return { ...base, sections, activeRepoRoot }
+}
+
+/** Same worst-wins ranking as a worktree's own tab aggregation. */
+const STATUS_RANK: Record<PtyStatus, number> = { idle: 0, processing: 1, waiting: 2, 'needs-approval': 3 }
+
+function worstOf(rows: WorktreeRowModel[]): PtyStatus {
+  let worst: PtyStatus = 'idle'
+  for (const row of rows) if (STATUS_RANK[row.status] > STATUS_RANK[worst]) worst = row.status
+  return worst
 }
 
 export function repoLabelFor(repoRoot: string): string {

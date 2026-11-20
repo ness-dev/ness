@@ -479,8 +479,9 @@ export function WorktreeList({
         return (
         <div key={section.scope} className={i > 0 ? 'mt-3' : ''}>
           {/* Every real project gets a row, even when it's the only one.
-              Clicking the project opens its main workspace; the chevron
-              alone collapses it. */}
+              Clicking it opens main, which opens the project: the project
+              you're in is expanded, the rest collapse to this row unless
+              pinned open. */}
           {!section.unified &&
             (home ? (
               <RowBlock active={home.path === activeWorktreeId} context={section.holdsActive}>
@@ -489,6 +490,7 @@ export function WorktreeList({
                   collapsed: section.collapsed,
                   count: section.count,
                   pinnedOpen: section.pinnedOpen,
+                  collapsedStatus: section.collapsed ? section.worstStatus : undefined,
                   onTogglePinnedOpen: () => onTogglePinnedOpen(section.scope),
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}

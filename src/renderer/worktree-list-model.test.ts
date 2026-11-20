@@ -944,3 +944,35 @@ describe('project accordion', () => {
     expect(model.sections[0].collapsed).toBe(false)
   })
 })
+
+describe('project worst status', () => {
+  const twoRepos = (statuses: Record<string, 'idle' | 'processing' | 'waiting' | 'needs-approval'>) =>
+    buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta'],
+        worktrees: [
+          wt({ path: '/repos/alpha', repoRoot: '/repos/alpha', isMain: true, branch: 'main' }),
+          wt({ path: '/repos/beta', repoRoot: '/repos/beta', isMain: true, branch: 'main' }),
+          wt({ path: '/w/b1', repoRoot: '/repos/beta' }),
+          wt({ path: '/w/b2', repoRoot: '/repos/beta' }),
+          wt({ path: '/w/bm', repoRoot: '/repos/beta' })
+        ],
+        tabsByWorktree: { '/w/b1': [tab('t1')], '/w/b2': [tab('t2')], '/w/bm': [tab('tm')] },
+        statuses,
+        mergedPaths: { '/w/bm': true },
+        activeWorktreeId: '/repos/alpha'
+      })
+    )
+
+  it('exposes a needs-approval worktree inside a collapsed project', () => {
+    const model = twoRepos({ t1: 'processing', t2: 'needs-approval' })
+    const beta = model.sections[1]
+    expect(beta.collapsed).toBe(true)
+    expect(beta.worstStatus).toBe('needs-approval')
+  })
+
+  it('ranks waiting above processing, and ignores archived worktrees', () => {
+    expect(twoRepos({ t1: 'processing', t2: 'waiting' }).sections[1].worstStatus).toBe('waiting')
+    expect(twoRepos({ tm: 'needs-approval' }).sections[1].worstStatus).toBe('idle')
+  })
+})
