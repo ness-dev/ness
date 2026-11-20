@@ -28,6 +28,7 @@ import { log } from './debug'
 import { isAbsolute, join } from 'path'
 import { statSync } from 'fs'
 import type { AddRepoResult } from '../shared/repo-pick'
+import { parseChatMention } from '../shared/chat-mention'
 import {
   validateProjectName,
   type CreateNewProjectOpts,
@@ -133,6 +134,8 @@ export interface MessagingQueries {
   /** Resolve a caller-supplied handle — absolute path, branch name, or
    * alias — to a known worktree path. */
   resolveTarget: (query: string) => { path: string } | { error: string }
+  /** Resolve an `@chat:<repo>/<branch>#<tab>` mention to one Chat tab. */
+  resolveChat: (query: string) => { path: string; tabId: string } | { error: string }
   /** Human label for a worktree: its alias when set, else its branch. Names
    * the sender in the delivered message. */
   describe: (worktreePath: string) => string
@@ -1237,15 +1240,36 @@ async function handleRequest(
       })
     }
     const body = await readJson(req)
-    const target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
-    const tab = typeof body.tab === 'string' ? body.tab.trim() : ''
+    let target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
+    let tab = typeof body.tab === 'string' ? body.tab.trim() : ''
     const message = typeof body.message === 'string' ? body.message.trim() : ''
     if (!target && !tab) return sendJson(res, 400, { error: 'worktree or tab required' })
     if (!message) return sendJson(res, 400, { error: 'message required' })
 
+    // A composer chat mention names worktree and tab at once. Agents put it
+    // in whichever field seems closest, so accept it in either — and one
+    // in `tab` wins over whatever `worktree` says, since it is the more
+    // specific of the two.
+    const chatToken = [tab, target].find((v) => parseChatMention(v) !== null)
+    let targetPath = scope.worktreePath
+    if (chatToken) {
+      const resolved = deps.messaging.resolveChat(chatToken)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      // A plain `tab` id alongside a token in `worktree` is a second,
+      // explicit recipient. Delivering to either one would mean ignoring
+      // something the caller asked for.
+      if (tab && tab !== chatToken && tab !== resolved.tabId) {
+        return sendJson(res, 400, {
+          error: `\`tab\` "${tab}" disagrees with the chat mention "${chatToken}" — pass only one of them`
+        })
+      }
+      targetPath = resolved.path
+      tab = resolved.tabId
+      target = ''
+    }
+
     // A tab id names exactly one recipient, so with `tab` set the worktree
     // defaults to the caller's own and only messaging yourself is refused.
-    let targetPath = scope.worktreePath
     if (target) {
       const resolved = deps.messaging.resolveTarget(target)
       if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })

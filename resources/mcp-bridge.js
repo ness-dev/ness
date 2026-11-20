@@ -386,7 +386,7 @@ const TOOLS = [
   {
     name: 'send_message',
     description:
-      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
+      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. A `@chat:<repo>/<branch>#<tab>` token in the user's message is a specific chat they picked from the composer: pass it as `tab`, as-is, and leave `worktree` out. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -398,7 +398,7 @@ const TOOLS = [
         tab: {
           type: 'string',
           description:
-            'Id of one Chat tab to deliver to, from list_tabs. Must be in `worktree` (or your own worktree when that is omitted), and must not be your own tab.'
+            'Id of one Chat tab to deliver to, from list_tabs, or a `@chat:<repo>/<branch>#<tab>` mention token from the user\'s message (it names the worktree too, so `worktree` is ignored). An id must be in `worktree` (or your own worktree when that is omitted). Must not be your own tab.'
         },
         message: {
           type: 'string',

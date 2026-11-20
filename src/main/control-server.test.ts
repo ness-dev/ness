@@ -266,6 +266,8 @@ const deps: ControlServerDeps = {
       }
       return { error: `no worktree matching "${query}"` }
     },
+    resolveChat: (query) =>
+      query.endsWith('#other-chat') ? { path: EXPLICIT_WORKTREE, tabId: 'other-chat' } : { error: `no Chat tab for "${query}"` },
     describe: (path) => (path === CALLER_WORKTREE ? 'Callers Tree' : 'Other Tree'),
     send: (path, message) => sendMessage(path, message),
     sendToTab: (path, tabId, message) => sendToTab(path, tabId, message)
@@ -846,6 +848,29 @@ describe('control-server /messages with a tab', () => {
       message: 'hi'
     })
     expect(wrong.status).toBe(404)
+    expect(sendToTab).not.toHaveBeenCalled()
+  })
+
+  it('accepts a chat mention token in either field', async () => {
+    for (const body of [
+      { tab: '@chat:repo/other#other-chat', message: 'hi' },
+      { worktree: 'chat:repo/other#other-chat', message: 'hi' }
+    ]) {
+      sendToTab.mockClear()
+      const r = await call('POST', '/messages', body)
+      expect(r.status).toBe(200)
+      expect(r.json).toMatchObject({ worktreePath: EXPLICIT_WORKTREE, tab: 'other-chat' })
+      expect(sendToTab.mock.calls[0].slice(0, 2)).toEqual([EXPLICIT_WORKTREE, 'other-chat'])
+    }
+    const bad = await call('POST', '/messages', { tab: 'chat:repo/other#gone', message: 'hi' })
+    expect(bad.status).toBe(404)
+    sendToTab.mockClear()
+    const conflict = await call('POST', '/messages', {
+      worktree: 'chat:repo/other#other-chat',
+      tab: AUTHOR_TAB,
+      message: 'hi'
+    })
+    expect(conflict.status).toBe(400)
     expect(sendToTab).not.toHaveBeenCalled()
   })
 

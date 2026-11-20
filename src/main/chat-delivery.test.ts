@@ -9,6 +9,7 @@ import {
   deliverToTab,
   deliverToWorktreeChat,
   describeWorktree,
+  resolveChatQuery,
   resolveWorktreeQuery,
   type ChatDeliveryDeps
 } from './chat-delivery'
@@ -101,6 +102,75 @@ function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   })
   return { send, wake, respawn, hasSession: (id) => live.has(id), isStarting: () => false }
 }
+
+describe('resolveChatQuery', () => {
+  function chatState(labels: Array<{ id: string; label?: string; customLabel?: string; type?: 'json-claude' | 'agent' }>): AppState {
+    return makeState({
+      worktrees: [worktree(A, 'feat-a'), worktree(B, 'feat-b')],
+      aliases: { [A]: 'Site' },
+      panes: {
+        [A]: {
+          type: 'leaf',
+          id: 'p1',
+          tabs: labels.map((t) => ({
+            id: t.id,
+            type: t.type ?? ('json-claude' as const),
+            label: t.label ?? 'Chat',
+            ...(t.customLabel ? { customLabel: t.customLabel } : {})
+          })),
+          activeTabId: labels[0]?.id ?? ''
+        }
+      }
+    })
+  }
+
+  it('resolves by tab id or by the slug of the tab name, with or without @', () => {
+    const state = chatState([{ id: 't1', customLabel: 'Fix Login Bug' }, { id: 't2' }])
+    expect(resolveChatQuery(state, '@chat:repo/feat-a#fix-login-bug')).toEqual({ path: A, tabId: 't1' })
+    expect(resolveChatQuery(state, 'chat:Site#t2')).toEqual({ path: A, tabId: 't2' })
+    expect(resolveChatQuery(state, 'CHAT:repo/feat-a#Fix-Login-Bug')).toEqual({ path: A, tabId: 't1' })
+  })
+
+  it('refuses a slug shared by two tabs rather than guessing', () => {
+    const state = chatState([{ id: 't1' }, { id: 't2' }])
+    const r = resolveChatQuery(state, 'chat:repo/feat-a#chat')
+    expect(r).toEqual({ error: expect.stringMatching(/matches 2 Chat tabs/) })
+  })
+
+  it('does not resolve terminal agent tabs or tabs in another worktree', () => {
+    const state = chatState([{ id: 'term', type: 'agent', label: 'Claude' }])
+    expect(resolveChatQuery(state, 'chat:repo/feat-a#term')).toEqual({ error: expect.stringMatching(/no Chat tab/) })
+    expect(resolveChatQuery(state, 'chat:repo/feat-b#term')).toEqual({ error: expect.stringMatching(/no Chat tab/) })
+  })
+
+  it('narrows an ambiguous worktree handle by the tab ref', () => {
+    // Two clones named `app` on the same branch share the handle app/main.
+    const C = '/other/app'
+    const state = makeState({
+      worktrees: [worktree(A, 'main', { repoRoot: '/x/app' }), worktree(C, 'main', { repoRoot: '/y/app' })],
+      panes: {
+        [A]: { type: 'leaf', id: 'p1', tabs: [{ id: 'ta', type: 'json-claude', label: 'Chat', customLabel: 'Deploy' }], activeTabId: 'ta' },
+        [C]: { type: 'leaf', id: 'p2', tabs: [{ id: 'tc', type: 'json-claude', label: 'Chat', customLabel: 'Docs' }, { id: 'tc2', type: 'json-claude', label: 'Chat', customLabel: 'Deploy' }], activeTabId: 'tc' }
+      }
+    })
+    expect(resolveChatQuery(state, 'chat:app/main#tc')).toEqual({ path: C, tabId: 'tc' })
+    expect(resolveChatQuery(state, 'chat:app/main#docs')).toEqual({ path: C, tabId: 'tc' })
+    // The slug exists in both candidates — still refused.
+    expect(resolveChatQuery(state, 'chat:app/main#deploy')).toEqual({ error: expect.stringMatching(/matches 2 Chat tabs/) })
+  })
+
+  it('ignores punctuation trailing the token in prose', () => {
+    const state = chatState([{ id: 't1', customLabel: 'Review' }])
+    expect(resolveChatQuery(state, '@chat:repo/feat-a#review,')).toEqual({ path: A, tabId: 't1' })
+    expect(resolveChatQuery(state, 'chat:repo/feat-a#t1).')).toEqual({ path: A, tabId: 't1' })
+  })
+
+  it('reports a bad worktree half or a malformed token', () => {
+    const state = chatState([{ id: 't1' }])
+    expect(resolveChatQuery(state, 'chat:nope#t1')).toEqual({ error: expect.stringMatching(/no worktree/) })
+    expect(resolveChatQuery(state, 'chat:repo/feat-a')).toEqual({ error: expect.stringMatching(/not a chat mention/) })
+  })
+})
 
 describe('resolveWorktreeQuery', () => {
   const state = makeState({
