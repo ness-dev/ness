@@ -19,6 +19,9 @@ export interface WorktreeRowAction {
   tooltipExtra?: string
   /** Hotkey whose binding the desktop tooltip should show. */
   hotkey?: Action
+  /** Desktop: right-click menu only, never a hover icon. Touch still lists
+   *  it in the action sheet, which is touch's stand-in for right-click. */
+  menuOnly?: boolean
   /** The event is only supplied by surfaces that have one to give — the
    *  desktop icon buttons pass it so snooze can branch on altKey. Sheet and
    *  context-menu callers invoke bare. */

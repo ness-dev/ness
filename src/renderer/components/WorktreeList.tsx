@@ -16,6 +16,7 @@ import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-ro
 import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
 import { Tooltip } from './Tooltip'
+import { ContextMenu } from './ContextMenu'
 import { HotkeyBadge } from './HotkeyBadge'
 import { RepoIcon } from './RepoIcon'
 import { useBackend } from '../backend'
@@ -629,6 +630,8 @@ function RepoHeader({
   actions: WorktreeRowAction[]
 }): JSX.Element {
   const touch = variant === 'touch'
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const menuActions = actions.filter((a) => a.menuOnly)
   return (
     // A div, not a <button>, because it holds real buttons and those can't
     // nest — so it carries the button keyboard contract itself.
@@ -648,6 +651,14 @@ function RepoHeader({
         touch ? 'min-h-14 py-2.5' : 'py-2'
       }`}
       title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
+      onContextMenu={
+        touch || menuActions.length === 0
+          ? undefined
+          : (e) => {
+              e.preventDefault()
+              setMenu({ x: e.clientX, y: e.clientY })
+            }
+      }
     >
       <RepoIcon repoName={section.repoName} className="text-2xl" />
       <span className="truncate text-base font-semibold text-fg-bright">{section.repoName}</span>
@@ -656,7 +667,7 @@ function RepoHeader({
           fold these into — they were unreachable there before too. */}
       {!touch && (
         <span className="ml-auto shrink-0 hidden group-hover:flex items-center gap-1.5">
-          {actions.map((a) => {
+          {actions.filter((a) => !a.menuOnly).map((a) => {
             const Icon = a.icon
             return (
               <Tooltip key={a.key} label={a.label}>
@@ -678,6 +689,18 @@ function RepoHeader({
       <span className="text-faint">
         <Chevron collapsed={section.collapsed} />
       </span>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuActions.map((a) => ({
+            label: a.label,
+            onClick: () => a.onSelect(),
+            danger: a.tone === 'danger'
+          }))}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -700,17 +723,19 @@ function buildProjectActions(
   if (onOpenGraph && primary) {
     out.push({
       key: 'project-graph',
-      label: `Subscription graph for ${repoName}`,
+      label: 'Subscription graph',
       icon: Waypoints,
+      menuOnly: true,
       onSelect: () => onOpenGraph(primary)
     })
   }
   if (onRemove && repoRoots.length > 0) {
     out.push({
       key: 'project-remove',
-      label: `Remove ${repoName} from workspace`,
+      label: 'Remove project from workspace',
       icon: X,
       tone: 'danger',
+      menuOnly: true,
       onSelect: () => {
         if (
           window.confirm(

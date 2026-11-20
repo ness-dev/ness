@@ -55,8 +55,9 @@ export interface ProjectRowProps {
   count?: number
   /** Absent in unified mode, where projects don't collapse individually. */
   onToggleCollapse?: () => void
-  /** Project-level actions (graph, remove, new worktree): hover icons on
-   *  desktop, action-sheet entries on touch. */
+  /** Project-level actions (graph, remove, new worktree). Desktop shows
+   *  them as hover icons, or in the right-click menu when `menuOnly`;
+   *  touch lists them all in the action sheet. */
   actions?: WorktreeRowAction[]
 }
 
@@ -148,10 +149,25 @@ export const WorktreeTab = memo(function WorktreeTab({
   )
   const dividerAt = mappedEntries.findIndex((e) => 'separator' in e)
   const openIn = { label: 'Open in', submenu: editorSubmenu }
-  const menuItems: ContextMenuEntry[] =
+  const worktreeMenu: ContextMenuEntry[] =
     dividerAt === -1
       ? [...mappedEntries, openIn]
       : [...mappedEntries.slice(0, dividerAt), openIn, ...mappedEntries.slice(dividerAt)]
+  // Project-level menu actions follow the worktree's own; destructive ones
+  // go below a rule, like "Remove worktree" does.
+  const projectMenu = project?.actions?.filter((a) => a.menuOnly) ?? []
+  const toEntry = (a: WorktreeRowAction): ContextMenuEntry => ({
+    label: a.label,
+    onClick: () => a.onSelect(),
+    danger: a.tone === 'danger'
+  })
+  const projectSafe = projectMenu.filter((a) => a.tone !== 'danger').map(toEntry)
+  const projectDanger = projectMenu.filter((a) => a.tone === 'danger').map(toEntry)
+  const menuItems: ContextMenuEntry[] = [
+    ...worktreeMenu,
+    ...projectSafe,
+    ...(projectDanger.length > 0 ? [{ separator: true as const }, ...projectDanger] : [])
+  ]
 
   const onContextMenu = touch
     ? undefined
@@ -235,9 +251,9 @@ export const WorktreeTab = memo(function WorktreeTab({
             </div>
           )}
         </div>
-        {/* Desktop: project actions appear on hover, out of layout until
-            then so the status line keeps the full width. Touch: they join
-            the row's action sheet instead of crowding it with tiny glyphs. */}
+        {/* Desktop: "+" appears on hover, out of layout until then so the
+            status line keeps the full width; graph and remove live in the
+            right-click menu. Touch: everything goes in the action sheet. */}
         {touch ? (
           <TouchRowActions
             disabled={
@@ -247,7 +263,7 @@ export const WorktreeTab = memo(function WorktreeTab({
             onOpen={() => setSheetOpen(true)}
           />
         ) : (
-          <DesktopRowActions actions={[...rowActions, ...(project.actions ?? [])]} />
+          <DesktopRowActions actions={[...rowActions, ...(project.actions ?? []).filter((a) => !a.menuOnly)]} />
         )}
         {metaHeld && row.cmdOrdinal !== undefined && (
           <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />
