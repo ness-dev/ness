@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FilePen,
   FileText,
+  GitBranch,
   ListChecks,
   Search,
   Sparkles,
@@ -27,9 +28,10 @@ export interface MockDiffLine {
 }
 
 /** A collapsed tool call. Bash carries the model's stated `intent`, which
- * the real chat shows in place of the bare tool name. */
+ * the real chat shows in place of the bare tool name. `Worktree` is the Ness
+ * MCP's create_worktree, which the real chat draws with a branch glyph. */
 export interface MockToolCall {
-  tool: 'Read' | 'Grep' | 'Bash'
+  tool: 'Read' | 'Grep' | 'Bash' | 'Worktree'
   intent?: string
 }
 
@@ -48,7 +50,9 @@ export interface MockTranscript {
   prompt: string
   tools: MockToolCall[]
   explanation: string
-  edit: { path: string; lines: MockDiffLine[] }
+  /** Absent for a turn that didn't touch files, e.g. a project's main
+   * workspace handing work out to new worktrees. */
+  edit?: { path: string; lines: MockDiffLine[] }
   /** While working: todo progress plus the turn still streaming in. */
   working: { todos: { done: number; total: number }; streaming: string }
   /** When the worktree needs approval: the Bash call it's blocked on. */
@@ -78,7 +82,7 @@ export function MockChat({
 
               <AssistantText text={transcript.explanation} />
 
-              <EditCard edit={transcript.edit} />
+              {transcript.edit && <EditCard edit={transcript.edit} />}
 
               <AnimatePresence mode="wait" initial={false}>
                 {needsApproval ? (
@@ -208,7 +212,8 @@ function TurnFold({
 const TOOL_ICONS: Record<MockToolCall['tool'], ComponentType<{ className?: string }>> = {
   Read: FileText,
   Grep: Search,
-  Bash: Terminal
+  Bash: Terminal,
+  Worktree: GitBranch
 }
 
 /** Consecutive tool calls fold into one collapsed row: a count label, then
@@ -290,7 +295,7 @@ function diffSummary(lines: MockDiffLine[]): string {
   return `+${added} −${removed}`
 }
 
-function EditCard({ edit }: { edit: MockTranscript['edit'] }) {
+function EditCard({ edit }: { edit: NonNullable<MockTranscript['edit']> }) {
   return (
     <ToolCard
       name="Edit"
