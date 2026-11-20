@@ -451,12 +451,17 @@ export function buildWorktreeListBase(
     }
     // Unified mode's single bucket collects mains in group order; restore the
     // user's repo order so the stacked project rows don't reshuffle on status
-    // changes. A dragged order (keyed by root, which is a single-root
-    // section's scope) wins over the repoRoots order.
+    // changes. A dragged order wins over the repoRoots order. Each root is
+    // ranked as it would be in split mode: by the merged `repo:<key>` scope
+    // when one was saved, else by the root itself.
     const repoOrder = new Map(
-      applyProjectOrder(repoRoots.map((root) => ({ scope: root, repoRoots: [{ repoRoot: root }] })), projectOrder).map(
-        (b, i) => [b.scope, i]
-      )
+      applyProjectOrder(
+        repoRoots.map((root) => ({
+          scope: `repo:${repoKeyFor(root, repoRemotes?.[root])}`,
+          repoRoots: [{ repoRoot: root }]
+        })),
+        projectOrder
+      ).map((b, i) => [b.repoRoots[0].repoRoot, i])
     )
     homes.sort(
       (a, b) =>
@@ -583,6 +588,27 @@ export function applyProjectOrder<T extends { scope: string; repoRoots: readonly
     .map((section, i) => ({ section, i, r: rankOf(section) }))
     .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r - b.r))
     .map((x) => x.section)
+}
+
+/** Where a drop lands: `order` is every section's scope after inserting
+ *  `active` before `before` (null = at the end). `line` marks the gap to
+ *  draw — on top of `before`, or under the last other section when
+ *  dropping at the end — and is null when the drop would change nothing. */
+export function planProjectDrop(
+  scopes: readonly string[],
+  active: string,
+  before: string | null
+): { order: string[]; line: { scope: string; edge: 'before' | 'after' } | null } {
+  const rest = scopes.filter((k) => k !== active)
+  const at = before === null ? rest.length : rest.indexOf(before)
+  const order = [...rest]
+  order.splice(at < 0 ? rest.length : at, 0, active)
+  const unchanged = order.every((k, i) => k === scopes[i])
+  if (unchanged || rest.length === 0) return { order, line: null }
+  return {
+    order,
+    line: before === null ? { scope: rest[rest.length - 1], edge: 'after' } : { scope: before, edge: 'before' }
+  }
 }
 
 /** The stored order after the user drags `nextVisible` (every visible

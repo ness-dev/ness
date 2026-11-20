@@ -6,6 +6,7 @@ import {
   buildWorktreeListBase,
   buildWorktreeListModel,
   mergeProjectOrder,
+  planProjectDrop,
   UNIFIED_REPO_ROOT,
   type WorktreeListModelInput
 } from './worktree-list-model'
@@ -1042,6 +1043,22 @@ describe('project order', () => {
     expect(scopes(byRoot)).toEqual(['/l/web', 'repo:remote:github.com/o/api'])
   })
 
+  it('orders unified-mode rows by a merged scope saved in split mode', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [
+          wt({ path: '/l/api', repoRoot: '/l/api', isMain: true, branch: 'main' }),
+          wt({ path: '/l/web', repoRoot: '/l/web', isMain: true, branch: 'main' })
+        ],
+        repoRoots: ['/l/web', '/l/api'],
+        repoRemotes: { '/l/api': 'github.com/o/api', '/l/web': 'github.com/o/web' },
+        unifiedRepos: true,
+        projectOrder: ['repo:remote:github.com/o/api', '/l/web']
+      })
+    )
+    expect(model.sections[0].homes.map((h) => h.path)).toEqual(['/l/api', '/l/web'])
+  })
+
   it('orders unified-mode project rows by the dragged order too', () => {
     const model = buildWorktreeListModel(
       input({ worktrees: mains, repoRoots: roots, unifiedRepos: true, projectOrder: ['/repos/beta'] })
@@ -1062,5 +1079,23 @@ describe('mergeProjectOrder', () => {
 
   it('appends visible sections the stored order never saw', () => {
     expect(mergeProjectOrder(['a', 'x'], ['n', 'a'])).toEqual(['n', 'x', 'a'])
+  })
+})
+
+describe('planProjectDrop', () => {
+  it('moves the first project to the end, with the line under the last', () => {
+    expect(planProjectDrop(['a', 'b', 'c'], 'a', null)).toEqual({
+      order: ['b', 'c', 'a'],
+      line: { scope: 'c', edge: 'after' }
+    })
+  })
+
+  it('draws no line for a drop into the slot it already occupies', () => {
+    expect(planProjectDrop(['a', 'b', 'c'], 'b', 'c').line).toBeNull()
+    expect(planProjectDrop(['a', 'b', 'c'], 'c', null).line).toBeNull()
+  })
+
+  it('swaps two projects', () => {
+    expect(planProjectDrop(['a', 'b'], 'b', 'a')).toEqual({ order: ['b', 'a'], line: { scope: 'a', edge: 'before' } })
   })
 })

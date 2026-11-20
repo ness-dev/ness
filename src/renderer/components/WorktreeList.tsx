@@ -30,7 +30,7 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { mergeProjectOrder, repoLabelFor } from '../worktree-list-model'
+import { mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
@@ -730,26 +730,9 @@ function useProjectDrag(
     setInsertBefore(undefined)
   }
 
-  const nextOrder = (active: string, before: string | null): string[] => {
-    const rest = others(active)
-    const at = before === null ? rest.length : rest.indexOf(before)
-    rest.splice(at, 0, active)
-    return rest
-  }
-
-  // Hide the line where dropping would change nothing.
-  let dropLine: { scope: string; edge: DropEdge } | null = null
-  if (activeScope && insertBefore !== undefined) {
-    const proposed = nextOrder(activeScope, insertBefore)
-    const unchanged = proposed.every((k, i) => k === sections[i]?.scope)
-    if (!unchanged) {
-      const rest = others(activeScope)
-      dropLine =
-        insertBefore === null
-          ? { scope: rest[rest.length - 1], edge: 'after' }
-          : { scope: insertBefore, edge: 'before' }
-    }
-  }
+  const scopes = sections.map((s) => s.scope)
+  const dropLine =
+    activeScope && insertBefore !== undefined ? planProjectDrop(scopes, activeScope, insertBefore).line : null
 
   return {
     sensors,
@@ -760,7 +743,7 @@ function useProjectDrag(
     onDragMove,
     onDragEnd: (e) => {
       const active = String(e.active.id)
-      if (insertBefore !== undefined) commit(nextOrder(active, insertBefore))
+      if (insertBefore !== undefined) commit(planProjectDrop(scopes, active, insertBefore).order)
       reset()
     },
     onDragCancel: reset
@@ -822,6 +805,7 @@ function ProjectSection({
         {...(draggable ? listeners : undefined)}
         onKeyDown={onKeyDown}
         tabIndex={focusable ? 0 : undefined}
+        role={focusable ? 'group' : undefined}
         aria-label={focusable ? name : undefined}
         aria-roledescription={draggable ? 'reorderable project' : undefined}
         aria-keyshortcuts={draggable ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}

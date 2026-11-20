@@ -189,8 +189,12 @@ export function useWorktreeHandlers(args: UseWorktreeHandlersArgs) {
       // Main dispatches reposChanged + listChanged. If our current focus is
       // about to disappear, switch to whatever's first in the remaining list.
       const removed = new Set(roots.map((entry) => entry.repoRoot))
-      // Forget the project's dragged slot, so re-adding it later lands at
-      // the end like any new repo instead of jumping back to where it was.
+      // Best effort: forget the project's dragged slot so re-adding it from
+      // here lands at the end. Removals made elsewhere (MCP, another client)
+      // leave the key behind — harmless, since applyProjectOrder ignores
+      // keys with no section, but such a repo re-added later returns to its
+      // old slot. The order can't be pruned against "known" repos on commit:
+      // outside fleet view, other backends' keys are deliberately kept.
       if (projectOrder.some((key) => removed.has(key))) {
         void backend.setSidebarProjectOrder(projectOrder.filter((key) => !removed.has(key)))
       }
