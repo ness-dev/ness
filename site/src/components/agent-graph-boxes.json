@@ -1,0 +1,68 @@
+{
+  "tab:orch": {
+    "x": 12,
+    "y": 40,
+    "width": 220,
+    "height": 44
+  },
+  "tab:cookies": {
+    "x": 12,
+    "y": 40,
+    "width": 220,
+    "height": 44
+  },
+  "pr:/code/ness-worktrees/session-cookies": {
+    "x": 12,
+    "y": 100,
+    "width": 220,
+    "height": 52
+  },
+  "tab:review": {
+    "x": 12,
+    "y": 40,
+    "width": 220,
+    "height": 44
+  },
+  "tab:webhooks": {
+    "x": 12,
+    "y": 100,
+    "width": 220,
+    "height": 44
+  },
+  "pr:/code/ness-worktrees/billing-webhooks": {
+    "x": 12,
+    "y": 160,
+    "width": 220,
+    "height": 52
+  },
+  "tab:docs": {
+    "x": 12,
+    "y": 40,
+    "width": 220,
+    "height": 44
+  },
+  "wt:/code/ness": {
+    "x": 12,
+    "y": 243,
+    "width": 244,
+    "height": 96
+  },
+  "wt:/code/ness-worktrees/session-cookies": {
+    "x": 628,
+    "y": 205.66666666666669,
+    "width": 244,
+    "height": 164
+  },
+  "wt:/code/ness-worktrees/billing-webhooks": {
+    "x": 320,
+    "y": 23,
+    "width": 244,
+    "height": 224
+  },
+  "wt:/code/ness-worktrees/auth-docs": {
+    "x": 320,
+    "y": 267,
+    "width": 244,
+    "height": 96
+  }
+}
