@@ -452,9 +452,9 @@ export function WorktreeList({
           )}
         </div>
       )}
-      {/* With no repo headers there's nowhere per-repo to put the nudge, so
+      {/* Unified mode has no per-project header to hang the nudge under, so
           offer one repo at a time at the top; closing it moves to the next. */}
-      {!model.showRepoHeaders && historyPromptRepos?.[0] && onOpenHistoryTracking && onDismissHistoryPrompt && (
+      {model.sections.some((s) => s.unified) && historyPromptRepos?.[0] && onOpenHistoryTracking && onDismissHistoryPrompt && (
         <HistoryPrompt
           repoRoot={historyPromptRepos[0]}
           showRepoName
@@ -469,7 +469,7 @@ export function WorktreeList({
         // mode's synthetic section has no single project to name.
         const showHeader = !section.unified
         const promptRoot =
-          model.showRepoHeaders && !section.collapsed
+          showHeader && !section.collapsed
             ? section.repoRoots.find((r) => historyPromptRepos?.includes(r.repoRoot))?.repoRoot
             : undefined
         return (
@@ -484,6 +484,9 @@ export function WorktreeList({
               onOpenGraph={onOpenGraph}
             />
           )}
+          {!section.collapsed && section.leads.length > 0 && (
+            <div className="pt-1 pb-1">{section.leads.map(renderLead)}</div>
+          )}
           {promptRoot && onOpenHistoryTracking && onDismissHistoryPrompt && (
             <HistoryPrompt
               repoRoot={promptRoot}
@@ -492,9 +495,6 @@ export function WorktreeList({
               onOpen={onOpenHistoryTracking}
               onDismiss={onDismissHistoryPrompt}
             />
-          )}
-          {!section.collapsed && section.leads.length > 0 && (
-            <div className="pt-1 pb-1">{section.leads.map(renderLead)}</div>
           )}
           {!section.collapsed &&
             section.pending.map((pending) => (
