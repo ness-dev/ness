@@ -37,7 +37,9 @@ import {
   Loader2
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
-import { useAliases, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import { useAliases, useAppState, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import { AgentIcon } from './AgentIcon'
+import { listChatMentionTargets, matchChatMentions } from '../../shared/chat-mention'
 import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
@@ -2508,6 +2510,20 @@ export function JsonModeChat({
       }))
   }, [worktreeMessagingEnabled, worktrees.list, aliases.byPath, worktreePath])
 
+  // Panes are read only while an @-mention is being typed: the map changes
+  // on every tab focus/rename in any worktree, and re-rendering every
+  // mounted chat for that would buy nothing the rest of the time.
+  const mentionPanes = useAppState((s) =>
+    mentionTrigger !== null && worktreeMessagingEnabled ? s.terminals.panes : null
+  )
+  const chatMentionTargets = useMemo(
+    () =>
+      mentionPanes
+        ? listChatMentionTargets(worktrees.list, mentionPanes, aliases.byPath, sessionId)
+        : [],
+    [mentionPanes, worktrees.list, aliases.byPath, sessionId]
+  )
+
   const mentionItems = useMemo<MentionPopoverItem[]>(() => {
     if (mentionDismissed === draft) return []
     if (modelPickerTrigger !== null) {
@@ -2608,7 +2624,22 @@ export function JsonModeChat({
         labelMatchIndices: r.indices,
         icon: <FileText className="icon-xs" />
       }))
-      return [...matchWorktreeMentions(q, worktreeMentionTargets), ...fileRows]
+      // The row shows the tab's name; picking it inserts the token, which
+      // is what send_message resolves.
+      const chatRows: MentionPopoverItem[] = matchChatMentions(q, chatMentionTargets).map(
+        ({ target, labelAt }) => ({
+          key: `chat:${target.worktreePath}#${target.tabId}`,
+          label: target.label,
+          insertText: target.token,
+          labelMatchIndices:
+            labelAt === -1
+              ? undefined
+              : Array.from({ length: q.trim().length }, (_, i) => labelAt + i),
+          description: target.worktreeName,
+          icon: <AgentIcon kind={target.agentKind} className="icon-xs" />
+        })
+      )
+      return [...matchWorktreeMentions(q, worktreeMentionTargets), ...chatRows, ...fileRows]
     }
     return []
   }, [
@@ -2617,6 +2648,7 @@ export function JsonModeChat({
     modelPickerTrigger,
     files,
     worktreeMentionTargets,
+    chatMentionTargets,
     draft,
     mentionDismissed,
     session?.slashCommands,
@@ -2720,7 +2752,7 @@ export function JsonModeChat({
       // Replace `@<query>` with `@<filepath> ` so the user can keep
       // typing. The trailing space also closes the popover (whitespace
       // breaks the trigger).
-      replaceTriggerToken(mentionTrigger.start, `@${item.label} `)
+      replaceTriggerToken(mentionTrigger.start, `@${item.insertText ?? item.label} `)
     }
   }
 

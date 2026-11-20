@@ -1,7 +1,8 @@
 import type { AppState } from '../shared/state'
 import { getLeaves } from '../shared/state/terminals'
 import { worktreeHandle } from '../shared/state/worktrees'
-import { findTabInWorktree } from '../shared/agent-tabs'
+import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
+import { parseChatMention, slugifyTabLabel } from '../shared/chat-mention'
 
 export interface ChatDeliveryDeps {
   /** Injects a user turn into a json-mode chat session. A session that is
@@ -123,6 +124,34 @@ export function resolveWorktreeQuery(
     }
   }
   return { error: `no worktree matching "${q}"` }
+}
+
+/** Resolve an `@chat:<repo>/<branch>#<tab>` mention to one Chat tab. The
+ *  worktree half goes through resolveWorktreeQuery; the tab half matches a
+ *  tab id exactly, else the slug of a Chat tab's name. Two tabs sharing the
+ *  slug is an error, as with worktrees — the composer only inserts a slug
+ *  when it was unique, so this means a tab was renamed since. */
+export function resolveChatQuery(
+  state: AppState,
+  query: string
+): { path: string; tabId: string } | { error: string } {
+  const parsed = parseChatMention(query)
+  if (!parsed) return { error: `"${query}" is not a chat mention — expected chat:<repo>/<branch>#<tab>` }
+  const wt = resolveWorktreeQuery(state, parsed.worktree)
+  if ('error' in wt) return wt
+  const tabs = listChatTabs(state, wt.path)
+  if (tabs.some((t) => t.id === parsed.tab)) return { path: wt.path, tabId: parsed.tab }
+  const want = parsed.tab.toLowerCase()
+  const matches = tabs.filter((t) => slugifyTabLabel(t.label) === want)
+  if (matches.length === 1) return { path: wt.path, tabId: matches[0].id }
+  if (matches.length > 1) {
+    return {
+      error: `"${parsed.tab}" matches ${matches.length} Chat tabs in ${parsed.worktree} — call list_tabs and pass the tab id instead`
+    }
+  }
+  return {
+    error: `no Chat tab "${parsed.tab}" in ${parsed.worktree} — it may have been closed or renamed; call list_tabs to see them`
+  }
 }
 
 /** Human label for a worktree: alias when the user set one, else its branch. */

@@ -197,7 +197,7 @@ import { listConfiguredHosts } from './ssh-config'
 import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
-import { describeWorktree, resolveWorktreeQuery } from './chat-delivery'
+import { describeWorktree, resolveChatQuery, resolveWorktreeQuery } from './chat-delivery'
 import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
 import {
@@ -6225,6 +6225,7 @@ async function runBoot(): Promise<void> {
       isEnabled: () => config.worktreeMessagingEnabled !== false,
       resolveTarget: (query) =>
         resolveWorktreeQuery(store.getSnapshot().state, query),
+      resolveChat: (query) => resolveChatQuery(store.getSnapshot().state, query),
       describe: (worktreePath) =>
         describeWorktree(store.getSnapshot().state, worktreePath),
       send: (worktreePath, message) => notificationBus.toWorktree(worktreePath, message),
