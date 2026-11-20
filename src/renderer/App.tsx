@@ -1184,6 +1184,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
     pathBackendId: fleetData.pathBackendId,
     worktrees,
+    listModel: worktreeListModel,
     repoRoots,
     unifiedRepos,
     prStatuses,

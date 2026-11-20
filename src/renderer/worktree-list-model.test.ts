@@ -661,3 +661,140 @@ describe('cross-host section merging with unresolved remotes', () => {
     expect(bothResolved.sections).toHaveLength(1)
   })
 })
+
+describe('leads', () => {
+  const main = (repoRoot = '/repos/alpha', branch = 'main') =>
+    wt({ path: repoRoot, repoRoot, isMain: true, branch })
+
+  it('pulls the main worktree out of the groups into the section lead', () => {
+    const model = buildWorktreeListModel(input({ worktrees: [main(), wt({ path: '/w/a' })] }))
+    const section = model.sections[0]
+    expect(section.leads.map((r) => r.path)).toEqual(['/repos/alpha'])
+    expect(section.workGroups.flatMap((g) => g.rows.map((r) => r.path))).toEqual(['/w/a'])
+    // Overview surfaces still see main in the full grouping.
+    expect(section.groups.flatMap((g) => g.rows.map((r) => r.path))).toContain('/repos/alpha')
+  })
+
+  it('pulls a pinned main out of the pinned group and drops the emptied group', () => {
+    const model = buildWorktreeListModel(
+      input({ worktrees: [main(), wt({ path: '/w/a' })], pinnedPaths: { '/repos/alpha': true } })
+    )
+    expect(model.sections[0].leads).toHaveLength(1)
+    expect(model.sections[0].workGroups.map((g) => g.key)).toEqual(['no-pr'])
+  })
+
+  it('summarises the repo’s live worktrees, ignoring archived ones', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [main(), wt({ path: '/w/a' }), wt({ path: '/w/b' }), wt({ path: '/w/c' }), wt({ path: '/w/s' })],
+        tabsByWorktree: { '/w/a': [tab('ta')], '/w/b': [tab('tb')], '/w/c': [tab('tc')] },
+        statuses: { ta: 'processing', tb: 'needs-approval', tc: 'idle' },
+        snoozeByPath: { '/w/s': { path: '/w/s', snoozedAt: 0, wakeAt: Date.now() + 1000 } }
+      })
+    )
+    expect(model.sections[0].leads[0].lead).toEqual({
+      showBranch: false,
+      agents: 3,
+      running: 1,
+      needsYou: 1
+    })
+  })
+
+  it('shows the branch only when main is off a base branch', () => {
+    const onMain = buildWorktreeListModel(input({ worktrees: [main()] }))
+    expect(onMain.sections[0].leads[0].lead!.showBranch).toBe(false)
+    const offMain = buildWorktreeListModel(input({ worktrees: [main('/repos/alpha', 'hotfix')] }))
+    expect(offMain.sections[0].leads[0].lead!.showBranch).toBe(true)
+    const prBase = buildWorktreeListModel(
+      input({
+        worktrees: [main('/repos/alpha', 'release'), wt({ path: '/w/a' })],
+        prStatuses: { '/w/a': pr({ number: 1, baseBranch: 'release' }) }
+      })
+    )
+    expect(prBase.sections[0].leads[0].lead!.showBranch).toBe(false)
+  })
+
+  it('stacks every repo’s lead in repo order in unified mode, each counting only its repo', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta'],
+        unifiedRepos: true,
+        worktrees: [
+          main('/repos/beta'),
+          main('/repos/alpha'),
+          wt({ path: '/w/b', repoRoot: '/repos/beta' })
+        ]
+      })
+    )
+    const leads = model.sections[0].leads
+    expect(leads.map((r) => r.path)).toEqual(['/repos/alpha', '/repos/beta'])
+    expect(leads.map((r) => r.lead!.agents)).toEqual([0, 1])
+    expect(leads.map((r) => r.repoLabel)).toEqual(['alpha', 'beta'])
+  })
+})
+
+describe('archive tail', () => {
+  it('folds snoozed and merged into one tail, collapsed when both are', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' }), wt({ path: '/w/m' }), wt({ path: '/w/s' })],
+        mergedPaths: { '/w/m': true },
+        snoozeByPath: { '/w/s': { path: '/w/s', snoozedAt: 0, wakeAt: Date.now() + 1000 } },
+        isGroupCollapsed: (_scope, key) => key === 'merged' || key === 'snoozed'
+      })
+    )
+    const { tail, workGroups } = model.sections[0]
+    expect(workGroups.map((g) => g.key)).toEqual(['no-pr'])
+    expect(tail!.groups.map((g) => g.key)).toEqual(['snoozed', 'merged'])
+    expect(tail!.count).toBe(2)
+    expect(tail!.collapsed).toBe(true)
+  })
+
+  it('counts as expanded when any tail group is open', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/m' }), wt({ path: '/w/s' })],
+        mergedPaths: { '/w/m': true },
+        snoozeByPath: { '/w/s': { path: '/w/s', snoozedAt: 0, wakeAt: Date.now() + 1000 } },
+        isGroupCollapsed: (_scope, key) => key === 'merged'
+      })
+    )
+    expect(model.sections[0].tail!.collapsed).toBe(false)
+    expect(model.visiblePaths).toEqual(['/w/s', '/w/m'])
+  })
+
+  it('is null when there is nothing archived', () => {
+    const model = buildWorktreeListModel(input({ worktrees: [wt({ path: '/w/a' })] }))
+    expect(model.sections[0].tail).toBeNull()
+  })
+})
+
+describe('display order', () => {
+  it('puts leads first in ordinals, ordered paths and visible paths', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [
+          wt({ path: '/w/a', createdAt: 3 }),
+          wt({ path: '/repos/alpha', isMain: true, branch: 'main', createdAt: 1 }),
+          wt({ path: '/w/m' })
+        ],
+        mergedPaths: { '/w/m': true },
+        isGroupCollapsed: (_scope, key) => key === 'merged'
+      })
+    )
+    expect(model.sections[0].leads[0].cmdOrdinal).toBe(1)
+    expect(model.orderedPaths).toEqual(['/repos/alpha', '/w/a', '/w/m'])
+    expect(model.visiblePaths).toEqual(['/repos/alpha', '/w/a'])
+  })
+
+  it('hides a collapsed repo’s lead from visible paths', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/repos/alpha', isMain: true, branch: 'main' })],
+        collapsedRepos: { '/repos/alpha': true }
+      })
+    )
+    expect(model.visiblePaths).toEqual([])
+    expect(model.orderedPaths).toEqual(['/repos/alpha'])
+  })
+})

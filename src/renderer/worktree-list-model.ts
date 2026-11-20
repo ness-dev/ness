@@ -55,6 +55,37 @@ export interface WorktreeRowModel {
   cmdOrdinal?: number
   /** Deletion is in flight — render inert with a spinner. */
   deleting: boolean
+  /** Set only on a repo's main worktree, which the sidebar renders as that
+   *  project's Lead — the chat that plans work and spins off worktrees. */
+  lead?: LeadModel
+}
+
+export interface LeadModel {
+  /** Show the branch on the Lead card. Only when main isn't sitting on a
+   *  base branch — "main" on the main checkout says nothing. */
+  showBranch: boolean
+  /** The repo's other in-flight worktrees (not merged, not snoozed). */
+  agents: number
+  /** Of those, how many are processing right now. */
+  running: number
+  /** Of those, how many are waiting on the user or blocked on approval. */
+  needsYou: number
+}
+
+/** Archive groups folded into one collapsed line at the bottom of a section. */
+const TAIL_KEYS: readonly GroupKey[] = ['snoozed', 'merged']
+
+/** Branches that read as "the repo's base" without any PR to tell us so. */
+const COMMON_BASE_BRANCHES = ['main', 'master', 'develop', 'trunk']
+
+/** Merged + Snoozed, rendered as a single fold so archives don't compete
+ *  with live work for attention. */
+export interface WorktreeTailModel {
+  groups: WorktreeListGroupModel[]
+  count: number
+  /** True only when every tail group is collapsed; expanding the fold
+   *  shows all of them. */
+  collapsed: boolean
 }
 
 export interface WorktreeListGroupModel {
@@ -96,7 +127,16 @@ export interface WorktreeRepoSectionModel {
   repoName: string
   unified: boolean
   collapsed: boolean
+  /** Every worktree grouped by status, main included. Overview surfaces
+   *  (command center, task list) render this; the sidebar renders the
+   *  lead / workGroups / tail split below instead. */
   groups: WorktreeListGroupModel[]
+  /** Main worktrees, pulled out of the groups. One per repo; several in
+   *  unified mode, where every project's Lead stacks at the top. */
+  leads: WorktreeRowModel[]
+  /** `groups` minus the leads and the tail, empty groups dropped. */
+  workGroups: WorktreeListGroupModel[]
+  tail: WorktreeTailModel | null
   pending: PendingWorktree[]
   count: number
 }
@@ -113,6 +153,11 @@ export interface WorktreeListModel {
   shellActiveByPath: Record<string, boolean>
   snoozedPaths: Record<string, true>
   totalWorktrees: number
+  /** Every worktree path in sidebar display order (leads first), collapsed
+   *  or not — prev/next navigation walks this. */
+  orderedPaths: string[]
+  /** The paths actually on screen, in order — Cmd+1..9 indexes this. */
+  visiblePaths: string[]
 }
 
 export interface WorktreeListModelInput {
@@ -287,6 +332,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     }
   }
 
+  const baseBranches = new Set(COMMON_BASE_BRANCHES)
+  for (const pr of Object.values(prStatuses)) if (pr?.baseBranch) baseBranches.add(pr.baseBranch)
+
   const sections: WorktreeRepoSectionModel[] = buckets.map((bucket) => {
     const groups = groupWorktrees(
       bucket.worktrees,
@@ -328,6 +376,53 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       }
     })
 
+    const leads: WorktreeRowModel[] = []
+    const workGroups: WorktreeListGroupModel[] = []
+    const tailGroups: WorktreeListGroupModel[] = []
+    const agentStats = new Map<string, { agents: number; running: number; needsYou: number }>()
+    for (const group of groups) {
+      const isTail = TAIL_KEYS.includes(group.key)
+      const rest: WorktreeRowModel[] = []
+      for (const row of group.rows) {
+        if (row.worktree.isMain) {
+          leads.push(row)
+          continue
+        }
+        rest.push(row)
+        if (isTail) continue
+        const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
+        stats.agents += 1
+        if (row.status === 'processing') stats.running += 1
+        if (row.status === 'waiting' || row.status === 'needs-approval') stats.needsYou += 1
+        agentStats.set(row.worktree.repoRoot, stats)
+      }
+      const split =
+        rest.length === group.rows.length
+          ? group
+          : { ...group, rows: rest, count: rest.length + group.phantomPRs.length }
+      if (split.count === 0) continue
+      ;(isTail ? tailGroups : workGroups).push(split)
+    }
+    // Unified mode's single bucket collects mains in group order; restore the
+    // user's repo order so the stacked Leads don't reshuffle on status changes.
+    const repoOrder = new Map(repoRoots.map((root, i) => [root, i]))
+    leads.sort(
+      (a, b) =>
+        (repoOrder.get(a.worktree.repoRoot) ?? Infinity) - (repoOrder.get(b.worktree.repoRoot) ?? Infinity)
+    )
+    for (const row of leads) {
+      const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
+      row.lead = { showBranch: !baseBranches.has(row.worktree.branch), ...stats }
+    }
+    const tail: WorktreeTailModel | null =
+      tailGroups.length === 0
+        ? null
+        : {
+            groups: tailGroups,
+            count: tailGroups.reduce((n, g) => n + g.count, 0),
+            collapsed: tailGroups.every((g) => g.collapsed)
+          }
+
     const memberRoots = new Set(bucket.repoRoots.map((r) => r.repoRoot))
     return {
       repoRoot: bucket.repoRoot,
@@ -337,6 +432,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       unified: bucket.repoRoot === UNIFIED_REPO_ROOT,
       collapsed: collapsedRepos[bucket.scope] === true,
       groups,
+      leads,
+      workGroups,
+      tail,
       pending:
         bucket.repoRoot === UNIFIED_REPO_ROOT
           ? pendingWorktrees
@@ -345,22 +443,36 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     }
   })
 
-  // Cmd+1..9 ordinals follow visible display order — skipping collapsed
-  // repos and groups — so the badge on a row matches the hotkey that
-  // actually switches to it.
-  if (assignOrdinals) {
-    let n = 1
-    outer: for (const section of sections) {
-      if (section.collapsed) continue
-      for (const group of section.groups) {
-        if (group.collapsed) continue
-        for (const row of group.rows) {
-          if (n > MAX_ORDINALS) break outer
-          row.cmdOrdinal = n
-          n += 1
-        }
+  // Sidebar display order: Leads, then live work, then the tail fold. Cmd+1..9
+  // ordinals follow the visible subset — skipping collapsed repos, groups
+  // and the folded tail — so the badge on a row matches the hotkey that
+  // actually switches to it. The hotkey handlers read these same lists
+  // rather than re-deriving the order.
+  const orderedPaths: string[] = []
+  const visibleRows: WorktreeRowModel[] = []
+  for (const section of sections) {
+    const visible = !section.collapsed
+    for (const row of section.leads) {
+      orderedPaths.push(row.path)
+      if (visible) visibleRows.push(row)
+    }
+    for (const group of section.workGroups) {
+      for (const row of group.rows) {
+        orderedPaths.push(row.path)
+        if (visible && !group.collapsed) visibleRows.push(row)
       }
     }
+    for (const group of section.tail?.groups ?? []) {
+      for (const row of group.rows) {
+        orderedPaths.push(row.path)
+        if (visible && !section.tail!.collapsed) visibleRows.push(row)
+      }
+    }
+  }
+  if (assignOrdinals) {
+    visibleRows.slice(0, MAX_ORDINALS).forEach((row, i) => {
+      row.cmdOrdinal = i + 1
+    })
   }
 
   return {
@@ -371,7 +483,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     pendingToolByPath,
     shellActiveByPath,
     snoozedPaths,
-    totalWorktrees: worktrees.length
+    totalWorktrees: worktrees.length,
+    orderedPaths,
+    visiblePaths: visibleRows.map((row) => row.path)
   }
 }
 
