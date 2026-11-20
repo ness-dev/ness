@@ -8,13 +8,14 @@ import type { GroupKey } from '../../shared/worktree-sort'
 export interface WorktreeCollapseState {
   collapsedGroups: Record<string, boolean>
   setCollapsedGroups: Dispatch<SetStateAction<Record<string, boolean>>>
-  collapsedRepos: Record<string, boolean>
-  setCollapsedRepos: Dispatch<SetStateAction<Record<string, boolean>>>
+  /** Projects kept expanded even when you're not in them. Every other
+   *  project shows just its row unless it holds the active worktree. */
+  pinnedOpenRepos: Record<string, boolean>
   unifiedRepos: boolean
   setUnifiedRepos: Dispatch<SetStateAction<boolean>>
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   toggleGroup: (scope: string, key: GroupKey) => void
-  toggleRepo: (repoRoot: string) => void
+  togglePinnedOpen: (scope: string) => void
 }
 
 /** Merged and snoozed start collapsed — they're archives, not workspaces. */
@@ -39,12 +40,14 @@ export function useWorktreeCollapse(): WorktreeCollapseState {
     localStorage.setItem('harness:collapsedGroups', JSON.stringify(collapsedGroups))
   }, [collapsedGroups])
 
-  const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>(() =>
-    loadFlagMap('harness:collapsedRepos')
+  // A new key on purpose: the old `harness:collapsedRepos` meant the
+  // opposite (explicitly closed), so reading it here would invert intent.
+  const [pinnedOpenRepos, setPinnedOpenRepos] = useState<Record<string, boolean>>(() =>
+    loadFlagMap('harness:pinnedOpenRepos')
   )
   useEffect(() => {
-    localStorage.setItem('harness:collapsedRepos', JSON.stringify(collapsedRepos))
-  }, [collapsedRepos])
+    localStorage.setItem('harness:pinnedOpenRepos', JSON.stringify(pinnedOpenRepos))
+  }, [pinnedOpenRepos])
 
   const [unifiedRepos, setUnifiedRepos] = useState<boolean>(() => {
     const saved = localStorage.getItem('harness:unifiedRepos')
@@ -71,19 +74,18 @@ export function useWorktreeCollapse(): WorktreeCollapseState {
     })
   }, [])
 
-  const toggleRepo = useCallback((repoRoot: string) => {
-    setCollapsedRepos((prev) => ({ ...prev, [repoRoot]: !prev[repoRoot] }))
+  const togglePinnedOpen = useCallback((scope: string) => {
+    setPinnedOpenRepos((prev) => ({ ...prev, [scope]: !prev[scope] }))
   }, [])
 
   return {
     collapsedGroups,
     setCollapsedGroups,
-    collapsedRepos,
-    setCollapsedRepos,
+    pinnedOpenRepos,
     unifiedRepos,
     setUnifiedRepos,
     isGroupCollapsed,
     toggleGroup,
-    toggleRepo
+    togglePinnedOpen
   }
 }

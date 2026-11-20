@@ -1,8 +1,8 @@
-import { memo, useEffect, useRef, useState, type ReactElement } from 'react'
+import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
-import type { SidebarDetailPrefs } from '../types'
+import type { PtyStatus, SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
-import { repoNameColor } from './RepoIcon'
+import { RepoIcon, repoNameColor } from './RepoIcon'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
 import { formatPendingTool } from '../pending-tool'
 import { HotkeyBadge } from './HotkeyBadge'
@@ -43,6 +43,28 @@ interface WorktreeTabProps {
   onSelect: (path: string) => void
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
+  /** Render this (main) worktree as its project's row: clicking the project
+   *  opens its main workspace. Not reference-stable, but only one row per
+   *  project carries it. */
+  project?: ProjectRowProps
+}
+
+export interface ProjectRowProps {
+  name: string
+  collapsed?: boolean
+  /** Worktree count, shown beside the name while collapsed. */
+  count?: number
+  /** Kept expanded even when you're working elsewhere. */
+  pinnedOpen?: boolean
+  /** Set only while collapsed: the project's most urgent status, shown on
+   *  the icon dot in place of main's own. */
+  collapsedStatus?: PtyStatus
+  /** Absent in unified mode, where projects don't collapse individually. */
+  onTogglePinnedOpen?: () => void
+  /** Project-level actions (graph, remove, new worktree). Desktop shows
+   *  them as hover icons, or in the right-click menu when `menuOnly`;
+   *  touch lists them all in the action sheet. */
+  actions?: WorktreeRowAction[]
 }
 
 /** Memoized: switching worktrees re-renders the list, and every prop here is
@@ -60,7 +82,8 @@ export const WorktreeTab = memo(function WorktreeTab({
   actions,
   onSelect,
   onStartAliasEdit: onStartAliasEditForPath,
-  onEndAliasEdit
+  onEndAliasEdit,
+  project
 }: WorktreeTabProps): JSX.Element {
   const onStartAliasEdit = (): void => onStartAliasEditForPath(row.path)
   const backend = useBackend()
@@ -132,24 +155,166 @@ export const WorktreeTab = memo(function WorktreeTab({
   )
   const dividerAt = mappedEntries.findIndex((e) => 'separator' in e)
   const openIn = { label: 'Open in', submenu: editorSubmenu }
-  const menuItems: ContextMenuEntry[] =
+  const worktreeMenu: ContextMenuEntry[] =
     dividerAt === -1
       ? [...mappedEntries, openIn]
       : [...mappedEntries.slice(0, dividerAt), openIn, ...mappedEntries.slice(dividerAt)]
+  // Project-level menu actions follow the worktree's own; destructive ones
+  // go below a rule, like "Remove worktree" does.
+  const projectMenu = project?.actions?.filter((a) => a.menuOnly) ?? []
+  const toEntry = (a: WorktreeRowAction): ContextMenuEntry => ({
+    label: a.label,
+    onClick: () => a.onSelect(),
+    danger: a.tone === 'danger'
+  })
+  const projectSafe = projectMenu.filter((a) => a.tone !== 'danger').map(toEntry)
+  const projectDanger = projectMenu.filter((a) => a.tone === 'danger').map(toEntry)
+  const menuItems: ContextMenuEntry[] = [
+    ...worktreeMenu,
+    ...projectSafe,
+    ...(projectDanger.length > 0 ? [{ separator: true as const }, ...projectDanger] : [])
+  ]
+
+  const onContextMenu = touch
+    ? undefined
+    : (e: ReactMouseEvent) => {
+        if (deleting) return
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }
+  const overlays = (
+    <>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      {sheetOpen && (
+        <WorktreeActionSheet
+          title={alias ?? (project ? project.name : worktree.branch)}
+          subtitle={alias || project ? worktree.branch : undefined}
+          actions={[...(project?.actions ?? []), ...aliasActions, ...rowActions]}
+          onClose={() => setSheetOpen(false)}
+        />
+      )}
+    </>
+  )
+
+  if (row.home && project) {
+    const home = row.home
+    const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? project.name)
+    // Collapsed, the dot speaks for the whole project so an agent waiting on
+    // you there isn't hidden; open, its worktrees show their own dots.
+    const dotStatus = project.collapsedStatus ?? displayStatus
+    return (
+      <div
+        onClick={() => onSelect(row.path)}
+        onContextMenu={onContextMenu}
+        className={`group flex items-center gap-2.5 px-2 transition-colors cursor-pointer ${
+          // Fixed height whether or not the pending-tool line shows, so the
+          // title sits centred and rows don't jump when main asks for approval.
+          touch ? 'min-h-14 py-2.5' : 'min-h-14 py-2'
+        } ${isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'}`}
+      >
+        <span className="relative shrink-0 inline-flex">
+          <RepoIcon repoName={project.name} className="text-2xl" />
+          {/* A collapsed project's dot is the only sign of what's inside, so
+              needs-approval also gets a diamond: red vs green alone is the
+              hardest pair to tell apart. */}
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ring-2 ring-panel ${STATUS_COLORS[dotStatus]} ${
+              project.collapsedStatus === 'needs-approval' ? 'rotate-45' : 'rounded-full'
+            }`}
+            title={project.collapsedStatus ? `Most urgent in ${project.name}: ${STATUS_LABELS[dotStatus]}` : STATUS_LABELS[dotStatus]}
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          {isEditingAlias ? (
+            <AliasEditor
+              initialValue={alias ?? ''}
+              onCommit={(value) => {
+                void backend.setAlias(worktree.path, value)
+                onEndAliasEdit()
+              }}
+              onCancel={onEndAliasEdit}
+            />
+          ) : (
+            <RowTooltip enabled={!touch} label={`${PROJECT_HOME_HINT} · ${worktree.branch}`}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-base font-semibold truncate text-fg-bright">{title}</span>
+                {project.collapsed && project.count !== undefined && project.count > 0 && (
+                  <span className="shrink-0 text-xs text-faint">{project.count}</span>
+                )}
+                {home.showBranch && (
+                  <span className="shrink-0 max-w-[50%] truncate rounded bg-surface px-1 text-xs text-dim font-mono">
+                    {worktree.branch}
+                  </span>
+                )}
+                {prStatus && (
+                  <span className="shrink-0 inline-flex" title={prIconTitle(prStatus)}>
+                    <GitPullRequest className={`icon-xs ${iconColor}`} />
+                  </span>
+                )}
+                <ReviewStatusIcon worktreePath={row.path} className="icon-xs" hideWhenNone />
+                {shellActive && (
+                  <Loader2 className="icon-xs animate-spin text-fg-bright shrink-0" aria-label="Shell activity" />
+                )}
+              </div>
+            </RowTooltip>
+          )}
+          {showPendingTool && (
+            <div className="text-xs text-danger truncate font-mono" title={formatPendingTool(pendingTool!)}>
+              {formatPendingTool(pendingTool!)}
+            </div>
+          )}
+        </div>
+        {/* Desktop: "+" appears on hover, out of layout until then so the
+            status line keeps the full width; graph and remove live in the
+            right-click menu. Touch: everything goes in the action sheet. */}
+        {touch ? (
+          <TouchRowActions
+            disabled={
+              deleting ||
+              ((project.actions?.length ?? 0) === 0 && rowActions.length === 0 && aliasActions.length === 0)
+            }
+            onOpen={() => setSheetOpen(true)}
+          />
+        ) : (
+          <DesktopRowActions actions={[...rowActions, ...(project.actions ?? []).filter((a) => !a.menuOnly)]} />
+        )}
+        {metaHeld && row.cmdOrdinal !== undefined && (
+          <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />
+        )}
+        {/* Opening a project is just clicking it; this keeps it open while
+            you work elsewhere. Shown on hover, or always once pinned so the
+            state is visible at rest. */}
+        {project.onTogglePinnedOpen && (
+          <Tooltip label={project.pinnedOpen ? 'Stop keeping open' : 'Keep open'} side="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                project.onTogglePinnedOpen!()
+              }}
+              aria-label={project.pinnedOpen ? `Stop keeping ${project.name} open` : `Keep ${project.name} open`}
+              aria-pressed={project.pinnedOpen ?? false}
+              className={`shrink-0 items-center justify-center cursor-pointer ${
+                project.pinnedOpen ? 'text-accent hover:text-fg' : 'text-faint hover:text-fg'
+              } ${
+                touch
+                  ? 'inline-flex w-11 h-11 -mr-2'
+                  : `p-0.5 ${project.pinnedOpen ? 'inline-flex' : 'hidden group-hover:inline-flex'}`
+              }`}
+            >
+              {project.pinnedOpen ? <Pin className="icon-xs fill-current" /> : <Pin className="icon-xs" />}
+            </button>
+          </Tooltip>
+        )}
+        {overlays}
+      </div>
+    )
+  }
 
   return (
     <div
       onClick={() => onSelect(row.path)}
-      onContextMenu={
-        touch
-          ? undefined
-          : (e) => {
-              if (deleting) return
-              e.preventDefault()
-              setMenu({ x: e.clientX, y: e.clientY })
-            }
-      }
-      className={`group w-full px-3 text-left flex items-center gap-2 transition-colors cursor-pointer ${
+      onContextMenu={onContextMenu}
+      className={`group w-full px-2 text-left flex items-center gap-2 transition-colors cursor-pointer ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${deleting ? 'opacity-60 italic' : ''} ${
         isActive ? 'text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
@@ -266,25 +431,14 @@ export const WorktreeTab = memo(function WorktreeTab({
       {metaHeld && row.cmdOrdinal !== undefined && (
         <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />
       )}
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={menuItems}
-          onClose={() => setMenu(null)}
-        />
-      )}
-      {sheetOpen && (
-        <WorktreeActionSheet
-          title={alias ?? worktree.branch}
-          subtitle={alias ? worktree.branch : undefined}
-          actions={[...aliasActions, ...rowActions]}
-          onClose={() => setSheetOpen(false)}
-        />
-      )}
+      {overlays}
     </div>
   )
 })
+
+/** Tooltip for a project row — the main checkout is where work gets
+ *  planned before it's spun off into worktrees. */
+export const PROJECT_HOME_HINT = 'Main workspace'
 
 /** Hover-revealed icon buttons. Desktop only — there is no hover on touch. */
 function DesktopRowActions({ actions }: { actions: WorktreeRowAction[] }): JSX.Element | null {
@@ -300,8 +454,14 @@ function DesktopRowActions({ actions }: { actions: WorktreeRowAction[] }): JSX.E
               ? 'text-faint hover:text-danger'
               : 'text-faint hover:text-accent'
         return (
-          <Tooltip key={action.key} label={`${action.label}${action.tooltipExtra ?? ''}`} side="left">
+          <Tooltip
+            key={action.key}
+            label={`${action.label}${action.tooltipExtra ?? ''}`}
+            action={action.hotkey}
+            side="left"
+          >
             <button
+              aria-label={action.label}
               onClick={(e) => {
                 e.stopPropagation()
                 action.onSelect(e)

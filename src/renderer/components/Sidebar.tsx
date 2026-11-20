@@ -1,4 +1,4 @@
-import { Trash2, Layers, ListTodo, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, ListTodo, Plus, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
@@ -49,7 +49,7 @@ interface SidebarProps {
   onOpenMyWeek: () => void
   width: number
   onToggleGroup: (scope: string, key: GroupKey) => void
-  onToggleRepo: (repoRoot: string) => void
+  onTogglePinnedOpen: (scope: string) => void
   unifiedRepos: boolean
   onToggleUnifiedRepos: () => void
   onCollapseSidebar: () => void
@@ -95,7 +95,7 @@ export function Sidebar({
   onOpenMyWeek,
   width,
   onToggleGroup,
-  onToggleRepo,
+  onTogglePinnedOpen,
   unifiedRepos,
   onToggleUnifiedRepos,
   onCollapseSidebar,
@@ -105,7 +105,7 @@ export function Sidebar({
 }: SidebarProps): JSX.Element {
   return (
     <div className="shrink-0 bg-panel flex flex-col h-full" style={{ width }}>
-      {/* Worktrees header */}
+      {/* Sidebar header */}
       <div className="px-3 py-3 flex items-center gap-2 shrink-0">
         <Tooltip label="Collapse sidebar" action="toggleSidebar" side="bottom">
           <button
@@ -116,8 +116,18 @@ export function Sidebar({
             <PanelLeftClose className="icon-xs" />
           </button>
         </Tooltip>
-        <span className="text-xs font-medium text-dim">WORKTREES</span>
         <div className="ml-auto flex items-center gap-1">
+          {/* Deliberately one icon among many: most worktrees get started by
+              asking a Lead, so the manual path stays available but quiet. */}
+          <Tooltip label="New worktree" action="newWorktree" side="bottom">
+            <button
+              onClick={() => onNewWorktree()}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
+              aria-label="New worktree"
+            >
+              <Plus className="icon-xs" />
+            </button>
+          </Tooltip>
           <Tooltip label="Task list" action="toggleTaskList" side="bottom">
             <button
               onClick={onOpenTaskList}
@@ -181,7 +191,7 @@ export function Sidebar({
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
           onToggleGroup={onToggleGroup}
-          onToggleRepo={onToggleRepo}
+          onTogglePinnedOpen={onTogglePinnedOpen}
           onNewWorktree={onNewWorktree}
           onDismissPendingWorktree={onDismissPendingWorktree}
           onContinueWorktree={onContinueWorktree}
