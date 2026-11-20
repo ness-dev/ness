@@ -286,7 +286,7 @@ export default function SubscriptionGraphView({
           on={showMerged}
           count={showMerged ? undefined : hidden.merged}
           label="Merged"
-          title="Merged worktrees. One an unmerged worktree still links to is always shown."
+          title="Merged or closed worktrees. One with a subscription to or from an unmerged worktree is always shown."
           onToggle={() => setShowMerged((v) => !v)}
         />
         <span className="flex-1" />

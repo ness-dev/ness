@@ -102,6 +102,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
+import { createLocalMergeOps } from './local-merge'
 import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
@@ -2768,30 +2769,28 @@ function registerIpcHandlers(): void {
     return previewMergeConflicts(repoRoot, branch, status.baseBranch)
   })
 
-  transport.onRequest('worktree:prepareMain', async (_ctx, repoRoot: string) => {
-    if (!repoRoot) throw new Error('No repo root provided')
-    return prepareMainForMerge(repoRoot)
+  const localMerge = createLocalMergeOps({
+    dispatch: (event) => store.dispatch(event),
+    getCurrentBranch,
+    mergeWorktreeLocally,
+    prepareMainForMerge,
+    getBranchSha,
+    recordLocallyMerged: (branch, sha) => {
+      if (!config.locallyMerged) config.locallyMerged = {}
+      config.locallyMerged[branch] = sha
+      saveConfig(config)
+    },
+    refreshAll: () => void prPoller.refreshAll()
   })
+
+  transport.onRequest('worktree:prepareMain', (_ctx, repoRoot: string) =>
+    localMerge.prepareMain(repoRoot)
+  )
 
   transport.onRequest(
     'worktree:mergeLocal',
-    async (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) => {
-      if (!repoRoot) throw new Error('No repo root provided')
-      let branch = sourceBranch
-      if (worktreePath) {
-        const resolved = await getCurrentBranch(worktreePath)
-        if (resolved) branch = resolved
-      }
-      const result = await mergeWorktreeLocally(repoRoot, branch, strategy)
-      const sha = await getBranchSha(repoRoot, branch)
-      if (sha) {
-        if (!config.locallyMerged) config.locallyMerged = {}
-        config.locallyMerged[branch] = sha
-        saveConfig(config)
-      }
-      void prPoller.refreshAll()
-      return result
-    }
+    (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) =>
+      localMerge.mergeLocal(repoRoot, sourceBranch, strategy, worktreePath)
   )
 
   // Legacy worktree:mergedStatus handler is gone — the computation is now

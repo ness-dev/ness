@@ -1,7 +1,8 @@
 import type { AppState } from './state'
-import type { PRStatus } from './state/prs'
+import { isWorktreeMerged, type PRStatus } from './state/prs'
 import type { NotifyMode } from './state/subscriptions'
 import type { ReviewVerdict } from './state/reviews'
+import { ROLLUP_STATUS_RANK } from './status-rollup'
 import { getLeaves, type AgentKind, type PtyStatus, type TerminalTab } from './state/terminals'
 import { findTabInWorktree, tabLabel } from './agent-tabs'
 import { followedTargets, subscribersOf } from './subscribers'
@@ -25,7 +26,10 @@ export interface GraphGroup {
   external: boolean
   /** Worst status across the worktree's agent tabs. */
   status: PtyStatus
+  /** Merged or closed, matching the sidebar's "Merged / Closed" group. */
   merged: boolean
+  /** Of those, the ones whose PR was closed without the branch landing. */
+  closed: boolean
 }
 
 export interface GraphAgentNode {
@@ -93,13 +97,6 @@ export const groupId = (path: string): string => `wt:${path}`
 export const agentId = (tabId: string): string => `tab:${tabId}`
 export const prId = (path: string): string => `pr:${path}`
 
-const STATUS_RANK: Record<PtyStatus, number> = {
-  idle: 0,
-  processing: 1,
-  waiting: 2,
-  'needs-approval': 3
-}
-
 function isAgentTab(tab: TerminalTab): boolean {
   return tab.type === 'json-claude' || tab.type === 'agent'
 }
@@ -135,7 +132,8 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
       isMain: wt.isMain,
       external: wt.repoRoot !== repoPath,
       status: 'idle',
-      merged: !!state.prs.mergedByPath[path] || state.prs.byPath[path]?.state === 'merged'
+      merged: isWorktreeMerged(state.prs, path),
+      closed: !state.prs.mergedByPath[path] && state.prs.byPath[path]?.state === 'closed'
     }
     groups.set(id, g)
     return g
@@ -160,7 +158,7 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
         asleep: tab.mode === 'asleep',
         reviewer: !!tab.reviewOf
       })
-      if (STATUS_RANK[status] > STATUS_RANK[g.status]) g.status = status
+      if (ROLLUP_STATUS_RANK[status] > ROLLUP_STATUS_RANK[g.status]) g.status = status
     }
     return id
   }
@@ -303,8 +301,12 @@ export interface FilteredGraph {
 
 /** Trims the graph for a project with many worktrees, where it's the links
  *  that matter. Applied in order:
- *    1. merged worktrees go, unless an unmerged one links to them; a live
- *       link into a merged worktree is still state worth seeing
+ *    1. merged (or closed) worktrees go, unless an unmerged one has an
+ *       explicit subscription with them. Spawn edges don't rescue, even
+ *       live ones: a live spawn edge is the creator's implicit, silent
+ *       created-worktree follow, and nearly every worktree is spawned from
+ *       main's Chat tab, so counting it would keep almost every merged
+ *       worktree on screen
  *    2. worktrees with no link to another worktree go; a worktree's own
  *       PR and reviewer edges don't count, they're inside the box
  *  Edges touching a hidden worktree go with it. */
@@ -322,7 +324,7 @@ export function filterSubscriptionGraph(g: SubscriptionGraph, f: GraphFilter): F
   let merged = 0
   if (!f.showMerged) {
     const linkedToUnmerged = new Set<string>()
-    for (const [a, b] of crossLinks(g.edges)) {
+    for (const [a, b] of crossLinks(g.edges.filter((e) => e.kind === 'subscription'))) {
       if (!byId.get(a)?.merged) linkedToUnmerged.add(b)
       if (!byId.get(b)?.merged) linkedToUnmerged.add(a)
     }
