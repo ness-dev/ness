@@ -7,6 +7,7 @@ import { OpenSource } from './components/OpenSource'
 import { Install } from './components/Install'
 import { Footer } from './components/Footer'
 import { ScrollDiorama } from './components/ScrollDiorama'
+import { AgentsRunAgents } from './components/AgentsRunAgents'
 
 export function App() {
   return (
@@ -15,6 +16,7 @@ export function App() {
       <Hero />
       <HeroMock />
       <ScrollDiorama />
+      <AgentsRunAgents />
       <FeatureCallouts />
       <Features />
       <OpenSource />

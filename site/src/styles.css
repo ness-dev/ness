@@ -1,5 +1,21 @@
 @import 'tailwindcss';
 
+/* The orchestration section renders the app's own subscription-graph
+ * cards (AgentGraphMock), so their classes have to be generated here too. */
+@source '../../src/renderer/components/SubscriptionGraphCanvas.tsx';
+@source '../../src/renderer/components/AgentIcon.tsx';
+@source '../../src/renderer/worktree-row-style.ts';
+
+/* The renderer's rem-based icon sizes, used by those cards. */
+@utility icon-xs {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+@utility icon-sm {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
 @theme {
   --color-ink-950: #0a0a0a;
   --color-ink-900: #141414;
@@ -232,7 +248,35 @@
   animation: caret-blink 1s step-end infinite;
 }
 
+/* Subscription-graph story: parts not yet in the story are laid out but
+ * invisible, and fade in when their beat arrives. */
+.agm .react-flow__node,
+.agm .react-flow__edge {
+  transition: opacity 600ms ease;
+}
+.agm .react-flow__node.agm-pending,
+.agm .react-flow__edge.agm-pending {
+  opacity: 0;
+}
+.agm-caption {
+  animation: agm-caption-in 400ms ease;
+}
+@keyframes agm-caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .agm .react-flow__node,
+  .agm .react-flow__edge,
+  .agm-caption,
+  .agm .animate-spin,
+  .agm .animate-pulse {
+    transition: none;
+    animation: none;
+  }
   .pulse-dot,
   .caret-blink,
   .json-claude-cursor {
