@@ -15,6 +15,7 @@ import type { WorktreeListModel, WorktreeRowModel } from '../worktree-list-model
 import { STATUS_COLORS, STATUS_LABELS, prIconStyle, prIconTitle } from '../worktree-row-style'
 import { repoNameColor } from './RepoIcon'
 import { WorktreeTabRows } from './WorktreeTabRows'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 
 /** The one line of text a task row shows.
  *
@@ -223,6 +224,7 @@ function TaskRow({
           <GitPullRequest className={`icon-xs ${iconColor}`} />
         </span>
       )}
+      <ReviewStatusIcon worktreePath={row.path} className="icon-xs" hideWhenNone />
     </div>
   )
 }

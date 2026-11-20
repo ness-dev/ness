@@ -90,7 +90,7 @@ function findGroup(
 }
 
 describe('status aggregation', () => {
-  it('takes the worst status across a worktree tabs', () => {
+  it('any processing tab beats waiting and idle tabs', () => {
     const model = buildWorktreeListModel(
       input({
         worktrees: [wt({ path: '/w/a' })],
@@ -98,7 +98,29 @@ describe('status aggregation', () => {
         statuses: { t1: 'idle', t2: 'processing', t3: 'waiting' }
       })
     )
+    expect(model.statusByPath['/w/a']).toBe('processing')
+  })
+
+  it('waiting beats idle when nothing is processing', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' })],
+        tabsByWorktree: { '/w/a': [tab('t1'), tab('t2')] },
+        statuses: { t1: 'waiting', t2: 'idle' }
+      })
+    )
     expect(model.statusByPath['/w/a']).toBe('waiting')
+  })
+
+  it('needs-approval beats processing', () => {
+    const model = buildWorktreeListModel(
+      input({
+        worktrees: [wt({ path: '/w/a' })],
+        tabsByWorktree: { '/w/a': [tab('t1'), tab('t2')] },
+        statuses: { t1: 'processing', t2: 'needs-approval' }
+      })
+    )
+    expect(model.statusByPath['/w/a']).toBe('needs-approval')
   })
 
   it('needs-approval wins and carries that tab pending tool', () => {

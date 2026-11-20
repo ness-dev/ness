@@ -2,6 +2,7 @@ import type { AppState } from './state'
 import { isWorktreeMerged, type PRStatus } from './state/prs'
 import type { NotifyMode } from './state/subscriptions'
 import type { ReviewVerdict } from './state/reviews'
+import { ROLLUP_STATUS_RANK } from './status-rollup'
 import { getLeaves, type AgentKind, type PtyStatus, type TerminalTab } from './state/terminals'
 import { findTabInWorktree, tabLabel } from './agent-tabs'
 import { followedTargets, subscribersOf } from './subscribers'
@@ -96,13 +97,6 @@ export const groupId = (path: string): string => `wt:${path}`
 export const agentId = (tabId: string): string => `tab:${tabId}`
 export const prId = (path: string): string => `pr:${path}`
 
-const STATUS_RANK: Record<PtyStatus, number> = {
-  idle: 0,
-  processing: 1,
-  waiting: 2,
-  'needs-approval': 3
-}
-
 function isAgentTab(tab: TerminalTab): boolean {
   return tab.type === 'json-claude' || tab.type === 'agent'
 }
@@ -164,7 +158,7 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
         asleep: tab.mode === 'asleep',
         reviewer: !!tab.reviewOf
       })
-      if (STATUS_RANK[status] > STATUS_RANK[g.status]) g.status = status
+      if (ROLLUP_STATUS_RANK[status] > ROLLUP_STATUS_RANK[g.status]) g.status = status
     }
     return id
   }

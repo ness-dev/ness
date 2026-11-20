@@ -23,6 +23,7 @@ import {
   type WorktreeRowActionHandlers
 } from './worktree-row-actions'
 import { WorktreeActionSheet } from './WorktreeActionSheet'
+import { ReviewStatusIcon } from './ReviewStatusIcon'
 
 export type WorktreeListVariant = 'desktop' | 'touch'
 
@@ -181,6 +182,7 @@ export const WorktreeTab = memo(function WorktreeTab({
           )}
         </span>
       )}
+      <ReviewStatusIcon worktreePath={row.path} className="icon-sm" hideWhenNone />
       <div className="min-w-0 flex-1">
         {isEditingAlias ? (
           <AliasEditor

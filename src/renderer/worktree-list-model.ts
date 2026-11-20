@@ -9,6 +9,7 @@ import type {
 } from './types'
 import type { SnoozeEntry } from '../shared/state'
 import type { AssignedPR } from '../shared/state/assigned-prs'
+import { ROLLUP_STATUS_RANK } from '../shared/status-rollup'
 import { groupWorktrees, type GroupKey } from '../shared/worktree-sort'
 import type { DisplayStatus } from './worktree-row-style'
 
@@ -34,7 +35,7 @@ const MAX_ORDINALS = 9
 export interface WorktreeRowModel {
   worktree: Worktree
   path: string
-  /** Worst pty status across every tab in this worktree. */
+  /** Rolled-up pty status across every tab in this worktree (see `aggregate`). */
   status: PtyStatus
   /** `status`, except merged worktrees read as 'merged' for the status dot. */
   displayStatus: DisplayStatus
@@ -150,8 +151,10 @@ export interface WorktreeListModelInput {
   assignOrdinals?: boolean
 }
 
-/** Worst-status-wins aggregation across a worktree's tabs, plus the pending
- *  tool belonging to whichever tab is actually blocking on approval. */
+/** Rolls a worktree's tabs up by `ROLLUP_STATUS_RANK`, plus the pending tool
+ *  belonging to whichever tab is actually blocking on approval. A processing
+ *  tab masks a waiting one, so a busy reviewer beside a waiting chat shows
+ *  green, not yellow. */
 function aggregate(
   tabs: TerminalTab[],
   statuses: Record<string, PtyStatus>,
@@ -163,8 +166,7 @@ function aggregate(
     if (s === 'needs-approval') {
       return { status: 'needs-approval', pendingTool: pendingTools[tab.id] || null }
     }
-    if (s === 'waiting') status = 'waiting'
-    if (s === 'processing' && status === 'idle') status = 'processing'
+    if (s && ROLLUP_STATUS_RANK[s] > ROLLUP_STATUS_RANK[status]) status = s
   }
   return { status, pendingTool: null }
 }
