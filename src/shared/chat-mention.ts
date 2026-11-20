@@ -34,8 +34,13 @@ export function parseChatMention(query: string): { worktree: string; tab: string
   if (!q.toLowerCase().startsWith(CHAT_MENTION_PREFIX)) return null
   q = q.slice(CHAT_MENTION_PREFIX.length)
   const hash = q.lastIndexOf('#')
-  if (hash <= 0 || hash === q.length - 1) return null
-  return { worktree: q.slice(0, hash).trim(), tab: q.slice(hash + 1).trim() }
+  if (hash <= 0) return null
+  // Tokens get typed into prose ("ask @chat:ness/main#review, then…"), and
+  // neither a slug nor a tab id ever ends in punctuation, so trailing
+  // punctuation is the sentence's, not the ref's.
+  const tab = q.slice(hash + 1).trim().replace(/[.,;:!?)\]'"]+$/, '')
+  if (!tab) return null
+  return { worktree: q.slice(0, hash).trim(), tab }
 }
 
 export interface ChatMentionTarget {

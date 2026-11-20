@@ -39,6 +39,8 @@ describe('parseChatMention', () => {
     expect(parseChatMention('chat:ness/feat')).toBeNull()
     expect(parseChatMention('chat:#abc')).toBeNull()
     expect(parseChatMention('chat:ness/feat#')).toBeNull()
+    expect(parseChatMention('chat:ness/feat#.')).toBeNull()
+    expect(parseChatMention('chat:ness/feat#fix-bug!')).toEqual({ worktree: 'ness/feat', tab: 'fix-bug' })
   })
 })
 

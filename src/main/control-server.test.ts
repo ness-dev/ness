@@ -864,6 +864,14 @@ describe('control-server /messages with a tab', () => {
     }
     const bad = await call('POST', '/messages', { tab: 'chat:repo/other#gone', message: 'hi' })
     expect(bad.status).toBe(404)
+    sendToTab.mockClear()
+    const conflict = await call('POST', '/messages', {
+      worktree: 'chat:repo/other#other-chat',
+      tab: AUTHOR_TAB,
+      message: 'hi'
+    })
+    expect(conflict.status).toBe(400)
+    expect(sendToTab).not.toHaveBeenCalled()
   })
 
   it('reports why a tab could not receive the message', async () => {

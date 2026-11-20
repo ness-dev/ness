@@ -1255,6 +1255,14 @@ async function handleRequest(
     if (chatToken) {
       const resolved = deps.messaging.resolveChat(chatToken)
       if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      // A plain `tab` id alongside a token in `worktree` is a second,
+      // explicit recipient. Delivering to either one would mean ignoring
+      // something the caller asked for.
+      if (tab && tab !== chatToken && tab !== resolved.tabId) {
+        return sendJson(res, 400, {
+          error: `\`tab\` "${tab}" disagrees with the chat mention "${chatToken}" — pass only one of them`
+        })
+      }
       targetPath = resolved.path
       tab = resolved.tabId
       target = ''
