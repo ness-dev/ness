@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react'
+import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { ChevronDown, ChevronRight, GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
@@ -55,8 +55,9 @@ export interface ProjectRowProps {
   count?: number
   /** Absent in unified mode, where projects don't collapse individually. */
   onToggleCollapse?: () => void
-  /** Project-level hover actions (graph, remove, new worktree). */
-  actions?: ReactNode
+  /** Project-level actions (graph, remove, new worktree): hover icons on
+   *  desktop, action-sheet entries on touch. */
+  actions?: WorktreeRowAction[]
 }
 
 /** Memoized: switching worktrees re-renders the list, and every prop here is
@@ -166,7 +167,7 @@ export const WorktreeTab = memo(function WorktreeTab({
         <WorktreeActionSheet
           title={alias ?? (project ? project.name : worktree.branch)}
           subtitle={alias || project ? worktree.branch : undefined}
-          actions={[...aliasActions, ...rowActions]}
+          actions={[...(project?.actions ?? []), ...aliasActions, ...rowActions]}
           onClose={() => setSheetOpen(false)}
         />
       )}
@@ -176,11 +177,6 @@ export const WorktreeTab = memo(function WorktreeTab({
   if (row.home && project) {
     const home = row.home
     const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? project.name)
-    // Secondary actions stay hidden until hover: the usual way to start work
-    // is asking the project's main chat, so "+" is a fallback, not a CTA.
-    // Out of layout (not just transparent) until hover, so the status line
-    // gets the full width at rest.
-    const hoverOnly = touch ? 'flex' : 'hidden group-hover:flex'
     return (
       <div
         onClick={() => onSelect(row.path)}
@@ -239,18 +235,19 @@ export const WorktreeTab = memo(function WorktreeTab({
             </div>
           )}
         </div>
-        {project.actions && (
-          <span className={`shrink-0 items-center gap-1.5 ${hoverOnly}`}>
-            {project.actions}
-          </span>
-        )}
+        {/* Desktop: project actions appear on hover, out of layout until
+            then so the status line keeps the full width. Touch: they join
+            the row's action sheet instead of crowding it with tiny glyphs. */}
         {touch ? (
           <TouchRowActions
-            disabled={deleting || (rowActions.length === 0 && aliasActions.length === 0)}
+            disabled={
+              deleting ||
+              ((project.actions?.length ?? 0) === 0 && rowActions.length === 0 && aliasActions.length === 0)
+            }
             onOpen={() => setSheetOpen(true)}
           />
         ) : (
-          <DesktopRowActions actions={rowActions} />
+          <DesktopRowActions actions={[...rowActions, ...(project.actions ?? [])]} />
         )}
         {metaHeld && row.cmdOrdinal !== undefined && (
           <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />

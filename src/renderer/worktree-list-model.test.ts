@@ -813,3 +813,54 @@ describe('display order', () => {
     expect(model.orderedPaths).toEqual(['/repos/alpha'])
   })
 })
+
+describe('project homes across hosts', () => {
+  const localRoot = '/Users/mike/dev/ness'
+  const remoteRoot = '/home/mike/code/ness'
+  // Remote listed first in the user's repo order, so the primary-first
+  // ordering can't pass by accident.
+  const twoHosts = (overrides: Partial<WorktreeListModelInput> = {}) =>
+    buildWorktreeListModel(
+      input({
+        repoRoots: [remoteRoot, localRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [
+          wt({ path: remoteRoot, repoRoot: remoteRoot, isMain: true, branch: 'main' }),
+          wt({ path: localRoot, repoRoot: localRoot, isMain: true, branch: 'main' }),
+          wt({ path: '/w/feature', repoRoot: localRoot })
+        ],
+        ...overrides
+      })
+    )
+
+  it('puts the primary (local) host’s main first as the project row', () => {
+    const model = twoHosts()
+    expect(model.sections[0].homes.map((h) => h.path)).toEqual([localRoot, remoteRoot])
+    expect(model.projectRowPaths).toEqual([localRoot])
+    expect(model.visiblePaths).toEqual([localRoot, remoteRoot, '/w/feature'])
+  })
+
+  it('hides other hosts’ mains when the section is collapsed, keeping only the project row', () => {
+    const model = twoHosts({ collapsedRepos: { 'repo:folder:ness': true } })
+    expect(model.sections[0].collapsed).toBe(true)
+    expect(model.visiblePaths).toEqual([localRoot])
+    expect(model.sections[0].homes[0].cmdOrdinal).toBe(1)
+    expect(model.sections[0].homes[1].cmdOrdinal).toBeUndefined()
+    expect(model.orderedPaths).toEqual([localRoot, remoteRoot, '/w/feature'])
+  })
+
+  it('treats every home as a project row in unified mode', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta'],
+        unifiedRepos: true,
+        worktrees: [
+          wt({ path: '/repos/alpha', repoRoot: '/repos/alpha', isMain: true, branch: 'main' }),
+          wt({ path: '/repos/beta', repoRoot: '/repos/beta', isMain: true, branch: 'main' })
+        ]
+      })
+    )
+    expect(model.projectRowPaths).toEqual(['/repos/alpha', '/repos/beta'])
+  })
+})

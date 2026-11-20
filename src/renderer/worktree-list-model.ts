@@ -132,8 +132,9 @@ export interface WorktreeRepoSectionModel {
    *  (command center, task list) render this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
   groups: WorktreeListGroupModel[]
-  /** Main worktrees, pulled out of the groups. One per repo; several in
-   *  unified mode, where every project's row stacks at the top. */
+  /** Main worktrees, pulled out of the groups. One per repo, primary host
+   *  first; several in unified mode, where every project's row stacks at
+   *  the top. */
   homes: WorktreeRowModel[]
   /** `groups` minus the homes and the tail, empty groups dropped. */
   workGroups: WorktreeListGroupModel[]
@@ -159,6 +160,10 @@ export interface WorktreeListModel {
   orderedPaths: string[]
   /** The paths actually on screen, in order — Cmd+1..9 indexes this. */
   visiblePaths: string[]
+  /** Mains drawn as a project row, which is on screen even when its
+   *  project is collapsed: every home in unified mode, the primary one
+   *  otherwise. */
+  projectRowPaths: string[]
 }
 
 export interface WorktreeListModelInput {
@@ -421,6 +426,13 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       (a, b) =>
         (repoOrder.get(a.worktree.repoRoot) ?? Infinity) - (repoOrder.get(b.worktree.repoRoot) ?? Infinity)
     )
+    // A section spanning hosts has one main per host. The section's own
+    // root (the local checkout's, when there is one) is the project row, so
+    // it goes first; the rest render as ordinary rows beneath it.
+    if (bucket.repoRoot !== UNIFIED_REPO_ROOT) {
+      const primaryIdx = homes.findIndex((h) => h.worktree.repoRoot === bucket.repoRoot)
+      if (primaryIdx > 0) homes.unshift(...homes.splice(primaryIdx, 1))
+    }
     for (const row of homes) {
       const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
       row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
@@ -456,18 +468,21 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
 
   // Sidebar display order: project homes, then live work, then the tail
   // fold. Cmd+1..9 ordinals follow the visible subset — skipping collapsed
-  // groups, the folded tail, and everything but the home in a collapsed
-  // repo (the home IS the project row, so it never hides) — so the badge on
+  // groups, the folded tail, and everything but the project row in a
+  // collapsed repo (that row never hides) — so the badge on
   // a row matches the hotkey that actually switches to it. The hotkey handlers read these same lists
   // rather than re-deriving the order.
   const orderedPaths: string[] = []
   const visibleRows: WorktreeRowModel[] = []
+  const projectRowPaths: string[] = []
   for (const section of sections) {
     const visible = !section.collapsed
-    for (const row of section.homes) {
+    section.homes.forEach((row, i) => {
       orderedPaths.push(row.path)
-      visibleRows.push(row)
-    }
+      const isProjectRow = section.unified || i === 0
+      if (isProjectRow) projectRowPaths.push(row.path)
+      if (isProjectRow || visible) visibleRows.push(row)
+    })
     for (const group of section.workGroups) {
       for (const row of group.rows) {
         orderedPaths.push(row.path)
@@ -497,7 +512,8 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     snoozedPaths,
     totalWorktrees: worktrees.length,
     orderedPaths,
-    visiblePaths: visibleRows.map((row) => row.path)
+    visiblePaths: visibleRows.map((row) => row.path),
+    projectRowPaths
   }
 }
 

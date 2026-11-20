@@ -149,18 +149,27 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 
   const ensureWorktreeVisible = useCallback(
     (wt: Worktree) => {
-      // The main worktree is its project's row, which is always on screen.
-      if (wt.isMain) return
-      const scope = scopeForWorktree(wt)
-      const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
-      if (isGroupCollapsed(scope, key)) {
-        setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
+      // A project row is always on screen. Other hosts' mains in a merged
+      // section are ordinary rows and fall through to the repo expand below.
+      if (listModel.projectRowPaths.includes(wt.path)) {
+        return
+      }
+      // The model knows the real collapse scope — a section merged across
+      // hosts keys on `repo:<key>`, not on any one root.
+      const section = listModel.sections.find((s) => s.groups.some((g) => g.rows.some((r) => r.path === wt.path)))
+      const scope = section?.scope ?? scopeForWorktree(wt)
+      // Mains sit outside the groups, so only their repo can hide them.
+      if (!wt.isMain) {
+        const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
+        if (isGroupCollapsed(scope, key)) {
+          setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
+        }
       }
       if (scope !== '__unified__' && collapsedRepos[scope]) {
         setCollapsedRepos((prev) => ({ ...prev, [scope]: false }))
       }
     },
-    [scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, collapsedRepos, setCollapsedGroups, setCollapsedRepos]
+    [listModel, scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, collapsedRepos, setCollapsedGroups, setCollapsedRepos]
   )
 
   const switchToWorktreeByIndex = useCallback(
