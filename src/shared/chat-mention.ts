@@ -65,9 +65,23 @@ export function listChatMentionTargets(
   aliasesByPath: Record<string, string>,
   selfTabId: string
 ): ChatMentionTarget[] {
+  const live = worktrees.filter((w) => !w.prunable)
+  // How many worktrees each name could mean, counting every name
+  // resolveWorktreeQuery accepts (handle, alias, branch). A handle shared
+  // with another worktree — two `app` clones on main, or a handle equal to
+  // someone's alias — makes the server narrow by tab ref, and two default
+  // "Chat" tabs would then collide; the tab id never does.
+  const nameCount = new Map<string, number>()
+  for (const w of live) {
+    const names = new Set(
+      [worktreeHandle(w.repoRoot, w.branch), aliasesByPath[w.path], w.branch]
+        .filter((n): n is string => !!n)
+        .map((n) => n.toLowerCase())
+    )
+    for (const n of names) nameCount.set(n, (nameCount.get(n) ?? 0) + 1)
+  }
   const out: ChatMentionTarget[] = []
-  for (const w of worktrees) {
-    if (w.prunable) continue
+  for (const w of live) {
     const tree = panes[w.path]
     if (!tree) continue
     const tabs = getLeaves(tree)
@@ -76,10 +90,12 @@ export function listChatMentionTargets(
     const slugs = tabs.map((t) => slugifyTabLabel(tabLabel(t)))
     const handle = worktreeHandle(w.repoRoot, w.branch)
     const alias = aliasesByPath[w.path]
+    const handleShared = (nameCount.get(handle.toLowerCase()) ?? 0) > 1
     tabs.forEach((t, i) => {
       if (t.id === selfTabId) return
       const slug = slugs[i]
-      const unique = slug !== '' && slugs.indexOf(slug) === slugs.lastIndexOf(slug)
+      const unique =
+        !handleShared && slug !== '' && slugs.indexOf(slug) === slugs.lastIndexOf(slug)
       out.push({
         worktreePath: w.path,
         tabId: t.id,

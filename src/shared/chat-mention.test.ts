@@ -64,6 +64,23 @@ describe('listChatMentionTargets', () => {
     expect(targets[3].worktreeName).toBe('ness/feat-b')
   })
 
+  it('uses the tab id when the worktree handle is shared with another worktree', () => {
+    const clones = [wt('/x/app', 'main', { repoRoot: '/x/app' }), wt('/y/app', 'main', { repoRoot: '/y/app' })]
+    const panes = { '/x/app': leaf([{ id: 'xa' }]), '/y/app': leaf([{ id: 'ya' }]) }
+    expect(listChatMentionTargets(clones, panes, {}, '').map((t) => t.token)).toEqual([
+      'chat:app/main#xa',
+      'chat:app/main#ya'
+    ])
+    // A handle that equals another worktree's alias is just as ambiguous.
+    const aliased = listChatMentionTargets(
+      [wt('/a', 'feat-a'), wt('/b', 'feat-b')],
+      { '/a': leaf([{ id: 'ta' }]) },
+      { '/b': 'ness/feat-a' },
+      ''
+    )
+    expect(aliased.map((t) => t.token)).toEqual(['chat:ness/feat-a#ta'])
+  })
+
   it('round-trips through parseChatMention', () => {
     const [t] = listChatMentionTargets(worktrees, { '/a': leaf([{ customLabel: 'Fix Bug' }]) }, {}, '')
     expect(parseChatMention(`@${t.token}`)).toEqual({ worktree: 'ness/feat-a', tab: 'fix-bug' })
