@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 
+vi.mock('./debug', () => ({
+  log: () => {}
+}))
+
+import { ChatStartGate } from './chat-start-gate'
 import {
   deliverToTab,
   deliverToWorktreeChat,
@@ -94,7 +99,7 @@ function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   const respawn = vi.fn((_wt: string, tabId: string) => {
     live.add(tabId)
   })
-  return { send, wake, respawn, hasSession: (id) => live.has(id) }
+  return { send, wake, respawn, hasSession: (id) => live.has(id), isStarting: () => false }
 }
 
 describe('resolveWorktreeQuery', () => {
@@ -239,7 +244,7 @@ describe('deliverToWorktreeChat', () => {
     const send = vi.fn()
     const result = deliverToWorktreeChat(
       state,
-      { send, hasSession: () => false, wake: () => {}, respawn: () => {} },
+      { send, hasSession: () => false, isStarting: () => false, wake: () => {}, respawn: () => {} },
       A,
       'hi'
     )
@@ -308,5 +313,87 @@ describe('deliverToTab', () => {
     const d = { ...deps(), wake: vi.fn(), respawn: vi.fn(), hasSession: () => false }
     expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'wake-failed' })
     expect(d.send).not.toHaveBeenCalled()
+  })
+})
+
+/** Deps composed the way main/index.ts composes them: wake/respawn begin a
+ *  start on a real ChatStartGate that waits on a probe, and send goes
+ *  through afterStart. Also flips the tab awake, like wakeJsonClaudeTab. */
+function gatedDeps(getState: () => AppState, setState: (s: AppState) => void) {
+  const gate = new ChatStartGate()
+  const live = new Set<string>()
+  let release!: (ok: boolean) => void
+  const probe = new Promise<boolean>((r) => {
+    release = r
+  })
+  const delivered: string[] = []
+  const woken: string[] = []
+  const start = (wt: string, id: string): void => {
+    void gate.begin(id, async () => {
+      const ok = await probe
+      if (ok) live.add(id)
+      return ok
+    })
+    const st = getState()
+    const tree = st.terminals.panes[wt]
+    if (tree?.type === 'leaf') {
+      setState({
+        ...st,
+        terminals: {
+          ...st.terminals,
+          panes: {
+            ...st.terminals.panes,
+            [wt]: { ...tree, tabs: tree.tabs.map((t) => (t.id === id ? { ...t, mode: 'awake' as const } : t)) }
+          }
+        }
+      })
+    }
+  }
+  const d: ChatDeliveryDeps = {
+    hasSession: (id) => live.has(id),
+    isStarting: (id) => gate.isStarting(id),
+    wake: (wt, id) => {
+      woken.push(id)
+      start(wt, id)
+    },
+    respawn: (wt, id) => start(wt, id),
+    send: (id, text) => gate.afterStart(id, () => delivered.push(`${id}:${text}`))
+  }
+  return { d, gate, delivered, woken, release }
+}
+
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+describe('delivery while a start is in flight', () => {
+  it('reports success on wake and delivers once the start resolves', async () => {
+    let state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    const { d, delivered, release } = gatedDeps(() => state, (s) => (state = s))
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: true, tabId: 's1', woke: true })
+    expect(delivered).toEqual([])
+    release(true)
+    await flush()
+    expect(delivered).toEqual(['s1:hi'])
+  })
+
+  it('delivers nothing when the start fails', async () => {
+    let state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    const { d, delivered, release } = gatedDeps(() => state, (s) => (state = s))
+    deliverToTab(state, d, A, 's1', 'hi')
+    release(false)
+    await flush()
+    expect(delivered).toEqual([])
+  })
+
+  it('routes a second worktree notification to the tab that is still starting', async () => {
+    let state = makeState({
+      panes: { [A]: panes([{ id: 's1', mode: 'asleep' }, { id: 's2', mode: 'asleep' }]) }
+    })
+    const { d, delivered, woken, release } = gatedDeps(() => state, (s) => (state = s))
+    expect(deliverToWorktreeChat(state, d, A, 'one')).toMatchObject({ ok: true, sessionId: 's1' })
+    expect(deliverToWorktreeChat(state, d, A, 'two')).toMatchObject({ ok: true, sessionId: 's1' })
+    expect(woken).toEqual(['s1'])
+    release(true)
+    await flush()
+    expect(delivered).toEqual(['s1:one', 's1:two'])
   })
 })

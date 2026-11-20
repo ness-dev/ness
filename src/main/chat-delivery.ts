@@ -4,12 +4,17 @@ import { worktreeHandle } from '../shared/state/worktrees'
 import { findTabInWorktree } from '../shared/agent-tabs'
 
 export interface ChatDeliveryDeps {
-  /** Injects a user turn into a running json-mode chat session. */
+  /** Injects a user turn into a json-mode chat session. A session that is
+   *  still starting gets it once the start completes. */
   send: (sessionId: string, text: string) => void
   /** True when the session has a live subprocess to receive the message. */
   hasSession: (sessionId: string) => boolean
-  /** Re-spawns a slept json-claude tab's subprocess. Synchronous — the
-   *  session is live by the time this returns (or the spawn failed). */
+  /** True while the session's start is in flight — waiting on the
+   *  worktree's shell-env probe before it spawns. */
+  isStarting: (sessionId: string) => boolean
+  /** Re-spawns a slept json-claude tab's subprocess. Asynchronous: the
+   *  start usually waits on the shell-env probe, so the session is
+   *  typically still starting when this returns. */
   wake: (worktreePath: string, tabId: string) => void
   /** Starts the subprocess of an awake json-claude tab whose process is
    *  gone (crashed, or not yet respawned by a client). Idempotent with the
@@ -42,6 +47,21 @@ function pickLiveSession(
     }
   }
   return best
+}
+
+/** A json-claude tab whose start is in flight. A woken tab is already
+ *  'awake' but has no live session until its shell-env probe finishes, so
+ *  without this tier a second notification in that window would miss it —
+ *  and either fail or wake a different slept tab. */
+function pickStartingTab(state: AppState, deps: ChatDeliveryDeps, worktreePath: string): string | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type === 'json-claude' && deps.isStarting(tab.id)) return tab.id
+    }
+  }
+  return null
 }
 
 /** A slept json-claude tab to wake, preferring whichever tab its pane
@@ -148,7 +168,12 @@ export function deliverToTab(
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
   if ((tab.mode ?? 'awake') === 'asleep') deps.wake(worktreePath, tabId)
   else deps.respawn(worktreePath, tabId)
-  if (!deps.hasSession(tabId)) return { ok: false, reason: 'wake-failed' }
+  // Only a start that never began (or already failed) is a failure; one
+  // still in flight receives the message through `send` once it's up.
+  // That makes `ok` optimistic: if the start later fails, the gate drops
+  // the held send and logs it under [json-claude], after the caller has
+  // already been told it was delivered.
+  if (!deps.hasSession(tabId) && !deps.isStarting(tabId)) return { ok: false, reason: 'wake-failed' }
   deps.send(tabId, message)
   return { ok: true, tabId, woke: true }
 }
@@ -182,7 +207,10 @@ export function deliverToWorktreeChat(
   worktreePath: string,
   message: string
 ): ChatDeliveryResult {
-  const tabId = pickLiveSession(state, deps, worktreePath) ?? pickSleptTab(state, worktreePath)
+  const tabId =
+    pickLiveSession(state, deps, worktreePath) ??
+    pickStartingTab(state, deps, worktreePath) ??
+    pickSleptTab(state, worktreePath)
   // No chat tab at all — a terminal-only worktree.
   if (!tabId) return { ok: false, reason: 'no-chat-tab' }
   const result = deliverToTab(state, deps, worktreePath, tabId, message)
