@@ -27,8 +27,11 @@ import type {
 import type { Box } from '../subscription-graph-layout'
 
 // The subscription graph's drawing: node and edge renderers, the
-// graph → React Flow conversion, and the fit maths. No store or backend
-// here, so the marketing site renders the same cards from a fixture.
+// graph → React Flow conversion, and the fit maths. The marketing site
+// imports this file (site/src/components/AgentGraphMock.tsx) to draw the
+// same cards from a fixture, so keep it free of the store, the backend and
+// anything else that only exists inside the app. CI typechecks and builds
+// the site to catch a slip.
 
 export type GroupFlowNode = Node<{ group: GraphGroup }, 'worktree'>
 export type AgentFlowNode = Node<{ node: GraphAgentNode }, 'agent'>
