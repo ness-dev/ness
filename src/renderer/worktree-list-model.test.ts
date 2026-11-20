@@ -695,8 +695,7 @@ describe('homes', () => {
     expect(model.sections[0].homes[0].home).toEqual({
       showBranch: false,
       agents: 3,
-      running: 1,
-      needsYou: 1
+      byStatus: { processing: 1, 'needs-approval': 1, waiting: 0, idle: 1 }
     })
   })
 

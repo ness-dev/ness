@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { ChevronDown, ChevronRight, GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
-import type { SidebarDetailPrefs } from '../types'
+import type { PtyStatus, SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { RepoIcon, repoNameColor } from './RepoIcon'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
@@ -246,9 +246,7 @@ export const WorktreeTab = memo(function WorktreeTab({
               {formatPendingTool(pendingTool!)}
             </div>
           ) : (
-            <div className={`text-xs truncate ${home.needsYou > 0 ? 'text-warning' : 'text-faint'}`}>
-              {projectSummary(home)}
-            </div>
+            <ProjectStatusCounts home={home} />
           )}
         </div>
         {/* Desktop: "+" appears on hover, out of layout until then so the
@@ -417,14 +415,33 @@ export const WorktreeTab = memo(function WorktreeTab({
  *  planned before it's spun off into worktrees. */
 export const PROJECT_HOME_HINT = 'Main workspace'
 
-/** "3 running · 1 needs you" across the project's worktrees. */
-export function projectSummary(home: ProjectHomeModel): string {
-  if (home.agents === 0) return 'No worktrees yet'
-  const parts: string[] = []
-  if (home.running > 0) parts.push(`${home.running} running`)
-  if (home.needsYou > 0) parts.push(`${home.needsYou} need${home.needsYou === 1 ? 's' : ''} you`)
-  if (parts.length === 0) parts.push(`${home.agents} worktree${home.agents === 1 ? '' : 's'} idle`)
-  return parts.join(' · ')
+/** Order and colours of the project row's status tally: the same dots the
+ *  worktree rows use, minus the pulse so a row of them stays calm. */
+const STATUS_TALLY: { status: PtyStatus; dot: string }[] = [
+  { status: 'processing', dot: 'bg-success' },
+  { status: 'needs-approval', dot: 'bg-danger' },
+  { status: 'waiting', dot: 'bg-warning' },
+  { status: 'idle', dot: 'bg-faint' }
+]
+
+/** `● 3  ● 1  ● 2` — one coloured dot + count per status present across
+ *  the project's worktrees. Zero counts are omitted. */
+function ProjectStatusCounts({ home }: { home: ProjectHomeModel }): JSX.Element {
+  if (home.agents === 0) return <div className="text-xs text-faint truncate">No worktrees yet</div>
+  return (
+    <div className="flex items-center gap-2.5 text-xs text-dim tabular-nums">
+      {STATUS_TALLY.filter(({ status }) => home.byStatus[status] > 0).map(({ status, dot }) => (
+        <span
+          key={status}
+          className="inline-flex items-center gap-1"
+          title={`${home.byStatus[status]} ${STATUS_LABELS[status].toLowerCase().replace(/\.+$/, '')}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+          {home.byStatus[status]}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 /** Hover-revealed icon buttons. Desktop only — there is no hover on touch. */

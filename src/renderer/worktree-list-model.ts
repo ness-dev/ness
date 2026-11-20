@@ -67,10 +67,8 @@ export interface ProjectHomeModel {
   showBranch: boolean
   /** The repo's other in-flight worktrees (not merged, not snoozed). */
   agents: number
-  /** Of those, how many are processing right now. */
-  running: number
-  /** Of those, how many are waiting on the user or blocked on approval. */
-  needsYou: number
+  /** Those worktrees bucketed by their (worst-tab) status. */
+  byStatus: Record<PtyStatus, number>
 }
 
 /** Archive groups folded into one collapsed line at the bottom of a section. */
@@ -395,7 +393,11 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     const homes: WorktreeRowModel[] = []
     const workGroups: WorktreeListGroupModel[] = []
     const tailGroups: WorktreeListGroupModel[] = []
-    const agentStats = new Map<string, { agents: number; running: number; needsYou: number }>()
+    const agentStats = new Map<string, { agents: number; byStatus: Record<PtyStatus, number> }>()
+    const emptyStats = (): { agents: number; byStatus: Record<PtyStatus, number> } => ({
+      agents: 0,
+      byStatus: { processing: 0, 'needs-approval': 0, waiting: 0, idle: 0 }
+    })
     for (const group of groups) {
       const isTail = TAIL_KEYS.includes(group.key)
       const rest: WorktreeRowModel[] = []
@@ -406,10 +408,9 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
         }
         rest.push(row)
         if (isTail) continue
-        const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
+        const stats = agentStats.get(row.worktree.repoRoot) ?? emptyStats()
         stats.agents += 1
-        if (row.status === 'processing') stats.running += 1
-        if (row.status === 'waiting' || row.status === 'needs-approval') stats.needsYou += 1
+        stats.byStatus[row.status] += 1
         agentStats.set(row.worktree.repoRoot, stats)
       }
       const split =
@@ -434,7 +435,7 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       if (primaryIdx > 0) homes.unshift(...homes.splice(primaryIdx, 1))
     }
     for (const row of homes) {
-      const stats = agentStats.get(row.worktree.repoRoot) ?? { agents: 0, running: 0, needsYou: 0 }
+      const stats = agentStats.get(row.worktree.repoRoot) ?? emptyStats()
       row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
     }
     const tail: WorktreeTailModel | null =
