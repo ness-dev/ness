@@ -17,7 +17,7 @@ import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
 import { Tooltip } from './Tooltip'
 import { HotkeyBadge } from './HotkeyBadge'
-import { repoNameColor } from './RepoIcon'
+import { RepoIcon } from './RepoIcon'
 import { useBackend } from '../backend'
 import { useSettings } from '../store'
 import { useMetaHeld } from '../hooks/useMetaHeld'
@@ -223,10 +223,9 @@ export function WorktreeList({
         onContinue: locked || !onContinueWorktree ? undefined : () => beginContinue(worktree.path, worktree.branch),
         onSnooze: locked ? undefined : (e?: ReactMouseEvent) => onSnoozeRow(worktree.path, e),
         onUnsnooze: locked ? undefined : () => void backend.unsnooze(worktree.path),
-        // Pinning is an organisational choice, not a lifecycle action — the
-        // main worktree is pinnable too, so this gates on `deleting` alone
-        // rather than `locked`.
-        onTogglePin: deleting
+        // The main worktree is the project's Lead, already fixed at the top
+        // of its section, so pinning it would do nothing.
+        onTogglePin: locked
           ? undefined
           : () =>
               void (row.isPinned
@@ -258,124 +257,177 @@ export function WorktreeList({
     return actions
   }
 
+  const showTabsFor = (row: WorktreeRowModel): boolean =>
+    !!onSelectTab &&
+    !row.deleting &&
+    // A Lead's sub-chats are always listed — that's where the planning lives.
+    (!!row.lead || tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
+
+  const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
+    showTabsFor(row) && onSelectTab ? (
+      <WorktreeTabRows
+        worktreePath={row.path}
+        backendId={pathBackendId?.[row.path] ?? null}
+        activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
+        onSelectTab={onSelectTab}
+        onCloseTab={onCloseTab}
+      />
+    ) : null
+
+  const renderTab = (row: WorktreeRowModel): JSX.Element => (
+    <WorktreeTab
+      row={row}
+      variant={variant}
+      isActive={row.path === activeWorktreeId}
+      metaHeld={metaHeld}
+      density={density}
+      detailPrefs={detailPrefs}
+      isEditingAlias={editingAliasPath === row.path}
+      actions={rowActionsFor(row)}
+      originLabel={originByPath?.[row.path]}
+      onSelect={onSelectWorktree}
+      onStartAliasEdit={onStartAliasEdit}
+      onEndAliasEdit={onEndAliasEdit}
+    />
+  )
+
+  const renderLead = (row: WorktreeRowModel): JSX.Element => (
+    <div key={row.path} className="mb-1">
+      {renderTab(row)}
+      {/* Sub-chats hang off the card, indented under its icon. */}
+      <div className="mx-2">{renderTabRows(row)}</div>
+    </div>
+  )
+
+  const renderRow = (row: WorktreeRowModel): JSX.Element => (
+    <div key={row.path}>
+      <div className={row.path === activeWorktreeId ? 'bg-surface' : ''}>
+        {renderTab(row)}
+        {renderTabRows(row)}
+      </div>
+      {continueTarget?.path === row.path && (
+        <div className="border-y-2 border-accent bg-panel-raised p-2.5 shadow-inner">
+          <div className="text-xs font-semibold uppercase tracking-wider text-accent mb-1.5 px-0.5">
+            Continue on new branch
+          </div>
+          <input
+            type="text"
+            value={continueBranchName}
+            onChange={(e) => setContinueBranchName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitContinue()
+              if (e.key === 'Escape') cancelContinue()
+            }}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="new-branch-name"
+            autoFocus
+            disabled={continuing}
+            data-hotkeys="ignore"
+            className="w-full bg-app border-2 border-border-strong rounded px-2 py-1.5 text-xs text-fg-bright placeholder-faint outline-none focus:border-accent"
+          />
+          {continueError && (
+            <div className="text-xs text-danger mt-1 px-1 truncate" title={continueError}>
+              {continueError}
+            </div>
+          )}
+          <div className="flex gap-1 mt-1.5">
+            <button
+              onClick={() => void submitContinue()}
+              disabled={continuing || !continueBranchName.trim()}
+              className={`flex-1 text-xs bg-accent hover:opacity-90 disabled:opacity-40 rounded px-2 text-app font-semibold transition-opacity cursor-pointer ${
+                touch ? 'min-h-11' : 'py-1'
+              }`}
+            >
+              {continuing ? 'Continuing...' : 'Continue'}
+            </button>
+            <button
+              onClick={cancelContinue}
+              disabled={continuing}
+              className={`text-xs text-dim hover:text-fg px-2 transition-colors cursor-pointer ${
+                touch ? 'min-h-11' : 'py-1'
+              }`}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderPhantoms = (group: WorktreeListGroupModel): JSX.Element[] =>
+    group.phantomPRs.map((pr) => (
+      <AssignedPRRow
+        key={`${pr.repoRoot}#${pr.number}`}
+        pr={pr}
+        variant={variant}
+        showRepoLabel={model.showRepoLabels}
+        repoLabel={repoLabelFor(pr.repoRoot)}
+        onClick={onOpenAssignedPR ? () => onOpenAssignedPR(pr.repoRoot, pr.number) : undefined}
+      />
+    ))
+
   const renderGroup = (
     section: WorktreeRepoSectionModel,
     group: WorktreeListGroupModel
   ): JSX.Element => (
     <div key={group.key}>
-      <button
-        onClick={() => onToggleGroup(section.scope, group.key)}
-        className={`w-full flex items-center gap-1 px-3 text-xs text-dim hover:text-fg transition-colors cursor-pointer ${
-          touch ? 'min-h-11 py-2 sticky top-0 z-10 bg-app/95 backdrop-blur' : 'py-1.5'
-        }`}
-        title={group.collapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
-      >
-        <Chevron collapsed={group.collapsed} />
-        <span className="font-medium">{group.label}</span>
-        <span className="text-faint ml-auto">{group.count}</span>
-      </button>
-      {!group.collapsed &&
-        group.rows.map((row) => (
-          <div key={row.path}>
-            <div className={row.path === activeWorktreeId ? 'bg-surface' : ''}>
-            <WorktreeTab
-              row={row}
-              variant={variant}
-              isActive={row.path === activeWorktreeId}
-              metaHeld={metaHeld}
-              density={density}
-              detailPrefs={detailPrefs}
-              isEditingAlias={editingAliasPath === row.path}
-              actions={rowActionsFor(row)}
-              originLabel={originByPath?.[row.path]}
-              onSelect={onSelectWorktree}
-              onStartAliasEdit={onStartAliasEdit}
-              onEndAliasEdit={onEndAliasEdit}
-            />
-            {onSelectTab &&
-              !row.deleting &&
-              (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId)) && (
-              <WorktreeTabRows
-                worktreePath={row.path}
-                backendId={pathBackendId?.[row.path] ?? null}
-                activeTabId={row.path === activeWorktreeId ? (activeTabId ?? null) : null}
-                onSelectTab={onSelectTab}
-                onCloseTab={onCloseTab}
-              />
-            )}
-            </div>
-            {continueTarget?.path === row.path && (
-              <div className="border-y-2 border-accent bg-panel-raised p-2.5 shadow-inner">
-                <div className="text-xs font-semibold uppercase tracking-wider text-accent mb-1.5 px-0.5">
-                  Continue on new branch
-                </div>
-                <input
-                  type="text"
-                  value={continueBranchName}
-                  onChange={(e) => setContinueBranchName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void submitContinue()
-                    if (e.key === 'Escape') cancelContinue()
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  placeholder="new-branch-name"
-                  autoFocus
-                  disabled={continuing}
-                  data-hotkeys="ignore"
-                  className="w-full bg-app border-2 border-border-strong rounded px-2 py-1.5 text-xs text-fg-bright placeholder-faint outline-none focus:border-accent"
-                />
-                {continueError && (
-                  <div className="text-xs text-danger mt-1 px-1 truncate" title={continueError}>
-                    {continueError}
-                  </div>
-                )}
-                <div className="flex gap-1 mt-1.5">
-                  <button
-                    onClick={() => void submitContinue()}
-                    disabled={continuing || !continueBranchName.trim()}
-                    className={`flex-1 text-xs bg-accent hover:opacity-90 disabled:opacity-40 rounded px-2 text-app font-semibold transition-opacity cursor-pointer ${
-                      touch ? 'min-h-11' : 'py-1'
-                    }`}
-                  >
-                    {continuing ? 'Continuing...' : 'Continue'}
-                  </button>
-                  <button
-                    onClick={cancelContinue}
-                    disabled={continuing}
-                    className={`text-xs text-dim hover:text-fg px-2 transition-colors cursor-pointer ${
-                      touch ? 'min-h-11' : 'py-1'
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      {!group.collapsed &&
-        group.phantomPRs.map((pr) => (
-          <AssignedPRRow
-            key={`${pr.repoRoot}#${pr.number}`}
-            pr={pr}
-            variant={variant}
-            showRepoLabel={model.showRepoLabels}
-            repoLabel={repoLabelFor(pr.repoRoot)}
-            onClick={onOpenAssignedPR ? () => onOpenAssignedPR(pr.repoRoot, pr.number) : undefined}
-          />
-        ))}
+      <GroupHeader
+        label={group.label}
+        count={group.count}
+        collapsed={group.collapsed}
+        touch={touch}
+        onToggle={() => onToggleGroup(section.scope, group.key)}
+      />
+      {!group.collapsed && group.rows.map(renderRow)}
+      {!group.collapsed && renderPhantoms(group)}
     </div>
   )
 
+  // One fold for every archive group. Expanding flips each collapsed one
+  // open; collapsing closes whichever are open — so the fold always lands
+  // in a uniform state even if an older per-group toggle left them mixed.
+  const renderTail = (section: WorktreeRepoSectionModel): JSX.Element | null => {
+    const tail = section.tail
+    if (!tail) return null
+    return (
+      <div className="mt-1">
+        <GroupHeader
+          label={tail.groups.map((g) => g.label).join(' · ')}
+          count={tail.count}
+          collapsed={tail.collapsed}
+          touch={touch}
+          onToggle={() => {
+            for (const g of tail.groups) {
+              if (g.collapsed === tail.collapsed) onToggleGroup(section.scope, g.key)
+            }
+          }}
+        />
+        {!tail.collapsed &&
+          tail.groups.map((group) => (
+            <div key={group.key}>
+              {tail.groups.length > 1 && (
+                <div className="px-3 pl-7 pt-1 text-xs text-faint">{group.label}</div>
+              )}
+              {group.rows.map(renderRow)}
+              {renderPhantoms(group)}
+            </div>
+          ))}
+      </div>
+    )
+  }
+
+  const firstLead = model.sections.flatMap((s) => s.leads)[0]
+
   return (
     <>
-      {agentCount === 0 && onNewWorktree && (
-        <button
-          onClick={() => onNewWorktree()}
-          className="group relative mx-2 mb-2 mt-1 w-[calc(100%-1rem)] text-left bg-panel-raised border border-border-strong hover:border-accent rounded-lg overflow-hidden transition-colors cursor-pointer"
-        >
+      {agentCount === 0 && (firstLead || onNewWorktree) && (
+        <div className="group relative mx-2 mb-2 mt-1 bg-panel-raised border border-border-strong rounded-lg overflow-hidden">
           <div className="brand-gradient-bg h-0.5" />
-          <div className="p-3">
+          <button
+            onClick={() => (firstLead ? onSelectWorktree(firstLead.path) : onNewWorktree?.())}
+            className="w-full text-left p-3 pb-2 cursor-pointer hover:bg-surface/40 transition-colors"
+          >
             <div className="flex items-center gap-1.5 mb-1">
               <Sparkles className="icon-xs text-accent" />
               <span className="text-xs font-semibold uppercase tracking-wider text-accent">
@@ -383,18 +435,22 @@ export function WorktreeList({
               </span>
             </div>
             <div className="text-sm font-semibold text-fg-bright leading-snug">
-              Spawn your first agent
+              Tell your Lead what to build
             </div>
             <div className="text-xs text-dim mt-0.5 leading-snug">
-              Fork a branch and send a Claude into it.
+              Describe a task in the Lead chat and it spins up a worktree with an agent for it.
             </div>
-            {!touch && (
-              <div className="mt-2">
-                <HotkeyBadge action="newWorktree" />
-              </div>
-            )}
-          </div>
-        </button>
+          </button>
+          {onNewWorktree && (
+            <button
+              onClick={() => onNewWorktree()}
+              className="w-full flex items-center gap-1.5 px-3 pb-2.5 text-xs text-faint hover:text-fg transition-colors cursor-pointer"
+            >
+              <span>or start one yourself</span>
+              {!touch && <HotkeyBadge action="newWorktree" />}
+            </button>
+          )}
+        </div>
       )}
       {/* With no repo headers there's nowhere per-repo to put the nudge, so
           offer one repo at a time at the top; closing it moves to the next. */}
@@ -407,18 +463,23 @@ export function WorktreeList({
           onDismiss={onDismissHistoryPrompt}
         />
       )}
-      {model.sections.map((section) => {
+      {model.sections.map((section, i) => {
+        // Every real project gets a header, even when it's the only one —
+        // the project is the frame the Lead and its work sit in. Unified
+        // mode's synthetic section has no single project to name.
+        const showHeader = !section.unified
         const promptRoot =
           model.showRepoHeaders && !section.collapsed
             ? section.repoRoots.find((r) => historyPromptRepos?.includes(r.repoRoot))?.repoRoot
             : undefined
         return (
-        <div key={section.scope}>
-          {model.showRepoHeaders && (
+        <div key={section.scope} className={i > 0 ? 'mt-2 pt-2 border-t border-border' : ''}>
+          {showHeader && (
             <RepoHeader
               section={section}
               variant={variant}
               onToggle={() => onToggleRepo(section.scope)}
+              onNewWorktree={onNewWorktree ? () => onNewWorktree(section.repoRoot) : undefined}
               onRemove={onRemoveRepo}
               onOpenGraph={onOpenGraph}
             />
@@ -432,20 +493,8 @@ export function WorktreeList({
               onDismiss={onDismissHistoryPrompt}
             />
           )}
-          {!section.collapsed && agentCount > 0 && onNewWorktree && (
-            <button
-              onClick={() => onNewWorktree(section.unified ? undefined : section.repoRoot)}
-              className={`group relative w-full flex items-center gap-2 px-3 text-dim hover:bg-panel-raised transition-colors cursor-pointer overflow-hidden ${
-                touch ? 'min-h-11 py-3' : 'py-1.5'
-              }`}
-            >
-              <span className="absolute left-0 top-0 bottom-0 w-0.5 brand-gradient-flow-bar opacity-0 group-hover:opacity-100 transition-opacity" />
-              <Plus className="icon-sm shrink-0 text-dim group-hover:text-brand transition-colors" />
-              <span className="text-sm font-medium brand-gradient-flow-text-hover">Add worktree</span>
-              {!touch && (section.unified || !model.showRepoHeaders) && (
-                <HotkeyBadge action="newWorktree" className="ml-auto" />
-              )}
-            </button>
+          {!section.collapsed && section.leads.length > 0 && (
+            <div className="pt-1 pb-1">{section.leads.map(renderLead)}</div>
           )}
           {!section.collapsed &&
             section.pending.map((pending) => (
@@ -460,7 +509,8 @@ export function WorktreeList({
                 }
               />
             ))}
-          {!section.collapsed && section.groups.map((group) => renderGroup(section, group))}
+          {!section.collapsed && section.workGroups.map((group) => renderGroup(section, group))}
+          {!section.collapsed && renderTail(section)}
         </div>
         )
       })}
@@ -487,6 +537,36 @@ export function WorktreeList({
   )
 }
 
+/** Quiet by design: group headers organise the work, they shouldn't compete
+ *  with it. Sentence case, faint, chevron only as strong as the label. */
+function GroupHeader({
+  label,
+  count,
+  collapsed,
+  touch,
+  onToggle
+}: {
+  label: string
+  count: number
+  collapsed: boolean
+  touch: boolean
+  onToggle: () => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={onToggle}
+      className={`w-full flex items-center gap-1 px-3 text-xs text-faint hover:text-fg transition-colors cursor-pointer ${
+        touch ? 'min-h-11 py-2 sticky top-0 z-10 bg-app/95 backdrop-blur' : 'pt-2 pb-1'
+      }`}
+      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+    >
+      <Chevron collapsed={collapsed} />
+      <span>{label}</span>
+      <span className="ml-auto">{count}</span>
+    </button>
+  )
+}
+
 function Chevron({ collapsed }: { collapsed: boolean }): JSX.Element {
   return collapsed ? (
     <ChevronRight className="icon-xs shrink-0" />
@@ -499,71 +579,92 @@ function RepoHeader({
   section,
   variant,
   onToggle,
+  onNewWorktree,
   onRemove,
   onOpenGraph
 }: {
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
+  onNewWorktree?: () => void
   onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
   onOpenGraph?: (repoRoot: string) => void
 }): JSX.Element {
+  const touch = variant === 'touch'
+  // Secondary actions stay out of sight until hover: the usual way to start
+  // work is asking the Lead, so "+" is a fallback rather than a call to action.
+  const hoverAction = touch ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
   return (
-    <button
+    <div
       onClick={onToggle}
-      className={`group w-full flex items-center gap-1 px-3 mt-1 text-xs font-semibold uppercase tracking-wider text-dim hover:text-fg transition-colors cursor-pointer ${
-        variant === 'touch' ? 'min-h-11 py-2' : 'py-1.5'
-      }`}
+      role="button"
+      className={`group w-full flex items-center gap-2 px-3 cursor-pointer ${touch ? 'min-h-11 py-2' : 'py-1.5'}`}
       title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
-      <Chevron collapsed={section.collapsed} />
-      <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
-      {onOpenGraph && (
-        <span
-          role="button"
-          aria-label={`Subscription graph for ${section.repoName}`}
-          className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 text-faint hover:text-fg transition-opacity"
-          title={`Subscription graph for ${section.repoName}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onOpenGraph(section.repoRoot)
-          }}
-        >
-          <Waypoints className="icon-xs" />
-        </span>
-      )}
-      <span className={`${onOpenGraph ? 'ml-1.5' : 'ml-auto'} relative flex items-center`}>
-        <span className={`text-faint normal-case transition-opacity ${onRemove ? 'group-hover:opacity-0' : ''}`}>
-          {section.count}
-        </span>
-        {onRemove && (
-          <span
-            role="button"
-            className="absolute inset-0 flex items-center justify-end opacity-0 group-hover:opacity-100 text-faint hover:text-danger transition-opacity"
-            title={`Remove ${section.repoName} from workspace`}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (
-                window.confirm(
-                  // A merged section's members are matched by folder name,
-                  // so the one way to catch a wrong merge before detaching
-                  // an unrelated repo is to show exactly what will go.
-                  section.repoRoots.length > 1
-                    ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
-                        .map((r) => `• ${r.repoRoot}`)
-                        .join('\n')}\n\nWorktrees stay on disk everywhere.`
-                    : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
-                )
-              ) {
-                void onRemove(section.repoRoots)
-              }
-            }}
-          >
-            <X className="icon-xs" />
-          </span>
+      <RepoIcon repoName={section.repoName} className="text-base" />
+      <span className="truncate text-sm font-semibold text-fg-bright">{section.repoName}</span>
+      {section.collapsed && <span className="text-xs text-faint shrink-0">{section.count}</span>}
+      <span className="ml-auto flex items-center gap-1.5 shrink-0">
+        {onOpenGraph && (
+          <Tooltip label={`Subscription graph for ${section.repoName}`}>
+            <button
+              aria-label={`Subscription graph for ${section.repoName}`}
+              className={`${hoverAction} text-faint hover:text-fg transition-opacity cursor-pointer`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenGraph(section.repoRoot)
+              }}
+            >
+              <Waypoints className="icon-xs" />
+            </button>
+          </Tooltip>
         )}
+        {onRemove && (
+          <Tooltip label={`Remove ${section.repoName} from workspace`}>
+            <button
+              aria-label={`Remove ${section.repoName} from workspace`}
+              className={`${hoverAction} text-faint hover:text-danger transition-opacity cursor-pointer`}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (
+                  window.confirm(
+                    // A merged section's members are matched by folder name,
+                    // so the one way to catch a wrong merge before detaching
+                    // an unrelated repo is to show exactly what will go.
+                    section.repoRoots.length > 1
+                      ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
+                          .map((r) => `• ${r.repoRoot}`)
+                          .join('\n')}\n\nWorktrees stay on disk everywhere.`
+                      : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
+                  )
+                ) {
+                  void onRemove(section.repoRoots)
+                }
+              }}
+            >
+              <X className="icon-xs" />
+            </button>
+          </Tooltip>
+        )}
+        {onNewWorktree && (
+          <Tooltip label="New worktree" action="newWorktree">
+            <button
+              aria-label={`New worktree in ${section.repoName}`}
+              className={`${hoverAction} text-faint hover:text-fg transition-opacity cursor-pointer`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onNewWorktree()
+              }}
+            >
+              <Plus className="icon-sm" />
+            </button>
+          </Tooltip>
+        )}
+        <span className="text-faint">
+          <Chevron collapsed={section.collapsed} />
+        </span>
       </span>
-    </button>
+    </div>
   )
 }
 
