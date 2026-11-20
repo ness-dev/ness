@@ -303,10 +303,10 @@ export function WorktreeList({
 
   const renderRow = (row: WorktreeRowModel): JSX.Element => (
     <div key={row.path}>
-      <div className={row.path === activeWorktreeId ? 'bg-surface' : ''}>
+      <RowBlock active={row.path === activeWorktreeId}>
         {renderTab(row)}
         {renderTabRows(row)}
-      </div>
+      </RowBlock>
       {continueTarget?.path === row.path && (
         <div className="border-y-2 border-accent bg-panel-raised p-2.5 shadow-inner">
           <div className="text-xs font-semibold uppercase tracking-wider text-accent mb-1.5 px-0.5">
@@ -481,7 +481,7 @@ export function WorktreeList({
               alone collapses it. */}
           {!section.unified &&
             (home ? (
-              <ProjectBlock active={home.path === activeWorktreeId}>
+              <RowBlock active={home.path === activeWorktreeId}>
                 {renderTab(home, {
                   name: section.repoName,
                   collapsed: section.collapsed,
@@ -490,7 +490,7 @@ export function WorktreeList({
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}
                 {renderTabRows(home)}
-              </ProjectBlock>
+              </RowBlock>
             ) : (
               <RepoHeader
                 section={section}
@@ -505,7 +505,7 @@ export function WorktreeList({
               {section.homes.map((h) => {
                 const name = repoLabelFor(h.worktree.repoRoot)
                 return (
-                  <ProjectBlock key={h.path} active={h.path === activeWorktreeId}>
+                  <RowBlock key={h.path} active={h.path === activeWorktreeId}>
                     {renderTab(h, {
                       name,
                       actions: projectActions(name, [
@@ -513,7 +513,7 @@ export function WorktreeList({
                       ])
                     })}
                     {renderTabRows(h)}
-                  </ProjectBlock>
+                  </RowBlock>
                 )
               })}
             </div>
@@ -569,9 +569,11 @@ export function WorktreeList({
   )
 }
 
-/** A project row plus its tab rows. While main is open the whole block
- *  shares the selected background, like an ordinary active row does. */
-function ProjectBlock({ active, children }: { active: boolean; children: ReactNode }): JSX.Element {
+/** A row plus its tab rows, inset with rounded corners. The selected
+ *  background covers the whole block as one pill rather than bleeding to
+ *  the sidebar edges; rows inside pad by px-2 so text stays where a
+ *  full-width px-3 row would put it. */
+function RowBlock({ active, children }: { active: boolean; children: ReactNode }): JSX.Element {
   return <div className={`mx-1 rounded-md overflow-hidden ${active ? 'bg-surface' : ''}`}>{children}</div>
 }
 
@@ -750,7 +752,7 @@ function PendingWorktreeRow({
   return (
     <div
       onClick={onClick}
-      className={`group w-full text-left px-3 flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group mx-1 rounded-md text-left px-2 flex items-center gap-2 transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-3' : 'py-2'
       } ${isActive ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'}`}
     >
@@ -812,9 +814,9 @@ function AssignedPRRow({
           ? `Open PR #${pr.number} from ${pr.repoNameWithOwner} as a new worktree`
           : `PR #${pr.number} from ${pr.repoNameWithOwner} — awaiting your review`
       }
-      className={`group w-full text-left px-3 flex items-center gap-2 text-muted transition-colors border-l-2 border-transparent ${
+      className={`group mx-1 w-[calc(100%-0.5rem)] rounded-md text-left px-2 flex items-center gap-2 text-muted transition-colors ${
         touch ? 'min-h-11 py-3' : 'py-2'
-      } ${onClick ? 'hover:bg-panel-raised hover:text-fg hover:border-accent cursor-pointer' : 'cursor-default'}`}
+      } ${onClick ? 'hover:bg-panel-raised hover:text-fg cursor-pointer' : 'cursor-default'}`}
     >
       <GitPullRequest className={`icon-sm shrink-0 ${pr.isDraft ? 'text-dim' : 'text-accent'}`} />
       <div className="min-w-0 flex-1">

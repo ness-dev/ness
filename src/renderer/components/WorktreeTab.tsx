@@ -276,7 +276,7 @@ export const WorktreeTab = memo(function WorktreeTab({
     <div
       onClick={() => onSelect(row.path)}
       onContextMenu={onContextMenu}
-      className={`group w-full px-3 text-left flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group w-full px-2 text-left flex items-center gap-2 transition-colors cursor-pointer ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${deleting ? 'opacity-60 italic' : ''} ${
         isActive ? 'text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
