@@ -415,13 +415,15 @@ export const WorktreeTab = memo(function WorktreeTab({
  *  planned before it's spun off into worktrees. */
 export const PROJECT_HOME_HINT = 'Main workspace'
 
-/** Order and colours of the project row's status tally: the same dots the
- *  worktree rows use, minus the pulse so a row of them stays calm. */
-const STATUS_TALLY: { status: PtyStatus; dot: string }[] = [
-  { status: 'processing', dot: 'bg-success' },
-  { status: 'needs-approval', dot: 'bg-danger' },
-  { status: 'waiting', dot: 'bg-warning' },
-  { status: 'idle', dot: 'bg-faint' }
+/** Order and marks of the project row's status tally: the row dots'
+ *  colours minus the pulse, so a row of them stays calm. Needs-approval is
+ *  a diamond rather than a dot, so the state that wants you doesn't rely on
+ *  telling red from green. */
+const STATUS_TALLY: { status: PtyStatus; mark: string }[] = [
+  { status: 'processing', mark: 'w-1.5 h-1.5 rounded-full bg-success' },
+  { status: 'needs-approval', mark: 'w-1.5 h-1.5 rotate-45 bg-danger' },
+  { status: 'waiting', mark: 'w-1.5 h-1.5 rounded-full bg-warning' },
+  { status: 'idle', mark: 'w-1.5 h-1.5 rounded-full bg-faint' }
 ]
 
 /** `● 3  ● 1  ● 2` — one coloured dot + count per status present across
@@ -430,16 +432,15 @@ function ProjectStatusCounts({ home }: { home: ProjectHomeModel }): JSX.Element 
   if (home.agents === 0) return <div className="text-xs text-faint truncate">No worktrees yet</div>
   return (
     <div className="flex items-center gap-2.5 text-xs text-dim tabular-nums">
-      {STATUS_TALLY.filter(({ status }) => home.byStatus[status] > 0).map(({ status, dot }) => (
-        <span
-          key={status}
-          className="inline-flex items-center gap-1"
-          title={`${home.byStatus[status]} ${STATUS_LABELS[status].toLowerCase().replace(/\.+$/, '')}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-          {home.byStatus[status]}
-        </span>
-      ))}
+      {STATUS_TALLY.filter(({ status }) => home.byStatus[status] > 0).map(({ status, mark }) => {
+        const label = `${home.byStatus[status]} ${STATUS_LABELS[status].toLowerCase().replace(/\.+$/, '')}`
+        return (
+          <span key={status} className="inline-flex items-center gap-1" title={label} aria-label={label} role="img">
+            <span className={mark} aria-hidden />
+            <span aria-hidden>{home.byStatus[status]}</span>
+          </span>
+        )
+      })}
     </div>
   )
 }

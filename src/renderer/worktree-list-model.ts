@@ -434,10 +434,21 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
       const primaryIdx = homes.findIndex((h) => h.worktree.repoRoot === bucket.repoRoot)
       if (primaryIdx > 0) homes.unshift(...homes.splice(primaryIdx, 1))
     }
-    for (const row of homes) {
-      const stats = agentStats.get(row.worktree.repoRoot) ?? emptyStats()
-      row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
+    // Unified mode stacks one row per repo, so each counts its own repo. A
+    // section's project row heads every host's worktrees, so it counts all
+    // of them — otherwise remote ones that need you vanish from the tally.
+    const sectionStats = emptyStats()
+    for (const stats of agentStats.values()) {
+      sectionStats.agents += stats.agents
+      for (const k of Object.keys(stats.byStatus) as PtyStatus[]) sectionStats.byStatus[k] += stats.byStatus[k]
     }
+    homes.forEach((row, i) => {
+      const stats =
+        bucket.repoRoot !== UNIFIED_REPO_ROOT && i === 0
+          ? sectionStats
+          : (agentStats.get(row.worktree.repoRoot) ?? emptyStats())
+      row.home = { showBranch: !isBaseBranch(row.worktree.repoRoot, row.worktree.branch), ...stats }
+    })
     const tail: WorktreeTailModel | null =
       tailGroups.length === 0
         ? null

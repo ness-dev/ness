@@ -863,3 +863,30 @@ describe('project homes across hosts', () => {
     expect(model.projectRowPaths).toEqual(['/repos/alpha', '/repos/beta'])
   })
 })
+
+describe('project tally across hosts', () => {
+  const localRoot = '/Users/mike/dev/ness'
+  const remoteRoot = '/home/mike/code/ness'
+
+  it('counts every host’s worktrees on the project row, not just the primary’s', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [
+          wt({ path: localRoot, repoRoot: localRoot, isMain: true, branch: 'main' }),
+          wt({ path: remoteRoot, repoRoot: remoteRoot, isMain: true, branch: 'main' }),
+          wt({ path: '/w/local', repoRoot: localRoot }),
+          wt({ path: '/w/remote', repoRoot: remoteRoot })
+        ],
+        tabsByWorktree: { '/w/remote': [tab('tr')] },
+        statuses: { tr: 'needs-approval' }
+      })
+    )
+    const projectRow = model.sections[0].homes[0]
+    expect(projectRow.path).toBe(localRoot)
+    expect(projectRow.home!.agents).toBe(2)
+    expect(projectRow.home!.byStatus).toEqual({ processing: 0, 'needs-approval': 1, waiting: 0, idle: 1 })
+  })
+})
