@@ -31,7 +31,8 @@ function group(id: keyof typeof PATHS, name: string, branch: string, isMain = fa
     isMain,
     external: false,
     status: 'idle',
-    merged: false
+    merged: false,
+    closed: false
   }
 }
 

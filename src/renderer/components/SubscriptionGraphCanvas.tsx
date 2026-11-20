@@ -173,7 +173,7 @@ const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupFlowNode>): J
         {g.name !== g.branch && <span className="text-xs text-faint truncate">{g.branch}</span>}
         <span className="flex-1" />
         {g.isMain && <span className="text-xs text-faint shrink-0">main</span>}
-        {g.merged && <span className="text-xs text-accent shrink-0">merged</span>}
+        {g.merged && <span className="text-xs text-accent shrink-0">{g.closed ? 'closed' : 'merged'}</span>}
         {g.external && <span className="text-xs text-faint shrink-0">other repo</span>}
       </div>
     </div>
