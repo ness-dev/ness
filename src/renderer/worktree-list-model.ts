@@ -119,13 +119,17 @@ export interface WorktreeRepoSectionModel {
    *  across hosts; operations that act on "the repo" (remove) must act on
    *  each entry via its own backend. */
   repoRoots: SectionRepoRoot[]
-  /** Collapse-state scope key. The repoRoot for ordinary sections, the
+  /** Pinned-open / group-collapse scope key. The repoRoot for ordinary sections, the
    *  shared repo key for merged ones — so a merged section keeps one
    *  collapse state no matter which host's root came first. */
   scope: string
   repoName: string
   unified: boolean
+  /** Only the project row shows. True when the project neither holds the
+   *  active worktree nor is pinned open. */
   collapsed: boolean
+  /** The user pinned this project open so it stays expanded anywhere. */
+  pinnedOpen: boolean
   /** Every worktree grouped by status, main included. Overview surfaces
    *  (command center, task list) render this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
@@ -193,7 +197,12 @@ export interface WorktreeListModelInput {
   viewerLogin?: string | null
   assignedPRsByRepo?: Record<string, AssignedPR[]>
   unifiedRepos: boolean
-  collapsedRepos: Record<string, boolean>
+  /** Project scopes kept expanded regardless of where you are. */
+  pinnedOpenRepos: Record<string, boolean>
+  /** The selected worktree (or pending creation). Its project expands; the
+   *  others collapse to their project row unless pinned open. Absent →
+   *  nothing collapses. */
+  activeWorktreeId?: string | null
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   /** Touch surfaces don't bind Cmd+N, so they skip ordinal assignment. */
   assignOrdinals?: boolean
@@ -238,7 +247,8 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
     viewerLogin,
     assignedPRsByRepo,
     unifiedRepos,
-    collapsedRepos,
+    pinnedOpenRepos,
+    activeWorktreeId,
     isGroupCollapsed,
     assignOrdinals = true
   } = input
@@ -459,21 +469,30 @@ export function buildWorktreeListModel(input: WorktreeListModelInput): WorktreeL
           }
 
     const memberRoots = new Set(bucket.repoRoots.map((r) => r.repoRoot))
+    const sectionPending =
+      bucket.repoRoot === UNIFIED_REPO_ROOT
+        ? pendingWorktrees
+        : pendingWorktrees.filter((p) => memberRoots.has(p.repoRoot))
+    const unifiedSection = bucket.repoRoot === UNIFIED_REPO_ROOT
+    const holdsActive =
+      !!activeWorktreeId &&
+      (bucket.worktrees.some((w) => w.path === activeWorktreeId) ||
+        sectionPending.some((p) => p.id === activeWorktreeId))
+    const pinnedOpen = pinnedOpenRepos[bucket.scope] === true
     return {
       repoRoot: bucket.repoRoot,
       repoRoots: bucket.repoRoots,
       scope: bucket.scope,
       repoName: bucket.repoRoot === UNIFIED_REPO_ROOT ? 'All repos' : repoLabelFor(bucket.repoRoot),
       unified: bucket.repoRoot === UNIFIED_REPO_ROOT,
-      collapsed: collapsedRepos[bucket.scope] === true,
+      // Accordion: the project you're in is open, plus any pinned open.
+      collapsed: !unifiedSection && !!activeWorktreeId && !holdsActive && !pinnedOpen,
+      pinnedOpen,
       groups,
       homes,
       workGroups,
       tail,
-      pending:
-        bucket.repoRoot === UNIFIED_REPO_ROOT
-          ? pendingWorktrees
-          : pendingWorktrees.filter((p) => memberRoots.has(p.repoRoot)),
+      pending: sectionPending,
       count: groups.reduce((n, g) => n + g.count, 0)
     }
   })

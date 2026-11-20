@@ -49,7 +49,7 @@ interface SidebarProps {
   onOpenMyWeek: () => void
   width: number
   onToggleGroup: (scope: string, key: GroupKey) => void
-  onToggleRepo: (repoRoot: string) => void
+  onTogglePinnedOpen: (scope: string) => void
   unifiedRepos: boolean
   onToggleUnifiedRepos: () => void
   onCollapseSidebar: () => void
@@ -95,7 +95,7 @@ export function Sidebar({
   onOpenMyWeek,
   width,
   onToggleGroup,
-  onToggleRepo,
+  onTogglePinnedOpen,
   unifiedRepos,
   onToggleUnifiedRepos,
   onCollapseSidebar,
@@ -191,7 +191,7 @@ export function Sidebar({
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
           onToggleGroup={onToggleGroup}
-          onToggleRepo={onToggleRepo}
+          onTogglePinnedOpen={onTogglePinnedOpen}
           onNewWorktree={onNewWorktree}
           onDismissPendingWorktree={onDismissPendingWorktree}
           onContinueWorktree={onContinueWorktree}

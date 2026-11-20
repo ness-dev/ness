@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
-import { ChevronDown, ChevronRight, GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
+import { GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { PtyStatus, SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
 import { RepoIcon, repoNameColor } from './RepoIcon'
@@ -53,8 +53,10 @@ export interface ProjectRowProps {
   collapsed?: boolean
   /** Worktree count, shown beside the name while collapsed. */
   count?: number
+  /** Kept expanded even when you're working elsewhere. */
+  pinnedOpen?: boolean
   /** Absent in unified mode, where projects don't collapse individually. */
-  onToggleCollapse?: () => void
+  onTogglePinnedOpen?: () => void
   /** Project-level actions (graph, remove, new worktree). Desktop shows
    *  them as hover icons, or in the right-click menu when `menuOnly`;
    *  touch lists them all in the action sheet. */
@@ -266,20 +268,29 @@ export const WorktreeTab = memo(function WorktreeTab({
         {metaHeld && row.cmdOrdinal !== undefined && (
           <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />
         )}
-        {project.onToggleCollapse && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              project.onToggleCollapse!()
-            }}
-            aria-label={project.collapsed ? `Expand ${project.name}` : `Collapse ${project.name}`}
-            aria-expanded={!project.collapsed}
-            className={`shrink-0 text-faint hover:text-fg cursor-pointer ${
-              touch ? 'inline-flex items-center justify-center w-11 h-11 -mr-2' : 'p-0.5'
-            }`}
-          >
-            {project.collapsed ? <ChevronRight className="icon-xs" /> : <ChevronDown className="icon-xs" />}
-          </button>
+        {/* Opening a project is just clicking it; this keeps it open while
+            you work elsewhere. Shown on hover, or always once pinned so the
+            state is visible at rest. */}
+        {project.onTogglePinnedOpen && (
+          <Tooltip label={project.pinnedOpen ? 'Stop keeping open' : 'Keep open'} side="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                project.onTogglePinnedOpen!()
+              }}
+              aria-label={project.pinnedOpen ? `Stop keeping ${project.name} open` : `Keep ${project.name} open`}
+              aria-pressed={project.pinnedOpen ?? false}
+              className={`shrink-0 items-center justify-center cursor-pointer ${
+                project.pinnedOpen ? 'text-accent hover:text-fg' : 'text-faint hover:text-fg'
+              } ${
+                touch
+                  ? 'inline-flex w-11 h-11 -mr-2'
+                  : `p-0.5 ${project.pinnedOpen ? 'inline-flex' : 'hidden group-hover:inline-flex'}`
+              }`}
+            >
+              {project.pinnedOpen ? <Pin className="icon-xs fill-current" /> : <Pin className="icon-xs" />}
+            </button>
+          </Tooltip>
         )}
         {overlays}
       </div>
@@ -426,8 +437,9 @@ const STATUS_TALLY: { status: PtyStatus; mark: string }[] = [
   { status: 'idle', mark: 'w-1.5 h-1.5 rounded-full bg-faint' }
 ]
 
-/** `● 3  ● 1  ● 2` — one coloured dot + count per status present across
- *  the project's worktrees. Zero counts are omitted. */
+/** `● 3  ◆ 1  ● 2` — one coloured mark + count per status present across
+ *  the project's worktrees (a diamond for needs-approval, dots otherwise).
+ *  Zero counts are omitted. */
 function ProjectStatusCounts({ home }: { home: ProjectHomeModel }): JSX.Element {
   if (home.agents === 0) return <div className="text-xs text-faint truncate">No worktrees yet</div>
   return (

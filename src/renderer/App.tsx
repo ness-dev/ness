@@ -392,16 +392,14 @@ function DesktopApp(): JSX.Element {
   }, [rightPanelWidth])
   const collapse = useWorktreeCollapse()
   const {
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     unifiedRepos,
     setUnifiedRepos,
     isGroupCollapsed,
     toggleGroup,
-    toggleRepo
+    togglePinnedOpen
   } = collapse
-  const worktreeListModel = useWorktreeListModel(collapse)
+  const worktreeListModel = useWorktreeListModel(collapse, { activeWorktreeId })
   const handleSidebarResize = useCallback((delta: number) => {
     setSidebarWidth((w) => Math.max(160, Math.min(SIDEBAR_MAX_PX, w + delta)))
   }, [])
@@ -1189,8 +1187,6 @@ const setQuestStep = useCallback((next: QuestStep) => {
     unifiedRepos,
     prStatuses,
     mergedPaths,
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     isGroupCollapsed,
     activeWorktreeId,
@@ -2047,7 +2043,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenMyWeek={() => setShowMyWeek(true)}
             width={effectiveSidebarWidth}
             onToggleGroup={toggleGroup}
-            onToggleRepo={toggleRepo}
+            onTogglePinnedOpen={togglePinnedOpen}
             unifiedRepos={unifiedRepos}
             onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
             onCollapseSidebar={() => setSidebarVisible(false)}

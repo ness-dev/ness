@@ -32,8 +32,6 @@ interface UseHotkeyHandlersArgs {
   unifiedRepos: boolean
   prStatuses: Record<string, PRStatus | null>
   mergedPaths: Record<string, boolean>
-  collapsedRepos: Record<string, boolean>
-  setCollapsedRepos: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   activeWorktreeId: string | null
@@ -87,8 +85,6 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     unifiedRepos,
     prStatuses,
     mergedPaths,
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     isGroupCollapsed,
     activeWorktreeId,
@@ -151,25 +147,20 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     (wt: Worktree) => {
       // A project row is always on screen. Other hosts' mains in a merged
       // section are ordinary rows and fall through to the repo expand below.
-      if (listModel.projectRowPaths.includes(wt.path)) {
-        return
-      }
-      // The model knows the real collapse scope — a section merged across
-      // hosts keys on `repo:<key>`, not on any one root.
+      // Selecting a worktree makes its project the active one, which opens
+      // it, so only a collapsed status group can still hide it. Mains sit
+      // outside the groups entirely.
+      if (wt.isMain) return
+      // The model knows the real scope — a section merged across hosts keys
+      // on `repo:<key>`, not on any one root.
       const section = listModel.sections.find((s) => s.groups.some((g) => g.rows.some((r) => r.path === wt.path)))
       const scope = section?.scope ?? scopeForWorktree(wt)
-      // Mains sit outside the groups, so only their repo can hide them.
-      if (!wt.isMain) {
-        const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
-        if (isGroupCollapsed(scope, key)) {
-          setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
-        }
-      }
-      if (scope !== '__unified__' && collapsedRepos[scope]) {
-        setCollapsedRepos((prev) => ({ ...prev, [scope]: false }))
+      const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
+      if (isGroupCollapsed(scope, key)) {
+        setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
       }
     },
-    [listModel, scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, collapsedRepos, setCollapsedGroups, setCollapsedRepos]
+    [listModel, scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, setCollapsedGroups]
   )
 
   const switchToWorktreeByIndex = useCallback(

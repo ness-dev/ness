@@ -54,7 +54,8 @@ interface WorktreeListProps {
   onSelectTab?: (worktreePath: string, paneId: string, tabId: string) => void
   onCloseTab?: (worktreePath: string, tabId: string) => void
   onToggleGroup: (scope: string, key: GroupKey) => void
-  onToggleRepo: (repoRoot: string) => void
+  /** Keep a project expanded while you work elsewhere. */
+  onTogglePinnedOpen: (scope: string) => void
   onNewWorktree?: (repoRoot?: string) => void
   onDismissPendingWorktree?: (id: string) => void
   onContinueWorktree?: (worktreePath: string, newBranchName: string) => Promise<void>
@@ -135,7 +136,7 @@ export function WorktreeList({
   onSelectTab,
   onCloseTab,
   onToggleGroup,
-  onToggleRepo,
+  onTogglePinnedOpen,
   onNewWorktree,
   onDismissPendingWorktree,
   onContinueWorktree,
@@ -487,7 +488,8 @@ export function WorktreeList({
                   name: section.repoName,
                   collapsed: section.collapsed,
                   count: section.count,
-                  onToggleCollapse: () => onToggleRepo(section.scope),
+                  pinnedOpen: section.pinnedOpen,
+                  onTogglePinnedOpen: () => onTogglePinnedOpen(section.scope),
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}
                 {renderTabRows(home)}
@@ -496,7 +498,7 @@ export function WorktreeList({
               <RepoHeader
                 section={section}
                 variant={variant}
-                onToggle={() => onToggleRepo(section.scope)}
+                onToggle={() => onTogglePinnedOpen(section.scope)}
                 actions={projectActions(section.repoName, section.repoRoots)}
               />
             ))}

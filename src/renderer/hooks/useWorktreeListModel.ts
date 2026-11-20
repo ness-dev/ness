@@ -35,14 +35,14 @@ export function useTabsByWorktree(): Record<string, TerminalTab[]> {
  *  Inputs are merged upstream in `useMergedWorktrees`; see that file for
  *  why merging inputs beats concatenating per-backend models. */
 export function useWorktreeListModel(
-  collapse: Pick<WorktreeCollapseState, 'unifiedRepos' | 'collapsedRepos' | 'isGroupCollapsed'>,
-  options: { assignOrdinals?: boolean } = {}
+  collapse: Pick<WorktreeCollapseState, 'unifiedRepos' | 'pinnedOpenRepos' | 'isGroupCollapsed'>,
+  options: { assignOrdinals?: boolean; activeWorktreeId?: string | null } = {}
 ): WorktreeListModel {
-  const { assignOrdinals = true } = options
+  const { assignOrdinals = true, activeWorktreeId } = options
   const merged = useMergedWorktrees()
   const viewerLogin = useAppState((s) => s.settings.viewerLogin)
 
-  const { unifiedRepos, collapsedRepos, isGroupCollapsed } = collapse
+  const { unifiedRepos, pinnedOpenRepos, isGroupCollapsed } = collapse
 
   return useMemo(
     () =>
@@ -65,7 +65,8 @@ export function useWorktreeListModel(
         viewerLogin,
         assignedPRsByRepo: merged.assignedPRsByRepo,
         unifiedRepos,
-        collapsedRepos,
+        pinnedOpenRepos,
+        activeWorktreeId,
         isGroupCollapsed,
         assignOrdinals
       }),
@@ -73,7 +74,8 @@ export function useWorktreeListModel(
       merged,
       viewerLogin,
       unifiedRepos,
-      collapsedRepos,
+      pinnedOpenRepos,
+      activeWorktreeId,
       isGroupCollapsed,
       assignOrdinals
     ]
