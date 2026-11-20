@@ -9,6 +9,7 @@ import type {
 } from './types'
 import type { SnoozeEntry } from '../shared/state'
 import type { AssignedPR } from '../shared/state/assigned-prs'
+import { ROLLUP_STATUS_RANK } from '../shared/status-rollup'
 import { groupWorktrees, type GroupKey } from '../shared/worktree-sort'
 import type { DisplayStatus } from './worktree-row-style'
 
@@ -150,10 +151,10 @@ export interface WorktreeListModelInput {
   assignOrdinals?: boolean
 }
 
-/** Rolls a worktree's tabs up to one status, plus the pending tool belonging
- *  to whichever tab is actually blocking on approval. Needs-approval wins
- *  because the user must act; otherwise any working tab makes the worktree
- *  read as working, so a busy reviewer beside an idle chat shows green. */
+/** Rolls a worktree's tabs up by `ROLLUP_STATUS_RANK`, plus the pending tool
+ *  belonging to whichever tab is actually blocking on approval. A processing
+ *  tab masks a waiting one, so a busy reviewer beside a waiting chat shows
+ *  green, not yellow. */
 function aggregate(
   tabs: TerminalTab[],
   statuses: Record<string, PtyStatus>,
@@ -165,8 +166,7 @@ function aggregate(
     if (s === 'needs-approval') {
       return { status: 'needs-approval', pendingTool: pendingTools[tab.id] || null }
     }
-    if (s === 'processing') status = 'processing'
-    if (s === 'waiting' && status === 'idle') status = 'waiting'
+    if (s && ROLLUP_STATUS_RANK[s] > ROLLUP_STATUS_RANK[status]) status = s
   }
   return { status, pendingTool: null }
 }
