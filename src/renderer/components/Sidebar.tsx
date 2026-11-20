@@ -40,6 +40,8 @@ interface SidebarProps {
   onOpenAddBackend: () => void
   onOpenHotkeyCheatsheet: () => void
   onOpenActivity: () => void
+  /** Opens the subscription graph; a repo root scopes it to that project. */
+  onOpenSubscriptionGraph: (repoRoot?: string) => void
   onOpenCleanup: () => void
   onOpenTaskList: () => void
   onOpenCommandCenter: () => void
@@ -85,6 +87,7 @@ export function Sidebar({
   onOpenAddBackend,
   onOpenHotkeyCheatsheet,
   onOpenActivity,
+  onOpenSubscriptionGraph,
   onOpenCleanup,
   onOpenTaskList,
   onOpenCommandCenter,
@@ -185,6 +188,7 @@ export function Sidebar({
           onDeleteWorktree={onDeleteWorktree}
           onPruneWorktrees={onPruneWorktrees}
           onRemoveRepo={onRemoveRepo}
+          onOpenGraph={onOpenSubscriptionGraph}
           onOpenAssignedPR={onOpenAssignedPR}
           historyPromptRepos={historyPromptRepos}
           onOpenHistoryTracking={onOpenHistoryTracking}
@@ -209,6 +213,7 @@ export function Sidebar({
         onOpenNewProject={onOpenNewProject}
         onAddRepo={onAddRepo}
         onOpenActivity={onOpenActivity}
+        onOpenSubscriptionGraph={() => onOpenSubscriptionGraph()}
         onOpenMyWeek={onOpenMyWeek}
         onOpenHotkeyCheatsheet={onOpenHotkeyCheatsheet}
         onOpenSettings={onOpenSettings}

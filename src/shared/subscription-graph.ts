@@ -54,6 +54,7 @@ export interface GraphPRNode {
   url: string
   state: PRStatus['state']
   checks: PRStatus['checksOverall']
+  hasConflict: boolean | null
   reviewDecision: PRStatus['reviewDecision']
 }
 
@@ -182,6 +183,7 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
         url: pr.url,
         state: pr.state,
         checks: pr.checksOverall,
+        hasConflict: pr.hasConflict,
         reviewDecision: pr.reviewDecision
       })
     }
