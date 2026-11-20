@@ -49,6 +49,21 @@ function pickLiveSession(
   return best
 }
 
+/** A json-claude tab whose start is in flight. A woken tab is already
+ *  'awake' but has no live session until its shell-env probe finishes, so
+ *  without this tier a second notification in that window would miss it —
+ *  and either fail or wake a different slept tab. */
+function pickStartingTab(state: AppState, deps: ChatDeliveryDeps, worktreePath: string): string | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type === 'json-claude' && deps.isStarting(tab.id)) return tab.id
+    }
+  }
+  return null
+}
+
 /** A slept json-claude tab to wake, preferring whichever tab its pane
  *  had focused. */
 function pickSleptTab(state: AppState, worktreePath: string): string | null {
@@ -155,6 +170,9 @@ export function deliverToTab(
   else deps.respawn(worktreePath, tabId)
   // Only a start that never began (or already failed) is a failure; one
   // still in flight receives the message through `send` once it's up.
+  // That makes `ok` optimistic: if the start later fails, the gate drops
+  // the held send and logs it under [json-claude], after the caller has
+  // already been told it was delivered.
   if (!deps.hasSession(tabId) && !deps.isStarting(tabId)) return { ok: false, reason: 'wake-failed' }
   deps.send(tabId, message)
   return { ok: true, tabId, woke: true }
@@ -189,7 +207,10 @@ export function deliverToWorktreeChat(
   worktreePath: string,
   message: string
 ): ChatDeliveryResult {
-  const tabId = pickLiveSession(state, deps, worktreePath) ?? pickSleptTab(state, worktreePath)
+  const tabId =
+    pickLiveSession(state, deps, worktreePath) ??
+    pickStartingTab(state, deps, worktreePath) ??
+    pickSleptTab(state, worktreePath)
   // No chat tab at all — a terminal-only worktree.
   if (!tabId) return { ok: false, reason: 'no-chat-tab' }
   const result = deliverToTab(state, deps, worktreePath, tabId, message)
