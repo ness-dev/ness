@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, History } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, History, Waypoints } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
 import type { GroupKey } from '../../shared/worktree-sort'
@@ -60,6 +60,8 @@ interface WorktreeListProps {
   onDeleteWorktree?: (path: string) => Promise<void>
   onPruneWorktrees?: (repoRoot: string) => Promise<void>
   onRemoveRepo?: (roots: SectionRepoRoot[]) => Promise<void>
+  /** Opens the subscription graph scoped to a repo. */
+  onOpenGraph?: (repoRoot: string) => void
   onOpenAssignedPR?: (repoRoot: string, prNumber: number) => void
   /** Repos to offer "Install history tracking" for (loch installed, not yet
    *  recording, not dismissed). Omit to hide the prompt entirely. */
@@ -139,6 +141,7 @@ export function WorktreeList({
   onDeleteWorktree,
   onPruneWorktrees,
   onRemoveRepo,
+  onOpenGraph,
   onOpenAssignedPR,
   historyPromptRepos,
   onOpenHistoryTracking,
@@ -417,6 +420,7 @@ export function WorktreeList({
               variant={variant}
               onToggle={() => onToggleRepo(section.scope)}
               onRemove={onRemoveRepo}
+              onOpenGraph={onOpenGraph}
             />
           )}
           {promptRoot && onOpenHistoryTracking && onDismissHistoryPrompt && (
@@ -495,12 +499,14 @@ function RepoHeader({
   section,
   variant,
   onToggle,
-  onRemove
+  onRemove,
+  onOpenGraph
 }: {
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
   onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
+  onOpenGraph?: (repoRoot: string) => void
 }): JSX.Element {
   return (
     <button
@@ -512,7 +518,21 @@ function RepoHeader({
     >
       <Chevron collapsed={section.collapsed} />
       <span className={`truncate ${repoNameColor(section.repoName)}`}>{section.repoName}</span>
-      <span className="ml-auto relative flex items-center">
+      {onOpenGraph && (
+        <span
+          role="button"
+          aria-label={`Subscription graph for ${section.repoName}`}
+          className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 text-faint hover:text-fg transition-opacity"
+          title={`Subscription graph for ${section.repoName}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenGraph(section.repoRoot)
+          }}
+        >
+          <Waypoints className="icon-xs" />
+        </span>
+      )}
+      <span className={`${onOpenGraph ? 'ml-1.5' : 'ml-auto'} relative flex items-center`}>
         <span className={`text-faint normal-case transition-opacity ${onRemove ? 'group-hover:opacity-0' : ''}`}>
           {section.count}
         </span>

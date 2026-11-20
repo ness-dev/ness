@@ -23,6 +23,8 @@ interface CollapsedSidebarProps {
   onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenActivity: () => void
+  /** Opens the subscription graph; a repo root scopes it to that project. */
+  onOpenSubscriptionGraph: (repoRoot?: string) => void
   onOpenMyWeek: () => void
   onOpenHotkeyCheatsheet: () => void
   onOpenSettings: () => void
@@ -39,6 +41,7 @@ export function CollapsedSidebar({
   onOpenCommandCenter,
   onOpenNewProject,
   onOpenActivity,
+  onOpenSubscriptionGraph,
   onOpenMyWeek,
   onOpenHotkeyCheatsheet,
   onOpenSettings
@@ -171,6 +174,7 @@ export function CollapsedSidebar({
         onOpenNewProject={onOpenNewProject}
         onAddRepo={onAddRepo}
         onOpenActivity={onOpenActivity}
+        onOpenSubscriptionGraph={() => onOpenSubscriptionGraph()}
         onOpenMyWeek={onOpenMyWeek}
         onOpenHotkeyCheatsheet={onOpenHotkeyCheatsheet}
         onOpenSettings={onOpenSettings}

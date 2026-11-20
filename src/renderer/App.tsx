@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition, lazy, Suspense } from 'react'
 import { NessMark } from './components/NessMark'
 import { pickActiveAnnouncement } from '../shared/announcement-pick'
 import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, selectHistoryPromptRepos, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
@@ -12,7 +12,7 @@ import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
 import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
-import { getLeaves, findLeaf } from '../shared/state/terminals'
+import { getLeaves, findLeaf, findLeafByTabId } from '../shared/state/terminals'
 import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
 import { SCALES, scaleSpec } from '../shared/state/settings'
@@ -47,6 +47,8 @@ import { ImportWorkStep } from './components/ImportWorkStep'
 import { AgentIcon } from './components/AgentIcon'
 import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
+// Lazy: React Flow + ELK are only needed once someone opens the graph.
+const SubscriptionGraphView = lazy(() => import('./components/SubscriptionGraphView'))
 import { CommandCenter } from './components/CommandCenter'
 import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
@@ -462,6 +464,8 @@ function DesktopApp(): JSX.Element {
   const [showMyWeek, setShowMyWeek] = useState(false)
   const [showActivity, setShowActivity] = useState(false)
   const [showCleanup, setShowCleanup] = useState(false)
+  /** Repo the subscription graph is showing, or null when it's closed. */
+  const [graphRepo, setGraphRepo] = useState<string | null>(null)
   const [showCommandCenter, setShowCommandCenter] = useState(false)
   const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -1017,6 +1021,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowNewWorktree(false)
           setShowActivity(false)
           setShowCleanup(false)
+          setGraphRepo(null)
           setShowCommandCenter(false)
           setShowTaskList(false)
         }
@@ -1034,6 +1039,35 @@ const setQuestStep = useCallback((next: QuestStep) => {
   )
 
   const handleEndAliasEdit = useCallback(() => setEditingAliasPath(null), [])
+
+  const handleOpenSubscriptionGraph = useCallback(
+    (repoRoot?: string) => {
+      const repo =
+        repoRoot ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined) ?? repoRoots[0]
+      if (!repo) return
+      setShowNewWorktree(false)
+      setShowActivity(false)
+      setShowCleanup(false)
+      setShowCommandCenter(false)
+      setShowTaskList(false)
+      setGraphRepo(repo)
+    },
+    [activeWorktreeId, worktreeRepoByPath, repoRoots]
+  )
+  const handleGraphFocusTab = useCallback(
+    (wtPath: string, tabId: string) => {
+      const tree = panes[wtPath]
+      const leaf = tree ? findLeafByTabId(tree, tabId) : null
+      if (leaf) handleSidebarSelectTab(wtPath, leaf.id, tabId)
+      else handleSidebarSelectWorktree(wtPath)
+    },
+    [panes, handleSidebarSelectTab, handleSidebarSelectWorktree]
+  )
+  const handleCloseSubscriptionGraph = useCallback(() => setGraphRepo(null), [])
+  // Any other full-content view replaces the graph.
+  useEffect(() => {
+    if (showNewWorktree || showActivity || showCleanup || showCommandCenter) setGraphRepo(null)
+  }, [showNewWorktree, showActivity, showCleanup, showCommandCenter])
 
   // Hoisted for RightColumn's memo, so the sidebar's optimistic highlight
   // render doesn't re-render the whole right column with unchanged data.
@@ -1072,7 +1106,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const workspaceVisible =
     !showNewWorktree &&
     !showActivity &&
-    !showCleanup &&
+    !showCleanup && graphRepo === null &&
     !showCommandCenter &&
     reportIssueState === null &&
     !!activeWorktreeId &&
@@ -1784,7 +1818,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       return !!tree && getLeaves(tree).some((l) => l.tabs.length > 0)
     })()
   const inContentOverlay =
-    showNewWorktree || showActivity || showCleanup || showCommandCenter || reportIssueState !== null
+    showNewWorktree || showActivity || showCleanup || graphRepo !== null || showCommandCenter || reportIssueState !== null
   const activeIsPending =
     isPendingId(activeWorktreeId) && pendingWorktrees.some((p) => p.id === activeWorktreeId)
   const activeIsDeleting = !!activeWorktreeId && !!pendingDeletionByPath[activeWorktreeId]
@@ -1999,6 +2033,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenAddBackend={() => setShowAddBackend(true)}
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenActivity={() => setShowActivity(true)}
+            onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenCleanup={() => setShowCleanup(true)}
             onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
@@ -2038,6 +2073,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             }}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenActivity={() => setShowActivity(true)}
+            onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenMyWeek={() => setShowMyWeek(true)}
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenSettings={() => setShowSettings(true)}
@@ -2064,7 +2100,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           const everOpened = openedWorktrees.has(mountKey)
           const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
           if (!eagerMount && !everOpened && !isSelected) return null
-          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
+          const isVisible = !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
           return (
             <div
               key={`${backendId}\u0000${wt.path}`}
@@ -2114,7 +2150,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     singleScreenMode || sidebarVisible ? 0 : 48
                   }
                   topBarTrailingExtendPx={
-                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null
+                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null
                       ? rightColumnHidden
                         ? 48
                         : rightPanelWidth + 1
@@ -2177,6 +2213,23 @@ const setQuestStep = useCallback((next: QuestStep) => {
             />
           </div>
         )}
+        {graphRepo !== null && (
+          <div className="flex-1 min-w-0 flex">
+            {/* The repo can be on any backend (the sidebar merges them all),
+                so the view reads the one that owns it, not the active one. */}
+            <BackendScope backendId={mergedData.repoBackendId[graphRepo] ?? null}>
+            <Suspense fallback={<div className="flex-1 bg-app" />}>
+              <SubscriptionGraphView
+                repoRoot={graphRepo}
+                onChangeRepo={setGraphRepo}
+                onClose={handleCloseSubscriptionGraph}
+                onFocusTab={handleGraphFocusTab}
+                onOpenWorktree={handleSidebarSelectWorktree}
+              />
+            </Suspense>
+            </BackendScope>
+          </div>
+        )}
         {showCommandCenter && (
           <CommandCenter
             model={worktreeListModel}
@@ -2192,6 +2245,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(false)
               setShowActivity(false)
               setShowCleanup(false)
+              setGraphRepo(null)
               setActiveWorktreeId(path)
             }}
             onToggleGroup={toggleGroup}
@@ -2218,7 +2272,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             </div>
           </div>
         )}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
           const pending = pendingWorktrees.find((p) => p.id === activeWorktreeId)
           if (!pending) return null
           return (
@@ -2230,7 +2284,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             />
           )
         })()}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
           <DeletingWorktreeScreen
             deletion={pendingDeletionByPath[activeWorktreeId]}
             onDismiss={handleDismissPendingDeletion}
@@ -2248,10 +2302,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
             out. macOS app-region rects are union/diff'd in DOM order (last wins per pixel), so a
             `drag-region` here — rendered after the tab bar — would re-mark the tab pixels as
             draggable and swallow clicks on tabs that overflow above the right column. */}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <BackendScope backendId={selectedBackendId}><div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
@@ -2276,7 +2330,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onBuildCustomTool={handleBuildCustomTool}
           /></div></div></BackendScope>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
             worktreePath={activeWorktreeId}
             onExpand={() => setRightColumnHidden(false)}
@@ -2328,6 +2382,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowNewWorktree(false)
           setShowActivity(false)
           setShowCleanup(false)
+          setGraphRepo(null)
           setShowCommandCenter(false)
           setActiveWorktreeId(path)
         }}
