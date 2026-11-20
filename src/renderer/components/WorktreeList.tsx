@@ -11,7 +11,7 @@ import type {
   WorktreeRowModel
 } from '../worktree-list-model'
 import { repoLabelFor } from '../worktree-list-model'
-import { WorktreeTab, type WorktreeListVariant } from './WorktreeTab'
+import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
@@ -223,9 +223,9 @@ export function WorktreeList({
         onContinue: locked || !onContinueWorktree ? undefined : () => beginContinue(worktree.path, worktree.branch),
         onSnooze: locked ? undefined : (e?: ReactMouseEvent) => onSnoozeRow(worktree.path, e),
         onUnsnooze: locked ? undefined : () => void backend.unsnooze(worktree.path),
-        // The main worktree is the project's Lead, already fixed at the top
-        // of its section, so pinning it would do nothing — but a pin set
-        // before Leads existed stays clearable rather than stranded.
+        // The main worktree is its project's row, already fixed at the top,
+        // so pinning it would do nothing — but a pin set before that stays
+        // clearable rather than stranded.
         onTogglePin: deleting || (worktree.isMain && !row.isPinned)
           ? undefined
           : () =>
@@ -261,10 +261,10 @@ export function WorktreeList({
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // A Lead's sub-chats are listed unless tab rows are switched off entirely
-    // — that's where the planning lives, so 'selected' doesn't hide them.
-    (tabsExpansion === 'all' ||
-      (tabsExpansion === 'selected' && (!!row.lead || row.path === activeWorktreeId)))
+    // A project row stays one line: its chats live in the tab strip once
+    // it's open, not as a tree hanging off the project name.
+    !row.home &&
+    (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -277,8 +277,9 @@ export function WorktreeList({
       />
     ) : null
 
-  const renderTab = (row: WorktreeRowModel): JSX.Element => (
+  const renderTab = (row: WorktreeRowModel, project?: ProjectRowProps): JSX.Element => (
     <WorktreeTab
+      project={project}
       row={row}
       variant={variant}
       isActive={row.path === activeWorktreeId}
@@ -294,13 +295,21 @@ export function WorktreeList({
     />
   )
 
-  const renderLead = (row: WorktreeRowModel): JSX.Element => (
-    <div key={row.path} className="mb-1">
-      {renderTab(row)}
-      {/* Sub-chats hang off the card, indented under its icon. */}
-      <div className="mx-2">{renderTabRows(row)}</div>
-    </div>
+  const projectActions = (repoName: string, repoRoots: SectionRepoRoot[]): JSX.Element => (
+    <ProjectActions
+      repoName={repoName}
+      repoRoots={repoRoots}
+      onNewWorktree={onNewWorktree ? () => onNewWorktree(repoRoots[0]?.repoRoot) : undefined}
+      onRemove={onRemoveRepo}
+      onOpenGraph={onOpenGraph}
+    />
   )
+
+  // The section's own project row: the local checkout's main worktree when
+  // the section spans hosts, else its only one. Other hosts' mains fall back
+  // to ordinary rows under it.
+  const primaryHome = (section: WorktreeRepoSectionModel): WorktreeRowModel | undefined =>
+    section.homes.find((h) => h.worktree.repoRoot === section.repoRoot) ?? section.homes[0]
 
   const renderRow = (row: WorktreeRowModel): JSX.Element => (
     <div key={row.path}>
@@ -420,15 +429,15 @@ export function WorktreeList({
     )
   }
 
-  const firstLead = model.sections.flatMap((s) => s.leads)[0]
+  const firstHome = model.sections.flatMap((s) => s.homes)[0]
 
   return (
     <>
-      {agentCount === 0 && (firstLead || onNewWorktree) && (
+      {agentCount === 0 && (firstHome || onNewWorktree) && (
         <div className="group relative mx-2 mb-2 mt-1 bg-panel-raised border border-border-strong rounded-lg overflow-hidden">
           <div className="brand-gradient-bg h-0.5" />
           <button
-            onClick={() => (firstLead ? onSelectWorktree(firstLead.path) : onNewWorktree?.())}
+            onClick={() => (firstHome ? onSelectWorktree(firstHome.path) : onNewWorktree?.())}
             className="w-full text-left p-3 pb-2 cursor-pointer hover:bg-surface/40 transition-colors"
           >
             <div className="flex items-center gap-1.5 mb-1">
@@ -438,10 +447,10 @@ export function WorktreeList({
               </span>
             </div>
             <div className="text-sm font-semibold text-fg-bright leading-snug">
-              Tell your Lead what to build
+              Ask your project for what you want built
             </div>
             <div className="text-xs text-dim mt-0.5 leading-snug">
-              Describe a task in the Lead chat and it spins up a worktree with an agent for it.
+              Open the project, describe a task in its chat, and it spins up a worktree with an agent for it.
             </div>
           </button>
           {onNewWorktree && (
@@ -467,28 +476,51 @@ export function WorktreeList({
         />
       )}
       {model.sections.map((section, i) => {
-        // Every real project gets a header, even when it's the only one —
-        // the project is the frame the Lead and its work sit in. Unified
-        // mode's synthetic section has no single project to name.
-        const showHeader = !section.unified
+        const home = section.unified ? undefined : primaryHome(section)
+        const otherHomes = section.unified ? [] : section.homes.filter((h) => h !== home)
         const promptRoot =
-          showHeader && !section.collapsed
+          !section.unified && !section.collapsed
             ? section.repoRoots.find((r) => historyPromptRepos?.includes(r.repoRoot))?.repoRoot
             : undefined
         return (
         <div key={section.scope} className={i > 0 ? 'mt-2 pt-2 border-t border-border' : ''}>
-          {showHeader && (
-            <RepoHeader
-              section={section}
-              variant={variant}
-              onToggle={() => onToggleRepo(section.scope)}
-              onNewWorktree={onNewWorktree ? () => onNewWorktree(section.repoRoot) : undefined}
-              onRemove={onRemoveRepo}
-              onOpenGraph={onOpenGraph}
-            />
-          )}
-          {!section.collapsed && section.leads.length > 0 && (
-            <div className="pt-1 pb-1">{section.leads.map(renderLead)}</div>
+          {/* Every real project gets a row, even when it's the only one.
+              Clicking the project opens its main workspace; the chevron
+              alone collapses it. */}
+          {!section.unified &&
+            (home ? (
+              renderTab(home, {
+                name: section.repoName,
+                collapsed: section.collapsed,
+                count: section.count,
+                onToggleCollapse: () => onToggleRepo(section.scope),
+                actions: projectActions(section.repoName, section.repoRoots)
+              })
+            ) : (
+              <RepoHeader
+                section={section}
+                variant={variant}
+                onToggle={() => onToggleRepo(section.scope)}
+                actions={projectActions(section.repoName, section.repoRoots)}
+              />
+            ))}
+          {/* Unified mode lists every project up top, then the shared groups. */}
+          {section.unified && section.homes.length > 0 && (
+            <div className="pb-2 mb-1 border-b border-border">
+              {section.homes.map((h) => {
+                const name = repoLabelFor(h.worktree.repoRoot)
+                return (
+                  <div key={h.path}>
+                    {renderTab(h, {
+                      name,
+                      actions: projectActions(name, [
+                        { backendId: pathBackendId?.[h.path] ?? null, repoRoot: h.worktree.repoRoot }
+                      ])
+                    })}
+                  </div>
+                )
+              })}
+            </div>
           )}
           {promptRoot && onOpenHistoryTracking && onDismissHistoryPrompt && (
             <HistoryPrompt
@@ -499,6 +531,7 @@ export function WorktreeList({
               onDismiss={onDismissHistoryPrompt}
             />
           )}
+          {!section.collapsed && otherHomes.map(renderRow)}
           {!section.collapsed &&
             section.pending.map((pending) => (
               <PendingWorktreeRow
@@ -578,25 +611,20 @@ function Chevron({ collapsed }: { collapsed: boolean }): JSX.Element {
   )
 }
 
+/** Project header for a section with no main worktree in view (e.g. a
+ *  bare repo). Clicking toggles collapse since there's no workspace to open. */
 function RepoHeader({
   section,
   variant,
   onToggle,
-  onNewWorktree,
-  onRemove,
-  onOpenGraph
+  actions
 }: {
   section: WorktreeRepoSectionModel
   variant: WorktreeListVariant
   onToggle: () => void
-  onNewWorktree?: () => void
-  onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
-  onOpenGraph?: (repoRoot: string) => void
+  actions: JSX.Element
 }): JSX.Element {
   const touch = variant === 'touch'
-  // Secondary actions stay out of sight until hover: the usual way to start
-  // work is asking the Lead, so "+" is a fallback rather than a call to action.
-  const hoverAction = touch ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
   return (
     // A div, not a <button>, because it holds real buttons and those can't
     // nest — so it carries the button keyboard contract itself.
@@ -612,73 +640,101 @@ function RepoHeader({
           onToggle()
         }
       }}
-      className={`group w-full flex items-center gap-2 px-3 cursor-pointer outline-none focus-visible:bg-surface ${touch ? 'min-h-11 py-2' : 'py-1.5'}`}
+      className={`group mx-1 flex items-center gap-2.5 rounded-md px-2 cursor-pointer outline-none hover:bg-panel-raised focus-visible:bg-surface ${
+        touch ? 'min-h-14 py-2.5' : 'py-2'
+      }`}
       title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
     >
-      <RepoIcon repoName={section.repoName} className="text-base" />
-      <span className="truncate text-sm font-semibold text-fg-bright">{section.repoName}</span>
+      <RepoIcon repoName={section.repoName} className="text-2xl" />
+      <span className="truncate text-base font-semibold text-fg-bright">{section.repoName}</span>
       {section.collapsed && <span className="text-xs text-faint shrink-0">{section.count}</span>}
-      <span className="ml-auto flex items-center gap-1.5 shrink-0">
-        {onOpenGraph && (
-          <Tooltip label={`Subscription graph for ${section.repoName}`}>
-            <button
-              aria-label={`Subscription graph for ${section.repoName}`}
-              className={`${hoverAction} text-faint hover:text-fg transition-opacity cursor-pointer`}
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenGraph(section.repoRoot)
-              }}
-            >
-              <Waypoints className="icon-xs" />
-            </button>
-          </Tooltip>
-        )}
-        {onRemove && (
-          <Tooltip label={`Remove ${section.repoName} from workspace`}>
-            <button
-              aria-label={`Remove ${section.repoName} from workspace`}
-              className={`${hoverAction} text-faint hover:text-danger transition-opacity cursor-pointer`}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (
-                  window.confirm(
-                    // A merged section's members are matched by folder name,
-                    // so the one way to catch a wrong merge before detaching
-                    // an unrelated repo is to show exactly what will go.
-                    section.repoRoots.length > 1
-                      ? `Remove ${section.repoName} from all ${section.repoRoots.length} hosts in this window?\n\n${section.repoRoots
-                          .map((r) => `• ${r.repoRoot}`)
-                          .join('\n')}\n\nWorktrees stay on disk everywhere.`
-                      : `Remove ${section.repoName} from this window? Worktrees stay on disk.`
-                  )
-                ) {
-                  void onRemove(section.repoRoots)
-                }
-              }}
-            >
-              <X className="icon-xs" />
-            </button>
-          </Tooltip>
-        )}
-        {onNewWorktree && (
-          <Tooltip label="New worktree" action="newWorktree">
-            <button
-              aria-label={`New worktree in ${section.repoName}`}
-              className={`${hoverAction} text-faint hover:text-fg transition-opacity cursor-pointer`}
-              onClick={(e) => {
-                e.stopPropagation()
-                onNewWorktree()
-              }}
-            >
-              <Plus className="icon-sm" />
-            </button>
-          </Tooltip>
-        )}
-        <span className="text-faint">
-          <Chevron collapsed={section.collapsed} />
-        </span>
+      <span
+        className={`ml-auto shrink-0 items-center gap-1.5 ${touch ? 'flex' : 'hidden group-hover:flex'}`}
+      >
+        {actions}
+      </span>
+      <span className="text-faint">
+        <Chevron collapsed={section.collapsed} />
       </span>
     </div>
+  )
+}
+
+/** Project-level actions shown on hover beside the project name. "+" is
+ *  last and quiet on purpose: most worktrees get started from the
+ *  project's main chat, so the manual path is a fallback. */
+function ProjectActions({
+  repoName,
+  repoRoots,
+  onNewWorktree,
+  onRemove,
+  onOpenGraph
+}: {
+  repoName: string
+  repoRoots: SectionRepoRoot[]
+  onNewWorktree?: () => void
+  onRemove?: (roots: SectionRepoRoot[]) => Promise<void>
+  onOpenGraph?: (repoRoot: string) => void
+}): JSX.Element {
+  const primary = repoRoots[0]?.repoRoot
+  return (
+    <>
+      {onOpenGraph && primary && (
+        <Tooltip label={`Subscription graph for ${repoName}`}>
+          <button
+            aria-label={`Subscription graph for ${repoName}`}
+            className="text-faint hover:text-fg cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenGraph(primary)
+            }}
+          >
+            <Waypoints className="icon-xs" />
+          </button>
+        </Tooltip>
+      )}
+      {onRemove && repoRoots.length > 0 && (
+        <Tooltip label={`Remove ${repoName} from workspace`}>
+          <button
+            aria-label={`Remove ${repoName} from workspace`}
+            className="text-faint hover:text-danger cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (
+                window.confirm(
+                  // A merged section's members are matched by folder name,
+                  // so the one way to catch a wrong merge before detaching
+                  // an unrelated repo is to show exactly what will go.
+                  repoRoots.length > 1
+                    ? `Remove ${repoName} from all ${repoRoots.length} hosts in this window?\n\n${repoRoots
+                        .map((r) => `• ${r.repoRoot}`)
+                        .join('\n')}\n\nWorktrees stay on disk everywhere.`
+                    : `Remove ${repoName} from this window? Worktrees stay on disk.`
+                )
+              ) {
+                void onRemove(repoRoots)
+              }
+            }}
+          >
+            <X className="icon-xs" />
+          </button>
+        </Tooltip>
+      )}
+      {onNewWorktree && (
+        <Tooltip label="New worktree" action="newWorktree">
+          <button
+            aria-label={`New worktree in ${repoName}`}
+            className="text-faint hover:text-fg cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation()
+              onNewWorktree()
+            }}
+          >
+            <Plus className="icon-sm" />
+          </button>
+        </Tooltip>
+      )}
+    </>
   )
 }
 

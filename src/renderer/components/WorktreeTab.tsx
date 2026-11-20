@@ -1,8 +1,8 @@
-import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
-import { Compass, GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
+import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight, GitPullRequest, Loader2, TriangleAlert, Ghost, MoreHorizontal, Pin } from 'lucide-react'
 import type { SidebarDetailPrefs } from '../types'
 import { Tooltip } from './Tooltip'
-import { repoNameColor } from './RepoIcon'
+import { RepoIcon, repoNameColor } from './RepoIcon'
 import { SubtitleDetail } from './WorktreeSubtitleDetail'
 import { formatPendingTool } from '../pending-tool'
 import { HotkeyBadge } from './HotkeyBadge'
@@ -14,7 +14,7 @@ import { useEditorOverrideScope, useResolvedEditorId } from '../store'
 import { displayLabel } from '../worktree-display'
 import { ALIAS_MAX_LEN } from '../../shared/state/aliases'
 import { STATUS_COLORS, STATUS_LABELS, detachedLikeTooltip, prIconStyle, prIconTitle } from '../worktree-row-style'
-import type { LeadModel, WorktreeRowModel } from '../worktree-list-model'
+import type { ProjectHomeModel, WorktreeRowModel } from '../worktree-list-model'
 import {
   buildRowActions,
   buildAliasActions,
@@ -42,6 +42,21 @@ interface WorktreeTabProps {
   onSelect: (path: string) => void
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
+  /** Render this (main) worktree as its project's row: clicking the project
+   *  opens its main workspace. Not reference-stable, but only one row per
+   *  project carries it. */
+  project?: ProjectRowProps
+}
+
+export interface ProjectRowProps {
+  name: string
+  collapsed?: boolean
+  /** Worktree count, shown beside the name while collapsed. */
+  count?: number
+  /** Absent in unified mode, where projects don't collapse individually. */
+  onToggleCollapse?: () => void
+  /** Project-level hover actions (graph, remove, new worktree). */
+  actions?: ReactNode
 }
 
 /** Memoized: switching worktrees re-renders the list, and every prop here is
@@ -59,7 +74,8 @@ export const WorktreeTab = memo(function WorktreeTab({
   actions,
   onSelect,
   onStartAliasEdit: onStartAliasEditForPath,
-  onEndAliasEdit
+  onEndAliasEdit,
+  project
 }: WorktreeTabProps): JSX.Element {
   const onStartAliasEdit = (): void => onStartAliasEditForPath(row.path)
   const backend = useBackend()
@@ -148,8 +164,8 @@ export const WorktreeTab = memo(function WorktreeTab({
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
       {sheetOpen && (
         <WorktreeActionSheet
-          title={alias ?? (row.lead ? LEAD_LABEL : worktree.branch)}
-          subtitle={alias || row.lead ? worktree.branch : undefined}
+          title={alias ?? (project ? project.name : worktree.branch)}
+          subtitle={alias || project ? worktree.branch : undefined}
           actions={[...aliasActions, ...rowActions]}
           onClose={() => setSheetOpen(false)}
         />
@@ -157,25 +173,26 @@ export const WorktreeTab = memo(function WorktreeTab({
     </>
   )
 
-  if (row.lead) {
-    const lead = row.lead
-    const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? LEAD_LABEL)
+  if (row.home && project) {
+    const home = row.home
+    const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? project.name)
+    // Secondary actions stay hidden until hover: the usual way to start work
+    // is asking the project's main chat, so "+" is a fallback, not a CTA.
+    // Out of layout (not just transparent) until hover, so the status line
+    // gets the full width at rest.
+    const hoverOnly = touch ? 'flex' : 'hidden group-hover:flex'
     return (
       <div
         onClick={() => onSelect(row.path)}
         onContextMenu={onContextMenu}
-        className={`group mx-2 flex items-center gap-2.5 rounded-lg border px-2.5 transition-colors cursor-pointer ${
-          touch ? 'min-h-14 py-3' : 'py-2'
-        } ${
-          isActive
-            ? 'border-border-strong bg-surface text-fg-bright'
-            : 'border-border bg-panel-raised text-fg hover:border-border-strong'
-        }`}
+        className={`group mx-1 flex items-center gap-2.5 rounded-md px-2 transition-colors cursor-pointer ${
+          touch ? 'min-h-14 py-2.5' : 'py-2'
+        } ${isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'}`}
       >
-        <span className="relative shrink-0 inline-flex items-center justify-center rounded-md bg-accent/15 text-accent p-1.5">
-          <Compass className="icon-base" />
+        <span className="relative shrink-0 inline-flex">
+          <RepoIcon repoName={project.name} className="text-2xl" />
           <span
-            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel-raised ${STATUS_COLORS[displayStatus]}`}
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel ${STATUS_COLORS[displayStatus]}`}
             title={STATUS_LABELS[displayStatus]}
           />
         </span>
@@ -190,13 +207,13 @@ export const WorktreeTab = memo(function WorktreeTab({
               onCancel={onEndAliasEdit}
             />
           ) : (
-            <RowTooltip enabled={!touch} label={LEAD_HINT}>
+            <RowTooltip enabled={!touch} label={`${PROJECT_HOME_HINT} · ${worktree.branch}`}>
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-sm font-semibold truncate">{title}</span>
-                {row.repoLabel && (
-                  <span className={`text-xs truncate ${repoNameColor(row.repoLabel)}`}>{row.repoLabel}</span>
+                <span className="text-base font-semibold truncate text-fg-bright">{title}</span>
+                {project.collapsed && project.count !== undefined && project.count > 0 && (
+                  <span className="shrink-0 text-xs text-faint">{project.count}</span>
                 )}
-                {lead.showBranch && (
+                {home.showBranch && (
                   <span className="shrink-0 max-w-[50%] truncate rounded bg-surface px-1 text-xs text-dim font-mono">
                     {worktree.branch}
                   </span>
@@ -217,11 +234,16 @@ export const WorktreeTab = memo(function WorktreeTab({
               {formatPendingTool(pendingTool!)}
             </div>
           ) : (
-            <div className={`text-xs truncate ${lead.needsYou > 0 ? 'text-warning' : 'text-faint'}`}>
-              {leadSummary(lead)}
+            <div className={`text-xs truncate ${home.needsYou > 0 ? 'text-warning' : 'text-faint'}`}>
+              {projectSummary(home)}
             </div>
           )}
         </div>
+        {project.actions && (
+          <span className={`shrink-0 items-center gap-1.5 ${hoverOnly}`}>
+            {project.actions}
+          </span>
+        )}
         {touch ? (
           <TouchRowActions
             disabled={deleting || (rowActions.length === 0 && aliasActions.length === 0)}
@@ -232,6 +254,21 @@ export const WorktreeTab = memo(function WorktreeTab({
         )}
         {metaHeld && row.cmdOrdinal !== undefined && (
           <HotkeyBadge action={`worktree${row.cmdOrdinal}` as Action} variant="strong" className="shrink-0" />
+        )}
+        {project.onToggleCollapse && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              project.onToggleCollapse!()
+            }}
+            aria-label={project.collapsed ? `Expand ${project.name}` : `Collapse ${project.name}`}
+            aria-expanded={!project.collapsed}
+            className={`shrink-0 text-faint hover:text-fg cursor-pointer ${
+              touch ? 'inline-flex items-center justify-center w-11 h-11 -mr-2' : 'p-0.5'
+            }`}
+          >
+            {project.collapsed ? <ChevronRight className="icon-xs" /> : <ChevronDown className="icon-xs" />}
+          </button>
         )}
         {overlays}
       </div>
@@ -363,18 +400,17 @@ export const WorktreeTab = memo(function WorktreeTab({
   )
 })
 
-/** What the main worktree is called when the user hasn't aliased it. The
- *  branch name ("main") describes git, not the role. */
-export const LEAD_LABEL = 'Lead'
-export const LEAD_HINT = 'Plan work here and spin off worktrees'
+/** Tooltip for a project row — the main checkout is where work gets
+ *  planned before it's spun off into worktrees. */
+export const PROJECT_HOME_HINT = 'Main workspace'
 
-/** "3 running · 1 needs you", or the hint when the Lead has no worktrees yet. */
-export function leadSummary(lead: LeadModel): string {
-  if (lead.agents === 0) return LEAD_HINT
+/** "3 running · 1 needs you" across the project's worktrees. */
+export function projectSummary(home: ProjectHomeModel): string {
+  if (home.agents === 0) return 'No worktrees yet'
   const parts: string[] = []
-  if (lead.running > 0) parts.push(`${lead.running} running`)
-  if (lead.needsYou > 0) parts.push(`${lead.needsYou} need${lead.needsYou === 1 ? 's' : ''} you`)
-  if (parts.length === 0) parts.push(`${lead.agents} worktree${lead.agents === 1 ? '' : 's'} idle`)
+  if (home.running > 0) parts.push(`${home.running} running`)
+  if (home.needsYou > 0) parts.push(`${home.needsYou} need${home.needsYou === 1 ? 's' : ''} you`)
+  if (parts.length === 0) parts.push(`${home.agents} worktree${home.agents === 1 ? '' : 's'} idle`)
   return parts.join(' · ')
 }
 

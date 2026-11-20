@@ -129,7 +129,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
   const preventSleepUntil = allSettings.preventSleepUntil
 
   // Navigation order comes straight from the sidebar's model, so hotkeys
-  // can never disagree with what's on screen (Leads first, folded tail
+  // can never disagree with what's on screen (project homes first, folded tail
   // skipped when collapsed).
   const allOrderedWorktrees = useMemo(() => {
     const byPath = new Map(worktrees.map((w) => [w.path, w]))
@@ -149,10 +149,11 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 
   const ensureWorktreeVisible = useCallback(
     (wt: Worktree) => {
+      // The main worktree is its project's row, which is always on screen.
+      if (wt.isMain) return
       const scope = scopeForWorktree(wt)
       const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
-      // A Lead sits above the groups, so only its repo can hide it.
-      if (!wt.isMain && isGroupCollapsed(scope, key)) {
+      if (isGroupCollapsed(scope, key)) {
         setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
       }
       if (scope !== '__unified__' && collapsedRepos[scope]) {
