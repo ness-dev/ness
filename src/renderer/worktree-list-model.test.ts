@@ -993,10 +993,10 @@ describe('project worst status', () => {
     expect(beta.worstStatus).toBe('needs-approval')
   })
 
-  it('follows the shared rollup ranking, and ignores archived worktrees', () => {
-    // Same order as a worktree's own dot (ROLLUP_STATUS_RANK): working
-    // masks waiting, waiting beats idle.
-    expect(twoRepos({ t1: 'processing', t2: 'waiting' }).sections[1].worstStatus).toBe('processing')
+  it('ranks for attention across worktrees, and ignores archived worktrees', () => {
+    // ATTENTION_STATUS_RANK, not the per-worktree rollup: one agent working
+    // must not hide another that's waiting on you.
+    expect(twoRepos({ t1: 'processing', t2: 'waiting' }).sections[1].worstStatus).toBe('waiting')
     expect(twoRepos({ t1: 'idle', t2: 'waiting' }).sections[1].worstStatus).toBe('waiting')
     expect(twoRepos({ tm: 'needs-approval' }).sections[1].worstStatus).toBe('idle')
   })

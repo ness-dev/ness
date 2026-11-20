@@ -9,7 +9,7 @@ import type {
 } from './types'
 import type { SnoozeEntry } from '../shared/state'
 import type { AssignedPR } from '../shared/state/assigned-prs'
-import { ROLLUP_STATUS_RANK } from '../shared/status-rollup'
+import { ATTENTION_STATUS_RANK, ROLLUP_STATUS_RANK } from '../shared/status-rollup'
 import { groupWorktrees, type GroupKey } from '../shared/worktree-sort'
 import type { DisplayStatus } from './worktree-row-style'
 
@@ -590,10 +590,11 @@ export function applyProjectAccordion(
   return { ...base, sections, activeRepoRoot }
 }
 
-
+/** Project-level rollup over per-worktree statuses, by attention — see
+ *  ATTENTION_STATUS_RANK for why it differs from the per-worktree order. */
 function worstOf(rows: WorktreeRowModel[]): PtyStatus {
   let worst: PtyStatus = 'idle'
-  for (const row of rows) if (ROLLUP_STATUS_RANK[row.status] > ROLLUP_STATUS_RANK[worst]) worst = row.status
+  for (const row of rows) if (ATTENTION_STATUS_RANK[row.status] > ATTENTION_STATUS_RANK[worst]) worst = row.status
   return worst
 }
 
