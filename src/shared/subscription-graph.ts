@@ -27,6 +27,8 @@ export interface GraphGroup {
   status: PtyStatus
   /** Merged or closed, matching the sidebar's "Merged / Closed" group. */
   merged: boolean
+  /** Of those, the ones whose PR was closed without the branch landing. */
+  closed: boolean
 }
 
 export interface GraphAgentNode {
@@ -136,7 +138,8 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
       isMain: wt.isMain,
       external: wt.repoRoot !== repoPath,
       status: 'idle',
-      merged: isWorktreeMerged(state.prs, path)
+      merged: isWorktreeMerged(state.prs, path),
+      closed: !state.prs.mergedByPath[path] && state.prs.byPath[path]?.state === 'closed'
     }
     groups.set(id, g)
     return g
@@ -304,10 +307,12 @@ export interface FilteredGraph {
 
 /** Trims the graph for a project with many worktrees, where it's the links
  *  that matter. Applied in order:
- *    1. merged (or closed) worktrees go, unless an unmerged one has a
- *       subscription with them. Only a subscription rescues: a spawn edge
- *       is history, and nearly every worktree was spawned from main, so
- *       counting it would keep almost every merged worktree on screen
+ *    1. merged (or closed) worktrees go, unless an unmerged one has an
+ *       explicit subscription with them. Spawn edges don't rescue, even
+ *       live ones: a live spawn edge is the creator's implicit, silent
+ *       created-worktree follow, and nearly every worktree is spawned from
+ *       main's Chat tab, so counting it would keep almost every merged
+ *       worktree on screen
  *    2. worktrees with no link to another worktree go; a worktree's own
  *       PR and reviewer edges don't count, they're inside the box
  *  Edges touching a hidden worktree go with it. */

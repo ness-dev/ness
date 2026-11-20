@@ -69,7 +69,8 @@ const group = (id: string): GraphGroup => ({
   isMain: false,
   external: false,
   status: 'idle',
-  merged: false
+  merged: false,
+  closed: false
 })
 
 describe('layoutSubscriptionGraph', () => {

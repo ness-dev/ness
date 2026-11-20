@@ -271,6 +271,8 @@ describe('filterSubscriptionGraph', () => {
     const s = big()
     s.prs = { ...s.prs, mergedByPath: { [B]: true, [C]: true } }
     const g = buildSubscriptionGraph(s, REPO)
+    // A's creator tab is a live Chat tab, so this is the implicit follow.
+    expect(g.edges.find((e) => e.kind === 'spawned')).toMatchObject({ source: agentId('ta'), live: true })
     const r = filterSubscriptionGraph(g, { showMerged: false, showUnlinked: true })
     expect(paths(r.graph)).toEqual([A, D])
     expect(r.hidden.merged).toBe(2)
@@ -296,12 +298,14 @@ describe('filterSubscriptionGraph', () => {
 
   it('treats a closed, unmerged PR as merged, like the sidebar', () => {
     const s = big()
-    s.prs = { ...initialState.prs, byPath: { [D]: pr({ state: 'closed' }) } }
+    s.prs = { ...s.prs, byPath: { [D]: pr({ state: 'closed' }) } }
     const g = buildSubscriptionGraph(s, REPO)
-    expect(g.groups.find((x) => x.path === D)?.merged).toBe(true)
+    // D is labelled closed; C, merged locally, is labelled merged.
+    expect(g.groups.find((x) => x.path === D)).toMatchObject({ merged: true, closed: true })
+    expect(g.groups.find((x) => x.path === C)).toMatchObject({ merged: true, closed: false })
     const r = filterSubscriptionGraph(g, { showMerged: false, showUnlinked: true })
-    expect(paths(r.graph)).toEqual([A, B, C])
-    expect(r.hidden.merged).toBe(1)
+    expect(paths(r.graph)).toEqual([A, B])
+    expect(r.hidden.merged).toBe(2)
   })
 
   it("doesn't count a worktree's own PR edge as a link", () => {
