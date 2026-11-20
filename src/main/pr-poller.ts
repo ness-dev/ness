@@ -103,6 +103,11 @@ export class PRPoller {
   // github-recorder.ts. If a stalled repo ever surfaces again despite
   // Fix 1+2+3 together, switch this to a per-repo Set.
   private inFlightAll = false
+  /** A refreshAll arrived while one was in flight. The running pass may
+   *  have read state (e.g. locallyMerged) from before the caller's change,
+   *  so dropping the call would let that stale result stand until the
+   *  next background tick — run once more when the current pass ends. */
+  private rerunAll = false
   private inFlightAssigned = false
   private recheckTimer: NodeJS.Timeout | null = null
 
@@ -153,7 +158,10 @@ export class PRPoller {
    * status — so a wifi blip doesn't flip every worktree into the "no PR"
    * sidebar group. */
   async refreshAll(): Promise<void> {
-    if (this.inFlightAll) return
+    if (this.inFlightAll) {
+      this.rerunAll = true
+      return
+    }
     const roots = this.opts.getRepoRoots()
     if (roots.length === 0) return
     this.inFlightAll = true
@@ -203,6 +211,10 @@ export class PRPoller {
     } finally {
       this.inFlightAll = false
       this.store.dispatch({ type: 'prs/loadingChanged', payload: false })
+      if (this.rerunAll) {
+        this.rerunAll = false
+        void this.refreshAll()
+      }
     }
   }
 
@@ -395,9 +407,9 @@ export class PRPoller {
     // lookup, fire them all in parallel, then walk results. The
     // serial-await version stalled boot by ~30ms × N at typical worktree
     // counts.
-    const persisted = { ...this.opts.getLocallyMerged() }
+    const persisted = this.opts.getLocallyMerged()
     const mergedAll: Record<string, boolean> = {}
-    let prunedAny = false
+    const pruned: Array<{ branch: string; recordedSha: string }> = []
     type ShaJob = { root: string; path: string; branch: string; recordedSha: string }
     const shaJobs: ShaJob[] = []
     for (let i = 0; i < roots.length; i++) {
@@ -423,12 +435,24 @@ export class PRPoller {
       if (branchSha && branchSha === job.recordedSha) {
         mergedAll[job.path] = true
       } else {
-        delete persisted[job.branch]
-        prunedAny = true
+        pruned.push({ branch: job.branch, recordedSha: job.recordedSha })
         mergedAll[job.path] = false
       }
     }
-    if (prunedAny) this.opts.setLocallyMerged(persisted)
+    if (pruned.length > 0) {
+      // Prune against a fresh read, not the snapshot taken before the
+      // rev-parse round: a merge can record a SHA while we await, and
+      // writing the old snapshot back would erase it.
+      const next = { ...this.opts.getLocallyMerged() }
+      let changed = false
+      for (const { branch, recordedSha } of pruned) {
+        if (next[branch] === recordedSha) {
+          delete next[branch]
+          changed = true
+        }
+      }
+      if (changed) this.opts.setLocallyMerged(next)
+    }
     this.store.dispatch({ type: 'prs/mergedChanged', payload: mergedAll })
   }
 

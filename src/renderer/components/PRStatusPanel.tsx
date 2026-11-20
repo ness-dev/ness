@@ -125,8 +125,14 @@ function MergeLocallyBody({
 
   // In-flight and merged both come from the prs slice, so they survive
   // switching away and back (and show on every client) — otherwise coming
-  // back mid-merge would offer the merge button again.
-  const { merging: mergeInFlight, merged: mergedLocally } = useLocalMergeState(path)
+  // back mid-merge would offer the merge button again. `mergedLocally` also
+  // covers worktrees merged in an earlier session: they open on the merged
+  // view with Remove, since merging them again is never what's wanted.
+  const {
+    merging: mergeInFlight,
+    repoBusy,
+    merged: mergedLocally
+  } = useLocalMergeState(path, repoRoot)
 
   const refreshStatus = useCallback(async () => {
     setBusy('checking')
@@ -238,8 +244,8 @@ function MergeLocallyBody({
   const merging = busy === 'merging' || mergeInFlight
   const successMessage =
     success ??
-    (mergedLocally && !dismissed && !merging
-      ? `Merged into ${mainStatus?.baseBranch ?? 'base branch'}`
+    (mergedLocally && !dismissed && !merging && mainStatus
+      ? `Merged into ${mainStatus.baseBranch}`
       : null)
 
   return (
@@ -261,7 +267,7 @@ function MergeLocallyBody({
               <div className="flex">
                 <button
                   onClick={handleMerge}
-                  disabled={!ready || busy !== 'idle' || merging || !strategyLoaded || hasConflict}
+                  disabled={!ready || busy !== 'idle' || merging || repoBusy || !strategyLoaded || hasConflict}
                   title={hasConflict ? 'Resolve merge conflicts before merging' : undefined}
                   className="flex-1 text-xs bg-accent/20 hover:bg-accent/30 text-fg-bright px-2 py-1.5 rounded-l flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-r border-accent/40"
                 >
@@ -358,7 +364,7 @@ function MergeLocallyBody({
                 </div>
                 <button
                   onClick={handleFix}
-                  disabled={busy !== 'idle' || merging}
+                  disabled={busy !== 'idle' || repoBusy}
                   className="text-xs bg-panel-raised hover:bg-surface text-fg px-2 py-1 rounded disabled:opacity-50 cursor-pointer"
                 >
                   {busy === 'fixing'
