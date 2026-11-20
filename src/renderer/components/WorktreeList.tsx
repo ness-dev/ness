@@ -825,7 +825,9 @@ function ProjectSection({
         aria-label={focusable ? name : undefined}
         aria-roledescription={draggable ? 'reorderable project' : undefined}
         aria-keyshortcuts={draggable ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
-        className={`outline-none rounded-md focus-visible:ring-1 focus-visible:ring-accent ${lifted ? 'opacity-40' : ''}`}
+        className={`outline-none rounded-md focus-visible:ring-1 focus-visible:ring-accent ${
+          draggable ? 'select-none' : ''
+        } ${lifted ? 'opacity-40' : ''}`}
       >
         {header}
       </div>
@@ -844,10 +846,12 @@ function DropLine({ className }: { className: string }): JSX.Element {
   )
 }
 
-/** What follows the pointer: the project's name, not its whole body. */
+/** What follows the pointer: the project's name, not its whole body.
+ *  Sized to its content rather than the row so the drop line stays
+ *  visible beside it — a full-width preview sits right on top of it. */
 function ProjectDragPreview({ name }: { name: string }): JSX.Element {
   return (
-    <div className="mx-1.5 flex min-h-14 cursor-grabbing items-center gap-2.5 rounded-md border border-border-strong bg-panel-raised px-2 py-2 shadow-lg">
+    <div className="ml-3 flex w-fit max-w-[80%] min-h-11 cursor-grabbing items-center gap-2 rounded-md border border-border-strong bg-panel-raised px-2.5 py-1.5 shadow-lg">
       <RepoIcon repoName={name} className="text-2xl" />
       <span className="truncate text-base font-semibold text-fg-bright">{name}</span>
     </div>
