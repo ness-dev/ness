@@ -572,10 +572,10 @@ export function WorktreeList({
 
 /** A row plus its tab rows, inset with rounded corners. The selected
  *  background covers the whole block as one pill rather than bleeding to
- *  the sidebar edges; rows inside pad by px-2 so text stays where a
- *  full-width px-3 row would put it. */
+ *  the sidebar edges. Pending and assigned-PR rows use the same mx-1.5
+ *  inset so every pill lines up. */
 function RowBlock({ active, children }: { active: boolean; children: ReactNode }): JSX.Element {
-  return <div className={`mx-1 rounded-md overflow-hidden ${active ? 'bg-surface' : ''}`}>{children}</div>
+  return <div className={`mx-1.5 rounded-md overflow-hidden ${active ? 'bg-surface' : ''}`}>{children}</div>
 }
 
 /** Quiet by design: group headers organise the work, they shouldn't compete
@@ -647,7 +647,7 @@ function RepoHeader({
           onToggle()
         }
       }}
-      className={`group mx-1 flex items-center gap-2.5 rounded-md px-2 cursor-pointer outline-none hover:bg-panel-raised focus-visible:bg-surface ${
+      className={`group mx-1.5 flex items-center gap-2.5 rounded-md px-2 cursor-pointer outline-none hover:bg-panel-raised focus-visible:bg-surface ${
         touch ? 'min-h-14 py-2.5' : 'py-2'
       }`}
       title={section.repoRoots.map((r) => r.repoRoot).join('\n')}
@@ -777,7 +777,7 @@ function PendingWorktreeRow({
   return (
     <div
       onClick={onClick}
-      className={`group mx-1 rounded-md text-left px-2 flex items-center gap-2 transition-colors cursor-pointer ${
+      className={`group mx-1.5 rounded-md text-left px-2 flex items-center gap-2 transition-colors cursor-pointer ${
         variant === 'touch' ? 'min-h-11 py-3' : 'py-2'
       } ${isActive ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'}`}
     >
@@ -839,7 +839,7 @@ function AssignedPRRow({
           ? `Open PR #${pr.number} from ${pr.repoNameWithOwner} as a new worktree`
           : `PR #${pr.number} from ${pr.repoNameWithOwner} — awaiting your review`
       }
-      className={`group mx-1 w-[calc(100%-0.5rem)] rounded-md text-left px-2 flex items-center gap-2 text-muted transition-colors ${
+      className={`group mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-2 flex items-center gap-2 text-muted transition-colors ${
         touch ? 'min-h-11 py-3' : 'py-2'
       } ${onClick ? 'hover:bg-panel-raised hover:text-fg cursor-pointer' : 'cursor-default'}`}
     >
