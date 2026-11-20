@@ -217,6 +217,10 @@ export interface WorktreeListModelInput {
 
 /** Worst-status-wins aggregation across a worktree's tabs, plus the pending
  *  tool belonging to whichever tab is actually blocking on approval. */
+/** Worst-wins ranking shared by a worktree's tab aggregation and a
+ *  project's worstStatus, so the two can't disagree. */
+const STATUS_RANK: Record<PtyStatus, number> = { idle: 0, processing: 1, waiting: 2, 'needs-approval': 3 }
+
 function aggregate(
   tabs: TerminalTab[],
   statuses: Record<string, PtyStatus>,
@@ -228,8 +232,7 @@ function aggregate(
     if (s === 'needs-approval') {
       return { status: 'needs-approval', pendingTool: pendingTools[tab.id] || null }
     }
-    if (s === 'waiting') status = 'waiting'
-    if (s === 'processing' && status === 'idle') status = 'processing'
+    if (s && STATUS_RANK[s] > STATUS_RANK[status]) status = s
   }
   return { status, pendingTool: null }
 }
@@ -588,8 +591,6 @@ export function applyProjectAccordion(
   return { ...base, sections, activeRepoRoot }
 }
 
-/** Same worst-wins ranking as a worktree's own tab aggregation. */
-const STATUS_RANK: Record<PtyStatus, number> = { idle: 0, processing: 1, waiting: 2, 'needs-approval': 3 }
 
 function worstOf(rows: WorktreeRowModel[]): PtyStatus {
   let worst: PtyStatus = 'idle'

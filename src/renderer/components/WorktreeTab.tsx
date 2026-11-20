@@ -213,8 +213,13 @@ export const WorktreeTab = memo(function WorktreeTab({
       >
         <span className="relative shrink-0 inline-flex">
           <RepoIcon repoName={project.name} className="text-2xl" />
+          {/* A collapsed project's dot is the only sign of what's inside, so
+              needs-approval also gets a diamond: red vs green alone is the
+              hardest pair to tell apart. */}
           <span
-            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel ${STATUS_COLORS[dotStatus]}`}
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ring-2 ring-panel ${STATUS_COLORS[dotStatus]} ${
+              project.collapsedStatus === 'needs-approval' ? 'rotate-45' : 'rounded-full'
+            }`}
             title={project.collapsedStatus ? `Most urgent in ${project.name}: ${STATUS_LABELS[dotStatus]}` : STATUS_LABELS[dotStatus]}
           />
         </span>
