@@ -1,5 +1,5 @@
 import type { AppState } from './state'
-import type { PRStatus } from './state/prs'
+import { isWorktreeMerged, type PRStatus } from './state/prs'
 import type { NotifyMode } from './state/subscriptions'
 import type { ReviewVerdict } from './state/reviews'
 import { getLeaves, type AgentKind, type PtyStatus, type TerminalTab } from './state/terminals'
@@ -25,6 +25,7 @@ export interface GraphGroup {
   external: boolean
   /** Worst status across the worktree's agent tabs. */
   status: PtyStatus
+  /** Merged or closed, matching the sidebar's "Merged / Closed" group. */
   merged: boolean
 }
 
@@ -135,7 +136,7 @@ export function buildSubscriptionGraph(state: AppState, repoPath: string): Subsc
       isMain: wt.isMain,
       external: wt.repoRoot !== repoPath,
       status: 'idle',
-      merged: !!state.prs.mergedByPath[path] || state.prs.byPath[path]?.state === 'merged'
+      merged: isWorktreeMerged(state.prs, path)
     }
     groups.set(id, g)
     return g
@@ -303,8 +304,10 @@ export interface FilteredGraph {
 
 /** Trims the graph for a project with many worktrees, where it's the links
  *  that matter. Applied in order:
- *    1. merged worktrees go, unless an unmerged one links to them; a live
- *       link into a merged worktree is still state worth seeing
+ *    1. merged (or closed) worktrees go, unless an unmerged one has a
+ *       subscription with them. Only a subscription rescues: a spawn edge
+ *       is history, and nearly every worktree was spawned from main, so
+ *       counting it would keep almost every merged worktree on screen
  *    2. worktrees with no link to another worktree go; a worktree's own
  *       PR and reviewer edges don't count, they're inside the box
  *  Edges touching a hidden worktree go with it. */
@@ -322,7 +325,7 @@ export function filterSubscriptionGraph(g: SubscriptionGraph, f: GraphFilter): F
   let merged = 0
   if (!f.showMerged) {
     const linkedToUnmerged = new Set<string>()
-    for (const [a, b] of crossLinks(g.edges)) {
+    for (const [a, b] of crossLinks(g.edges.filter((e) => e.kind === 'subscription'))) {
       if (!byId.get(a)?.merged) linkedToUnmerged.add(b)
       if (!byId.get(b)?.merged) linkedToUnmerged.add(a)
     }
