@@ -517,6 +517,10 @@ function GraphCanvas({
         elementsSelectable={false}
         edgesFocusable={false}
         minZoom={MIN_ZOOM}
+        // Our own zIndex values, as set in toFlow. The default lifts an edge to
+        // the z of the child nodes it joins, which drew edges between
+        // worktrees over the cards they pass.
+        zIndexMode="manual"
         onInit={(inst) => {
           instanceRef.current = inst
           const r = wrapRef.current?.getBoundingClientRect()

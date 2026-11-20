@@ -1,5 +1,5 @@
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
-import type { SubscriptionGraph } from '../shared/subscription-graph'
+import type { GraphNode, SubscriptionGraph } from '../shared/subscription-graph'
 
 export interface Box {
   x: number
@@ -20,6 +20,32 @@ export const NODE_SIZE = {
 }
 
 const elk = new ELK()
+
+/** A worktree's members top to bottom, ordered so its internal edges join
+ *  neighbours: each reviewer directly above the tab it reviews, the tab
+ *  that follows the PR last among the agents, the PR at the bottom. Every
+ *  in-worktree arrow then points down into the next card, instead of
+ *  running past a card in between and over the other arrows. */
+export function stackOrder(g: SubscriptionGraph, groupId: string): GraphNode[] {
+  const members = g.nodes.filter((n) => n.groupId === groupId)
+  const inGroup = new Set(members.map((n) => n.id))
+  const agents = members.filter((n) => n.kind === 'agent')
+  const prs = members.filter((n) => n.kind === 'pr')
+  const moveTo = (id: string, index: () => number): void => {
+    const from = agents.findIndex((n) => n.id === id)
+    if (from === -1) return
+    const [node] = agents.splice(from, 1)
+    agents.splice(index(), 0, node)
+  }
+  for (const e of g.edges) {
+    if (e.kind === 'own-pr' && inGroup.has(e.source)) moveTo(e.source, () => agents.length)
+  }
+  for (const e of g.edges) {
+    if (e.kind !== 'review' || !inGroup.has(e.source) || !inGroup.has(e.target)) continue
+    moveTo(e.source, () => agents.findIndex((n) => n.id === e.target))
+  }
+  return [...agents, ...prs]
+}
 
 /** Positions for every group and node. Groups are absolute; their
  *  children are relative to the group, which is what React Flow's
@@ -42,8 +68,7 @@ export async function layoutSubscriptionGraph(
   const children: ElkNode[] = g.groups.map((group) => {
     let y = s(NODE_SIZE.groupHeader)
     const width = s(NODE_SIZE.agent.width) + 2 * pad
-    for (const n of g.nodes) {
-      if (n.groupId !== group.id) continue
+    for (const n of stackOrder(g, group.id)) {
       groupOf.set(n.id, group.id)
       const size = NODE_SIZE[n.kind]
       boxes[n.id] = { x: pad, y, width: s(size.width), height: s(size.height) }
