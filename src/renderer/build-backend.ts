@@ -483,6 +483,8 @@ export function buildBackend(
       reqConfig('config:setHiddenBottomIcons', hidden),
     setBottomIconOrder: (order: BottomIconKey[]) =>
       reqConfig('config:setBottomIconOrder', order),
+    setSidebarProjectOrder: (order: string[]) =>
+      reqConfig('config:setSidebarProjectOrder', order),
 
     setEditor: (editorId: string) => reqConfig('config:setEditor', editorId),
     setRepoEditor: (repoRoot: string, editorId: string | null) =>

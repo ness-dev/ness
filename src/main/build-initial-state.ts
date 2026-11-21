@@ -409,7 +409,8 @@ export function buildInitialAppState(
       hiddenBottomIcons: sanitizeHiddenBottomIcons(config.hiddenBottomIcons),
       bottomIconOrder: resolveBottomIconOrder(
         sanitizeBottomIconOrder(config.bottomIconOrder)
-      )
+      ),
+      sidebarProjectOrder: sanitizeProjectOrder(config.sidebarProjectOrder)
     }
   }
 }
@@ -424,6 +425,13 @@ function sanitizeHiddenBottomIcons(
     if (val === true) out[key] = true
   }
   return out
+}
+
+export function sanitizeProjectOrder(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  for (const k of input) if (typeof k === 'string' && k) seen.add(k)
+  return [...seen]
 }
 
 function sanitizeBottomIconOrder(input: unknown): BottomIconKey[] {

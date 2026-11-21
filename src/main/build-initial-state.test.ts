@@ -97,6 +97,15 @@ describe('buildInitialAppState', () => {
     expect(seeded.settings.agentReviewsEnabled).toBe(false)
   })
 
+  it('seeds the sidebar project order, dropping junk and duplicates', () => {
+    const result = buildInitialAppState(
+      { ...emptyConfig, sidebarProjectOrder: ['/b', 3, '', '/a', '/b'] as unknown as string[] },
+      { hasGithubToken: false }
+    )
+    expect(result.settings.sidebarProjectOrder).toEqual(['/b', '/a'])
+    expect(seeded.settings.sidebarProjectOrder).toEqual([])
+  })
+
   it('keeps an upgrader on manual approval and on auto-review', () => {
     // A pre-change config: auto-approve was off (the old setter deleted the
     // key) and auto-review on green CI was on.

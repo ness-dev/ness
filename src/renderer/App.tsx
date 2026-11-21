@@ -403,6 +403,12 @@ function DesktopApp(): JSX.Element {
   // and don't rebuild their action map on every worktree switch.
   const worktreeListBase = useWorktreeListBase(collapse)
   const worktreeListModel = useProjectAccordion(worktreeListBase, activeWorktreeId, collapse.pinnedOpenRepos)
+  // The palette groups by status; within a group, list worktrees in sidebar
+  // order so a dragged project order carries over.
+  const paletteWorktrees = useMemo(() => {
+    const rank = new Map(worktreeListBase.orderedPaths.map((p, i) => [p, i]))
+    return [...worktrees].sort((a, b) => (rank.get(a.path) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER))
+  }, [worktrees, worktreeListBase.orderedPaths])
   const handleSidebarResize = useCallback((delta: number) => {
     setSidebarWidth((w) => Math.max(160, Math.min(SIDEBAR_MAX_PX, w + delta)))
   }, [])
@@ -2370,7 +2376,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <Toasts />
     {showCommandPalette && (
       <CommandPalette
-        worktrees={worktrees}
+        worktrees={paletteWorktrees}
         worktreeStatuses={worktreeStatuses}
         prStatuses={prStatuses}
         mergedPaths={mergedPaths}
