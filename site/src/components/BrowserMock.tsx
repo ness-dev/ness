@@ -25,7 +25,7 @@ export function BrowserMock() {
         </div>
         <div className="hidden sm:flex items-center gap-1.5 px-4 text-xs text-fg-bright border-l border-border-strong">
           <span className="w-1.5 h-1.5 rounded-full bg-success" />
-          Claude · fix/safari-sign-in
+          Claude · fix/sign-in
         </div>
         <div className="flex items-center gap-1.5 px-4 text-xs text-fg-bright border-l border-border-strong">
           <Globe className="w-3.5 h-3.5 text-dim" />
@@ -37,7 +37,7 @@ export function BrowserMock() {
         {/* Agent chat */}
         <div className="hidden sm:flex w-[42%] shrink-0 flex-col justify-end gap-3 px-5 py-4 text-sm leading-relaxed border-r border-border-strong">
           <div className="self-end max-w-[90%] rounded-xl bg-surface px-3 py-2 text-fg-bright">
-            Sign in does nothing on Safari. Can you check it in the browser?
+            Clicking Sign in does nothing. Can you check it in the browser?
           </div>
           <div className="space-y-0.5">
             {TOOL_ROWS.map((t) => (
@@ -51,9 +51,9 @@ export function BrowserMock() {
           <p>
             The console shows{' '}
             <code className="font-mono text-xs text-fg-bright bg-surface px-1 rounded">
-              form.requestSubmit is not a function
+              Cannot read properties of undefined (reading 'token')
             </code>
-            . Older Safari doesn’t have it, so I’m falling back to a submit event and trying again.
+            . The login API now nests the token under <code className="font-mono text-xs text-fg-bright bg-surface px-1 rounded">session</code>, so I’m updating the client and trying again.
           </p>
         </div>
 
