@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { Bot, GitBranchPlus, MessageSquareDiff, MessageSquareShare, Radio } from 'lucide-react'
+import { SectionIntro } from './SectionIntro'
 
 const AgentGraphMock = lazy(() => import('./AgentGraphMock'))
 
@@ -95,17 +96,11 @@ export function AgentsRunAgents() {
   }, [])
 
   return (
-    <section id="orchestration" className="max-w-6xl mx-auto px-6 py-24">
-      <div className="max-w-2xl mx-auto text-center mb-12">
-        <div className="text-xs uppercase tracking-[0.2em] text-brand/80 font-semibold mb-4">
-          Orchestration
-        </div>
-        <h2 className="text-4xl font-bold tracking-tight mb-4">Your agents, run agents.</h2>
-        <p className="text-ink-400 leading-relaxed">
-          Every agent in Ness can start, follow and review other agents through the Ness MCP. Hand one a big
-          job and it splits the work across worktrees, then keeps track of all of them for you.
-        </p>
-      </div>
+    <section id="orchestration" className="max-w-6xl mx-auto px-6 py-14 sm:py-20">
+      <SectionIntro step="02" eyebrow="Orchestration" title="Your agents, run agents.">
+        Every agent in Ness can start, follow and review other agents through the Ness MCP. Hand one a big job
+        and it splits the work across worktrees, then keeps track of all of them for you.
+      </SectionIntro>
 
       <div
         ref={graphRef}

@@ -1,5 +1,6 @@
 import { FileClock, GitMerge, MessageSquareText, MousePointerClick, ShieldCheck } from 'lucide-react'
 import { BlameGutterPreview } from '../../../src/renderer/components/BlameGutterPreview'
+import { SectionIntro } from './SectionIntro'
 
 // The gutter picture is the same component the app's history-tracking
 // explainer draws (the real LochBlameCard over a made-up snippet), so the
@@ -62,18 +63,12 @@ const POINTS = [
 
 export function ConversationBlame() {
   return (
-    <section id="blame" className="max-w-6xl mx-auto px-6 py-24">
-      <div className="max-w-2xl mx-auto text-center mb-12">
-        <div className="text-xs uppercase tracking-[0.2em] text-brand/80 font-semibold mb-4">
-          Conversation blame
-        </div>
-        <h2 className="text-4xl font-bold tracking-tight mb-4">Ask any line why it’s there.</h2>
-        <p className="text-ink-400 leading-relaxed">
-          Turn on history tracking for a repo and Ness records which Claude Code turn wrote each line. Open a
-          file and you can see the conversation and the prompt behind any line, then ask that conversation
-          what it was thinking.
-        </p>
-      </div>
+    <section id="blame" className="max-w-6xl mx-auto px-6 py-14 sm:py-20">
+      <SectionIntro step="03" eyebrow="Conversation blame" title="Ask any line why it’s there.">
+        Turn on history tracking for a repo and Ness records which Claude Code turn wrote each line. Open a file
+        and you can see the conversation and the prompt behind any line, then ask that conversation what it was
+        thinking.
+      </SectionIntro>
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-x-12 gap-y-12 items-start">
         <div>

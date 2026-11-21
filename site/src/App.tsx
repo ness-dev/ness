@@ -6,7 +6,7 @@ import { Features } from './components/Features'
 import { OpenSource } from './components/OpenSource'
 import { Install } from './components/Install'
 import { Footer } from './components/Footer'
-import { ScrollDiorama } from './components/ScrollDiorama'
+import { Highlights } from './components/Highlights'
 import { AgentsRunAgents } from './components/AgentsRunAgents'
 import { ConversationBlame } from './components/ConversationBlame'
 
@@ -16,7 +16,7 @@ export function App() {
       <HeaderNav />
       <Hero />
       <HeroMock />
-      <ScrollDiorama />
+      <Highlights />
       <AgentsRunAgents />
       <ConversationBlame />
       <FeatureCallouts />
