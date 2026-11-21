@@ -48,7 +48,7 @@ const POINTS = [
 export function RemoteAndMobile() {
   return (
     <section id="remote" className="max-w-6xl mx-auto px-6 py-14 sm:py-20">
-      <SectionIntro step="04" eyebrow="Remote and mobile" title="Your agents don’t live on your laptop.">
+      <SectionIntro step="04" eyebrow="Remote and mobile" title="Your agents don’t have to live on your laptop.">
         Run Ness’s server on any machine you can SSH into and drive it from the desktop app, or from your phone.{' '}
         <a
           href="/announcements/remote-backends.html"
