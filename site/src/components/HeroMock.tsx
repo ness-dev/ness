@@ -33,12 +33,9 @@ function stateFor(beat: Beat): MockHarnessState {
     activeWorktreeId: beat.active,
     lead: { ...LEAD_WORKTREE, status: 'processing' },
     worktrees: BASE_WORKTREES.map((w, i) => ({ ...w, status: beat.statuses[i] })),
-    highlightedElement: beat.highlight ? 'worktree-row' : null,
     highlightedWorktreeId: beat.highlight,
-    panelMode: 'terminal',
     snoozedCount: 1,
-    mergedClosedCount: 3,
-    rightPanelOpen: true
+    mergedClosedCount: 3
   }
 }
 

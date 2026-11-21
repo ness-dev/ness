@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   ArrowUp,
   BarChart3,
@@ -9,7 +9,6 @@ import {
   CircleAlert,
   CircleCheck,
   ClipboardCheck,
-  Code2,
   FilePlus,
   FolderOpen,
   GitMerge,
@@ -25,19 +24,13 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelRightClose,
-  PanelRightOpen,
   Pin,
   Plus,
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
   SquareTerminal,
-  Trash2,
-  Wand2,
-  X,
-  BookOpen,
-  ListChecks,
-  Map as MapIcon
+  Trash2
 } from 'lucide-react'
 import { MockChat, type MockTranscript } from './MockChat'
 import { NessMark } from './NessMark'
@@ -88,19 +81,6 @@ export interface MockChanges {
   committed: MockChangedFile[]
 }
 
-export type HighlightedElement =
-  | 'sidebar'
-  | 'worktree-row'
-  /** The project row, i.e. the main workspace where work gets planned. */
-  | 'project-row'
-  /** The quiet manual path: the sidebar header's "+" (⌘N). */
-  | 'new-worktree-button'
-  | 'terminal'
-  | 'right-column-button'
-  | null
-
-export type PanelMode = 'terminal' | 'new-worktree-flow'
-
 export interface MockHarnessState {
   /** A worktree id, or the lead's id to have the main workspace open. */
   activeWorktreeId: string
@@ -110,23 +90,16 @@ export interface MockHarnessState {
   /** The project's other worktrees. An unknown `activeWorktreeId` (e.g. 'new'
    * while the New worktree screen is up) falls back to the lead. */
   worktrees: MockWorktree[]
-  highlightedElement: HighlightedElement
+  /** A worktree row to ring, e.g. the one that just started asking for approval. */
   highlightedWorktreeId?: string
-  panelMode: PanelMode
-  /** A worktree mid-creation, listed under the project as "Creating worktree…". */
-  pendingBranch?: string
   /** Counts for the archive fold at the end of the project. */
   snoozedCount?: number
   mergedClosedCount?: number
-  /** When true the right column is expanded; otherwise it renders as the
-   * 48px icon rail the real app collapses to. */
-  rightPanelOpen?: boolean
 }
 
 /** Widths lifted from the renderer's defaults so the proportions match. */
 const SIDEBAR_WIDTH = 224
 const RIGHT_COLUMN_WIDTH = 256
-const RIGHT_RAIL_WIDTH = 48
 /** Leading clearance for the macOS traffic lights (renderer: `titlebar-lead`). */
 const TITLEBAR_LEAD = 72
 
@@ -159,7 +132,6 @@ const PR_ICON_COLOR: Record<'success' | 'failure' | 'pending' | 'none', string> 
 }
 
 export function MockHarness({ state }: { state: MockHarnessState }) {
-  const newWorktreeScreen = state.panelMode === 'new-worktree-flow'
   return (
     <div
       className="relative w-full h-full rounded-xl overflow-hidden border border-border-strong shadow-2xl shadow-black/70 bg-app flex flex-col font-sans select-none"
@@ -178,46 +150,14 @@ export function MockHarness({ state }: { state: MockHarnessState }) {
           <AppTitleSegment />
         </div>
         <div className="w-px shrink-0 bg-border-strong" />
-        {newWorktreeScreen ? (
-          <div className="flex-1 flex items-center justify-end pr-2">
-            <span className="text-dim p-1.5 rounded">
-              <X size={16} />
-            </span>
-          </div>
-        ) : (
-          <MockTabBar state={state} />
-        )}
+        <MockTabBar state={state} />
       </div>
 
       <div className="flex flex-1 min-h-0">
         <MockSidebar state={state} />
         <div className="w-px shrink-0 bg-border-strong" />
-        <AnimatePresence mode="wait" initial={false}>
-          {newWorktreeScreen ? (
-            <motion.div
-              key="new-worktree"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.55, ease: 'easeOut' }}
-              className="flex-1 flex flex-col min-w-0"
-            >
-              <MockNewWorktreeScreen />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="terminal"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.55, ease: 'easeOut' }}
-              className="flex-1 flex min-w-0"
-            >
-              <MockTerminalPanel state={state} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-        {!newWorktreeScreen && <MockRightColumn state={state} />}
+        <MockTerminalPanel state={state} />
+        <MockRightColumn state={state} />
       </div>
     </div>
   )
@@ -263,16 +203,11 @@ function RepoIcon({ className = '' }: { className?: string }) {
   )
 }
 
-const HIGHLIGHT_GLOW = 'inset 0 0 0 1px rgba(74, 222, 128, 0.55), 0 0 18px rgba(74, 222, 128, 0.18)'
-const NO_GLOW = 'inset 0 0 0 0px rgba(0,0,0,0)'
-
 /** Mirrors the renderer's sidebar after the project-row redesign: no list
  * label in the header (the manual "+" lives there among the other icons),
  * then one project — its row opens the main workspace — followed by the work
  * groups and the archive fold. */
 function MockSidebar({ state }: { state: MockHarnessState }) {
-  const sidebarGlow = state.highlightedElement === 'sidebar'
-
   const needsAttention = state.worktrees.filter((w) => w.pr?.checks === 'failure')
   const openPRs = state.worktrees.filter((w) => w.pr && w.pr.checks !== 'failure')
   const activeNoPR = state.worktrees.filter((w) => !w.pr)
@@ -290,29 +225,21 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
             key={wt.id}
             worktree={wt}
             isActive={wt.id === state.activeWorktreeId}
-            highlighted={
-              state.highlightedElement === 'worktree-row' && wt.id === state.highlightedWorktreeId
-            }
+            highlighted={wt.id === state.highlightedWorktreeId}
           />
         ))}
       </div>
     )
 
   return (
-    <motion.div
-      animate={{
-        boxShadow: sidebarGlow
-          ? 'inset 0 0 0 1px rgba(74, 222, 128, 0.55), inset 0 0 48px rgba(74, 222, 128, 0.10)'
-          : 'inset 0 0 0 0px rgba(74, 222, 128, 0)'
-      }}
-      transition={{ type: 'spring', stiffness: 200, damping: 30 }}
+    <div
       className="shrink-0 bg-panel flex flex-col h-full relative"
       style={{ width: SIDEBAR_WIDTH }}
     >
       <div className="px-3 py-3 flex items-center gap-2 shrink-0 text-dim">
         <PanelLeftClose size={12} />
         <div className="ml-auto flex items-center gap-1">
-          <NewWorktreeIcon highlighted={state.highlightedElement === 'new-worktree-button'} />
+          <span className="p-0.5"><Plus size={12} /></span>
           <span className="p-0.5"><ListTodo size={12} /></span>
           <span className="p-0.5"><Trash2 size={12} /></span>
           <span className="p-0.5 opacity-40"><Layers size={12} /></span>
@@ -322,9 +249,6 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
         <MockProjectRow state={state} />
-        <AnimatePresence initial={false}>
-          {state.pendingBranch && <MockPendingRow key={state.pendingBranch} branch={state.pendingBranch} />}
-        </AnimatePresence>
         {renderGroup('Needs Attention', needsAttention)}
         {renderGroup('Open PRs', openPRs)}
         {renderGroup('Active', activeNoPR)}
@@ -340,26 +264,7 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
       </div>
 
       <BottomIconStrip />
-    </motion.div>
-  )
-}
-
-/** The header's "+": one quiet icon among several, since most worktrees get
- * started by asking the project's chat. */
-function NewWorktreeIcon({ highlighted }: { highlighted: boolean }) {
-  return (
-    <motion.span
-      animate={{
-        boxShadow: highlighted
-          ? '0 0 0 2px rgba(74, 222, 128, 0.6), 0 0 18px rgba(74, 222, 128, 0.35)'
-          : '0 0 0 0px rgba(74, 222, 128, 0)',
-        scale: highlighted ? 1.15 : 1
-      }}
-      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
-      className={`rounded p-0.5 ${highlighted ? 'text-fg bg-surface' : ''}`}
-    >
-      <Plus size={12} />
-    </motion.span>
+    </div>
   )
 }
 
@@ -413,12 +318,9 @@ function RowBlock({
 function MockProjectRow({ state }: { state: MockHarnessState }) {
   const lead = state.lead
   const isActive = state.activeWorktreeId === lead.id || !state.worktrees.some((w) => w.id === state.activeWorktreeId)
-  const highlighted = state.highlightedElement === 'project-row'
   return (
     <RowBlock active={isActive} context={!isActive}>
-      <motion.div
-        animate={{ boxShadow: highlighted ? HIGHLIGHT_GLOW : NO_GLOW }}
-        transition={{ type: 'spring', stiffness: 220, damping: 26 }}
+      <div
         className={`group flex items-center gap-2.5 px-2 min-h-14 py-2 rounded-md transition-colors ${
           isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'
         }`}
@@ -438,32 +340,13 @@ function MockProjectRow({ state }: { state: MockHarnessState }) {
         <span className="shrink-0 p-0.5 text-faint hidden group-hover:inline-flex">
           <Pin size={12} />
         </span>
-      </motion.div>
+      </div>
       {isActive && <MockTabRows worktree={lead} />}
     </RowBlock>
   )
 }
 
-/** A worktree mid-creation (renderer `PendingWorktreeRow`). */
-function MockPendingRow({ branch }: { branch: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.3 }}
-      className="overflow-hidden"
-    >
-      <div className="mx-1.5 rounded-md px-2 py-2 flex items-center gap-2 text-muted">
-        <Loader2 size={14} className="shrink-0 text-accent animate-spin" />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium truncate">{branch}</div>
-          <div className="text-xs text-faint truncate">Creating worktree…</div>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
+const NO_GLOW = 'inset 0 0 0 0px rgba(0,0,0,0)'
 
 function MockWorktreeRow({
   worktree,
@@ -669,20 +552,11 @@ function MockTabBar({ state }: { state: MockHarnessState }) {
 
 function MockTerminalPanel({ state }: { state: MockHarnessState }) {
   const active = activeWorktree(state)
-  const terminalGlow = state.highlightedElement === 'terminal'
 
   return (
-    <motion.div
-      animate={{
-        boxShadow: terminalGlow
-          ? 'inset 0 0 0 1px rgba(74, 222, 128, 0.4)'
-          : 'inset 0 0 0 0px rgba(74, 222, 128, 0)'
-      }}
-      transition={{ type: 'spring', stiffness: 200, damping: 30 }}
-      className="flex-1 min-w-0 flex flex-col bg-app relative"
-    >
+    <div className="flex-1 min-w-0 flex flex-col bg-app relative">
       <MockChat key={active.id} transcript={active.chat} needsApproval={active.status === 'needs-approval'} />
-    </motion.div>
+    </div>
   )
 }
 
@@ -691,89 +565,22 @@ function MockTerminalPanel({ state }: { state: MockHarnessState }) {
 /* ------------------------------------------------------------------ */
 
 function MockRightColumn({ state }: { state: MockHarnessState }) {
-  const open = !!state.rightPanelOpen
-  const railGlow = state.highlightedElement === 'right-column-button'
   const active = activeWorktree(state)
 
   return (
-    <motion.div
-      animate={{ width: open ? RIGHT_COLUMN_WIDTH : RIGHT_RAIL_WIDTH }}
-      initial={false}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-      className={`shrink-0 h-full overflow-hidden bg-panel border-l ${
-        open ? 'border-border-strong' : 'border-border'
-      }`}
+    <div
+      className="shrink-0 h-full overflow-hidden bg-panel border-l border-border-strong flex flex-col"
+      style={{ width: RIGHT_COLUMN_WIDTH }}
     >
-      <AnimatePresence mode="wait" initial={false}>
-        {open ? (
-          <motion.div
-            key="expanded"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="h-full flex flex-col"
-            style={{ width: RIGHT_COLUMN_WIDTH }}
-          >
-            <RightColumnToolbar />
-            <PullRequestPanel pr={active.pr} />
-            <CommitsPanel commits={active.changes?.commits ?? []} />
-            <ChangedFilesPanel
-              uncommitted={active.changes?.uncommitted ?? []}
-              committed={active.changes?.committed ?? []}
-            />
-            <RightPanelSection title="All Files" collapsed actions={<ListTree size={12} />} />
-            <RightPanelSection title="Cost" collapsed />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="rail"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="h-full"
-            style={{ width: RIGHT_RAIL_WIDTH }}
-          >
-            <CollapsedRightRail highlighted={railGlow} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  )
-}
-
-function CollapsedRightRail({ highlighted }: { highlighted: boolean }) {
-  return (
-    <div className="h-full flex flex-col items-center gap-1 py-3 text-dim">
-      <motion.span
-        animate={{
-          boxShadow: highlighted
-            ? '0 0 0 2px rgba(74, 222, 128, 0.6), 0 0 18px rgba(74, 222, 128, 0.35)'
-            : '0 0 0 0px rgba(74, 222, 128, 0)',
-          scale: highlighted ? 1.08 : 1
-        }}
-        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
-        className={`rounded p-1.5 ${highlighted ? 'text-fg bg-surface' : ''}`}
-      >
-        <PanelRightOpen size={14} />
-      </motion.span>
-      <div className="h-px w-6 bg-border my-1" />
-      <span className="rounded p-1.5 text-success">
-        <GitPullRequest size={14} />
-      </span>
-      <span className="rounded p-1.5 text-success">
-        <GitMerge size={14} />
-      </span>
-      <span className="rounded p-1.5">
-        <ClipboardCheck size={14} />
-      </span>
-      <span className="rounded p-1.5">
-        <Code2 size={14} />
-      </span>
-      <span className="rounded p-1.5">
-        <FolderOpen size={14} />
-      </span>
+      <RightColumnToolbar />
+      <PullRequestPanel pr={active.pr} />
+      <CommitsPanel commits={active.changes?.commits ?? []} />
+      <ChangedFilesPanel
+        uncommitted={active.changes?.uncommitted ?? []}
+        committed={active.changes?.committed ?? []}
+      />
+      <RightPanelSection title="All Files" collapsed actions={<ListTree size={12} />} />
+      <RightPanelSection title="Cost" collapsed />
     </div>
   )
 }
@@ -1020,102 +827,6 @@ function ChangedFileRow({ file }: { file: MockChangedFile }) {
         {file.add > 0 && <span className="text-success">+{file.add}</span>}
         {file.del > 0 && <span className="text-danger ml-1">−{file.del}</span>}
       </span>
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* New worktree screen                                                 */
-/* ------------------------------------------------------------------ */
-
-const STARTER_TASKS = [
-  { icon: MapIcon, label: 'Map the repo', hint: 'A one-paragraph architecture summary' },
-  { icon: ListChecks, label: 'Find the TODOs', hint: 'Collect every TODO/FIXME in one file' },
-  { icon: BookOpen, label: 'Sharpen the README', hint: 'Get 3 concrete improvement ideas' }
-]
-
-function MockNewWorktreeScreen() {
-  return (
-    <div className="flex-1 flex flex-col min-w-0 bg-app brand-grid-bg relative overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-5">
-          <div className="text-center mb-5">
-            <NessMark className="h-10 w-auto mx-auto mb-3 text-brand" />
-            <h1 className="text-3xl font-extrabold tracking-tight mb-1">
-              New <span className="brand-gradient-text">worktree</span>
-            </h1>
-            <p className="text-muted text-base">
-              Say what you want done. Ness makes the branch and sends the agent in.
-            </p>
-          </div>
-
-          <div className="bg-panel/80 backdrop-blur border border-border rounded-2xl p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-dim">
-                Kickoff prompt
-              </span>
-              <span className="text-xs text-faint">names the branch too</span>
-            </div>
-            <div className="w-full bg-app border-2 border-accent rounded-lg px-4 py-3 text-sm text-fg-bright leading-relaxed min-h-[84px]">
-              Add a presence indicator to the sidebar showing which teammates are currently viewing
-              the same doc.
-              <span className="inline-block w-[1px] h-3.5 bg-fg-bright caret-blink ml-0.5 align-middle" />
-            </div>
-            <div className="mt-2 flex items-start gap-1.5 text-xs text-dim">
-              <Wand2 size={12} className="text-accent shrink-0 mt-0.5" />
-              <span>
-                Ness names the branch from this prompt, and the agent renames it once it has read
-                the task. Set a name yourself under Advanced.
-              </span>
-            </div>
-
-            <div className="mt-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-dim">
-              <ChevronRight size={12} />
-              Advanced
-              <span className="ml-1 normal-case font-normal tracking-normal text-faint">
-                start mode, branch, agent, model
-              </span>
-            </div>
-
-            <div className="flex items-center justify-end mt-5 gap-2">
-              <div className="flex items-center gap-1.5 px-4 py-2 text-sm text-dim">
-                Cancel
-                <kbd className="text-xs text-faint bg-app px-1.5 py-0.5 rounded border border-border font-mono">
-                  Esc
-                </kbd>
-              </div>
-              <div className="brand-gradient-bg text-white font-semibold text-sm px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-lg">
-                <Sparkles size={14} />
-                Create worktree
-                <kbd className="text-xs text-white bg-white/20 px-1.5 py-0.5 rounded border border-white/30 font-mono">
-                  ⌘↵
-                </kbd>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <div className="mb-2.5 px-1 flex items-center gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wider text-dim">
-                Or try a starter task
-              </span>
-              <X size={12} className="text-faint" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {STARTER_TASKS.map(({ icon: Icon, label, hint }) => (
-                <div
-                  key={label}
-                  className="text-left bg-panel/60 border border-border/60 rounded-xl p-3.5"
-                >
-                  <Icon size={18} className="text-accent mb-2" />
-                  <div className="text-sm text-fg font-medium">{label}</div>
-                  <div className="text-xs text-dim mt-0.5">{hint}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

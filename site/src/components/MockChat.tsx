@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 
 /** A replica of Ness's Chat mode (`JsonModeChat`) for the marketing
- * diorama — borderless prompt bubbles, assistant markdown, the flat
+ * hero mock — borderless prompt bubbles, assistant markdown, the flat
  * chevron rows tool calls and finished turns fold into, and the approval
  * card, plus the composer underneath. Styling reads the same `--chat-*`
  * density tokens the real chat does. */
