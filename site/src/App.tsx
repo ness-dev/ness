@@ -8,6 +8,7 @@ import { Install } from './components/Install'
 import { Footer } from './components/Footer'
 import { ScrollDiorama } from './components/ScrollDiorama'
 import { AgentsRunAgents } from './components/AgentsRunAgents'
+import { ConversationBlame } from './components/ConversationBlame'
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
       <HeroMock />
       <ScrollDiorama />
       <AgentsRunAgents />
+      <ConversationBlame />
       <FeatureCallouts />
       <Features />
       <OpenSource />
