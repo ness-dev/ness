@@ -40,7 +40,7 @@ import { ContextMenu } from './ContextMenu'
 import { HotkeyBadge } from './HotkeyBadge'
 import { RepoIcon } from './RepoIcon'
 import { useBackend } from '../backend'
-import { useSettings } from '../store'
+import { useOnboarding, useSettings } from '../store'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 
 /** Everything between the desktop sidebar's header and its footer — repo
@@ -171,6 +171,10 @@ export function WorktreeList({
 }: WorktreeListProps): JSX.Element {
   const backend = useBackend()
   const touch = variant === 'touch'
+  // The first-run tour's popout says the same thing, pointing at the row
+  // itself, so the card steps aside while it's up. Touch has no tour.
+  const tourStep = useOnboarding().tour.step
+  const tourShowing = !touch && (tourStep === 'home' || tourStep === 'awaiting-worktree')
   // Read once for the whole list rather than per row — N rows each holding
   // their own store subscription is CLAUDE.md anti-pattern #4.
   const settings = useSettings()
@@ -473,7 +477,7 @@ export function WorktreeList({
 
   return (
     <>
-      {agentCount === 0 && (firstHome || onNewWorktree) && (
+      {agentCount === 0 && !tourShowing && (firstHome || onNewWorktree) && (
         <div className="group relative mx-2 mb-2 mt-1 bg-panel-raised border border-border-strong rounded-lg overflow-hidden">
           <div className="brand-gradient-bg h-0.5" />
           <button
