@@ -11,7 +11,7 @@ import { ContextMenu, type ContextMenuEntry, type ContextMenuSubItem } from './C
 import { useBackend } from '../backend'
 import { useAvailableEditors } from '../hooks/useAvailableEditors'
 import { useEditorOverrideScope, useResolvedEditorId } from '../store'
-import { displayLabel } from '../worktree-display'
+import { displayLabel, homeRowLabel } from '../worktree-display'
 import { ALIAS_MAX_LEN } from '../../shared/state/aliases'
 import { STATUS_COLORS, STATUS_LABELS, detachedLikeTooltip, prIconStyle, prIconTitle } from '../worktree-row-style'
 import type { WorktreeRowModel } from '../worktree-list-model'
@@ -198,9 +198,7 @@ export const WorktreeTab = memo(function WorktreeTab({
 
   if (row.home && project) {
     const home = row.home
-    // Cmd peeks behind the alias, and behind a home row's alias is the
-    // project, not the branch — the branch is the same "main" for every repo.
-    const title = metaHeld ? project.name : (alias ?? project.name)
+    const title = homeRowLabel(project.name, alias, metaHeld)
     // Collapsed, the dot speaks for the whole project so an agent waiting on
     // you there isn't hidden; open, its worktrees show their own dots.
     const dotStatus = project.collapsedStatus ?? displayStatus
