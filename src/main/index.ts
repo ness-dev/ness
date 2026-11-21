@@ -13,10 +13,11 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
-import { canInstallLoch, installLoch, upgradeManagedLochIfStale } from './loch-install'
+import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
 import {
   backfillRepo,
+  ensureCurrentLoch,
   installLochHooks,
   lochAsk,
   isLochForkPath,
@@ -1889,7 +1890,8 @@ const lochHooks = new LochHooksCoordinator({
 async function syncLochHooks(): Promise<void> {
   if ((config.lochRecordingRepos ?? []).length === 0) return
   for (const wt of store.getSnapshot().state.worktrees.list) {
-    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.hooked.has(wt.path)) continue
+    // Re-checked per worktree: the binary can change mid-sweep.
+    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.isCurrent(wt.path, lochBinary())) continue
     await lochHooks.installIfRecording(wt)
   }
 }
@@ -1904,20 +1906,45 @@ function setLochRecordingRepos(next: string[]): void {
 async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Promise<number> {
   const current = config.lochRecordingRepos ?? []
   if (current.includes(repoRoot)) setLochRecordingRepos(current.filter((r) => r !== repoRoot))
+  // Nothing records while opted out, so a later opt-in must backfill that gap.
+  if (config.lochBackfilledVersions?.[repoRoot]) {
+    const { [repoRoot]: _gone, ...rest } = config.lochBackfilledVersions
+    config.lochBackfilledVersions = rest
+    saveConfig(config)
+  }
   const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
   return results.filter((ok) => !ok).length
 }
 store.subscribe((event) => {
   if (event.type === 'worktrees/listChanged') void syncLochHooks()
 })
-void syncLochHooks()
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
-void upgradeManagedLochIfStale((config.lochRecordingRepos ?? []).length > 0).then(() => {
-  // A replaced binary has the same path, but drop the cache so the next
-  // lookup re-probes rather than trusting a pre-upgrade answer.
-  resetLochBinaryCache()
-})
+void (async () => {
+  await ensureCurrentLoch((config.lochRecordingRepos ?? []).length > 0)
+  const bin = lochBinary()
+  store.dispatch({ type: 'loch/availabilityChanged', payload: !!bin })
+  // Hook lines name the binary by path; the sweep rewrites any that name
+  // another one (a stale PATH copy Ness has now passed over).
+  await syncLochHooks()
+  for (const repo of config.lochRecordingRepos ?? []) await backfillIfNewLoch(repo, bin)
+})()
+
+/** A new loch can attribute more of the past than the one that last
+ *  backfilled a repo (0.3.0 reaches removed worktrees), so each version
+ *  backfills each recording repo once. Tracked per repo, so one that keeps
+ *  failing retries alone rather than re-running every repo each boot.
+ *  Callers run these one at a time: it's a full transcript scan, and nothing
+ *  is waiting on it. */
+async function backfillIfNewLoch(repoRoot: string, bin: string | null): Promise<void> {
+  if (!bin || !isLochRecording(repoRoot) || !existsSync(repoRoot)) return
+  const version = await binaryVersion(bin)
+  if (!version || config.lochBackfilledVersions?.[repoRoot] === version) return
+  // An opt-out during the scan cleared this entry; don't write it back.
+  if (!(await backfillRepo(repoRoot)) || !isLochRecording(repoRoot)) return
+  config.lochBackfilledVersions = { ...config.lochBackfilledVersions, [repoRoot]: version }
+  saveConfig(config)
+}
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -4647,7 +4674,9 @@ function registerIpcHandlers(): void {
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
-      // Opting in is the explicit go-ahead to fetch loch when it's missing.
+      // Opting in is the explicit go-ahead to fetch loch when it's missing
+      // or older than the release Ness is written against.
+      await ensureCurrentLoch(true)
       if (!lochBinary()) {
         const got = await installLoch()
         if (!got.ok) return { ok: false, code: got.code, error: got.error }
@@ -4677,9 +4706,11 @@ function registerIpcHandlers(): void {
         }
         return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
       }
+      // Other recording repos' hooks may name a binary just passed over.
+      void syncLochHooks()
       // Recording only covers turns from now on; backfill reconstructs what
       // it can of the history so the gutter isn't empty on day one.
-      void backfillRepo(repoRoot)
+      void backfillIfNewLoch(repoRoot, lochBinary())
       return {
         ok: true,
         installed,

@@ -2,8 +2,9 @@ import { parseAutomatedMessage } from './state/json-claude'
 
 // Wire types for loch (https://github.com/ness-dev/loch), the CLI that
 // records which agent turn wrote each line. Only the fields Ness reads are
-// typed; loch's JSON contract (schema 2) adds fields without bumping the
-// schema, so unknown keys are expected and ignored.
+// typed. Ness never checks `schema` (3 as of loch 0.3.0): the fields read
+// here held across 2 → 3, and loch adds fields without bumping it, so
+// unknown keys are expected and ignored.
 
 export interface LochConversation {
   /** Per-blame letter, stable only within one blame document. */
@@ -36,7 +37,7 @@ export interface LochHunk {
 
 /** The loch release Ness installs when the user has none (main/loch-install.ts
  *  pins the matching per-platform checksums). */
-export const LOCH_VERSION = '0.2.0'
+export const LOCH_VERSION = '0.3.0'
 
 /** Compare dotted numeric versions (`0.2.0` vs `0.10.1`). Pre-release or
  *  build suffixes are ignored; missing parts count as 0. */
@@ -129,7 +130,7 @@ export function hunkAtLine(hunks: LochHunk[], line: number): LochHunk | null {
 }
 
 /** Validate a parsed `loch blame --json` document into Ness's shape. Anything
- *  that doesn't look like schema-2 output becomes `bad-output` rather than a
+ *  that doesn't have blame's shape becomes `bad-output` rather than a
  *  half-trusted payload. */
 export function parseBlameDocument(doc: unknown): LochBlameResult {
   if (!doc || typeof doc !== 'object') return { ok: false, code: 'bad-output' }
@@ -227,7 +228,9 @@ export function extractFirstPrompt(lines: Iterable<string>): string | null {
 }
 
 /** The line `loch install` writes for each hook: `<command> hook <name>
- *  2>/dev/null || true`. `<command>` must be ONE token: a quoted path, or an
+ *  [flags] 2>/dev/null || true`. Ness's `--local` installs write no flags;
+ *  loch 0.3.0's user-wide install adds `--scope user`, and a Codex line
+ *  `--agent codex`. `<command>` must be ONE token: a quoted path, or an
  *  unquoted one with no shell metacharacters (spaces allowed, for an older
  *  unquoted install under a home with a space in it). A compound command a
  *  user wrote — `./lint.sh && ~/.loch/bin/loch hook stop …` — is theirs and
@@ -235,7 +238,7 @@ export function extractFirstPrompt(lines: Iterable<string>): string | null {
  *  token's basename must be `loch` (or `loch.exe`). This matcher is the only
  *  way Ness can take its hooks back out, since loch has no uninstall. */
 const LOCH_HOOK_LINE =
-  /^("[^"]+"|'[^']+'|[^;&|<>$`"'()]+?) hook (prompt|stop|end|pre-tool|post-tool) 2>\/dev\/null \|\| true$/
+  /^("[^"]+"|'[^']+'|[^;&|<>$`"'()]+?) hook (prompt|stop|end|pre-tool|post-tool)((?: --(?:scope|agent) [\w-]+)*) 2>\/dev\/null \|\| true$/
 
 export function isLochHookCommand(command: unknown): boolean {
   if (typeof command !== 'string') return false

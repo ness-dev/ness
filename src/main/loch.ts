@@ -21,8 +21,10 @@ import { basename, delimiter, isAbsolute, join, relative, resolve } from 'path'
 import { createInterface } from 'readline'
 import { cachedShellEnv, claudeConfigDirFor, knownClaudeConfigDirs } from './claude-env'
 import { log } from './debug'
-import { managedLochPath } from './loch-install'
+import { binaryVersion, installLoch, managedLochPath } from './loch-install'
 import {
+  LOCH_VERSION,
+  compareVersions,
   extractFirstPrompt,
   parseBlameDocument,
   isLochHookCommand,
@@ -54,41 +56,74 @@ function lochEnv(cwd: string): NodeJS.ProcessEnv {
   }
 }
 
-/** Absolute path of the loch binary, from PATH (which boot merges with the
- *  login shell's). Absolute because it's also what the hook lines name —
- *  hooks run under whatever PATH Claude has, which may not include
- *  ~/.local/bin. A hit is cached; a miss isn't, so installing loch while
- *  Ness runs is noticed (a miss is a couple of dozen stats). A future
- *  bundled copy would slot in here. */
+/** Absolute path of the loch binary. Absolute because it's also what the
+ *  hook lines name — hooks run under whatever PATH Claude has, which may not
+ *  include ~/.local/bin. PATH (which boot merges with the login shell's)
+ *  wins, unless `ensureCurrentLoch` chose Ness's own copy. A hit is cached; a
+ *  miss isn't, so installing loch while Ness runs is noticed (a miss is a
+ *  couple of dozen stats). */
 let cachedBinary: string | null = null
+/** Set by `ensureCurrentLoch` when Ness's own copy is at least as new as the
+ *  PATH one (or PATH's won't say); otherwise PATH comes first. */
+let preferManaged = false
 /** Forget the cached binary, so the next lookup probes again — for "Check
  *  again", and after a run finds the cached path gone. */
 export function resetLochBinaryCache(): void {
   cachedBinary = null
 }
-export function lochBinary(): string | null {
-  if (cachedBinary) return cachedBinary
+
+function lochOnPath(): string | null {
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue
     const candidate = join(dir, 'loch')
     try {
       accessSync(candidate, fsConstants.X_OK)
-      cachedBinary = realpathSync(candidate)
-      break
+      return realpathSync(candidate)
     } catch {
       // not here
     }
   }
-  // The copy Ness downloads for users who had none (see loch-install.ts).
-  if (!cachedBinary) {
-    try {
-      accessSync(managedLochPath(), fsConstants.X_OK)
-      cachedBinary = managedLochPath()
-    } catch {
-      // not installed
-    }
+  return null
+}
+
+/** The copy Ness downloads (see loch-install.ts), if it's there. */
+function managedLoch(): string | null {
+  try {
+    accessSync(managedLochPath(), fsConstants.X_OK)
+    return managedLochPath()
+  } catch {
+    return null
   }
+}
+
+export function lochBinary(): string | null {
+  if (cachedBinary) return cachedBinary
+  const managed = managedLoch()
+  cachedBinary = preferManaged && managed ? managed : (lochOnPath() ?? managed)
   return cachedBinary
+}
+
+/** At boot and on opt-in: make sure the loch Ness runs is at least
+ *  LOCH_VERSION, for users who are recording — nobody else gets a download
+ *  they didn't ask for. A current loch on PATH is used as is. An older one is
+ *  left in place (it's the user's) and Ness's own copy is fetched, since
+ *  Ness's calls and hook lines are written against the pinned release.
+ *  Whatever happened, the newer of the two copies is the one used, so a
+ *  failed download never swaps in an older managed copy. */
+export async function ensureCurrentLoch(recordingAnywhere: boolean): Promise<void> {
+  const onPath = lochOnPath()
+  const pathVersion = onPath ? await binaryVersion(onPath) : null
+  const pathCurrent = !!pathVersion && compareVersions(pathVersion, LOCH_VERSION) >= 0
+  if (recordingAnywhere && !pathCurrent && (onPath || managedLoch())) {
+    const r = await installLoch()
+    if (!r.ok) log('loch', `loch ${LOCH_VERSION} install failed code=${r.code}`, r.error ?? '')
+  }
+  const managed = managedLoch()
+  const managedVersion = managed && onPath && !pathCurrent ? await binaryVersion(managed) : null
+  preferManaged =
+    !!managedVersion && (!pathVersion || compareVersions(managedVersion, pathVersion) > 0)
+  if (preferManaged) log('loch', `using ${managed} (${managedVersion}) over ${onPath} (${pathVersion ?? 'unreadable'})`)
+  resetLochBinaryCache()
 }
 
 function runLoch(args: string[], cwd: string, timeout: number): Promise<RunOutcome> {
@@ -387,7 +422,7 @@ export function projectHasLochHooks(worktreePath: string): boolean {
  *  line, so a binary that moved would otherwise leave both behind. */
 export async function installLochHooks(
   worktreePath: string
-): Promise<{ ok: true; viaProject?: boolean } | { ok: false; code: string; error?: string }> {
+): Promise<{ ok: true; bin: string; viaProject?: boolean } | { ok: false; code: string; error?: string }> {
   const bin = lochBinary()
   if (!bin) return { ok: false, code: 'not-installed' }
   if (projectHasLochHooks(worktreePath)) {
@@ -397,7 +432,7 @@ export async function installLochHooks(
     } catch {
       // best effort
     }
-    return { ok: true, viaProject: true }
+    return { ok: true, bin, viaProject: true }
   }
   try {
     removeLochHooks(worktreePath)
@@ -413,16 +448,16 @@ export async function installLochHooks(
     return out
   }
   log('loch', `hooks installed in ${worktreePath}`)
-  return { ok: true }
+  return { ok: true, bin }
 }
 
 const BACKFILL_TIMEOUT_MS = 10 * 60_000
-const backfillInflight = new Map<string, Promise<void>>()
+const backfillInflight = new Map<string, Promise<boolean>>()
 
 /** One background backfill per repo (loch keys projects by root commit, so
  *  any worktree stands for the whole repo). Blame results cached before it
  *  finished are dropped so the next look picks up the reconstructed turns. */
-export function backfillRepo(repoRoot: string): Promise<void> {
+export function backfillRepo(repoRoot: string): Promise<boolean> {
   const existing = backfillInflight.get(repoRoot)
   if (existing) return existing
   const p = (async () => {
@@ -433,6 +468,7 @@ export function backfillRepo(repoRoot: string): Promise<void> {
       `backfill ${repoRoot} ok=${out.ok}${out.ok ? ` turns=${String(out.doc.turns)}` : ` code=${out.code}`} ms=${Date.now() - started}`
     )
     blameCache.clear()
+    return out.ok
   })().finally(() => backfillInflight.delete(repoRoot))
   backfillInflight.set(repoRoot, p)
   return p

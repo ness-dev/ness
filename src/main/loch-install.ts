@@ -4,8 +4,12 @@
 // and puts the binary at ~/.loch/bin/loch. That path is loch's own home and
 // outlives Ness updates, which matters because the hook lines name it.
 //
-// Only ever run from an explicit user action (opting a repo in to history
-// tracking). Bump LOCH_VERSION and the sums together, from the release's
+// Opting a repo in to history tracking is the consent to download. After
+// that, `ensureCurrentLoch` (loch.ts) also runs this at boot for anyone still
+// recording whose loch is older than LOCH_VERSION — including users who manage
+// loch on PATH themselves, who then find a ~/.loch/bin/loch they didn't put
+// there (their own copy is left alone). Nobody who isn't recording is ever
+// downloaded to. Bump LOCH_VERSION and the sums together, from the release's
 // SHA256SUMS.
 
 import { execFile } from 'child_process'
@@ -22,27 +26,27 @@ const execFileAsync = promisify(execFile)
 const ASSETS: Record<string, { triple: string; sha256: string }> = {
   'darwin-arm64': {
     triple: 'aarch64-apple-darwin',
-    sha256: 'a065223055dd5ce3423032e3273edb7f10954e618b9f1111a685eed3cf79e414'
+    sha256: 'de7ab66076e83b2733d5ad3e7cab0138a72766ddb56333b7ba0dd41e19ce8e3e'
   },
   'darwin-x64': {
     triple: 'x86_64-apple-darwin',
-    sha256: '11b347f4cf91608b7379988daa0817f0ae0f2d1adf6fe89441165aabc45f2bda'
+    sha256: 'e6ac2b8aadc267935776e468b69293b34e8047c3f4902af78ece4fb797c9a081'
   },
   'linux-arm64': {
     triple: 'aarch64-unknown-linux-musl',
-    sha256: '7a384f5dc1fdea050d3425266f7e4167c6a92ba616e729c2a95e06dbcd4b1baa'
+    sha256: 'b3829fdea35747acea484945b4bdfe4b60af7bab7af95b484b2437b6429ae630'
   },
   'linux-x64': {
     triple: 'x86_64-unknown-linux-musl',
-    sha256: 'c2a2e77d51486136c5ffeab0b7ceaf45a0a3da64db7ea353ac592f84d89c2233'
+    sha256: '396b44d8383b8fe4671afdd364befbed0e6b68c4781b92657d2ea6f98d51aa76'
   },
   'win32-arm64': {
     triple: 'aarch64-pc-windows-msvc',
-    sha256: 'bcd673f7d666d499de37f794c44d4e147e5fb52bdacdd994967fa07ac9851d55'
+    sha256: 'e4bbbc4c95a5a1c5d1ff0832f0589f75a51a7b0b1423508b78614d4c21b7c4d3'
   },
   'win32-x64': {
     triple: 'x86_64-pc-windows-msvc',
-    sha256: '87ab4784a7107f72ee85df6a9642814df7d35d97206e58f6396725e7c09a32f9'
+    sha256: 'a72c0acc317ddb977709d064e26909216c4c36fdcc6dead22b51a5e6d3d41c8d'
   }
 }
 
@@ -71,15 +75,6 @@ export async function binaryVersion(path: string): Promise<string | null> {
   } catch {
     return null
   }
-}
-
-/** At boot: bring Ness's own copy up to LOCH_VERSION, but only for users who
- *  already have that copy and are recording somewhere — nobody else gets a
- *  download they didn't ask for. A loch on PATH is the user's to manage. */
-export async function upgradeManagedLochIfStale(recordingAnywhere: boolean): Promise<void> {
-  if (!recordingAnywhere || !existsSync(managedLochPath())) return
-  const r = await installLoch()
-  if (!r.ok) log('loch', `managed loch upgrade failed code=${r.code}`, r.error ?? '')
 }
 
 let inflight: Promise<InstallOutcome> | null = null

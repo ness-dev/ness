@@ -13,6 +13,8 @@
 
 export interface HookInstallResult {
   ok: boolean
+  /** The loch binary the written hook lines name. */
+  bin?: string
   viaProject?: boolean
   code?: string
   error?: string
@@ -27,8 +29,16 @@ export interface LochHooksDeps<R extends HookInstallResult> {
 }
 
 export class LochHooksCoordinator<R extends HookInstallResult = HookInstallResult> {
-  /** Paths this process has installed into, so a sweep skips them. */
-  readonly hooked = new Set<string>()
+  /** Paths this process has installed into, and the binary their hook lines
+   *  name, so a sweep skips them until the binary Ness uses changes. Set from
+   *  the binary the install actually used, so an install that raced a switch
+   *  still reads as stale. */
+  readonly hooked = new Map<string, string>()
+
+  /** Whether `path`'s hooks were written this process and name `bin`. */
+  isCurrent(path: string, bin: string | null): boolean {
+    return bin !== null && this.hooked.get(path) === bin
+  }
   private queues = new Map<string, Promise<unknown>>()
 
   constructor(private deps: LochHooksDeps<R>) {}
@@ -60,7 +70,7 @@ export class LochHooksCoordinator<R extends HookInstallResult = HookInstallResul
         }
         return null
       }
-      if (r.ok) this.hooked.add(wt.path)
+      if (r.ok) this.hooked.set(wt.path, r.bin ?? '')
       return r
     })
   }

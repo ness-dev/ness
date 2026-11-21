@@ -40,10 +40,12 @@ const hunks: LochHunk[] = [
 ]
 
 describe('parseBlameDocument', () => {
-  it('accepts a schema-2 success document', () => {
-    const r = parseBlameDocument({ schema: 2, ok: true, command: 'blame', conversations: [], hunks })
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(r.hunks).toHaveLength(4)
+  it('accepts schema-2 and schema-3 success documents alike', () => {
+    for (const schema of [2, 3]) {
+      const r = parseBlameDocument({ schema, ok: true, command: 'blame', conversations: [], hunks })
+      expect(r.ok).toBe(true)
+      if (r.ok) expect(r.hunks).toHaveLength(4)
+    }
   })
 
   it('carries loch failure codes through', () => {
@@ -224,6 +226,18 @@ describe('stripLochHooks', () => {
     expect(stripLochHooks(settings)).toEqual({
       hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep-me' }] }] }
     })
+  })
+
+  it('recognises loch 0.3.0 user-wide and Codex lines', () => {
+    for (const cmd of [
+      'loch hook prompt --scope user 2>/dev/null || true',
+      'loch hook stop --scope user --agent codex 2>/dev/null || true',
+      '/x/loch hook end --agent codex 2>/dev/null || true'
+    ]) {
+      expect(isLochHookCommand(cmd)).toBe(true)
+    }
+    expect(isLochHookCommand('loch hook stop --scope user; rm -rf ~ 2>/dev/null || true')).toBe(false)
+    expect(isLochHookCommand('loch hook stop --other x 2>/dev/null || true')).toBe(false)
   })
 
   it('leaves look-alikes that aren’t loch', () => {
