@@ -198,7 +198,9 @@ export const WorktreeTab = memo(function WorktreeTab({
 
   if (row.home && project) {
     const home = row.home
-    const title = metaHeld ? displayLabel(worktree, alias, metaHeld) : (alias ?? project.name)
+    // Cmd peeks behind the alias, and behind a home row's alias is the
+    // project, not the branch — the branch is the same "main" for every repo.
+    const title = metaHeld ? project.name : (alias ?? project.name)
     // Collapsed, the dot speaks for the whole project so an agent waiting on
     // you there isn't hidden; open, its worktrees show their own dots.
     const dotStatus = project.collapsedStatus ?? displayStatus
