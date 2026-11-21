@@ -1,5 +1,6 @@
 import { BellRing, KeyRound, Server, Smartphone, SquareStack } from 'lucide-react'
 import { InlineCode } from './InlineCode'
+import { PhoneMock } from './PhoneMock'
 import { SectionIntro } from './SectionIntro'
 
 const POINTS = [
@@ -71,12 +72,13 @@ export function RemoteAndMobile() {
           ))}
         </div>
 
-        <img
-          src="/screenshot-mobile.svg"
-          alt="Ness on a phone: the sidebar of agents with their status dots, above a terminal pane"
-          className="block h-[28rem] sm:h-[34rem] w-auto mx-auto order-1 lg:order-2"
-          loading="lazy"
-        />
+        <div
+          role="img"
+          aria-label="Ness on a phone: a worktree's Claude chat asking for approval to run the e2e suite, with Allow and Deny buttons"
+          className="order-1 lg:order-2 flex justify-center"
+        >
+          <PhoneMock />
+        </div>
       </div>
     </section>
   )

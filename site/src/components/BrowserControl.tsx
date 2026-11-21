@@ -1,4 +1,5 @@
 import { Eye, MonitorSmartphone, MousePointerClick, TerminalSquare } from 'lucide-react'
+import { BrowserMock } from './BrowserMock'
 import { SectionIntro } from './SectionIntro'
 
 const POINTS = [
@@ -32,12 +33,12 @@ export function BrowserControl() {
         groceries.
       </SectionIntro>
 
-      <img
-        src="/screenshot-browser.png"
-        alt="Ness with a browser tab beside a Claude session. The agent has opened Google and typed “hello world im claude” into the search box."
-        className="block w-full h-auto"
-        loading="lazy"
-      />
+      <div
+        role="img"
+        aria-label="Ness with an agent's chat beside a browser tab it is driving: it opened a local sign-in page, filled in the form, clicked Sign in and found the error in the console."
+      >
+        <BrowserMock />
+      </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-8 mt-14">
         {POINTS.map(({ icon: Icon, title, body }) => (
