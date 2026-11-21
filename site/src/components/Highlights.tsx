@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Activity, GitBranch, Loader2, MessageSquarePlus, PanelRight } from 'lucide-react'
+import { InlineCode } from './InlineCode'
 import { SectionIntro } from './SectionIntro'
 
 /** The four things Ness is for, in one ordinary section. The full app
@@ -41,7 +42,7 @@ const HIGHLIGHTS: { icon: typeof Activity; title: string; body: ReactNode; previ
     body: (
       <>
         Ask your project’s main workspace for something and it starts a worktree with an agent on it, or press{' '}
-        <Kbd>⌘N</Kbd>. Ness handles the git worktree from creation to cleanup.
+        <InlineCode as="kbd">⌘N</InlineCode>. Ness handles the git worktree from creation to cleanup.
       </>
     ),
     preview: (
@@ -63,7 +64,7 @@ const HIGHLIGHTS: { icon: typeof Activity; title: string; body: ReactNode; previ
     body: (
       <>
         PR and CI status, the branch’s commits, changed files and an editor sit next to the agent. Failing checks
-        and conflicts float to the top of the sidebar. <Kbd>⌘⇧G</Kbd> opens the PR.
+        and conflicts float to the top of the sidebar. <InlineCode as="kbd">⌘⇧G</InlineCode> opens the PR.
       </>
     ),
     preview: (
@@ -96,12 +97,6 @@ export function Highlights() {
         ))}
       </div>
     </section>
-  )
-}
-
-function Kbd({ children }: { children: string }) {
-  return (
-    <kbd className="font-mono text-[0.85em] text-ink-300 bg-ink-850 px-1 py-px rounded">{children}</kbd>
   )
 }
 

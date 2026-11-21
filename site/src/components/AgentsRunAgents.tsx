@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { Bot, GitBranchPlus, MessageSquareDiff, MessageSquareShare, Radio } from 'lucide-react'
+import { InlineCode } from './InlineCode'
 import { SectionIntro } from './SectionIntro'
 
 const AgentGraphMock = lazy(() => import('./AgentGraphMock'))
@@ -11,7 +12,7 @@ const POINTS = [
     title: 'Spawn worktrees',
     body: (
       <>
-        An agent calls <Code>create_worktree</Code> with a briefing. A fresh agent picks it up on its own
+        An agent calls <InlineCode>create_worktree</InlineCode> with a briefing. A fresh agent picks it up on its own
         branch, in its own folder.
       </>
     )
@@ -23,7 +24,7 @@ const POINTS = [
       <>
         The creator automatically follows what it spawned: PR, CI and review updates, plus progress reports.
         Routine news waits for its next turn. Urgent news interrupts. Any agent can{' '}
-        <Code>subscribe_to_worktree</Code> to follow a sibling too.
+        <InlineCode>subscribe_to_worktree</InlineCode> to follow a sibling too.
       </>
     )
   },
@@ -32,7 +33,7 @@ const POINTS = [
     title: 'Review agents',
     body: (
       <>
-        <Code>request_review</Code> opens a reviewer next to the author. It leaves inline comments and hands
+        <InlineCode>request_review</InlineCode> opens a reviewer next to the author. It leaves inline comments and hands
         its verdict straight back.
       </>
     )
@@ -42,7 +43,7 @@ const POINTS = [
     title: 'Message each other',
     body: (
       <>
-        <Code>send_message</Code> lands as a turn in another worktree’s chat, waking it if it was asleep.
+        <InlineCode>send_message</InlineCode> lands as a turn in another worktree’s chat, waking it if it was asleep.
       </>
     )
   },
@@ -52,12 +53,6 @@ const POINTS = [
     body: <>Claude’s own subagents still work inside any chat, for the small stuff.</>
   }
 ]
-
-function Code({ children }: { children: string }) {
-  return (
-    <code className="font-mono text-[0.85em] text-ink-300 bg-ink-850 px-1 py-px rounded">{children}</code>
-  )
-}
 
 /** Same chrome and rough height as the loaded mock, so the page doesn't
  *  jump when the graph chunk arrives. */
