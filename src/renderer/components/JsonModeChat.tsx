@@ -979,6 +979,9 @@ function automationLabel(
   if (source === 'ci-failure') {
     return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
   }
+  if (source === 'first-run-kickoff') {
+    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true }
+  }
   if (source === 'blame-ask') {
     return { label: 'Blame · Ask about a line', note: 'you opened this from the gutter', brand: true }
   }

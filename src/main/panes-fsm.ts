@@ -720,6 +720,26 @@ export class PanesFSM {
     return { tabId: sessionId, reused: false }
   }
 
+  /** Open a Chat tab that starts on `prompt`, focused. Always a Chat tab,
+   *  even when the default Claude tab type is Terminal: a terminal tab
+   *  can't take an automated first turn. A default agent with no Chat
+   *  support falls back to Claude for the same reason. */
+  openKickoffChat(wtPath: string, prompt: string, opts?: { label?: string }): string {
+    const sessionId = crypto.randomUUID()
+    const agentKind = this.opts.getDefaultAgentKind?.() ?? 'claude'
+    this.addTab(wtPath, {
+      id: sessionId,
+      type: 'json-claude',
+      label: opts?.label ?? agentDisplayName(supportsChat(agentKind) ? agentKind : 'claude'),
+      sessionId,
+      mode: 'awake',
+      ...(supportsChat(agentKind) && agentKind !== 'claude' ? { agentKind } : {})
+    })
+    this.focusTab(wtPath, sessionId)
+    this.opts.startJsonClaudeWithPrompt?.(sessionId, wtPath, prompt)
+    return sessionId
+  }
+
   /** Make `tabId` the active tab of whichever pane holds it. */
   private focusTab(wtPath: string, tabId: string): void {
     const tree = this.getTree(wtPath)

@@ -204,6 +204,7 @@ export const WorktreeTab = memo(function WorktreeTab({
     const dotStatus = project.collapsedStatus ?? displayStatus
     return (
       <div
+        data-sidebar-row={row.path}
         onClick={() => onSelect(row.path)}
         onContextMenu={onContextMenu}
         className={`group flex items-center gap-2.5 px-2 transition-colors cursor-pointer ${
@@ -312,6 +313,7 @@ export const WorktreeTab = memo(function WorktreeTab({
 
   return (
     <div
+      data-sidebar-row={row.path}
       onClick={() => onSelect(row.path)}
       onContextMenu={onContextMenu}
       className={`group w-full px-2 text-left flex items-center gap-2 transition-colors cursor-pointer ${

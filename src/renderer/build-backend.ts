@@ -468,7 +468,8 @@ export function buildBackend(
       }
     ) => req('agent:buildSpawnArgs', agentKind, opts),
 
-    setOnboardingQuest: (quest: string) => reqConfig('config:setOnboardingQuest', quest),
+    tourStartSomethingNew: () => req('onboarding:tourStartSomethingNew'),
+    tourDismiss: () => req('onboarding:tourDismiss'),
     scanExistingWork: () => req('onboarding:scanExistingWork'),
     importExistingWork: (repoRoots: string[]) => req('onboarding:importWork', repoRoots),
     setWorktreeBase: (mode: 'remote' | 'local') => reqConfig('config:setWorktreeBase', mode),
