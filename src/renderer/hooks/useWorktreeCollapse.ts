@@ -56,6 +56,7 @@ export function useWorktreeCollapse(): WorktreeCollapseState {
     () => localStorage.getItem('harness:unifiedRepos') === '1'
   )
   useEffect(() => {
+    // Must write on mount, not only after a toggle: see the comment above.
     localStorage.setItem('harness:unifiedRepos', unifiedRepos ? '1' : '0')
   }, [unifiedRepos])
 
