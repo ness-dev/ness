@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Activity, GitBranch, Loader2, MessageSquarePlus, PanelRight } from 'lucide-react'
+import { HighlightCard } from './HighlightCard'
 import { InlineCode } from './InlineCode'
 import { SectionIntro } from './SectionIntro'
 
@@ -85,15 +86,10 @@ export function Highlights() {
       </SectionIntro>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {HIGHLIGHTS.map(({ icon: Icon, title, body, preview }) => (
-          <article key={title} className="bg-ink-950/60 border border-ink-800 rounded-xl p-5 flex flex-col">
-            <div className="h-16 mb-5 flex items-center justify-center bg-ink-900/40 rounded-lg border border-ink-800/60 px-3">
-              {preview}
-            </div>
-            <Icon className="w-5 h-5 text-brand mb-3" aria-hidden="true" />
-            <h3 className="font-semibold text-ink-100 mb-1.5">{title}</h3>
-            <p className="text-sm text-ink-500 leading-relaxed">{body}</p>
-          </article>
+        {HIGHLIGHTS.map(({ icon, title, body, preview }) => (
+          <HighlightCard key={title} icon={icon} title={title} preview={preview}>
+            {body}
+          </HighlightCard>
         ))}
       </div>
     </section>
