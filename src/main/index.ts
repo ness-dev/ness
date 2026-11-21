@@ -1940,7 +1940,8 @@ async function backfillIfNewLoch(repoRoot: string, bin: string | null): Promise<
   if (!bin || !isLochRecording(repoRoot) || !existsSync(repoRoot)) return
   const version = await binaryVersion(bin)
   if (!version || config.lochBackfilledVersions?.[repoRoot] === version) return
-  if (!(await backfillRepo(repoRoot))) return
+  // An opt-out during the scan cleared this entry; don't write it back.
+  if (!(await backfillRepo(repoRoot)) || !isLochRecording(repoRoot)) return
   config.lochBackfilledVersions = { ...config.lochBackfilledVersions, [repoRoot]: version }
   saveConfig(config)
 }
