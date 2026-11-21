@@ -149,6 +149,15 @@ describe.skipIf(process.platform === 'win32')('ensureCurrentLoch', () => {
     expect(lochBinary()).toBe(onPath)
   })
 
+  it('never swaps in a managed copy older than the PATH one', async () => {
+    const onPath = fakeLoch(join(dir, 'bin'), '0.2.5')
+    fakeLoch(join(dir, 'home', '.loch', 'bin'), '0.2.0')
+    process.env.PATH = join(dir, 'bin')
+    // Not recording, so no install is attempted and the old copy stays.
+    await ensureCurrentLoch(false)
+    expect(lochBinary()).toBe(onPath)
+  })
+
   it('falls back to a stale PATH loch when there is no copy of Ness’s own', async () => {
     const onPath = fakeLoch(join(dir, 'bin'), '0.1.0')
     process.env.PATH = join(dir, 'bin')

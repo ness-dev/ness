@@ -59,12 +59,13 @@ function lochEnv(cwd: string): NodeJS.ProcessEnv {
 /** Absolute path of the loch binary. Absolute because it's also what the
  *  hook lines name — hooks run under whatever PATH Claude has, which may not
  *  include ~/.local/bin. PATH (which boot merges with the login shell's)
- *  wins, unless `ensureCurrentLoch` found that copy older than LOCH_VERSION
- *  and Ness's own copy is there to use instead. A hit is cached; a miss
- *  isn't, so installing loch while Ness runs is noticed (a miss is a couple
- *  of dozen stats). */
+ *  wins, unless `ensureCurrentLoch` chose Ness's own copy. A hit is cached; a
+ *  miss isn't, so installing loch while Ness runs is noticed (a miss is a
+ *  couple of dozen stats). */
 let cachedBinary: string | null = null
-let pathLochStale = false
+/** Set by `ensureCurrentLoch` when Ness's own copy is at least as new as the
+ *  PATH one (or PATH's won't say); otherwise PATH comes first. */
+let preferManaged = false
 /** Forget the cached binary, so the next lookup probes again — for "Check
  *  again", and after a run finds the cached path gone. */
 export function resetLochBinaryCache(): void {
@@ -97,17 +98,18 @@ function managedLoch(): string | null {
 
 export function lochBinary(): string | null {
   if (cachedBinary) return cachedBinary
-  const onPath = lochOnPath()
   const managed = managedLoch()
-  cachedBinary = pathLochStale && managed ? managed : (onPath ?? managed)
+  cachedBinary = preferManaged && managed ? managed : (lochOnPath() ?? managed)
   return cachedBinary
 }
 
-/** At boot: make sure the loch Ness runs is at least LOCH_VERSION, for users
- *  who are recording somewhere — nobody else gets a download they didn't ask
- *  for. A current loch on PATH is used as is. An older one is left in place
- *  (it's the user's) but passed over for Ness's own copy, fetched if needed,
- *  since Ness's calls and hook lines are written against the pinned release. */
+/** At boot and on opt-in: make sure the loch Ness runs is at least
+ *  LOCH_VERSION, for users who are recording — nobody else gets a download
+ *  they didn't ask for. A current loch on PATH is used as is. An older one is
+ *  left in place (it's the user's) and Ness's own copy is fetched, since
+ *  Ness's calls and hook lines are written against the pinned release.
+ *  Whatever happened, the newer of the two copies is the one used, so a
+ *  failed download never swaps in an older managed copy. */
 export async function ensureCurrentLoch(recordingAnywhere: boolean): Promise<void> {
   const onPath = lochOnPath()
   const pathVersion = onPath ? await binaryVersion(onPath) : null
@@ -115,9 +117,12 @@ export async function ensureCurrentLoch(recordingAnywhere: boolean): Promise<voi
   if (recordingAnywhere && !pathCurrent && (onPath || managedLoch())) {
     const r = await installLoch()
     if (!r.ok) log('loch', `loch ${LOCH_VERSION} install failed code=${r.code}`, r.error ?? '')
-    else if (onPath) log('loch', `using ${r.path} over ${onPath} (version ${pathVersion ?? 'unreadable'})`)
   }
-  pathLochStale = !!onPath && !pathCurrent
+  const managed = managedLoch()
+  const managedVersion = managed && onPath && !pathCurrent ? await binaryVersion(managed) : null
+  preferManaged =
+    !!managedVersion && (!pathVersion || compareVersions(managedVersion, pathVersion) > 0)
+  if (preferManaged) log('loch', `using ${managed} (${managedVersion}) over ${onPath} (${pathVersion ?? 'unreadable'})`)
   resetLochBinaryCache()
 }
 
@@ -417,7 +422,7 @@ export function projectHasLochHooks(worktreePath: string): boolean {
  *  line, so a binary that moved would otherwise leave both behind. */
 export async function installLochHooks(
   worktreePath: string
-): Promise<{ ok: true; viaProject?: boolean } | { ok: false; code: string; error?: string }> {
+): Promise<{ ok: true; bin: string; viaProject?: boolean } | { ok: false; code: string; error?: string }> {
   const bin = lochBinary()
   if (!bin) return { ok: false, code: 'not-installed' }
   if (projectHasLochHooks(worktreePath)) {
@@ -427,7 +432,7 @@ export async function installLochHooks(
     } catch {
       // best effort
     }
-    return { ok: true, viaProject: true }
+    return { ok: true, bin, viaProject: true }
   }
   try {
     removeLochHooks(worktreePath)
@@ -443,7 +448,7 @@ export async function installLochHooks(
     return out
   }
   log('loch', `hooks installed in ${worktreePath}`)
-  return { ok: true }
+  return { ok: true, bin }
 }
 
 const BACKFILL_TIMEOUT_MS = 10 * 60_000

@@ -4,8 +4,12 @@
 // and puts the binary at ~/.loch/bin/loch. That path is loch's own home and
 // outlives Ness updates, which matters because the hook lines name it.
 //
-// Only ever run from an explicit user action (opting a repo in to history
-// tracking). Bump LOCH_VERSION and the sums together, from the release's
+// Opting a repo in to history tracking is the consent to download. After
+// that, `ensureCurrentLoch` (loch.ts) also runs this at boot for anyone still
+// recording whose loch is older than LOCH_VERSION — including users who manage
+// loch on PATH themselves, who then find a ~/.loch/bin/loch they didn't put
+// there (their own copy is left alone). Nobody who isn't recording is ever
+// downloaded to. Bump LOCH_VERSION and the sums together, from the release's
 // SHA256SUMS.
 
 import { execFile } from 'child_process'

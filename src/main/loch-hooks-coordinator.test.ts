@@ -4,6 +4,7 @@ import { LochHooksCoordinator, type HookInstallResult } from './loch-hooks-coord
 /** A fake worktree filesystem: which paths currently have hooks, plus a log
  *  of operations in the order they ran, and installs that can be held open. */
 function harness() {
+  const bin = { current: '/old/loch' }
   const recording = new Set<string>()
   const hooksOn = new Set<string>()
   const ops: string[] = []
@@ -12,22 +13,28 @@ function harness() {
     isRecording: (repo) => recording.has(repo),
     install: async (path) => {
       ops.push(`install:start ${path}`)
+      // Read before the await, like installLochHooks: a switch mid-install
+      // must not be credited to this one.
+      const used = bin.current
       await new Promise<void>((resolve) => gates.set(path, resolve))
       hooksOn.add(path)
       ops.push(`install:end ${path}`)
-      return { ok: true }
+      return { ok: true, bin: used }
     },
     remove: (path) => {
       hooksOn.delete(path)
       ops.push(`remove ${path}`)
     }
   })
-  const release = async (path: string): Promise<void> => {
+  const started = async (path: string): Promise<void> => {
     for (let i = 0; i < 20 && !gates.has(path); i++) await Promise.resolve()
+  }
+  const release = async (path: string): Promise<void> => {
+    await started(path)
     gates.get(path)?.()
     gates.delete(path)
   }
-  return { recording, hooksOn, ops, coordinator, release }
+  return { bin, recording, hooksOn, ops, coordinator, started, release }
 }
 
 const wt = { path: '/r/wt1', repoRoot: '/r' }
@@ -38,9 +45,21 @@ describe('LochHooksCoordinator', () => {
     h.recording.add('/r')
     const p = h.coordinator.installIfRecording(wt)
     await h.release(wt.path)
-    expect(await p).toEqual({ ok: true })
+    expect(await p).toEqual({ ok: true, bin: '/old/loch' })
     expect(h.hooksOn.has(wt.path)).toBe(true)
-    expect(h.coordinator.hooked.has(wt.path)).toBe(true)
+    expect(h.coordinator.isCurrent(wt.path, '/old/loch')).toBe(true)
+  })
+
+  it('an install that raced a binary switch still reads as stale', async () => {
+    const h = harness()
+    h.recording.add('/r')
+    const p = h.coordinator.installIfRecording(wt)
+    await h.started(wt.path)
+    h.bin.current = '/new/loch'
+    await h.release(wt.path)
+    await p
+    expect(h.coordinator.isCurrent(wt.path, '/new/loch')).toBe(false)
+    expect(h.coordinator.isCurrent(wt.path, null)).toBe(false)
   })
 
   it('skips the install entirely when the repo is not opted in', async () => {

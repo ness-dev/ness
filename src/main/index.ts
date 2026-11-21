@@ -1890,7 +1890,8 @@ const lochHooks = new LochHooksCoordinator({
 async function syncLochHooks(): Promise<void> {
   if ((config.lochRecordingRepos ?? []).length === 0) return
   for (const wt of store.getSnapshot().state.worktrees.list) {
-    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.hooked.has(wt.path)) continue
+    // Re-checked per worktree: the binary can change mid-sweep.
+    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.isCurrent(wt.path, lochBinary())) continue
     await lochHooks.installIfRecording(wt)
   }
 }
@@ -1914,34 +1915,28 @@ store.subscribe((event) => {
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
 void (async () => {
-  const before = lochBinary()
   await ensureCurrentLoch((config.lochRecordingRepos ?? []).length > 0)
   const bin = lochBinary()
   store.dispatch({ type: 'loch/availabilityChanged', payload: !!bin })
-  // Hook lines name the binary by path, so a switch (stale PATH copy →
-  // Ness's own) has to rewrite any written while this ran.
-  if (bin !== before) lochHooks.hooked.clear()
+  // Hook lines name the binary by path; the sweep rewrites any that name
+  // another one (a stale PATH copy Ness has now passed over).
   await syncLochHooks()
-  await backfillForNewLoch(bin)
+  for (const repo of config.lochRecordingRepos ?? []) await backfillIfNewLoch(repo, bin)
 })()
 
 /** A new loch can attribute more of the past than the one that last
- *  backfilled (0.3.0 reaches removed worktrees), so each version backfills
- *  every recording repo once. One repo at a time: it's a full transcript
- *  scan, and nothing is waiting on it. */
-async function backfillForNewLoch(bin: string | null): Promise<void> {
-  const repos = config.lochRecordingRepos ?? []
-  if (!bin || repos.length === 0) return
+ *  backfilled a repo (0.3.0 reaches removed worktrees), so each version
+ *  backfills each recording repo once. Tracked per repo, so one that keeps
+ *  failing retries alone rather than re-running every repo each boot.
+ *  Callers run these one at a time: it's a full transcript scan, and nothing
+ *  is waiting on it. */
+async function backfillIfNewLoch(repoRoot: string, bin: string | null): Promise<void> {
+  if (!bin || !isLochRecording(repoRoot) || !existsSync(repoRoot)) return
   const version = await binaryVersion(bin)
-  if (!version || config.lochBackfilledVersion === version) return
-  let allOk = true
-  for (const repo of repos) {
-    if (isLochRecording(repo) && !(await backfillRepo(repo))) allOk = false
-  }
-  if (allOk) {
-    config.lochBackfilledVersion = version
-    saveConfig(config)
-  }
+  if (!version || config.lochBackfilledVersions?.[repoRoot] === version) return
+  if (!(await backfillRepo(repoRoot))) return
+  config.lochBackfilledVersions = { ...config.lochBackfilledVersions, [repoRoot]: version }
+  saveConfig(config)
 }
 
 // Same for pins — a removed worktree must not leave an orphan entry
@@ -4674,10 +4669,7 @@ function registerIpcHandlers(): void {
 
       // Opting in is the explicit go-ahead to fetch loch when it's missing
       // or older than the release Ness is written against.
-      const before = lochBinary()
       await ensureCurrentLoch(true)
-      const switched = lochBinary() !== before
-      if (switched) lochHooks.hooked.clear()
       if (!lochBinary()) {
         const got = await installLoch()
         if (!got.ok) return { ok: false, code: got.code, error: got.error }
@@ -4707,11 +4699,11 @@ function registerIpcHandlers(): void {
         }
         return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
       }
-      // Other recording repos' hooks still name the old binary.
-      if (switched) void syncLochHooks()
+      // Other recording repos' hooks may name a binary just passed over.
+      void syncLochHooks()
       // Recording only covers turns from now on; backfill reconstructs what
       // it can of the history so the gutter isn't empty on day one.
-      void backfillRepo(repoRoot)
+      void backfillIfNewLoch(repoRoot, lochBinary())
       return {
         ok: true,
         installed,
