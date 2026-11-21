@@ -1906,6 +1906,12 @@ function setLochRecordingRepos(next: string[]): void {
 async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Promise<number> {
   const current = config.lochRecordingRepos ?? []
   if (current.includes(repoRoot)) setLochRecordingRepos(current.filter((r) => r !== repoRoot))
+  // Nothing records while opted out, so a later opt-in must backfill that gap.
+  if (config.lochBackfilledVersions?.[repoRoot]) {
+    const { [repoRoot]: _gone, ...rest } = config.lochBackfilledVersions
+    config.lochBackfilledVersions = rest
+    saveConfig(config)
+  }
   const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
   return results.filter((ok) => !ok).length
 }
