@@ -3,7 +3,9 @@
 //
 //   eligible           fresh install, wizard not finished yet — nothing shown
 //   home               popout 1 on the project's main workspace row
-//   awaiting-worktree  kickoff chat running; waiting for its agent to make a worktree
+//   awaiting-worktree  kickoff chat running; waiting for its agent to make a
+//                      worktree. Nothing is shown; closing the kickoff tab
+//                      drops back to `home` so the user is never stranded here
 //   new-worktree       popout 2 on the worktree that agent created
 //   done               finished or dismissed; terminal
 //
@@ -19,6 +21,10 @@ export interface TourState {
   repoRoot?: string
   /** The worktree popout 2 points at. Set in `new-worktree` only. */
   worktreePath?: string
+  /** The kickoff Chat tab and the worktree holding it. Set in
+   *  `awaiting-worktree` only, so main can tell when it's closed. */
+  kickoffTabId?: string
+  kickoffPath?: string
 }
 
 export interface OnboardingState {
@@ -27,7 +33,8 @@ export interface OnboardingState {
 
 export type OnboardingEvent =
   | { type: 'onboarding/tourStarted'; payload: { repoRoot: string } }
-  | { type: 'onboarding/tourKickedOff' }
+  | { type: 'onboarding/tourKickedOff'; payload: { tabId: string; worktreePath: string } }
+  | { type: 'onboarding/tourKickoffClosed' }
   | { type: 'onboarding/tourWorktreeCreated'; payload: { worktreePath: string } }
   | { type: 'onboarding/tourEnded' }
 
@@ -49,8 +56,17 @@ export function sanitizeTour(raw: unknown): TourState {
     case 'eligible':
       return { step: 'eligible' }
     case 'home':
-    case 'awaiting-worktree':
-      return repoRoot ? { step: r.step, repoRoot } : TOUR_DONE
+      return repoRoot ? { step: 'home', repoRoot } : TOUR_DONE
+    case 'awaiting-worktree': {
+      if (!repoRoot) return TOUR_DONE
+      const kickoffTabId = typeof r.kickoffTabId === 'string' && r.kickoffTabId ? r.kickoffTabId : undefined
+      const kickoffPath = typeof r.kickoffPath === 'string' && r.kickoffPath ? r.kickoffPath : undefined
+      // Without the tab there's no way to notice it closing; fall back to
+      // popout 1 rather than wait on nothing.
+      return kickoffTabId && kickoffPath
+        ? { step: 'awaiting-worktree', repoRoot, kickoffTabId, kickoffPath }
+        : { step: 'home', repoRoot }
+    }
     case 'new-worktree':
       return repoRoot && worktreePath ? { step: 'new-worktree', repoRoot, worktreePath } : TOUR_DONE
     default:
@@ -69,7 +85,18 @@ export function onboardingReducer(
       return { ...state, tour: { step: 'home', repoRoot: event.payload.repoRoot } }
     case 'onboarding/tourKickedOff':
       if (tour.step !== 'home') return state
-      return { ...state, tour: { step: 'awaiting-worktree', repoRoot: tour.repoRoot } }
+      return {
+        ...state,
+        tour: {
+          step: 'awaiting-worktree',
+          repoRoot: tour.repoRoot,
+          kickoffTabId: event.payload.tabId,
+          kickoffPath: event.payload.worktreePath
+        }
+      }
+    case 'onboarding/tourKickoffClosed':
+      if (tour.step !== 'awaiting-worktree') return state
+      return { ...state, tour: { step: 'home', repoRoot: tour.repoRoot } }
     case 'onboarding/tourWorktreeCreated':
       // From `home` too: the wizard's default agent tab can make the
       // worktree before the user ever presses Start something new.

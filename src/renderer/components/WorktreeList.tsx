@@ -171,10 +171,10 @@ export function WorktreeList({
 }: WorktreeListProps): JSX.Element {
   const backend = useBackend()
   const touch = variant === 'touch'
-  // The first-run tour's popout says the same thing, pointing at the row
+  // The first-run tour's popout 1 says the same thing, pointing at the row
   // itself, so the card steps aside while it's up. Touch has no tour.
   const tourStep = useOnboarding().tour.step
-  const tourShowing = !touch && (tourStep === 'home' || tourStep === 'awaiting-worktree')
+  const tourShowing = !touch && tourStep === 'home'
   // Read once for the whole list rather than per row — N rows each holding
   // their own store subscription is CLAUDE.md anti-pattern #4.
   const settings = useSettings()

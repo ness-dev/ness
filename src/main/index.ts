@@ -3890,7 +3890,7 @@ function registerIpcHandlers(): void {
     const homePath = tourHomePath(store.getSnapshot().state)
     if (!homePath) return { ok: false as const }
     const tabId = panesFSM.openKickoffChat(homePath, buildFirstRunKickoff(), { label: 'Getting started' })
-    store.dispatch({ type: 'onboarding/tourKickedOff' })
+    store.dispatch({ type: 'onboarding/tourKickedOff', payload: { tabId, worktreePath: homePath } })
     return { ok: true as const, worktreePath: homePath, tabId }
   })
   transport.onRequest('onboarding:tourDismiss', () => {
@@ -3932,6 +3932,11 @@ function registerIpcHandlers(): void {
         (r) => wanted.has(r.repoRoot) && !config.repoRoots.includes(r.repoRoot)
       )
       if (chosen.length === 0) return { addedRepoRoots: [], focusWorktreePath: null }
+      // Someone importing a sidebar full of worktrees and live conversations
+      // already works this way; "start something new" on the first imported
+      // repo is the wrong lesson. End the tour before the repos register,
+      // or the first reposChanged would start it.
+      store.dispatch({ type: 'onboarding/tourEnded' })
       let focus: { path: string; at: number } | null = null
       for (const repo of chosen) {
         for (const wt of repo.worktrees) {

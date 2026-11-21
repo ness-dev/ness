@@ -9,6 +9,8 @@
 //   - an origin is recorded whose creator is that project's main
 //     workspace → popout 2 on the new worktree (once; the reducer ignores
 //     later ones)
+//   - the kickoff tab is closed before its agent made a worktree → back
+//     to popout 1, so the user isn't left in a step that shows nothing
 //   - the tour's project or worktree disappears → end the tour, rather
 //     than leave it pointing at a row that will never come back
 
@@ -17,6 +19,7 @@ import type { Config } from './persistence'
 import type { AppState, StateEvent } from '../shared/state'
 import type { TourState } from '../shared/state/onboarding'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
+import { getLeaves } from '../shared/state/terminals'
 
 export function installFirstRunTour(deps: {
   store: Store
@@ -59,6 +62,20 @@ export function installFirstRunTour(deps: {
       })
       return
     }
+    if (
+      tour.step === 'awaiting-worktree' &&
+      (event.type === 'terminals/panesForWorktreeChanged' ||
+        event.type === 'terminals/panesForWorktreeCleared' ||
+        event.type === 'terminals/panesReplaced')
+    ) {
+      // Scoped to the one worktree holding the kickoff tab.
+      if (event.type === 'terminals/panesForWorktreeChanged' && event.payload.worktreePath !== tour.kickoffPath) return
+      if (event.type === 'terminals/panesForWorktreeCleared' && event.payload !== tour.kickoffPath) return
+      if (!hasTab(state, tour.kickoffPath, tour.kickoffTabId)) {
+        store.dispatch({ type: 'onboarding/tourKickoffClosed' })
+      }
+      return
+    }
     if (event.type === 'origins/cleared') {
       if (tour.step === 'new-worktree' && event.payload === tour.worktreePath) {
         store.dispatch({ type: 'onboarding/tourEnded' })
@@ -74,6 +91,13 @@ function isHomeOf(state: AppState, path: string, repoRoot: string | undefined): 
   const wt = state.worktrees.list.find((w) => w.path === path)
   if (wt) return wt.isMain && wt.repoRoot === repoRoot
   return path === repoRoot
+}
+
+function hasTab(state: AppState, path: string | undefined, tabId: string | undefined): boolean {
+  if (!path || !tabId) return false
+  const tree = state.terminals.panes[path]
+  if (!tree) return false
+  return getLeaves(tree).some((leaf) => leaf.tabs.some((t) => t.id === tabId))
 }
 
 /** The main workspace of the tour's project, if the tour is on popout 1. */
