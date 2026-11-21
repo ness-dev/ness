@@ -1,10 +1,14 @@
 @import 'tailwindcss';
+@import '../../src/renderer/loch-colors.css';
 
 /* The orchestration section renders the app's own subscription-graph
  * cards (AgentGraphMock), so their classes have to be generated here too. */
 @source '../../src/renderer/components/SubscriptionGraphCanvas.tsx';
 @source '../../src/renderer/components/AgentIcon.tsx';
 @source '../../src/renderer/worktree-row-style.ts';
+/* The conversation-blame section renders the app's own gutter preview. */
+@source '../../src/renderer/components/BlameGutterPreview.tsx';
+@source '../../src/renderer/components/LochBlameCard.tsx';
 
 /* The renderer's rem-based icon sizes, used by those cards. */
 @utility icon-xs {
