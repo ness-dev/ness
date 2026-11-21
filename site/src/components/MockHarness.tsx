@@ -6,6 +6,8 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
+  CircleCheck,
   ClipboardCheck,
   Code2,
   FilePlus,
@@ -20,9 +22,11 @@ import {
   ListTree,
   Loader2,
   Menu,
+  MessageSquare,
   PanelLeftClose,
   PanelRightClose,
   PanelRightOpen,
+  Pin,
   Plus,
   RefreshCw,
   SlidersHorizontal,
@@ -47,6 +51,9 @@ export interface MockWorktree {
   status: MockStatus
   /** Rendered in the row's detail cluster, same as the app's worktree age. */
   age: string
+  /** The latest local agent review, drawn next to the PR icon. A review in
+   * progress also adds a Reviewer tab. */
+  review?: 'reviewing' | 'approve' | 'changes-requested' | 'comment'
   /** The worktree's Chat tab. Absent renders the chat's empty state. */
   chat?: MockTranscript
   /** What the right column's Commits and Changed Files panels list. Absent
@@ -84,6 +91,9 @@ export interface MockChanges {
 export type HighlightedElement =
   | 'sidebar'
   | 'worktree-row'
+  /** The project row, i.e. the main workspace where work gets planned. */
+  | 'project-row'
+  /** The quiet manual path: the sidebar header's "+" (⌘N). */
   | 'new-worktree-button'
   | 'terminal'
   | 'right-column-button'
@@ -92,14 +102,21 @@ export type HighlightedElement =
 export type PanelMode = 'terminal' | 'new-worktree-flow'
 
 export interface MockHarnessState {
+  /** A worktree id, or the lead's id to have the main workspace open. */
   activeWorktreeId: string
-  /** Must be non-empty: an unknown `activeWorktreeId` (e.g. 'new' while the
-   * New worktree screen is up) falls back to the first entry. */
+  /** The project's main worktree. It isn't one of the grouped rows: it's the
+   * project row at the top, and opening the project opens it. */
+  lead: MockWorktree
+  /** The project's other worktrees. An unknown `activeWorktreeId` (e.g. 'new'
+   * while the New worktree screen is up) falls back to the lead. */
   worktrees: MockWorktree[]
   highlightedElement: HighlightedElement
   highlightedWorktreeId?: string
   panelMode: PanelMode
-  /** Optional count shown on the (always-collapsed) Merged / Closed header. */
+  /** A worktree mid-creation, listed under the project as "Creating worktree…". */
+  pendingBranch?: string
+  /** Counts for the archive fold at the end of the project. */
+  snoozedCount?: number
   mergedClosedCount?: number
   /** When true the right column is expanded; otherwise it renders as the
    * 48px icon rail the real app collapses to. */
@@ -114,8 +131,9 @@ const RIGHT_RAIL_WIDTH = 48
 const TITLEBAR_LEAD = 72
 
 const REPO_NAME = 'ness'
-/** `repoNameColor('ness')` in the renderer resolves to this. */
+/** `repoNameColor('ness')` / `repoColor('ness')` in the renderer resolve to these. */
 const REPO_NAME_COLOR = 'text-cyan-400'
+const REPO_ICON_COLOR = 'bg-cyan-400/60'
 
 const STATUS_COLORS: Record<MockStatus, string> = {
   idle: 'bg-faint',
@@ -206,7 +224,7 @@ export function MockHarness({ state }: { state: MockHarnessState }) {
 }
 
 function activeWorktree(state: MockHarnessState): MockWorktree {
-  return state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.worktrees[0]
+  return state.worktrees.find((w) => w.id === state.activeWorktreeId) ?? state.lead
 }
 
 function TrafficLights() {
@@ -232,17 +250,40 @@ function AppTitleSegment() {
 /* Sidebar                                                             */
 /* ------------------------------------------------------------------ */
 
+/** The repo letter tile the app draws for each project (renderer `RepoIcon`):
+ * a 1em square, so its size comes from the font-size class. */
+function RepoIcon({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center justify-center rounded-sm text-white font-bold shrink-0 ${REPO_ICON_COLOR} ${className}`}
+      style={{ width: '1em', height: '1em', lineHeight: 1 }}
+    >
+      <span style={{ fontSize: '0.6em' }}>{REPO_NAME[0].toUpperCase()}</span>
+    </span>
+  )
+}
+
+const HIGHLIGHT_GLOW = 'inset 0 0 0 1px rgba(74, 222, 128, 0.55), 0 0 18px rgba(74, 222, 128, 0.18)'
+const NO_GLOW = 'inset 0 0 0 0px rgba(0,0,0,0)'
+
+/** Mirrors the renderer's sidebar after the project-row redesign: no list
+ * label in the header (the manual "+" lives there among the other icons),
+ * then one project — its row opens the main workspace — followed by the work
+ * groups and the archive fold. */
 function MockSidebar({ state }: { state: MockHarnessState }) {
   const sidebarGlow = state.highlightedElement === 'sidebar'
 
   const needsAttention = state.worktrees.filter((w) => w.pr?.checks === 'failure')
   const openPRs = state.worktrees.filter((w) => w.pr && w.pr.checks !== 'failure')
   const activeNoPR = state.worktrees.filter((w) => !w.pr)
-  const mergedCount = state.mergedClosedCount ?? 3
+  const tail = [
+    { label: 'Snoozed', count: state.snoozedCount ?? 0 },
+    { label: 'Merged / Closed', count: state.mergedClosedCount ?? 0 }
+  ].filter((g) => g.count > 0)
 
   const renderGroup = (label: string, rows: MockWorktree[]) =>
     rows.length > 0 && (
-      <>
+      <div>
         <GroupHeader label={label} count={rows.length} expanded />
         {rows.map((wt) => (
           <MockWorktreeRow
@@ -254,7 +295,7 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
             }
           />
         ))}
-      </>
+      </div>
     )
 
   return (
@@ -268,23 +309,34 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
       className="shrink-0 bg-panel flex flex-col h-full relative"
       style={{ width: SIDEBAR_WIDTH }}
     >
-      <div className="px-3 py-3 flex items-center gap-2 shrink-0">
-        <PanelLeftClose size={12} className="text-dim" />
-        <span className="text-xs font-medium text-dim">WORKTREES</span>
-        <div className="ml-auto flex items-center gap-1 text-dim">
-          <ListTodo size={12} />
-          <Trash2 size={12} />
-          <Layers size={12} />
-          <RefreshCw size={12} />
+      <div className="px-3 py-3 flex items-center gap-2 shrink-0 text-dim">
+        <PanelLeftClose size={12} />
+        <div className="ml-auto flex items-center gap-1">
+          <NewWorktreeIcon highlighted={state.highlightedElement === 'new-worktree-button'} />
+          <span className="p-0.5"><ListTodo size={12} /></span>
+          <span className="p-0.5"><Trash2 size={12} /></span>
+          <span className="p-0.5 opacity-40"><Layers size={12} /></span>
+          <span className="p-0.5"><RefreshCw size={12} /></span>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
-        <AddWorktreeRow highlighted={state.highlightedElement === 'new-worktree-button'} />
+        <MockProjectRow state={state} />
+        <AnimatePresence initial={false}>
+          {state.pendingBranch && <MockPendingRow key={state.pendingBranch} branch={state.pendingBranch} />}
+        </AnimatePresence>
         {renderGroup('Needs Attention', needsAttention)}
         {renderGroup('Open PRs', openPRs)}
         {renderGroup('Active', activeNoPR)}
-        <GroupHeader label="Merged / Closed" count={mergedCount} expanded={false} />
+        {tail.length > 0 && (
+          <div className="mt-1">
+            <GroupHeader
+              label={tail.map((g) => g.label).join(' · ')}
+              count={tail.reduce((n, g) => n + g.count, 0)}
+              expanded={false}
+            />
+          </div>
+        )}
       </div>
 
       <BottomIconStrip />
@@ -292,6 +344,27 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
   )
 }
 
+/** The header's "+": one quiet icon among several, since most worktrees get
+ * started by asking the project's chat. */
+function NewWorktreeIcon({ highlighted }: { highlighted: boolean }) {
+  return (
+    <motion.span
+      animate={{
+        boxShadow: highlighted
+          ? '0 0 0 2px rgba(74, 222, 128, 0.6), 0 0 18px rgba(74, 222, 128, 0.35)'
+          : '0 0 0 0px rgba(74, 222, 128, 0)',
+        scale: highlighted ? 1.15 : 1
+      }}
+      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+      className={`rounded p-0.5 ${highlighted ? 'text-fg bg-surface' : ''}`}
+    >
+      <Plus size={12} />
+    </motion.span>
+  )
+}
+
+/** Quiet by design, like the renderer's: sentence-weight, faint, chevron
+ * only as strong as the label. */
 function GroupHeader({
   label,
   count,
@@ -302,56 +375,93 @@ function GroupHeader({
   expanded: boolean
 }) {
   return (
-    <div className="w-full flex items-center gap-1 px-3 py-1.5 text-xs text-dim">
+    <div className="w-full flex items-center gap-1 px-3 pt-2 pb-1 text-xs text-faint">
       {expanded ? (
         <ChevronDown size={12} className="shrink-0" />
       ) : (
         <ChevronRight size={12} className="shrink-0" />
       )}
-      <span className="font-medium">{label}</span>
-      <span className="text-faint ml-auto">{count}</span>
+      <span>{label}</span>
+      <span className="ml-auto">{count}</span>
     </div>
   )
 }
 
-/** The app puts "Add worktree" at the top of each repo section, with the
- * hotkey badge trailing. */
-function AddWorktreeRow({ highlighted }: { highlighted: boolean }) {
+/** A row plus its tab rows as one inset pill (renderer `RowBlock`). `context`
+ * is the faint pill a project row gets while you're inside one of its
+ * worktrees. */
+function RowBlock({
+  active,
+  context = false,
+  children
+}: {
+  active: boolean
+  context?: boolean
+  children: ReactNode
+}) {
   return (
-    <motion.div
-      animate={{
-        boxShadow: highlighted
-          ? '0 0 24px rgba(74, 222, 128, 0.30)'
-          : '0 0 0px rgba(74, 222, 128, 0)'
-      }}
-      transition={{ type: 'spring', stiffness: 220, damping: 24 }}
-      className={`group relative w-full flex items-center gap-2 px-3 py-1.5 text-dim hover:bg-panel-raised overflow-hidden cursor-pointer transition-colors ${
-        highlighted ? 'brand-gradient-flow-text-active bg-panel-raised' : ''
-      }`}
+    <div
+      className={`mx-1.5 rounded-md overflow-hidden ${active ? 'bg-surface' : context ? 'bg-surface/50' : ''}`}
     >
-      <span
-        className={`absolute left-0 top-0 bottom-0 w-0.5 brand-gradient-flow-bar transition-opacity ${
-          highlighted ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}
-      />
-      <Plus
-        size={14}
-        className="shrink-0 transition-colors"
-        style={highlighted ? { stroke: 'var(--color-brand)' } : undefined}
-      />
-      <span className="text-sm font-medium brand-gradient-flow-text-hover">Add worktree</span>
-      <HotkeyBadge binding="⌘T" className="ml-auto" />
-    </motion.div>
+      {children}
+    </div>
   )
 }
 
-function HotkeyBadge({ binding, className = '' }: { binding: string; className?: string }) {
+/** The project row: repo tile with main's status dot, the project name, and
+ * on hover the "+" and keep-open pin. Clicking it opens the main workspace. */
+function MockProjectRow({ state }: { state: MockHarnessState }) {
+  const lead = state.lead
+  const isActive = state.activeWorktreeId === lead.id || !state.worktrees.some((w) => w.id === state.activeWorktreeId)
+  const highlighted = state.highlightedElement === 'project-row'
   return (
-    <span
-      className={`inline-flex items-center text-xs leading-none rounded px-1 py-0.5 select-none whitespace-nowrap shrink-0 bg-app/60 border border-border text-faint ${className}`}
+    <RowBlock active={isActive} context={!isActive}>
+      <motion.div
+        animate={{ boxShadow: highlighted ? HIGHLIGHT_GLOW : NO_GLOW }}
+        transition={{ type: 'spring', stiffness: 220, damping: 26 }}
+        className={`group flex items-center gap-2.5 px-2 min-h-14 py-2 rounded-md transition-colors ${
+          isActive ? 'bg-surface text-fg-bright' : 'text-fg hover:bg-panel-raised'
+        }`}
+      >
+        <span className="relative shrink-0 inline-flex">
+          <RepoIcon className="text-2xl" />
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-panel ${STATUS_COLORS[lead.status]}`}
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="text-base font-semibold truncate text-fg-bright">{REPO_NAME}</span>
+        </div>
+        <span className="shrink-0 text-faint hidden group-hover:flex">
+          <Plus size={12} />
+        </span>
+        <span className="shrink-0 p-0.5 text-faint hidden group-hover:inline-flex">
+          <Pin size={12} />
+        </span>
+      </motion.div>
+      {isActive && <MockTabRows worktree={lead} />}
+    </RowBlock>
+  )
+}
+
+/** A worktree mid-creation (renderer `PendingWorktreeRow`). */
+function MockPendingRow({ branch }: { branch: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.3 }}
+      className="overflow-hidden"
     >
-      {binding}
-    </span>
+      <div className="mx-1.5 rounded-md px-2 py-2 flex items-center gap-2 text-muted">
+        <Loader2 size={14} className="shrink-0 text-accent animate-spin" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate">{branch}</div>
+          <div className="text-xs text-faint truncate">Creating worktree…</div>
+        </div>
+      </div>
+    </motion.div>
   )
 }
 
@@ -366,15 +476,15 @@ function MockWorktreeRow({
 }) {
   const glowColor = worktree.status === 'needs-approval' ? '239, 68, 68' : '74, 222, 128'
   return (
-    <div className={isActive ? 'bg-surface' : ''}>
+    <RowBlock active={isActive}>
       <motion.div
         animate={{
           boxShadow: highlighted
             ? `inset 0 0 0 1px rgba(${glowColor}, 0.55), 0 0 18px rgba(${glowColor}, 0.18)`
-            : 'inset 0 0 0 0px rgba(0,0,0,0)'
+            : NO_GLOW
         }}
         transition={{ type: 'spring', stiffness: 220, damping: 26 }}
-        className={`group w-full px-3 py-2 text-left flex items-center gap-2 transition-colors ${
+        className={`group w-full px-2 py-2 text-left flex items-center gap-2 rounded-md transition-colors ${
           isActive ? 'text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
         }`}
       >
@@ -385,14 +495,29 @@ function MockWorktreeRow({
         {worktree.pr && (
           <GitPullRequest size={14} className={`shrink-0 ${PR_ICON_COLOR[worktree.pr.checks]}`} />
         )}
+        {worktree.review && <ReviewIcon review={worktree.review} />}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium truncate">{worktree.branch}</div>
           <SubtitleDetail worktree={worktree} active={isActive} />
         </div>
       </motion.div>
-      {isActive && <MockTabRows status={worktree.status} />}
-    </div>
+      {isActive && <MockTabRows worktree={worktree} />}
+    </RowBlock>
   )
+}
+
+/** The local agent review, beside the PR icon (renderer `ReviewStatusIcon`). */
+function ReviewIcon({ review }: { review: NonNullable<MockWorktree['review']> }) {
+  switch (review) {
+    case 'reviewing':
+      return <Loader2 size={14} className="shrink-0 animate-spin text-accent" />
+    case 'approve':
+      return <CircleCheck size={14} className="shrink-0 text-success" />
+    case 'changes-requested':
+      return <CircleAlert size={14} className="shrink-0 text-warning" />
+    case 'comment':
+      return <MessageSquare size={14} className="shrink-0 text-info" />
+  }
 }
 
 /** The line-2 detail cluster: age, diff stats, milestone, PR number. Mirrors
@@ -421,7 +546,8 @@ function SubtitleDetail({ worktree, active }: { worktree: MockWorktree; active: 
 }
 
 /** Tabs of the selected worktree, listed as indented child rows. */
-function MockTabRows({ status }: { status: MockStatus }) {
+function MockTabRows({ worktree }: { worktree: MockWorktree }) {
+  const status = worktree.status
   return (
     <div className="pb-1">
       <div className="pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs bg-surface-hover/60 text-fg-bright">
@@ -435,11 +561,13 @@ function MockTabRows({ status }: { status: MockStatus }) {
         ) : null}
         <span className="truncate">Chat</span>
       </div>
-      <div className="pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs text-muted">
-        <CodexGlyph />
-        <Loader2 size={10} className="shrink-0 animate-spin text-success" />
-        <span className="truncate">Reviewer</span>
-      </div>
+      {worktree.review === 'reviewing' && (
+        <div className="pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs text-muted">
+          <CodexGlyph />
+          <Loader2 size={10} className="shrink-0 animate-spin text-success" />
+          <span className="truncate">Reviewer</span>
+        </div>
+      )}
       <div className="pl-9 pr-3 py-1 flex items-center gap-1.5 text-xs text-muted">
         <SquareTerminal size={12} className="shrink-0" />
         <span className="truncate">Shell</span>
@@ -524,10 +652,12 @@ function MockTabBar({ state }: { state: MockHarnessState }) {
           <span className={`w-1.5 h-1.5 rounded-full ${TAB_STATUS_COLORS[active.status]}`} />
           <span>Chat</span>
         </div>
-        <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-transparent border-l border-l-border text-dim">
-          <span className="w-1.5 h-1.5 rounded-full bg-success" />
-          <span>Reviewer</span>
-        </div>
+        {active.review === 'reviewing' && (
+          <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-transparent border-l border-l-border text-dim">
+            <span className="w-1.5 h-1.5 rounded-full bg-success" />
+            <span>Reviewer</span>
+          </div>
+        )}
         <div className="shrink-0 flex items-center gap-1.5 px-3 h-full text-xs border-b-2 border-transparent border-l border-l-border text-dim">
           <span className="w-1.5 h-1.5 rounded-full bg-faint" />
           <span>Shell</span>

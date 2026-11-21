@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { motion, useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion'
 import type { MockHarnessState, MockStatus } from './MockHarness'
-import { BASE_WORKTREES } from './mock-data'
+import { BASE_WORKTREES, LEAD_SPAWNING_CHAT, LEAD_WORKTREE } from './mock-data'
 import { ScaledMock } from './ScaledMock'
 
 type SectionIndex = 0 | 1 | 2 | 3
@@ -18,7 +18,7 @@ const SECTIONS: Section[] = [
   {
     eyebrow: 'Parallel sessions',
     title: 'All your agents in one place.',
-    body: 'Every agent is its own git branch, its own folder, its own Claude (or Codex!). Kick off five tasks, switch between them in a keystroke, and never worry about two agents fighting over the same file.'
+    body: 'Click a project to open its main workspace and tell it what you want built. It splits the work across worktrees, each its own git branch, its own folder, its own Claude (or Codex!). Switch between them in a keystroke, and never worry about two agents fighting over the same file.'
   },
   {
     eyebrow: 'Reliable status',
@@ -26,10 +26,9 @@ const SECTIONS: Section[] = [
     body: 'Glancing at the sidebar tells you which agents need your attention. The second an agent is waiting on approval, the row lights up red and jumps the queue.'
   },
   {
-    eyebrow: 'New worktree in a click',
+    eyebrow: 'New worktree in a sentence',
     title: 'Start new work instantly.',
-    body: 'Spawn a fresh agent from the sidebar. Ness manages the full lifecycle of the git worktree, so you never even have to learn the commands.',
-    bonus: 'Bonus: Agents can create new worktrees themselves through the Ness MCP. Just ask!'
+    body: 'Ask your project for something and it spins up a worktree with an agent on it. Or start one yourself with ⌘N. Ness manages the full lifecycle of the git worktree, so you never even have to learn the commands.'
   },
   {
     eyebrow: 'Everything in one UI',
@@ -196,6 +195,10 @@ function dioramaStateFor(phase: Phase, reduced: boolean): MockHarnessState {
   return sectionFourState(localProgress)
 }
 
+/** The project's main workspace. It keeps working throughout: it's the agent
+ * handing work out to the rest. */
+const LEAD = { ...LEAD_WORKTREE, status: 'processing' as MockStatus }
+
 function sectionOneState(progress: number): MockHarnessState {
   const revealCount = Math.min(BASE_WORKTREES.length, Math.floor(progress * 6) + 2)
   const worktrees = BASE_WORKTREES.slice(0, revealCount).map((w, i) => ({
@@ -203,10 +206,12 @@ function sectionOneState(progress: number): MockHarnessState {
     status: sectionOneStatusFor(i, progress)
   }))
   return {
-    activeWorktreeId: '1',
+    activeWorktreeId: LEAD.id,
+    lead: LEAD,
     worktrees,
     highlightedElement: progress > 0.15 ? 'sidebar' : null,
     panelMode: 'terminal',
+    snoozedCount: 1,
     mergedClosedCount: 3
   }
 }
@@ -232,10 +237,12 @@ function sectionTwoState(progress: number): MockHarnessState {
   const highlightRow = progress > 0.35
   return {
     activeWorktreeId: highlightRow ? '2' : '1',
+    lead: LEAD,
     worktrees,
     highlightedElement: highlightRow ? 'worktree-row' : 'sidebar',
     highlightedWorktreeId: '2',
     panelMode: 'terminal',
+    snoozedCount: 1,
     mergedClosedCount: 3
   }
 }
@@ -245,12 +252,19 @@ function sectionThreeState(progress: number): MockHarnessState {
     ...w,
     status: i === 1 ? ('needs-approval' as MockStatus) : sectionOneStatusFor(i, 0.8)
   }))
-  const showForm = progress > 0.5
+  // First half: ask the project, and a worktree starts creating under it —
+  // and stays there through the second half, the quieter manual path via the
+  // header's "+" (⌘N), so it never vanishes mid-scroll.
+  const manual = progress > 0.5
+  const showForm = progress > 0.65
   return {
-    activeWorktreeId: showForm ? 'new' : '1',
+    activeWorktreeId: showForm ? 'new' : LEAD.id,
+    lead: { ...LEAD, chat: LEAD_SPAWNING_CHAT },
     worktrees,
-    highlightedElement: 'new-worktree-button',
+    highlightedElement: manual ? 'new-worktree-button' : 'project-row',
+    pendingBranch: progress > 0.2 ? 'feat/team-invites' : undefined,
     panelMode: showForm ? 'new-worktree-flow' : 'terminal',
+    snoozedCount: 1,
     mergedClosedCount: 3
   }
 }
@@ -263,9 +277,11 @@ function sectionFourState(progress: number): MockHarnessState {
   const panelOpen = progress > 0.25
   return {
     activeWorktreeId: '1',
+    lead: LEAD,
     worktrees,
     highlightedElement: panelOpen ? null : 'right-column-button',
     panelMode: 'terminal',
+    snoozedCount: 1,
     mergedClosedCount: 3,
     rightPanelOpen: panelOpen
   }
@@ -278,9 +294,11 @@ function finalState(): MockHarnessState {
   }))
   return {
     activeWorktreeId: '1',
+    lead: LEAD,
     worktrees,
     highlightedElement: null,
     panelMode: 'terminal',
+    snoozedCount: 1,
     mergedClosedCount: 3,
     rightPanelOpen: true
   }

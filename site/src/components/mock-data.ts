@@ -1,5 +1,57 @@
 import type { MockWorktree } from './MockHarness'
 
+/** The project's main checkout. In the app it's the project row itself:
+ * clicking the project opens it, and its chat is where work gets planned
+ * and handed out to the worktrees below. Its chat shows exactly that. */
+export const LEAD_WORKTREE: Omit<MockWorktree, 'status'> = {
+  id: 'main',
+  branch: 'main',
+  path: 'ness',
+  age: '3w',
+  chat: {
+    earlier: {
+      prompt:
+        'For v1.4: a welcome screen after signup, fix the dashboard flashing on logout, and pull session handling out of the auth module.',
+      duration: '41s',
+      toolCount: 4,
+      filesEdited: 0,
+      answer:
+        'Started `feat/onboarding`, `fix/login-flash` and `refactor/auth`, each with its own agent. I’m following all three and will tell you when one needs you.'
+    },
+    prompt: 'Also document the new session API, and bump our deps while you’re at it.',
+    tools: [
+      { tool: 'Worktree', intent: 'Create Worktree · docs/api-reference' },
+      { tool: 'Worktree', intent: 'Create Worktree · chore/deps-bump' }
+    ],
+    explanation:
+      'Two more underway: `docs/api-reference` and `chore/deps-bump`. `feat/onboarding` has #142 up with checks passing, and a reviewer is on it.',
+    working: {
+      todos: { done: 2, total: 5 },
+      streaming: 'Waiting on `fix/login-flash` to finish its e2e run'
+    },
+    approval: {
+      command: 'gh pr checks 142 --watch',
+      description: 'Watch CI on the onboarding PR'
+    }
+  }
+}
+
+/** The same main workspace a moment later, asked for one more piece of
+ * work: the diorama's "start new work" section, while the worktree it asked
+ * for is still being created in the sidebar. */
+export const LEAD_SPAWNING_CHAT: NonNullable<MockWorktree['chat']> = {
+  earlier: LEAD_WORKTREE.chat!.earlier,
+  prompt: 'Let admins invite teammates by email.',
+  tools: [{ tool: 'Worktree', intent: 'Create Worktree · feat/team-invites' }],
+  explanation:
+    'Started `feat/team-invites` with its own agent and handed it the brief. It’ll show up in the sidebar once setup finishes.',
+  working: {
+    todos: { done: 1, total: 2 },
+    streaming: 'Waiting for `feat/team-invites` to finish its setup script'
+  },
+  approval: LEAD_WORKTREE.chat!.approval
+}
+
 /** The fleet both the hero and the scroll diorama show. Each worktree
  * carries its own chat and right-column contents so whichever one is active
  * reads as a single coherent piece of work. */
@@ -9,13 +61,13 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
     branch: 'feat/onboarding',
     path: 'ness/feat-onboarding',
     age: '2d',
+    review: 'reviewing',
     pr: {
       number: 142,
       title: 'Onboarding flow ready for review',
       checks: 'success',
       additions: 142,
-      deletions: 58,
-      milestone: 'v1.4'
+      deletions: 58
     },
     changes: {
       commits: [
@@ -120,7 +172,8 @@ export const BASE_WORKTREES: Omit<MockWorktree, 'status'>[] = [
     id: '3',
     branch: 'refactor/auth',
     path: 'ness/refactor-auth',
-    age: '3h'
+    age: '3h',
+    review: 'changes-requested'
   },
   {
     id: '4',

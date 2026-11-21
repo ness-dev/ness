@@ -23,7 +23,7 @@ export function Features() {
 
         <FeatureCard
           title="One worktree per task"
-          description="Create and delete git worktrees from the sidebar. Each task gets its own folder and branch so agents never trip over each other's edits."
+          description="Ask your project's main workspace for the work and it creates the worktrees, or start one yourself with ⌘N. Each task gets its own folder and branch so agents never trip over each other's edits."
           preview={
             <div className="flex flex-col items-center">
               <div className="px-2 py-0.5 rounded bg-ink-800 border border-ink-700 text-[9px] font-mono text-ink-300">
@@ -92,7 +92,7 @@ export function Features() {
 
         <FeatureCard
           title="Multi-repo"
-          description="Manage multiple repos in a single window. Add repos to the sidebar, switch between them, or toggle unified view to see everything at once."
+          description="Manage multiple repos in a single window. Each repo is a project in the sidebar: click it to open its main workspace, or merge them into one list to see everything at once."
           preview={
             <div className="flex items-center justify-center gap-3">
               <RepoPill label="api" color="text-amber-300" dots={['bg-green-500', 'bg-amber-400']} />
