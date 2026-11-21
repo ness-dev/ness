@@ -1,7 +1,8 @@
 import { HeaderNav } from './components/HeaderNav'
 import { Hero } from './components/Hero'
 import { HeroMock } from './components/HeroMock'
-import { FeatureCallouts } from './components/FeatureCallouts'
+import { RemoteAndMobile } from './components/RemoteAndMobile'
+import { BrowserControl } from './components/BrowserControl'
 import { Features } from './components/Features'
 import { OpenSource } from './components/OpenSource'
 import { Install } from './components/Install'
@@ -19,7 +20,8 @@ export function App() {
       <Highlights />
       <AgentsRunAgents />
       <ConversationBlame />
-      <FeatureCallouts />
+      <RemoteAndMobile />
+      <BrowserControl />
       <Features />
       <OpenSource />
       <Install />
