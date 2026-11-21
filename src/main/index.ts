@@ -13,10 +13,11 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
-import { canInstallLoch, installLoch, upgradeManagedLochIfStale } from './loch-install'
+import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
 import {
   backfillRepo,
+  ensureCurrentLoch,
   installLochHooks,
   lochAsk,
   isLochForkPath,
@@ -1910,14 +1911,38 @@ async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Pro
 store.subscribe((event) => {
   if (event.type === 'worktrees/listChanged') void syncLochHooks()
 })
-void syncLochHooks()
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
-void upgradeManagedLochIfStale((config.lochRecordingRepos ?? []).length > 0).then(() => {
-  // A replaced binary has the same path, but drop the cache so the next
-  // lookup re-probes rather than trusting a pre-upgrade answer.
-  resetLochBinaryCache()
-})
+void (async () => {
+  const before = lochBinary()
+  await ensureCurrentLoch((config.lochRecordingRepos ?? []).length > 0)
+  const bin = lochBinary()
+  store.dispatch({ type: 'loch/availabilityChanged', payload: !!bin })
+  // Hook lines name the binary by path, so a switch (stale PATH copy →
+  // Ness's own) has to rewrite any written while this ran.
+  if (bin !== before) lochHooks.hooked.clear()
+  await syncLochHooks()
+  await backfillForNewLoch(bin)
+})()
+
+/** A new loch can attribute more of the past than the one that last
+ *  backfilled (0.3.0 reaches removed worktrees), so each version backfills
+ *  every recording repo once. One repo at a time: it's a full transcript
+ *  scan, and nothing is waiting on it. */
+async function backfillForNewLoch(bin: string | null): Promise<void> {
+  const repos = config.lochRecordingRepos ?? []
+  if (!bin || repos.length === 0) return
+  const version = await binaryVersion(bin)
+  if (!version || config.lochBackfilledVersion === version) return
+  let allOk = true
+  for (const repo of repos) {
+    if (isLochRecording(repo) && !(await backfillRepo(repo))) allOk = false
+  }
+  if (allOk) {
+    config.lochBackfilledVersion = version
+    saveConfig(config)
+  }
+}
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -4647,7 +4672,12 @@ function registerIpcHandlers(): void {
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
-      // Opting in is the explicit go-ahead to fetch loch when it's missing.
+      // Opting in is the explicit go-ahead to fetch loch when it's missing
+      // or older than the release Ness is written against.
+      const before = lochBinary()
+      await ensureCurrentLoch(true)
+      const switched = lochBinary() !== before
+      if (switched) lochHooks.hooked.clear()
       if (!lochBinary()) {
         const got = await installLoch()
         if (!got.ok) return { ok: false, code: got.code, error: got.error }
@@ -4677,6 +4707,8 @@ function registerIpcHandlers(): void {
         }
         return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
       }
+      // Other recording repos' hooks still name the old binary.
+      if (switched) void syncLochHooks()
       // Recording only covers turns from now on; backfill reconstructs what
       // it can of the history so the gutter isn't empty on day one.
       void backfillRepo(repoRoot)

@@ -296,6 +296,9 @@ export interface Config {
   lochRecordingRepos?: string[]
   // Repo roots whose "Install history tracking" sidebar prompt was closed.
   lochPromptDismissedRepos?: string[]
+  /** loch version that last backfilled every recording repo; a different
+   *  binary at boot backfills them again. */
+  lochBackfilledVersion?: string
   /** Default ON, so only an explicit `false` is written — absence means
    *  enabled, same as browserToolsEnabled. */
   agentTabNamingEnabled?: boolean

@@ -73,15 +73,6 @@ export async function binaryVersion(path: string): Promise<string | null> {
   }
 }
 
-/** At boot: bring Ness's own copy up to LOCH_VERSION, but only for users who
- *  already have that copy and are recording somewhere — nobody else gets a
- *  download they didn't ask for. A loch on PATH is the user's to manage. */
-export async function upgradeManagedLochIfStale(recordingAnywhere: boolean): Promise<void> {
-  if (!recordingAnywhere || !existsSync(managedLochPath())) return
-  const r = await installLoch()
-  if (!r.ok) log('loch', `managed loch upgrade failed code=${r.code}`, r.error ?? '')
-}
-
 let inflight: Promise<InstallOutcome> | null = null
 
 export type InstallOutcome = { ok: true; path: string } | { ok: false; code: string; error?: string }
