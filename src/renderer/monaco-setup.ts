@@ -12,6 +12,8 @@ import JsonWorkerUrl from 'monaco-editor/esm/vs/language/json/json.worker?worker
 import CssWorkerUrl from 'monaco-editor/esm/vs/language/css/css.worker?worker&url'
 import HtmlWorkerUrl from 'monaco-editor/esm/vs/language/html/html.worker?worker&url'
 import TsWorkerUrl from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker&url'
+import * as groovyLang from './monaco-grammars/groovy'
+import * as asciidocLang from './monaco-grammars/asciidoc'
 
 const workerUrlByLabel: Record<string, string> = {
   editor: EditorWorkerUrl,
@@ -127,6 +129,30 @@ function configureTypescriptDefaults(): void {
 
 configureTypescriptDefaults()
 
+function registerCustomLanguages(): void {
+  const langs: Array<{
+    id: string
+    extensions?: string[]
+    filenamePatterns?: string[]
+    conf: monaco.languages.LanguageConfiguration
+    language: monaco.languages.IMonarchLanguage
+  }> = [
+    { id: 'groovy', extensions: ['.groovy', '.gvy', '.gy', '.gsh', '.gradle'], ...groovyLang },
+    { id: 'asciidoc', extensions: ['.adoc', '.asciidoc'], ...asciidocLang },
+  ]
+  for (const l of langs) {
+    monaco.languages.register({
+      id: l.id,
+      extensions: l.extensions,
+      filenamePatterns: l.filenamePatterns,
+    })
+    monaco.languages.setLanguageConfiguration(l.id, l.conf)
+    monaco.languages.setMonarchTokensProvider(l.id, l.language)
+  }
+}
+
+registerCustomLanguages()
+
 // Pull current Tailwind theme tokens from the document and build a Monaco
 // theme that tracks them. Called once at boot and on theme changes.
 function readVar(name: string, fallback: string): string {
@@ -182,13 +208,16 @@ export function defineHarnessTheme(): void {
 export function detectMonacoLanguage(filePath: string | undefined): string {
   if (!filePath) return 'plaintext'
   const name = filePath.split('/').pop() || ''
+  const lower = name.toLowerCase()
+  // Compound extensions checked before the single-ext fallback below.
+  if (lower.endsWith('.gradle.kts')) return 'kotlin'
   const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : ''
   const byName: Record<string, string> = {
     dockerfile: 'dockerfile',
     makefile: 'makefile',
     'cmakelists.txt': 'cmake'
   }
-  if (byName[name.toLowerCase()]) return byName[name.toLowerCase()]
+  if (byName[lower]) return byName[lower]
   const byExt: Record<string, string> = {
     ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
     js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
@@ -201,9 +230,13 @@ export function detectMonacoLanguage(filePath: string | undefined): string {
     sh: 'shell', bash: 'shell', zsh: 'shell',
     yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini',
     sql: 'sql', xml: 'xml', svg: 'xml',
-    php: 'php', swift: 'swift', kt: 'kotlin', dart: 'dart', lua: 'lua',
+    php: 'php', swift: 'swift', kt: 'kotlin', kts: 'kotlin', dart: 'dart', lua: 'lua',
     graphql: 'graphql', gql: 'graphql',
-    dockerfile: 'dockerfile'
+    dockerfile: 'dockerfile',
+    groovy: 'groovy', gvy: 'groovy', gy: 'groovy', gsh: 'groovy',
+    gradle: 'groovy',
+    adoc: 'asciidoc', asciidoc: 'asciidoc',
+    properties: 'ini'
   }
   return byExt[ext] || 'plaintext'
 }
