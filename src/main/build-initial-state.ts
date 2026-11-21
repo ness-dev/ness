@@ -336,6 +336,7 @@ export function buildInitialAppState(
       lochPromptDismissedRepos: Array.isArray(config.lochPromptDismissedRepos)
         ? config.lochPromptDismissedRepos
         : [],
+      lochRecordNewRepos: typeof config.lochRecordNewRepos === 'boolean' ? config.lochRecordNewRepos : null,
       agentTabNamingEnabled: config.agentTabNamingEnabled !== false,
       defaultClaudeTabType: config.defaultClaudeTabType === 'json' ? 'json' : 'xterm',
       chatPromotionDismissed: config.chatPromotionDismissed === true,

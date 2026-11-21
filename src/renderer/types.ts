@@ -421,6 +421,9 @@ export interface ElectronAPI {
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
   setLochBlameEnabled(enabled: boolean): Promise<boolean>
+  /** The standing answer for repos added from now on: `true` turns loch
+   *  recording on for each as it's added. */
+  setLochRecordNewRepos(enabled: boolean): Promise<boolean>
   /** Opt a repo in to (or out of) loch recording: installs or removes loch's
    *  hooks in every worktree of it. */
   setLochRecording(repoRoot: string, enabled: boolean): Promise<LochRecordingResult>

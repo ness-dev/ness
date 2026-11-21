@@ -15,4 +15,16 @@ describe('lochReducer', () => {
     expect(on.installable).toBe(true)
     expect(lochReducer(on, { type: 'loch/installableChanged', payload: true })).toBe(on)
   })
+
+  it('autoRecordingChanged adds and removes a repo, keeping identity on no-ops', () => {
+    expect(initialLoch.autoRecording).toEqual([])
+    const ev = (repoRoot: string, active: boolean) =>
+      ({ type: 'loch/autoRecordingChanged', payload: { repoRoot, active } }) as const
+    const on = lochReducer(initialLoch, ev('/r', true))
+    expect(on.autoRecording).toEqual(['/r'])
+    expect(lochReducer(on, ev('/r', true))).toBe(on)
+    const off = lochReducer(on, ev('/r', false))
+    expect(off.autoRecording).toEqual([])
+    expect(lochReducer(off, ev('/r', false))).toBe(off)
+  })
 })

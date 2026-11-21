@@ -146,7 +146,7 @@ import { scanExistingWork, readLiveClaudeSessions } from './work-discovery'
 import type { DiscoveredSession, DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 import type { AddRepoResult } from '../shared/repo-pick'
 import { isWorktreeMerged } from '../shared/state/prs'
-import type { ForkSource } from '../shared/state/worktrees'
+import type { ForkSource, Worktree } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
 import type { ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../shared/state/reviews'
@@ -1915,8 +1915,112 @@ async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Pro
   const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
   return results.filter((ok) => !ok).length
 }
+/** Opt a repo in: fetch loch if needed, add the repo to the list, install
+ *  hooks in `worktrees`. Shared by the explicit `loch:setRecording` and the
+ *  automatic opt-in for repos added while `lochRecordNewRepos` is on. */
+async function enableLochRecording(
+  repoRoot: string,
+  worktrees: readonly Worktree[]
+): Promise<LochRecordingResult> {
+  // Opting in is the explicit go-ahead to fetch loch when it's missing
+  // or older than the release Ness is written against.
+  await ensureCurrentLoch(true)
+  if (!lochBinary()) {
+    const got = await installLoch()
+    if (!got.ok) return { ok: false, code: got.code, error: got.error }
+    store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+    if (!lochBinary()) return { ok: false, code: 'not-installed' }
+  }
+  // Opt in BEFORE installing: the installs re-check the list, so a
+  // concurrent opt-out during them rolls them back rather than losing.
+  const wasRecording = isLochRecording(repoRoot)
+  if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
+  let installed = 0
+  let viaProject = 0
+  let firstFailure: { code: string; error?: string } | null = null
+  for (const wt of worktrees) {
+    const r = await lochHooks.installIfRecording(wt)
+    if (!r) continue
+    if (r.ok) {
+      if (r.viaProject) viaProject++
+      else installed++
+    } else {
+      firstFailure ??= { code: r.code, error: r.error }
+    }
+  }
+  if (installed + viaProject === 0) {
+    if (!wasRecording && isLochRecording(repoRoot)) {
+      setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
+    }
+    return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
+  }
+  // Other recording repos' hooks may name a binary just passed over.
+  void syncLochHooks()
+  // Recording only covers turns from now on; backfill reconstructs what
+  // it can of the history so the gutter isn't empty on day one.
+  void backfillIfNewLoch(repoRoot, lochBinary())
+  return {
+    ok: true,
+    installed,
+    viaProject,
+    failed: worktrees.length - installed - viaProject
+  }
+}
+
+// Repos registered while `lochRecordNewRepos` is on (the onboarding answer)
+// start recording through the same path as the explicit opt-in. Done here
+// rather than in registerRepoRoot's callers so every route in (import,
+// add-repo, MCP add_repo, new project) is covered for every client. A repo
+// waits for its first worktree listing, since installs are per worktree.
+// Runs serialized: an import adds several repos at once, and each would
+// otherwise start its own loch download.
+let knownRepoRoots = new Set(config.repoRoots)
+const autoRecordAwaitingList = new Set<string>()
+let autoRecordChain: Promise<void> = Promise.resolve()
+function setAutoRecording(repoRoot: string, active: boolean): void {
+  store.dispatch({ type: 'loch/autoRecordingChanged', payload: { repoRoot, active } })
+}
+function autoRecord(repoRoot: string, worktrees: readonly Worktree[]): void {
+  autoRecordChain = autoRecordChain.then(async () => {
+    try {
+      // Re-checked: the answer may have flipped, or the repo been removed,
+      // while an earlier repo in the chain was installing.
+      if (config.lochRecordNewRepos !== true || !config.repoRoots.includes(repoRoot)) return
+      const r = await enableLochRecording(repoRoot, worktrees)
+      // A failure leaves the repo out of lochRecordingRepos, so the sidebar
+      // prompt offers it again once autoRecording drops it.
+      if (!r.ok) log('loch', `auto-record ${repoRoot} failed: ${r.code}`, r.error)
+    } catch (err) {
+      log('loch', `auto-record ${repoRoot} threw`, err instanceof Error ? err.message : err)
+    } finally {
+      setAutoRecording(repoRoot, false)
+    }
+  })
+}
 store.subscribe((event) => {
-  if (event.type === 'worktrees/listChanged') void syncLochHooks()
+  if (event.type === 'worktrees/reposChanged') {
+    const next = new Set(event.payload)
+    for (const root of next) {
+      if (knownRepoRoots.has(root) || config.lochRecordNewRepos !== true || isLochRecording(root)) continue
+      if (!lochBinary() && !canInstallLoch()) continue
+      autoRecordAwaitingList.add(root)
+      setAutoRecording(root, true)
+    }
+    for (const root of autoRecordAwaitingList) {
+      if (next.has(root)) continue
+      autoRecordAwaitingList.delete(root)
+      setAutoRecording(root, false)
+    }
+    knownRepoRoots = next
+  } else if (event.type === 'worktrees/listChanged') {
+    for (const root of autoRecordAwaitingList) {
+      const worktrees = event.payload.filter((w) => w.repoRoot === root && !w.prunable)
+      if (worktrees.length === 0) continue
+      autoRecordAwaitingList.delete(root)
+      autoRecord(root, worktrees)
+    }
+    void syncLochHooks()
+  }
 })
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
@@ -3424,6 +3528,15 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  // The standing "record history in repos I add" answer. Only governs repos
+  // added after it's set; already-added repos keep their own choice.
+  transport.onRequest('config:setLochRecordNewRepos', (_ctx, enabled: boolean) => {
+    config.lochRecordNewRepos = enabled === true
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochRecordNewReposChanged', payload: config.lochRecordNewRepos })
+    return true
+  })
+
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
     // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
@@ -4674,49 +4787,7 @@ function registerIpcHandlers(): void {
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
-      // Opting in is the explicit go-ahead to fetch loch when it's missing
-      // or older than the release Ness is written against.
-      await ensureCurrentLoch(true)
-      if (!lochBinary()) {
-        const got = await installLoch()
-        if (!got.ok) return { ok: false, code: got.code, error: got.error }
-        store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
-        if (!lochBinary()) return { ok: false, code: 'not-installed' }
-      }
-      // Opt in BEFORE installing: the installs re-check the list, so a
-      // concurrent opt-out during them rolls them back rather than losing.
-      const wasRecording = isLochRecording(repoRoot)
-      if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
-      let installed = 0
-      let viaProject = 0
-      let firstFailure: { code: string; error?: string } | null = null
-      for (const wt of worktrees) {
-        const r = await lochHooks.installIfRecording(wt)
-        if (!r) continue
-        if (r.ok) {
-          if (r.viaProject) viaProject++
-          else installed++
-        } else {
-          firstFailure ??= { code: r.code, error: r.error }
-        }
-      }
-      if (installed + viaProject === 0) {
-        if (!wasRecording && isLochRecording(repoRoot)) {
-          setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
-        }
-        return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
-      }
-      // Other recording repos' hooks may name a binary just passed over.
-      void syncLochHooks()
-      // Recording only covers turns from now on; backfill reconstructs what
-      // it can of the history so the gutter isn't empty on day one.
-      void backfillIfNewLoch(repoRoot, lochBinary())
-      return {
-        ok: true,
-        installed,
-        viaProject,
-        failed: worktrees.length - installed - viaProject
-      }
+      return enableLochRecording(repoRoot, worktrees)
     }
   )
 

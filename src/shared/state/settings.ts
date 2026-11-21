@@ -422,6 +422,11 @@ export interface SettingsState {
   /** Repo roots whose sidebar "Install history tracking" prompt the user
    *  closed. A preference, so it's persisted and shared across clients. */
   lochPromptDismissedRepos: string[]
+  /** Standing answer to "record history in repos I add?", asked once in
+   *  onboarding and editable in Settings. `true` turns recording on for
+   *  each repo added from then on; `null` means never asked (every existing
+   *  user), which behaves like `false`: the sidebar prompt asks per repo. */
+  lochRecordNewRepos: boolean | null
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
    *  guidance to keep their tab name current. Default ON — it gates a
    *  cosmetic, reversible action. Off
@@ -640,6 +645,7 @@ export type SettingsEvent =
   | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
   | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
   | { type: 'settings/lochPromptDismissedReposChanged'; payload: string[] }
+  | { type: 'settings/lochRecordNewReposChanged'; payload: boolean | null }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -734,6 +740,7 @@ export const initialSettings: SettingsState = {
   lochBlameEnabled: true,
   lochRecordingRepos: [],
   lochPromptDismissedRepos: [],
+  lochRecordNewRepos: null,
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
@@ -1065,6 +1072,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, lochRecordingRepos: event.payload }
     case 'settings/lochPromptDismissedReposChanged':
       return { ...state, lochPromptDismissedRepos: event.payload }
+    case 'settings/lochRecordNewReposChanged':
+      return { ...state, lochRecordNewRepos: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':

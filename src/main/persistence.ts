@@ -296,6 +296,9 @@ export interface Config {
   lochRecordingRepos?: string[]
   // Repo roots whose "Install history tracking" sidebar prompt was closed.
   lochPromptDismissedRepos?: string[]
+  /** Record history in repos added from now on (asked in onboarding).
+   *  Absent = never answered. */
+  lochRecordNewRepos?: boolean
   /** Per recording repo root, the loch version that last backfilled it; a
    *  different binary at boot backfills that repo again. */
   lochBackfilledVersions?: Record<string, string>
