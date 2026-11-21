@@ -31,7 +31,13 @@ const CODE: { text: string; slot: number | null; backfilled?: boolean }[] = [
 const HOVER_START = 9
 const HOVER_END = 10
 
-export function BlameGutterPreview(): JSX.Element {
+export function BlameGutterPreview({
+  frameClassName = 'mt-4 rounded-lg border border-border'
+}: {
+  /** The box around the editor. The marketing site draws its own window
+   *  chrome around the preview, so it passes an empty frame. */
+  frameClassName?: string
+} = {}): JSX.Element {
   // Relative to now so "ended 2h ago" never goes stale.
   const conversation = useMemo<LochConversation>(
     () => ({
@@ -52,7 +58,7 @@ export function BlameGutterPreview(): JSX.Element {
 
   return (
     <div
-      className="relative mt-4 rounded-lg border border-border bg-app overflow-hidden select-none pointer-events-none"
+      className={`relative ${frameClassName} bg-app overflow-hidden select-none pointer-events-none`}
       // Tall enough for the card, which hangs below the hovered lines the
       // way the real one does and runs past the end of the snippet.
       style={{ minHeight: '33.5rem' }}
@@ -89,7 +95,7 @@ export function BlameGutterPreview(): JSX.Element {
           )
         })}
       </div>
-      <div className="absolute left-12" style={{ top: `calc(2rem + 0.5rem + ${HOVER_END} * 1.25rem)` }}>
+      <div className="absolute left-12 right-2" style={{ top: `calc(2rem + 0.5rem + ${HOVER_END} * 1.25rem)` }}>
         <LochBlameCard
           conversation={conversation}
           start={HOVER_START}
@@ -101,7 +107,9 @@ export function BlameGutterPreview(): JSX.Element {
           }}
           pinned
           onAsk={() => {}}
-          widthClass="w-[28rem]"
+          // Capped by the preview box (via the wrapper's left/right), not the
+          // window: the box clips anything wider.
+          widthClass="w-[28rem] max-w-full"
         />
       </div>
     </div>
