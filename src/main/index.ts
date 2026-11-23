@@ -15,6 +15,7 @@ import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
 import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
+import { LochAutoRecorder } from './loch-auto-recorder'
 import {
   backfillRepo,
   ensureCurrentLoch,
@@ -1967,60 +1968,19 @@ async function enableLochRecording(
   }
 }
 
-// Repos registered while `lochRecordNewRepos` is on (the onboarding answer)
-// start recording through the same path as the explicit opt-in. Done here
-// rather than in registerRepoRoot's callers so every route in (import,
-// add-repo, MCP add_repo, new project) is covered for every client. A repo
-// waits for its first worktree listing, since installs are per worktree.
-// Runs serialized: an import adds several repos at once, and each would
-// otherwise start its own loch download.
-let knownRepoRoots = new Set(config.repoRoots)
-const autoRecordAwaitingList = new Set<string>()
-let autoRecordChain: Promise<void> = Promise.resolve()
-function setAutoRecording(repoRoot: string, active: boolean): void {
-  store.dispatch({ type: 'loch/autoRecordingChanged', payload: { repoRoot, active } })
-}
-function autoRecord(repoRoot: string, worktrees: readonly Worktree[]): void {
-  autoRecordChain = autoRecordChain.then(async () => {
-    try {
-      // Re-checked: the answer may have flipped, or the repo been removed,
-      // while an earlier repo in the chain was installing.
-      if (config.lochRecordNewRepos !== true || !config.repoRoots.includes(repoRoot)) return
-      const r = await enableLochRecording(repoRoot, worktrees)
-      // A failure leaves the repo out of lochRecordingRepos, so the sidebar
-      // prompt offers it again once autoRecording drops it.
-      if (!r.ok) log('loch', `auto-record ${repoRoot} failed: ${r.code}`, r.error)
-    } catch (err) {
-      log('loch', `auto-record ${repoRoot} threw`, err instanceof Error ? err.message : err)
-    } finally {
-      setAutoRecording(repoRoot, false)
-    }
-  })
-}
+// Repos registered while the onboarding answer is on start recording
+// through the same path as the explicit opt-in (see loch-auto-recorder.ts).
+const lochAutoRecorder = new LochAutoRecorder(store, {
+  recordNewRepos: () => config.lochRecordNewRepos === true,
+  repoRoots: () => config.repoRoots || [],
+  isRecording: isLochRecording,
+  canRecord: () => !!lochBinary() || canInstallLoch(),
+  enable: enableLochRecording,
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
+lochAutoRecorder.start()
 store.subscribe((event) => {
-  if (event.type === 'worktrees/reposChanged') {
-    const next = new Set(event.payload)
-    for (const root of next) {
-      if (knownRepoRoots.has(root) || config.lochRecordNewRepos !== true || isLochRecording(root)) continue
-      if (!lochBinary() && !canInstallLoch()) continue
-      autoRecordAwaitingList.add(root)
-      setAutoRecording(root, true)
-    }
-    for (const root of autoRecordAwaitingList) {
-      if (next.has(root)) continue
-      autoRecordAwaitingList.delete(root)
-      setAutoRecording(root, false)
-    }
-    knownRepoRoots = next
-  } else if (event.type === 'worktrees/listChanged') {
-    for (const root of autoRecordAwaitingList) {
-      const worktrees = event.payload.filter((w) => w.repoRoot === root && !w.prunable)
-      if (worktrees.length === 0) continue
-      autoRecordAwaitingList.delete(root)
-      autoRecord(root, worktrees)
-    }
-    void syncLochHooks()
-  }
+  if (event.type === 'worktrees/listChanged') void syncLochHooks()
 })
 store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
 store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })

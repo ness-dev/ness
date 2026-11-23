@@ -1726,15 +1726,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
                       }}
                       className="mt-0.5 cursor-pointer icon-base shrink-0"
                     />
-                    <div className="text-xs text-dim">
-                      <span className="text-sm text-fg-bright">Also record conversation history</span> in
-                      repos you add, so you can point at any line in the file viewer and get back to the
-                      agent turn that wrote it. Powered by <span className="text-fg">loch</span>, which runs
-                      on this machine: it adds hooks to each worktree&apos;s{' '}
-                      <code className="bg-app/50 px-1 rounded">.claude/settings.local.json</code> and keeps
-                      snapshots in <code className="bg-app/50 px-1 rounded">~/.loch</code>. Nothing is
-                      uploaded. If loch isn&apos;t installed, Ness downloads a checksum-pinned copy when the
-                      first repo is added. Change this in Settings → Conversation blame.
+                    <div className="text-sm text-fg-bright">
+                      Keep track of which agent made every change.{' '}
+                      <span className="text-xs text-dim">Powered by loch</span>
                     </div>
                   </label>
                 ) : (
