@@ -280,15 +280,19 @@ export function WorktreeList({
     return actions
   }
 
-  const showTabsFor = (row: WorktreeRowModel): boolean =>
+  // `projectActive` is passed only for a project's main row: under 'selected'
+  // main stays expanded while you're anywhere in its project, so its chats
+  // are one click away from a worktree, not hidden until you go back to main.
+  const showTabsFor = (row: WorktreeRowModel, projectActive: boolean): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // Project rows follow the same rule, and show their tabs even while the
-    // project is collapsed: collapsing hides the worktrees, not main.
-    (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
+    // Project rows show their tabs even while the project is collapsed:
+    // collapsing hides the worktrees, not main.
+    (tabsExpansion === 'all' ||
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || projectActive)))
 
-  const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
-    showTabsFor(row) && onSelectTab ? (
+  const renderTabRows = (row: WorktreeRowModel, projectActive = false): JSX.Element | null =>
+    showTabsFor(row, projectActive) && onSelectTab ? (
       <WorktreeTabRows
         worktreePath={row.path}
         backendId={pathBackendId?.[row.path] ?? null}
@@ -561,7 +565,7 @@ export function WorktreeList({
                   onTogglePinnedOpen: () => onTogglePinnedOpen(section.scope),
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}
-                {renderTabRows(home)}
+                {renderTabRows(home, section.holdsActive)}
               </RowBlock>
             ) : (
               <RepoHeader
@@ -578,11 +582,12 @@ export function WorktreeList({
             <div className="mb-2">
               {section.homes.map((h) => {
                 const name = repoLabelFor(h.worktree.repoRoot)
+                const projectActive = h.worktree.repoRoot === model.activeRepoRoot
                 return (
                   <RowBlock
                     key={h.path}
                     active={h.path === activeWorktreeId}
-                    context={h.worktree.repoRoot === model.activeRepoRoot}
+                    context={projectActive}
                   >
                     {renderTab(h, {
                       name,
@@ -590,7 +595,7 @@ export function WorktreeList({
                         { backendId: pathBackendId?.[h.path] ?? null, repoRoot: h.worktree.repoRoot }
                       ])
                     })}
-                    {renderTabRows(h)}
+                    {renderTabRows(h, projectActive)}
                   </RowBlock>
                 )
               })}
