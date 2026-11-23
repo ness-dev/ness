@@ -45,3 +45,11 @@ export function displayLabel(
   return alias ?? worktree.branch
 }
 
+/** Title for a project's home row. Cmd peeks behind the alias, and behind a
+ *  home row's alias is the project — not the branch, which is "main" for
+ *  nearly every repo, and not `displayLabel`'s path reveal, since the main
+ *  checkout isn't under the worktrees root. Kept apart from `displayLabel`
+ *  so home rows can't be routed back through it. */
+export function homeRowLabel(projectName: string, alias: string | undefined, metaHeld: boolean): string {
+  return metaHeld ? projectName : (alias ?? projectName)
+}

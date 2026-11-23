@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./loch-colors.css";
 
 /* Tailwind v4 auto-scans the static import graph from the entry. The
  * web-client build's entry (src/web-client/main.tsx) only references the
@@ -336,6 +337,12 @@
   padding-left: 80px;
 }
 
+/* Same clearance for an absolutely positioned control (the "Back" button on
+ * full-window screens like Settings) rather than a padded row. */
+@utility titlebar-lead-inset {
+  left: 80px;
+}
+
 @utility icon-2xs {
   width: 0.625rem;
   height: 0.625rem;
@@ -553,6 +560,18 @@ mark.find-hit-current {
   margin-left: -1.4em;
 }
 
+/* Text the user typed, inside their bubble. It should still read as a
+   typed message: tight block spacing, and a stray `# ` doesn't turn into
+   a page title. */
+.markdown-user > * + * {
+  margin-top: 0.4em;
+}
+.markdown-user :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 /* Tiny inline swatch the rehypeColorHex plugin inserts after a hex
    color literal (#fff, #FF00AA, etc.) in chat markdown. em-based so it
    tracks the surrounding text size; border keeps near-background
@@ -639,12 +658,22 @@ button, [role="button"], a[href], [onclick] {
   -webkit-app-region: no-drag;
 }
 
-/* macOS native fullscreen hides the traffic lights, so the leading clearance
- * used on every top-of-window drag bar collapses to 0. Scoped to
- * .drag-region so unrelated pl-20 / titlebar-lead uses are untouched. */
-:root[data-fullscreen="true"] .drag-region.titlebar-lead,
-:root[data-fullscreen="true"] .drag-region.titlebar-lead-wide {
+/* macOS native fullscreen hides the traffic lights, and the web client never
+ * had any, so the leading clearance used on every top-of-window drag bar
+ * collapses (data-window-controls is set at module load in App.tsx). Linux
+ * is excluded from the fullscreen case: LinuxWindowControls stay rendered
+ * there, and a collapsed Back button would sit under Close. Scoped to
+ * .drag-region so unrelated titlebar-lead uses are untouched. The inset
+ * control keeps a normal gutter instead of sitting flush against the edge. */
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region.titlebar-lead,
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region.titlebar-lead-wide,
+:root[data-window-controls="none"] .drag-region.titlebar-lead,
+:root[data-window-controls="none"] .drag-region.titlebar-lead-wide {
   padding-left: 0;
+}
+:root[data-window-controls="mac"][data-fullscreen="true"] .drag-region .titlebar-lead-inset,
+:root[data-window-controls="none"] .drag-region .titlebar-lead-inset {
+  left: 1rem;
 }
 
 /* Brand accents — mirrors the marketing site hero styling */
@@ -686,12 +715,12 @@ button, [role="button"], a[href], [onclick] {
   animation: brand-gradient-flow 2.4s linear infinite;
 }
 
-@keyframes quest-slide-in {
-  from { opacity: 0; transform: translateY(16px) scale(0.96); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes tour-popout-in {
+  from { opacity: 0; transform: translateX(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
 }
-.quest-card-enter {
-  animation: quest-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1);
+.tour-popout-enter {
+  animation: tour-popout-in 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes claude-loader-rotate {
@@ -839,6 +868,28 @@ button, [role="button"], a[href], [onclick] {
 }
 .monaco-editor .ref-line-glyph:hover {
   background-color: var(--color-fg);
+}
+
+/* loch conversation blame: a thin bar per line in the line-decorations lane.
+   The palette (.loch-c*, .loch-swatch) lives in loch-colors.css, shared
+   with the marketing site. */
+.monaco-editor .loch-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 3px;
+  border-radius: 1px;
+  background: var(--loch-c);
+  opacity: 0.75;
+}
+.monaco-editor .loch-bar.loch-askable { cursor: pointer; }
+.monaco-editor .loch-bar.loch-askable:hover::before { opacity: 1; width: 4px; }
+/* Backfilled turns are reconstructed and coarser — dashed, not solid. */
+.monaco-editor .loch-bar.loch-backfilled::before {
+  background: repeating-linear-gradient(to bottom, var(--loch-c) 0 3px, transparent 3px 5px);
+  opacity: 0.6;
 }
 
 /* Review screen: per-line "add comment" button (+ icon). */

@@ -293,6 +293,7 @@ export type BottomIconKey =
   | 'newProject'
   | 'addRepo'
   | 'activity'
+  | 'subscriptionGraph'
   | 'myWeek'
   | 'hotkeys'
   | 'reportIssue'
@@ -306,6 +307,7 @@ export const BOTTOM_ICON_KEYS: readonly BottomIconKey[] = [
   'newProject',
   'addRepo',
   'activity',
+  'subscriptionGraph',
   'myWeek',
   'hotkeys',
   'reportIssue',
@@ -398,20 +400,39 @@ export interface SettingsState {
   browserToolsEnabled: boolean
   browserToolsMode: BrowserToolsMode
   /** Whether a chat can be forked into a new worktree — both the Chat tab
-   *  menu action and the create_worktree MCP parameter. Off by default, and
+   *  menu action and the create_worktree MCP parameter. On by default;
    *  off hides the feature rather than merely rejecting it, so agents aren't
    *  told about an option that will fail. */
   conversationForkEnabled: boolean
   /** When true, agents get the `send_message` MCP tool and can deliver a
    *  message into another worktree's chat — the one capability that
-   *  deliberately crosses the worktree boundary. Default off. */
+   *  deliberately crosses the worktree boundary. Default on. */
   worktreeMessagingEnabled: boolean
   /** When true, agents get the `edit_copy` MCP tool and can hand the user a
    *  draft of copy to rewrite before using it. Default off. */
   copyEditingEnabled: boolean
+  /** Show loch's per-line conversation blame in the file viewer's gutter,
+   *  with an action to open a Chat on a fork of the conversation that wrote
+   *  a line. Without loch (on PATH, or the copy Ness installs on opt-in) the
+   *  gutter is simply empty, which is why this defaults ON — it's read-only
+   *  and costs nothing where loch isn't set up. Recording is the separate,
+   *  opt-in part. */
+  lochBlameEnabled: boolean
+  /** Repo roots the user has explicitly opted in to loch recording: Ness
+   *  installs loch's hooks into every worktree of these repos. Separate from
+   *  `lochBlameEnabled`, which only governs showing blame that exists. */
+  lochRecordingRepos: string[]
+  /** Repo roots whose sidebar "Install history tracking" prompt the user
+   *  closed. A preference, so it's persisted and shared across clients. */
+  lochPromptDismissedRepos: string[]
+  /** Standing answer to "record history in repos I add?", asked once in
+   *  onboarding and editable in Settings. `true` turns recording on for
+   *  each repo added from then on; `null` means never asked (every existing
+   *  user), which behaves like `false`: the sidebar prompt asks per repo. */
+  lochRecordNewRepos: boolean | null
   /** Whether agents get the `set_tab_name` MCP tool and the system-prompt
-   *  guidance to keep their tab name current. Default ON — unlike the
-   *  experimental toggles this gates a cosmetic, reversible action. Off
+   *  guidance to keep their tab name current. Default ON — it gates a
+   *  cosmetic, reversible action. Off
    *  hides the tool and strips the guidance rather than rejecting the
    *  call, so an agent isn't told about something that will fail. The
    *  user's own rename (double-click / Cmd+L / context menu) is never
@@ -517,6 +538,10 @@ export interface SettingsState {
    *  the feed contents. Set by the "Hide all announcements" action and
    *  cleared only by the user. */
   announcementsMuted: boolean
+  /** Epoch ms of this install's first launch; announcements published at
+   *  or before it are hidden. 0 for installs that predate the field, so
+   *  they see everything. Seeded once at boot and never changes. */
+  firstLaunchAt: number
   /** When true, PRs that have you as a requested reviewer (across every
    *  repo added to Ness) show up as phantom entries in the sidebar's
    *  Reviewing group — click one and it opens the "new worktree from PR"
@@ -536,6 +561,11 @@ export interface SettingsState {
   reviewModel: string
   /** Instructions handed to a reviewer. See DEFAULT_REVIEW_PROMPT. */
   reviewPrompt: string
+  /** Master switch for agent-run reviews: the request_review MCP tool,
+   *  the "Request AI review" button and the CI-green spawner. Off by
+   *  default — each review starts another agent. The Review tab and its
+   *  comment tools work regardless; they serve human reviews too. */
+  agentReviewsEnabled: boolean
   /** Open a reviewer Chat tab automatically when a worktree's PR checks
    *  go green. Off by default — it spawns an agent on its own. */
   autoReviewOnGreenCi: boolean
@@ -555,6 +585,14 @@ export interface SettingsState {
    *  at read time (so adding a new icon to the codebase just shows up on the
    *  end). Managed via up/down chevrons in the hamburger dropdown. */
   bottomIconOrder: BottomIconKey[]
+  /** User's drag order for sidebar projects, as section scope keys (the
+   *  repo root, or `repo:<key>` for a section merged across hosts).
+   *  Client-owned rather than a reorder of `worktrees.repoRoots`, because
+   *  fleet view interleaves several backends' repos and merges same-repo
+   *  roots into one section — an order no single backend's list can hold.
+   *  Sections not listed keep their default order after the listed ones;
+   *  stale keys are harmless and ignored (see `applyProjectOrder`). */
+  sidebarProjectOrder: string[]
 }
 
 export type SettingsEvent =
@@ -608,6 +646,10 @@ export type SettingsEvent =
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
   | { type: 'settings/copyEditingEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
+  | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
+  | { type: 'settings/lochPromptDismissedReposChanged'; payload: string[] }
+  | { type: 'settings/lochRecordNewReposChanged'; payload: boolean | null }
   | { type: 'settings/agentTabNamingEnabledChanged'; payload: boolean }
   | { type: 'settings/defaultClaudeTabTypeChanged'; payload: 'xterm' | 'json' }
   | { type: 'settings/chatPromotionDismissedChanged'; payload: boolean }
@@ -640,10 +682,12 @@ export type SettingsEvent =
   | { type: 'settings/reviewAgentChanged'; payload: ReviewAgentChoice }
   | { type: 'settings/reviewModelChanged'; payload: string }
   | { type: 'settings/reviewPromptChanged'; payload: string }
+  | { type: 'settings/agentReviewsEnabledChanged'; payload: boolean }
   | { type: 'settings/autoReviewOnGreenCiChanged'; payload: boolean }
   | { type: 'settings/preventSleepUntilChanged'; payload: number | null }
   | { type: 'settings/hiddenBottomIconsChanged'; payload: HiddenBottomIcons }
   | { type: 'settings/bottomIconOrderChanged'; payload: BottomIconKey[] }
+  | { type: 'settings/sidebarProjectOrderChanged'; payload: string[] }
 
 // Client-side placeholder. Real values are seeded in the main-process Store
 // constructor from the on-disk config and secrets.
@@ -694,14 +738,18 @@ export const initialSettings: SettingsState = {
   wsTransportPort: 37291,
   wsTransportHost: '127.0.0.1',
   browserToolsEnabled: true,
-  conversationForkEnabled: false,
+  conversationForkEnabled: true,
   browserToolsMode: 'full',
-  worktreeMessagingEnabled: false,
+  worktreeMessagingEnabled: true,
   copyEditingEnabled: false,
+  lochBlameEnabled: true,
+  lochRecordingRepos: [],
+  lochPromptDismissedRepos: [],
+  lochRecordNewRepos: null,
   agentTabNamingEnabled: true,
   defaultClaudeTabType: 'xterm',
   chatPromotionDismissed: false,
-  autoApprovePermissions: false,
+  autoApprovePermissions: true,
   autoApproveSteerInstructions: '',
   useSystemClaudeForJsonMode: false,
   jsonModeChatDensity: 'compact',
@@ -721,16 +769,19 @@ export const initialSettings: SettingsState = {
   prReviewPrompt: DEFAULT_PR_REVIEW_PROMPT,
   dismissedAnnouncementIds: [],
   announcementsMuted: false,
+  firstLaunchAt: 0,
   showAssignedPRs: false,
   preventSleepMode: 'off',
   agentReviewDelivery: 'draft',
   reviewAgent: 'inherit',
   reviewModel: '',
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  agentReviewsEnabled: false,
   autoReviewOnGreenCi: false,
   preventSleepUntil: null,
   hiddenBottomIcons: {},
-  bottomIconOrder: [...BOTTOM_ICON_KEYS]
+  bottomIconOrder: [...BOTTOM_ICON_KEYS],
+  sidebarProjectOrder: []
 }
 
 /** Read helper: return the user's stored order with any missing keys
@@ -798,7 +849,7 @@ function patchOverrides(
  *      whichever token that backend resolved.
  *    - `wsTransport*` — that backend's own listener config. Overwriting
  *      it from the client could tear down the connection in use.
- *    - `dismissedAnnouncementIds` / `announcementsMuted` — entangled
+ *    - `dismissedAnnouncementIds` / `announcementsMuted` / `firstLaunchAt` — entangled
  *      with the per-backend `announcements` slice they filter; moving
  *      one without the other just relocates the inconsistency. */
 export const CLIENT_OWNED_SETTING_KEYS = [
@@ -832,7 +883,8 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'jsonModeTranscriptWindow',
   'snoozeDefaultDays',
   'hiddenBottomIcons',
-  'bottomIconOrder'
+  'bottomIconOrder',
+  'sidebarProjectOrder'
 ] as const satisfies readonly (keyof SettingsState)[]
 
 /** The `config:*` transport channels that mutate (or probe for) a
@@ -886,6 +938,7 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setSnoozeDefaultDays',
   'config:setHiddenBottomIcons',
   'config:setBottomIconOrder',
+  'config:setSidebarProjectOrder',
   'config:setLastEffectiveAppBg'
 ])
 
@@ -1020,6 +1073,14 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, worktreeMessagingEnabled: event.payload }
     case 'settings/copyEditingEnabledChanged':
       return { ...state, copyEditingEnabled: event.payload }
+    case 'settings/lochBlameEnabledChanged':
+      return { ...state, lochBlameEnabled: event.payload }
+    case 'settings/lochRecordingReposChanged':
+      return { ...state, lochRecordingRepos: event.payload }
+    case 'settings/lochPromptDismissedReposChanged':
+      return { ...state, lochPromptDismissedRepos: event.payload }
+    case 'settings/lochRecordNewReposChanged':
+      return { ...state, lochRecordNewRepos: event.payload }
     case 'settings/agentTabNamingEnabledChanged':
       return { ...state, agentTabNamingEnabled: event.payload }
     case 'settings/defaultClaudeTabTypeChanged':
@@ -1075,6 +1136,10 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, showAssignedPRs: event.payload }
     case 'settings/preventSleepModeChanged':
       return { ...state, preventSleepMode: event.payload }
+    case 'settings/agentReviewsEnabledChanged':
+      return state.agentReviewsEnabled === event.payload
+        ? state
+        : { ...state, agentReviewsEnabled: event.payload }
     case 'settings/autoReviewOnGreenCiChanged':
       return state.autoReviewOnGreenCi === event.payload
         ? state
@@ -1095,6 +1160,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, hiddenBottomIcons: event.payload }
     case 'settings/bottomIconOrderChanged':
       return { ...state, bottomIconOrder: event.payload }
+    case 'settings/sidebarProjectOrderChanged':
+      return { ...state, sidebarProjectOrder: event.payload }
     default: {
       const _exhaustive: never = event
       void _exhaustive

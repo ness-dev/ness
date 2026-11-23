@@ -1,0 +1,125 @@
+import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
+import type { GraphNode, SubscriptionGraph } from '../shared/subscription-graph'
+
+export interface Box {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Node sizes in CSS px at the default 16px root. Multiplied by the live
+ *  root font-size ratio so rem-sized text inside still fits at every
+ *  uiScale rung. */
+export const NODE_SIZE = {
+  agent: { width: 220, height: 44 },
+  pr: { width: 220, height: 52 },
+  groupHeader: 40,
+  groupPad: 12,
+  gap: 16
+}
+
+const elk = new ELK()
+
+/** A worktree's members top to bottom, ordered so its internal edges join
+ *  neighbours: each reviewer directly above the tab it reviews, the tab
+ *  that follows the PR last among the agents, the PR at the bottom. Every
+ *  in-worktree arrow then points down into the next card, instead of
+ *  running past a card in between and over the other arrows. */
+export function stackOrder(g: SubscriptionGraph, groupId: string): GraphNode[] {
+  const members = g.nodes.filter((n) => n.groupId === groupId)
+  const inGroup = new Set(members.map((n) => n.id))
+  const agents = members.filter((n) => n.kind === 'agent')
+  const prs = members.filter((n) => n.kind === 'pr')
+  const moveTo = (id: string, index: () => number): void => {
+    const from = agents.findIndex((n) => n.id === id)
+    if (from === -1) return
+    const [node] = agents.splice(from, 1)
+    agents.splice(index(), 0, node)
+  }
+  for (const e of g.edges) {
+    if (e.kind === 'own-pr' && inGroup.has(e.source)) moveTo(e.source, () => agents.length)
+  }
+  for (const e of g.edges) {
+    if (e.kind !== 'review' || !inGroup.has(e.source) || !inGroup.has(e.target)) continue
+    moveTo(e.source, () => agents.findIndex((n) => n.id === e.target))
+  }
+  return [...agents, ...prs]
+}
+
+/** The graph's edges as ELK sees them: between groups, one per ordered
+ *  pair, with edges inside a group dropped (the stack handles those).
+ *  Ids that aren't a member (a group itself) stand for themselves. */
+export function liftEdges(
+  g: SubscriptionGraph,
+  groupOf: Map<string, string>
+): { id: string; sources: string[]; targets: string[] }[] {
+  const seen = new Set<string>()
+  const out: { id: string; sources: string[]; targets: string[] }[] = []
+  for (const e of g.edges) {
+    const a = groupOf.get(e.source) ?? e.source
+    const b = groupOf.get(e.target) ?? e.target
+    if (a === b || seen.has(`${a}>${b}`)) continue
+    seen.add(`${a}>${b}`)
+    out.push({ id: e.id, sources: [a], targets: [b] })
+  }
+  return out
+}
+
+/** Positions for every group and node. Groups are absolute; their
+ *  children are relative to the group, which is what React Flow's
+ *  `parentId` expects.
+ *
+ *  Two passes: each worktree stacks its agents and PR in a column, then
+ *  ELK places the worktree boxes with edges lifted to worktree level.
+ *  Laying the members out inside ELK too put each PR in a layer of its
+ *  own, which doubled the width of every worktree and of the graph. */
+export async function layoutSubscriptionGraph(
+  g: SubscriptionGraph,
+  scale: number
+): Promise<Record<string, Box>> {
+  const s = (n: number): number => Math.round(n * scale)
+  const pad = s(NODE_SIZE.groupPad)
+  const gap = s(NODE_SIZE.gap)
+  const boxes: Record<string, Box> = {}
+  const groupOf = new Map<string, string>()
+
+  const children: ElkNode[] = g.groups.map((group) => {
+    let y = s(NODE_SIZE.groupHeader)
+    const width = s(NODE_SIZE.agent.width) + 2 * pad
+    for (const n of stackOrder(g, group.id)) {
+      groupOf.set(n.id, group.id)
+      const size = NODE_SIZE[n.kind]
+      boxes[n.id] = { x: pad, y, width: s(size.width), height: s(size.height) }
+      y += s(size.height) + gap
+    }
+    const height = y === s(NODE_SIZE.groupHeader) ? y : y - gap + pad
+    return { id: group.id, width, height }
+  })
+
+  const edges = liftEdges(g, groupOf)
+
+  const out = await elk.layout({
+    id: 'root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.layered.spacing.nodeNodeBetweenLayers': String(s(64)),
+      'elk.spacing.nodeNode': String(s(20)),
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.separateConnectedComponents': 'true',
+      'elk.spacing.componentComponent': String(s(32))
+    },
+    children,
+    edges
+  })
+  for (const group of out.children ?? []) {
+    boxes[group.id] = {
+      x: group.x ?? 0,
+      y: group.y ?? 0,
+      width: group.width ?? 0,
+      height: group.height ?? 0
+    }
+  }
+  return boxes
+}

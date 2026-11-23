@@ -619,7 +619,7 @@ function WorktreePickerSheet({
   const collapse = useWorktreeCollapse()
   // Touch doesn't bind Cmd+N, so the model skips ordinal assignment and no
   // hotkey badges render.
-  const model = useWorktreeListModel(collapse, { assignOrdinals: false })
+  const model = useWorktreeListModel(collapse, { assignOrdinals: false, activeWorktreeId })
   const snoozeDefaultDays = useSettings().snoozeDefaultDays
   const repoCount = useWorktrees().repoRoots.length
   const [editingAliasPath, setEditingAliasPath] = useState<string | null>(null)
@@ -665,7 +665,7 @@ function WorktreePickerSheet({
           onEndAliasEdit={() => setEditingAliasPath(null)}
           onSelectWorktree={onSelect}
           onToggleGroup={collapse.toggleGroup}
-          onToggleRepo={collapse.toggleRepo}
+          onTogglePinnedOpen={collapse.togglePinnedOpen}
           onNewWorktree={onNewWorktree}
           onDismissPendingWorktree={onDismissPendingWorktree}
         />

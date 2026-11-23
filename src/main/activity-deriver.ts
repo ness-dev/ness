@@ -3,16 +3,19 @@ import type { AppState, StateEvent } from '../shared/state'
 import type { PtyStatus } from '../shared/state/terminals'
 import { getLeaves } from '../shared/state/terminals'
 import { isWorktreeMerged } from '../shared/state/prs'
+import { ATTENTION_STATUS_RANK } from '../shared/status-rollup'
 import type { ActivityState } from './activity'
 import { recordActivity } from './activity'
 
 const DEBOUNCE_MS = 30000
 
-const STATUS_RANK: Record<PtyStatus | 'merged', number> = {
-  idle: 0,
-  processing: 1,
-  waiting: 2,
-  'needs-approval': 3,
+/** Deliberately NOT `ROLLUP_STATUS_RANK` (shared/status-rollup.ts), which
+ *  puts processing above waiting for the display dot. This feeds the
+ *  activity log and the auto-unsnooze trigger, which fires on 'processing'
+ *  as "the user sent a prompt". Ranking processing higher here would let a
+ *  reviewer starting beside a waiting chat wake a snoozed worktree. */
+export const STATUS_RANK: Record<PtyStatus | 'merged', number> = {
+  ...ATTENTION_STATUS_RANK,
   merged: 4
 }
 

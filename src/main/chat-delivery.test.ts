@@ -1,9 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
 
+vi.mock('./debug', () => ({
+  log: () => {}
+}))
+
+import { ChatStartGate } from './chat-start-gate'
 import {
   deliverToTab,
   deliverToWorktreeChat,
   describeWorktree,
+  resolveChatQuery,
   resolveWorktreeQuery,
   type ChatDeliveryDeps
 } from './chat-delivery'
@@ -94,8 +100,77 @@ function deps(liveSessionIds: string[] = []): ChatDeliveryDeps & {
   const respawn = vi.fn((_wt: string, tabId: string) => {
     live.add(tabId)
   })
-  return { send, wake, respawn, hasSession: (id) => live.has(id) }
+  return { send, wake, respawn, hasSession: (id) => live.has(id), isStarting: () => false }
 }
+
+describe('resolveChatQuery', () => {
+  function chatState(labels: Array<{ id: string; label?: string; customLabel?: string; type?: 'json-claude' | 'agent' }>): AppState {
+    return makeState({
+      worktrees: [worktree(A, 'feat-a'), worktree(B, 'feat-b')],
+      aliases: { [A]: 'Site' },
+      panes: {
+        [A]: {
+          type: 'leaf',
+          id: 'p1',
+          tabs: labels.map((t) => ({
+            id: t.id,
+            type: t.type ?? ('json-claude' as const),
+            label: t.label ?? 'Chat',
+            ...(t.customLabel ? { customLabel: t.customLabel } : {})
+          })),
+          activeTabId: labels[0]?.id ?? ''
+        }
+      }
+    })
+  }
+
+  it('resolves by tab id or by the slug of the tab name, with or without @', () => {
+    const state = chatState([{ id: 't1', customLabel: 'Fix Login Bug' }, { id: 't2' }])
+    expect(resolveChatQuery(state, '@chat:repo/feat-a#fix-login-bug')).toEqual({ path: A, tabId: 't1' })
+    expect(resolveChatQuery(state, 'chat:Site#t2')).toEqual({ path: A, tabId: 't2' })
+    expect(resolveChatQuery(state, 'CHAT:repo/feat-a#Fix-Login-Bug')).toEqual({ path: A, tabId: 't1' })
+  })
+
+  it('refuses a slug shared by two tabs rather than guessing', () => {
+    const state = chatState([{ id: 't1' }, { id: 't2' }])
+    const r = resolveChatQuery(state, 'chat:repo/feat-a#chat')
+    expect(r).toEqual({ error: expect.stringMatching(/matches 2 Chat tabs/) })
+  })
+
+  it('does not resolve terminal agent tabs or tabs in another worktree', () => {
+    const state = chatState([{ id: 'term', type: 'agent', label: 'Claude' }])
+    expect(resolveChatQuery(state, 'chat:repo/feat-a#term')).toEqual({ error: expect.stringMatching(/no Chat tab/) })
+    expect(resolveChatQuery(state, 'chat:repo/feat-b#term')).toEqual({ error: expect.stringMatching(/no Chat tab/) })
+  })
+
+  it('narrows an ambiguous worktree handle by the tab ref', () => {
+    // Two clones named `app` on the same branch share the handle app/main.
+    const C = '/other/app'
+    const state = makeState({
+      worktrees: [worktree(A, 'main', { repoRoot: '/x/app' }), worktree(C, 'main', { repoRoot: '/y/app' })],
+      panes: {
+        [A]: { type: 'leaf', id: 'p1', tabs: [{ id: 'ta', type: 'json-claude', label: 'Chat', customLabel: 'Deploy' }], activeTabId: 'ta' },
+        [C]: { type: 'leaf', id: 'p2', tabs: [{ id: 'tc', type: 'json-claude', label: 'Chat', customLabel: 'Docs' }, { id: 'tc2', type: 'json-claude', label: 'Chat', customLabel: 'Deploy' }], activeTabId: 'tc' }
+      }
+    })
+    expect(resolveChatQuery(state, 'chat:app/main#tc')).toEqual({ path: C, tabId: 'tc' })
+    expect(resolveChatQuery(state, 'chat:app/main#docs')).toEqual({ path: C, tabId: 'tc' })
+    // The slug exists in both candidates — still refused.
+    expect(resolveChatQuery(state, 'chat:app/main#deploy')).toEqual({ error: expect.stringMatching(/matches 2 Chat tabs/) })
+  })
+
+  it('ignores punctuation trailing the token in prose', () => {
+    const state = chatState([{ id: 't1', customLabel: 'Review' }])
+    expect(resolveChatQuery(state, '@chat:repo/feat-a#review,')).toEqual({ path: A, tabId: 't1' })
+    expect(resolveChatQuery(state, 'chat:repo/feat-a#t1).')).toEqual({ path: A, tabId: 't1' })
+  })
+
+  it('reports a bad worktree half or a malformed token', () => {
+    const state = chatState([{ id: 't1' }])
+    expect(resolveChatQuery(state, 'chat:nope#t1')).toEqual({ error: expect.stringMatching(/no worktree/) })
+    expect(resolveChatQuery(state, 'chat:repo/feat-a')).toEqual({ error: expect.stringMatching(/not a chat mention/) })
+  })
+})
 
 describe('resolveWorktreeQuery', () => {
   const state = makeState({
@@ -239,7 +314,7 @@ describe('deliverToWorktreeChat', () => {
     const send = vi.fn()
     const result = deliverToWorktreeChat(
       state,
-      { send, hasSession: () => false, wake: () => {}, respawn: () => {} },
+      { send, hasSession: () => false, isStarting: () => false, wake: () => {}, respawn: () => {} },
       A,
       'hi'
     )
@@ -308,5 +383,87 @@ describe('deliverToTab', () => {
     const d = { ...deps(), wake: vi.fn(), respawn: vi.fn(), hasSession: () => false }
     expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: false, reason: 'wake-failed' })
     expect(d.send).not.toHaveBeenCalled()
+  })
+})
+
+/** Deps composed the way main/index.ts composes them: wake/respawn begin a
+ *  start on a real ChatStartGate that waits on a probe, and send goes
+ *  through afterStart. Also flips the tab awake, like wakeJsonClaudeTab. */
+function gatedDeps(getState: () => AppState, setState: (s: AppState) => void) {
+  const gate = new ChatStartGate()
+  const live = new Set<string>()
+  let release!: (ok: boolean) => void
+  const probe = new Promise<boolean>((r) => {
+    release = r
+  })
+  const delivered: string[] = []
+  const woken: string[] = []
+  const start = (wt: string, id: string): void => {
+    void gate.begin(id, async () => {
+      const ok = await probe
+      if (ok) live.add(id)
+      return ok
+    })
+    const st = getState()
+    const tree = st.terminals.panes[wt]
+    if (tree?.type === 'leaf') {
+      setState({
+        ...st,
+        terminals: {
+          ...st.terminals,
+          panes: {
+            ...st.terminals.panes,
+            [wt]: { ...tree, tabs: tree.tabs.map((t) => (t.id === id ? { ...t, mode: 'awake' as const } : t)) }
+          }
+        }
+      })
+    }
+  }
+  const d: ChatDeliveryDeps = {
+    hasSession: (id) => live.has(id),
+    isStarting: (id) => gate.isStarting(id),
+    wake: (wt, id) => {
+      woken.push(id)
+      start(wt, id)
+    },
+    respawn: (wt, id) => start(wt, id),
+    send: (id, text) => gate.afterStart(id, () => delivered.push(`${id}:${text}`))
+  }
+  return { d, gate, delivered, woken, release }
+}
+
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+describe('delivery while a start is in flight', () => {
+  it('reports success on wake and delivers once the start resolves', async () => {
+    let state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    const { d, delivered, release } = gatedDeps(() => state, (s) => (state = s))
+    expect(deliverToTab(state, d, A, 's1', 'hi')).toEqual({ ok: true, tabId: 's1', woke: true })
+    expect(delivered).toEqual([])
+    release(true)
+    await flush()
+    expect(delivered).toEqual(['s1:hi'])
+  })
+
+  it('delivers nothing when the start fails', async () => {
+    let state = makeState({ panes: { [A]: panes([{ id: 's1', mode: 'asleep' }]) } })
+    const { d, delivered, release } = gatedDeps(() => state, (s) => (state = s))
+    deliverToTab(state, d, A, 's1', 'hi')
+    release(false)
+    await flush()
+    expect(delivered).toEqual([])
+  })
+
+  it('routes a second worktree notification to the tab that is still starting', async () => {
+    let state = makeState({
+      panes: { [A]: panes([{ id: 's1', mode: 'asleep' }, { id: 's2', mode: 'asleep' }]) }
+    })
+    const { d, delivered, woken, release } = gatedDeps(() => state, (s) => (state = s))
+    expect(deliverToWorktreeChat(state, d, A, 'one')).toMatchObject({ ok: true, sessionId: 's1' })
+    expect(deliverToWorktreeChat(state, d, A, 'two')).toMatchObject({ ok: true, sessionId: 's1' })
+    expect(woken).toEqual(['s1'])
+    release(true)
+    await flush()
+    expect(delivered).toEqual(['s1:one', 's1:two'])
   })
 })

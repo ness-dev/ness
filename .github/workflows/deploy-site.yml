@@ -11,6 +11,11 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      # Rendered on the site by the orchestration section's graph mock.
+      - 'src/renderer/components/SubscriptionGraphCanvas.tsx'
+      - 'src/renderer/components/subscription-graph.css'
+      - 'src/renderer/components/AgentIcon.tsx'
+      - 'src/renderer/worktree-row-style.ts'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/deploy-site.sh'

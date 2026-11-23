@@ -186,6 +186,10 @@ export function buildBackend(
       req('worktree:recentCommitShas', worktreePath),
     readWorktreeFile: (worktreePath: string, filePath: string) =>
       req('worktree:readFile', worktreePath, filePath),
+    lochBlame: (worktreePath: string, filePath: string) =>
+      req('loch:blame', worktreePath, filePath),
+    lochAsk: (worktreePath: string, filePath: string, line: number, opts?: { atTurn?: boolean }) =>
+      req('loch:ask', worktreePath, filePath, line, opts),
     readWorktreeFileBinary: (worktreePath: string, filePath: string) =>
       req('worktree:readFileBinary', worktreePath, filePath),
     writeWorktreeFile: (worktreePath: string, filePath: string, contents: string) =>
@@ -307,6 +311,13 @@ export function buildBackend(
       reqConfig('config:setConversationForkEnabled', enabled),
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
+    setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
+    setLochRecordNewRepos: (enabled: boolean) => req('config:setLochRecordNewRepos', enabled),
+    setLochRecording: (repoRoot: string, enabled: boolean) =>
+      req('loch:setRecording', repoRoot, enabled),
+    setLochPromptDismissed: (repoRoot: string, dismissed: boolean) =>
+      req('loch:setPromptDismissed', repoRoot, dismissed),
+    refreshLochAvailability: () => req('loch:refreshAvailability'),
     setAgentTabNamingEnabled: (enabled: boolean) =>
       reqConfig('config:setAgentTabNamingEnabled', enabled),
     setCopyEditingEnabled: (enabled: boolean) =>
@@ -341,6 +352,8 @@ export function buildBackend(
     // reviewer, so every client of a workspace wants the same value.
     setAgentReviewDelivery: (value: AgentReviewDelivery) =>
       req('config:setAgentReviewDelivery', value),
+    setAgentReviewsEnabled: (enabled: boolean) =>
+      req('config:setAgentReviewsEnabled', enabled),
     setAutoReviewOnGreenCi: (enabled: boolean) =>
       req('config:setAutoReviewOnGreenCi', enabled),
     setReviewAgent: (value: ReviewAgentChoice) => req('config:setReviewAgent', value),
@@ -457,7 +470,10 @@ export function buildBackend(
       }
     ) => req('agent:buildSpawnArgs', agentKind, opts),
 
-    setOnboardingQuest: (quest: string) => reqConfig('config:setOnboardingQuest', quest),
+    tourStartSomethingNew: () => req('onboarding:tourStartSomethingNew'),
+    tourDismiss: () => req('onboarding:tourDismiss'),
+    scanExistingWork: () => req('onboarding:scanExistingWork'),
+    importExistingWork: (repoRoots: string[]) => req('onboarding:importWork', repoRoots),
     setWorktreeBase: (mode: 'remote' | 'local') => reqConfig('config:setWorktreeBase', mode),
     setMergeStrategy: (strategy: 'squash' | 'merge-commit' | 'fast-forward') =>
       reqConfig('config:setMergeStrategy', strategy),
@@ -471,6 +487,8 @@ export function buildBackend(
       reqConfig('config:setHiddenBottomIcons', hidden),
     setBottomIconOrder: (order: BottomIconKey[]) =>
       reqConfig('config:setBottomIconOrder', order),
+    setSidebarProjectOrder: (order: string[]) =>
+      reqConfig('config:setSidebarProjectOrder', order),
 
     setEditor: (editorId: string) => reqConfig('config:setEditor', editorId),
     setRepoEditor: (repoRoot: string, editorId: string | null) =>

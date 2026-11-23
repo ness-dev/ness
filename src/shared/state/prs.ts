@@ -76,6 +76,11 @@ export interface PRsState {
   byPath: Record<string, PRStatus | null>
   /** Locally-merged flag per worktree path. Replaced wholesale on poll. */
   mergedByPath: Record<string, boolean>
+  /** Worktree paths with a "Merge Locally" in flight. Lives in the slice, not
+   * the panel, so the in-flight state follows the worktree rather than
+   * whichever worktree the panel happens to be showing when it settles — and
+   * so every client sees it and can't start a second merge. */
+  mergingByPath: Record<string, true>
   /** True while a full refresh is in flight. */
   loading: boolean
 }
@@ -85,10 +90,13 @@ export type PRsEvent =
   | { type: 'prs/bulkStatusChanged'; payload: Record<string, PRStatus | null> }
   | { type: 'prs/mergedChanged'; payload: Record<string, boolean> }
   | { type: 'prs/loadingChanged'; payload: boolean }
+  | { type: 'prs/localMergeStarted'; payload: { path: string } }
+  | { type: 'prs/localMergeFinished'; payload: { path: string; merged: boolean } }
 
 export const initialPRs: PRsState = {
   byPath: {},
   mergedByPath: {},
+  mergingByPath: {},
   loading: false
 }
 
@@ -121,6 +129,26 @@ export function prsReducer(state: PRsState, event: PRsEvent): PRsState {
       return { ...state, mergedByPath: event.payload }
     case 'prs/loadingChanged':
       return { ...state, loading: event.payload }
+    case 'prs/localMergeStarted': {
+      if (state.mergingByPath[event.payload.path]) return state
+      return {
+        ...state,
+        mergingByPath: { ...state.mergingByPath, [event.payload.path]: true }
+      }
+    }
+    case 'prs/localMergeFinished': {
+      const { path, merged } = event.payload
+      const { [path]: _wasMerging, ...mergingByPath } = state.mergingByPath
+      void _wasMerging
+      // Mark merged immediately rather than waiting for the poller's next
+      // wholesale mergedChanged, so there's no window where the merge has
+      // landed but the panel offers the merge button again.
+      const mergedByPath =
+        merged && !state.mergedByPath[path]
+          ? { ...state.mergedByPath, [path]: true }
+          : state.mergedByPath
+      return { ...state, mergingByPath, mergedByPath }
+    }
     default: {
       const _exhaustive: never = event
       void _exhaustive

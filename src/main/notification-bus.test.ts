@@ -29,7 +29,7 @@ function setup(tabs: Array<{ id: string; type?: 'json-claude' | 'agent' }>) {
   }
   const bus = new NotificationBus(
     store,
-    { send, hasSession: (id) => live.has(id), wake: () => {}, respawn: () => {} },
+    { send, hasSession: (id) => live.has(id), isStarting: () => false, wake: () => {}, respawn: () => {} },
     async () => true
   )
   return { store, send, bus }

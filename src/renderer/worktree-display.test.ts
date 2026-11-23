@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { displayLabel } from './worktree-display'
+import { displayLabel, homeRowLabel } from './worktree-display'
 import type { Worktree } from '../shared/state/worktrees'
 
 const wt = (path: string, branch: string, repoRoot = '/Users/tt/Projects/harness'): Worktree => ({
@@ -38,5 +38,20 @@ describe('displayLabel', () => {
   it('handles trailing slash on repoRoot', () => {
     const w = wt('/Users/tt/Projects/harness-worktrees/tt/alias-worktrees', 'feat/x', '/Users/tt/Projects/harness/')
     expect(displayLabel(w, 'my-alias', true)).toBe('tt/alias-worktrees')
+  })
+})
+
+describe('homeRowLabel', () => {
+  it('shows the project name when there is no alias', () => {
+    expect(homeRowLabel('ness', undefined, false)).toBe('ness')
+    expect(homeRowLabel('ness', undefined, true)).toBe('ness')
+  })
+
+  it('shows the alias when Cmd is not held', () => {
+    expect(homeRowLabel('ness', 'Home Base', false)).toBe('Home Base')
+  })
+
+  it('Cmd held on an aliased home row reveals the project name, not the branch', () => {
+    expect(homeRowLabel('ness', 'Home Base', true)).toBe('ness')
   })
 })

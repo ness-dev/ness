@@ -152,7 +152,11 @@ export function getEntrySegments(entry: JsonClaudeChatEntry): FindSegment[] {
 
   // Top-level entry.text (user messages that aren't in blocks; some
   // system/error cards).
-  if (entry.text) out.push({ text: entry.text })
+  // User turns (typed and automated) render as markdown, so count what
+  // rehype will mark, not the raw source.
+  if (entry.text) {
+    out.push({ text: entry.kind === 'user' ? stripMarkdown(entry.text) : entry.text })
+  }
   if (entry.errorMessage) out.push({ text: entry.errorMessage })
 
   // Compact card body — static string, but the card is collapsible so
@@ -698,9 +702,11 @@ export function stripMarkdown(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     // Bold / italic / strikethrough.
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
+    // Underscores only count at word edges: GFM leaves intraword ones
+    // (snake_case) alone, so the corpus must too.
+    .replace(/(?<!\w)__([^_]+)__(?!\w)/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/_([^_]+)_/g, '$1')
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, '$1')
     .replace(/~~([^~]+)~~/g, '$1')
     // Leading heading / blockquote / list markers on each line.
     .replace(/^#{1,6}\s+/gm, '')

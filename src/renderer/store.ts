@@ -472,29 +472,27 @@ export interface BackendStateEntry {
   state: AppState
 }
 
-/** Projects every registered backend into a `BackendStateEntry`, reusing
- *  entries whose state and connection metadata are unchanged.
- *
- *  Reference stability is mandatory, not an optimization: this feeds
- *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
- *  read — and it is read on every store event from every backend. */
-const allBackendStatesSelector = new SegmentedSelector<
-  { state: AppState; connection: BackendConnection | undefined },
-  BackendStateEntry
->(
+export function backendStateEntryDeps(source: {
+  state: AppState
+  connection: BackendConnection | undefined
+}): readonly unknown[] {
   // Keyed on the SLICES the merged sidebar reads, never on `source.state`.
   // The store does `this.state = rootReducer(this.state, event)`, so the
   // AppState object is replaced on every event — keying on it means every
   // backend's segment is rebuilt dozens of times a second while an agent
   // streams, and `useMergedWorktrees` re-walks every worktree's pane tree
   // each time. With ~80 worktrees across backends that is a beachball.
+  // The same goes for keying on the whole `settings` object: pick fields.
   //
   // (backend-segments.ts documents exactly this trap. I wrote that comment
   // and then keyed on the state object anyway — hence this one.)
   //
-  // Must stay in step with what `useMergedWorktrees` actually reads: a
-  // slice consumed there but missing here is a stale sidebar.
-  (source) => [
+  // Must stay in step with what every `useAllBackendStatesSelector`
+  // projection actually reads — `useMergedWorktrees`,
+  // `getFleetWorktreeLists`, `selectHistoryPromptRepos`. A slice consumed
+  // there but missing here is stale UI: the entry keeps the old AppState
+  // until some unrelated keyed slice changes.
+  return [
     source.connection,
     source.state.worktrees.list,
     source.state.worktrees.repoRoots,
@@ -510,8 +508,26 @@ const allBackendStatesSelector = new SegmentedSelector<
     source.state.snooze.byPath,
     source.state.pinned.byPath,
     source.state.aliases.byPath,
-    source.state.assignedPRs.byRepo
-  ],
+    source.state.assignedPRs.byRepo,
+    // selectHistoryPromptRepos
+    source.state.loch,
+    source.state.settings.lochBlameEnabled,
+    source.state.settings.lochRecordingRepos,
+    source.state.settings.lochPromptDismissedRepos
+  ]
+}
+
+/** Projects every registered backend into a `BackendStateEntry`, reusing
+ *  entries whose state and connection metadata are unchanged.
+ *
+ *  Reference stability is mandatory, not an optimization: this feeds
+ *  `useSyncExternalStore`, which spins if `getSnapshot` allocates on every
+ *  read — and it is read on every store event from every backend. */
+const allBackendStatesSelector = new SegmentedSelector<
+  { state: AppState; connection: BackendConnection | undefined },
+  BackendStateEntry
+>(
+  backendStateEntryDeps,
   (source, backendId) => ({
     backendId,
     label: source.connection?.label ?? backendId,
@@ -579,6 +595,30 @@ export function useAllBackendStatesSelector<T>(
 }
 
 const EMPTY_BACKEND_STATES: readonly BackendStateEntry[] = []
+
+/** Repos that should show the sidebar "Install history tracking" prompt,
+ *  across every backend: loch is installed (or installable) on the repo's machine, the
+ *  gutter is on, and the repo is neither recording nor dismissed. Cached on
+ *  a string key so the array keeps its identity until the answer changes —
+ *  a requirement of `useAllBackendStatesSelector`. */
+let historyPromptCache: { key: string; value: readonly string[] } = { key: '', value: [] }
+export function selectHistoryPromptRepos(entries: readonly BackendStateEntry[]): readonly string[] {
+  const out: string[] = []
+  for (const { state } of entries) {
+    if (!(state.loch.available || state.loch.installable) || !state.settings.lochBlameEnabled) continue
+    const { lochRecordingRepos, lochPromptDismissedRepos } = state.settings
+    for (const root of state.worktrees.repoRoots) {
+      if (lochRecordingRepos.includes(root) || lochPromptDismissedRepos.includes(root)) continue
+      // Being turned on because of the onboarding answer; if that fails the
+      // repo leaves this list and the prompt is the fallback.
+      if (state.loch.autoRecording.includes(root)) continue
+      out.push(root)
+    }
+  }
+  const key = out.join('\0')
+  if (key !== historyPromptCache.key) historyPromptCache = { key, value: out }
+  return historyPromptCache.value
+}
 const getAllBackendStatesServerSnapshot = (): readonly BackendStateEntry[] =>
   EMPTY_BACKEND_STATES
 
@@ -1102,6 +1142,25 @@ export function useSettings(): SettingsState {
 
 export function usePrs() {
   return useAppState((s) => s.prs)
+}
+
+/** Local-merge state for the Merge Locally panel. `repoBusy` is true while
+ *  any worktree of the repo is merging: they all merge into the same main
+ *  checkout, so main refuses a second one and the panel shouldn't offer it. */
+export function useLocalMergeState(
+  worktreePath: string,
+  repoRoot: string
+): { merging: boolean; repoBusy: boolean; merged: boolean } {
+  const merging = useAppState((s) => !!s.prs.mergingByPath[worktreePath])
+  const repoBusy = useAppState((s) => {
+    // Usually empty, so this is a no-op outside an actual merge.
+    for (const path in s.prs.mergingByPath) {
+      if (s.worktrees.list.some((w) => w.path === path && w.repoRoot === repoRoot)) return true
+    }
+    return false
+  })
+  const merged = useAppState((s) => !!s.prs.mergedByPath[worktreePath])
+  return { merging, repoBusy, merged }
 }
 
 export function useOnboarding() {

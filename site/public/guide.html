@@ -97,7 +97,7 @@
       <span class="text-xl font-bold">Ness</span>
     </a>
     <div class="hidden sm:flex items-center gap-6 text-sm text-neutral-400">
-      <a href="/#features" class="hover:text-neutral-100 transition-colors">Features</a>
+      <a href="/#highlights" class="hover:text-neutral-100 transition-colors">Features</a>
       <a href="/guide.html" class="text-neutral-100 transition-colors">Guide</a>
       <a href="/#install" class="hover:text-neutral-100 transition-colors">Install</a>
       <a href="https://github.com/ness-dev/ness" class="hover:text-neutral-100 transition-colors">GitHub</a>
@@ -115,7 +115,7 @@
       class="hidden sm:hidden absolute top-full left-0 right-0 mx-4 mt-1 bg-[#0a0a0a]/95 backdrop-blur border border-neutral-800 rounded-lg shadow-xl overflow-hidden"
     >
       <nav class="flex flex-col py-2 text-sm text-neutral-400">
-        <a href="/#features" class="px-4 py-3 hover:bg-neutral-800/50 hover:text-neutral-100 transition-colors">Features</a>
+        <a href="/#highlights" class="px-4 py-3 hover:bg-neutral-800/50 hover:text-neutral-100 transition-colors">Features</a>
         <a href="/guide.html" class="px-4 py-3 hover:bg-neutral-800/50 hover:text-neutral-100 transition-colors">Guide</a>
         <a href="/#install" class="px-4 py-3 hover:bg-neutral-800/50 hover:text-neutral-100 transition-colors">Install</a>
         <a href="https://github.com/ness-dev/ness" class="px-4 py-3 hover:bg-neutral-800/50 hover:text-neutral-100 transition-colors">GitHub</a>
@@ -494,6 +494,10 @@ claude</code></pre>
             <span style="background: rgba(34, 197, 94, 0.7);"></span>
           </div>
           <div style="background: #141414; padding: 0.5rem 0;">
+            <div class="mockup-row" style="padding: 0.625rem 0.75rem;">
+              <span style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 0.125rem; background: rgba(34, 211, 238, 0.6); color: #fff; font-size: 0.75rem; font-weight: 700; flex-shrink: 0;">N<span style="position: absolute; right: -0.125rem; bottom: -0.125rem; width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #22c55e; box-shadow: 0 0 0 2px #141414;"></span></span>
+              <span style="font-size: 13px; font-weight: 600; color: #f5f5f5; flex: 1;">ness</span>
+            </div>
             <div class="mockup-row">
               <span style="width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #ef4444; flex-shrink: 0;"></span>
               <code>feature/onboarding</code>
@@ -510,19 +514,15 @@ claude</code></pre>
               <span class="status-pulse" style="width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #22c55e; flex-shrink: 0;"></span>
               <code>refactor/types</code>
             </div>
-            <div class="mockup-row">
-              <span style="width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #525252; flex-shrink: 0;"></span>
-              <code>main</code>
-            </div>
           </div>
         </div>
-        <figcaption>The sidebar: one row per worktree, with its current status.</figcaption>
+        <figcaption>The sidebar: the project on top, which opens its main workspace, then one row per worktree with its current status.</figcaption>
       </figure>
 
       <div class="grid sm:grid-cols-2 gap-4 mt-6">
         <div class="feature-card">
-          <h4>One-click worktrees</h4>
-          <p>Create and delete them from the sidebar. Ness runs the <code>git worktree</code> commands for you.</p>
+          <h4>Worktrees on request</h4>
+          <p>Ask your project's main workspace for the work and it creates the worktrees, or press <code>⌘N</code> to start one yourself. Ness runs the <code>git worktree</code> commands for you.</p>
         </div>
         <div class="feature-card">
           <h4>Tabs per worktree</h4>

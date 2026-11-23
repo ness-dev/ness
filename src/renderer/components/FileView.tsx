@@ -5,7 +5,8 @@ import { rehypeHighlightShared } from '../rehype-highlight-shared'
 import remarkGfm from 'remark-gfm'
 import type { FileBinaryReadResult, FileReadResult } from '../types'
 import { Tooltip } from './Tooltip'
-import { MonacoEditor } from './MonacoEditor'
+import { MonacoEditor, type MonacoBlame } from './MonacoEditor'
+import { isQuietBlameFailure } from '../../shared/loch'
 import { useSettings } from '../store'
 import { useBackend } from '../backend'
 import { useFileContentChange } from '../hooks/useFileContentChange'
@@ -61,6 +62,10 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
   const [binary, setBinary] = useState<{ url: string; size: number; mime: string } | null>(null)
   const [binaryError, setBinaryError] = useState<string | null>(null)
   const [staleOnDisk, setStaleOnDisk] = useState(false)
+  const [blame, setBlame] = useState<MonacoBlame | null>(null)
+  const [blameStatus, setBlameStatus] = useState<string | null>(null)
+  const [blameSeq, setBlameSeq] = useState(0)
+  const lochEnabled = settings.lochBlameEnabled
 
   const valueRef = useRef(value)
   const savedRef = useRef(savedValue)
@@ -156,7 +161,43 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
 
   useFileContentChange(worktreePath, filePath, () => {
     loadFromDisk(true)
+    setBlameSeq((n) => n + 1)
   })
+
+  // loch blame runs against the file on disk, so it is re-fetched whenever
+  // the disk copy changes (watcher above, or our own save) and simply not
+  // drawn while the buffer has unsaved edits — its line numbers would be
+  // pointing at the wrong lines.
+  useEffect(() => {
+    setBlame(null)
+    if (!lochEnabled || !filePath || needsBinary) return
+    let cancelled = false
+    backend.lochBlame(worktreePath, filePath).then((r) => {
+      if (cancelled) return
+      if (r.ok) {
+        setBlame({ hunks: r.hunks, sessions: r.sessions })
+      } else if (!isQuietBlameFailure(r.code) && r.code !== 'disabled') {
+        console.warn('[loch] blame failed', r.code, r.error)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [lochEnabled, worktreePath, filePath, needsBinary, blameSeq, backend])
+
+  const askLine = useCallback(
+    (line: number, opts: { atTurn: boolean }) => {
+      if (!filePath) return
+      setBlameStatus('Forking the conversation…')
+      backend.lochAsk(worktreePath, filePath, line, opts).then(
+        (r) => {
+          setBlameStatus(r.ok ? null : `Couldn’t open the conversation (${r.code})`)
+        },
+        (err) => setBlameStatus(`Couldn’t open the conversation (${String(err)})`)
+      )
+    },
+    [backend, worktreePath, filePath]
+  )
 
   const reloadFromDisk = useCallback(() => {
     loadFromDisk(false)
@@ -183,6 +224,7 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
     const r = await backend.writeWorktreeFile(worktreePath, filePath, current)
     if (r.ok) {
       setSavedValue(current)
+      setBlameSeq((n) => n + 1)
     } else {
       setSaveError(r.error || 'Save failed')
     }
@@ -302,6 +344,17 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
         toggleControl={toggleControl}
         wrapToggleControl={wrapToggleControl}
       />
+      {blameStatus && (
+        <div className="shrink-0 flex items-center gap-3 border-b border-border bg-panel px-4 py-1.5 text-xs text-dim">
+          <span className="flex-1 min-w-0 truncate">{blameStatus}</span>
+          <button
+            onClick={() => setBlameStatus(null)}
+            className="shrink-0 text-faint hover:text-fg cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {staleOnDisk && (
         <StaleOnDiskBanner onReload={reloadFromDisk} onDismiss={dismissStaleBanner} />
       )}
@@ -330,6 +383,8 @@ export function FileView({ worktreePath, filePath, onSendToAgent }: FileViewProp
             wordWrap={wordWrap}
             onChange={setValue}
             onSave={save}
+            blame={dirty ? null : blame}
+            onAskLine={askLine}
             onReferenceLine={
               onSendToAgent
                 ? (ln) => onSendToAgent(`@${filePath}:${ln} `)

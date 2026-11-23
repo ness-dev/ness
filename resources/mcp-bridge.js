@@ -189,6 +189,8 @@ const FORK_DESCRIPTION_SENTENCE =
 const EMBED_DESCRIPTION_SENTENCE =
   ' Also returns the path the capture was saved to: embed that path as markdown (`![caption](path)`) in your reply and Ness renders the screenshot inline in the chat, which is the clearest way to show a UI change you just made. Append a `#w=` fragment to set its displayed width — `![login form](path#w=500)` for 500px, `#w=50%` to fill half the column, `#w=400x300` for both dimensions; with no fragment it renders at a default size. Prefer the fragment over a `|` size spec: a pipe breaks the embed when it lands inside a markdown table cell.'
 
+const GITIGNORE_PRESETS = ['macos', 'node', 'python', 'none']
+
 const TOOLS = [
   {
     name: 'create_worktree',
@@ -266,6 +268,52 @@ const TOOLS = [
     name: 'list_repos',
     description: 'List the repo roots currently open in Ness.',
     inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'create_project',
+    description:
+      "Create a brand-new project: a fresh git repo at <parentDir>/<name> with an initial commit, added to the Ness sidebar. Use it when the user asks you to start something new (\"make me a personal finance app\"). Returns the new repoRoot. Next step: call create_worktree with that repoRoot and a branchName (plus an initialPrompt describing the work) to open an agent session in it — the initial commit is the base the worktree forks from. The repo has no remote, so there are no PRs until one is added. Fails if <parentDir>/<name> already exists; to bring in a repo that's already on disk, use add_repo instead.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Folder name for the new project, e.g. "personal-finance". A single path segment: no slashes, no "." or "..".'
+        },
+        parentDir: {
+          type: 'string',
+          description:
+            'Absolute path of an existing folder to create the project in. Ness has no default here — the sibling folder of a repo from list_repos is often a good choice, and if you have no good guess, ask the user where they keep their projects.'
+        },
+        includeReadme: {
+          type: 'boolean',
+          description: 'Write a README.md with the project name as its heading. Defaults to true.'
+        },
+        gitignorePreset: {
+          type: 'string',
+          enum: ['macos', 'node', 'python', 'none'],
+          description:
+            'Starter .gitignore: "macos" (.DS_Store and friends), "node" (node_modules, dist, .env), "python" (__pycache__, venv, dist), or "none" to skip the file. Defaults to "macos".'
+        }
+      },
+      required: ['name', 'parentDir']
+    }
+  },
+  {
+    name: 'add_repo',
+    description:
+      'Add an existing git repo on disk to the Ness sidebar. Returns its repoRoot (succeeds without change if it was already open). Next step: call create_worktree with that repoRoot to start work in it. The path must be the repo root itself — a subfolder of a repo, or a folder that is not a git repo, is rejected rather than registered. To start a new project from scratch, use create_project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute path of the git repo root.'
+        }
+      },
+      required: ['path']
+    }
   },
   {
     name: 'set_worktree_alias',
@@ -347,7 +395,7 @@ const TOOLS = [
   {
     name: 'send_message',
     description:
-      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
+      "Send a message to the agent working in another Ness worktree. It arrives as a turn in that agent's chat, labelled with your worktree as the sender, and wakes the tab if it was asleep. Use it to hand off work (\"the API change landed, you can rebase now\"), ask a question, or report that something you were asked to do is finished.\n\nThere is no separate reply channel. If you want an answer, say so in the message and ask them to send_message back to you — name your own worktree so they know where to reply. Then end your turn: you'll be woken when their message arrives, so there is no need to poll or wait.\n\nTo reach one specific Chat tab instead — including another tab in your OWN worktree — pass `tab` with an id from list_tabs; `worktree` can then be omitted. A `@chat:<repo>/<branch>#<tab>` token in the user's message is a specific chat they picked from the composer: pass it as `tab`, as-is, and leave `worktree` out. Terminal tabs cannot receive messages.\n\nDelivery is immediate or not at all — nothing is queued. If the target worktree has no agent chat tab the call fails and the message is lost, so report that to the user rather than assuming it landed. The recipient always sees which worktree you are (and, with `tab`, which tab); the sender name cannot be set by you.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -359,7 +407,7 @@ const TOOLS = [
         tab: {
           type: 'string',
           description:
-            'Id of one Chat tab to deliver to, from list_tabs. Must be in `worktree` (or your own worktree when that is omitted), and must not be your own tab.'
+            'Id of one Chat tab to deliver to, from list_tabs, or a `@chat:<repo>/<branch>#<tab>` mention token from the user\'s message (it names the worktree too, so `worktree` is ignored). An id must be in `worktree` (or your own worktree when that is omitted). Must not be your own tab.'
         },
         message: {
           type: 'string',
@@ -939,10 +987,10 @@ const FULL_CONTROL_BROWSER_TOOLS = new Set([
 ])
 
 // One /scope fetch backs every capability gate below. Defaults on failure are
-// permissive for browser tools (pre-existing behaviour) but the fork and
-// messaging gates default off — both are opt-in, and a server that doesn't
-// report them would reject the call anyway, so advertising them would only
-// waste a turn.
+// permissive for browser tools (pre-existing behaviour) but the fork,
+// messaging and review gates default off — a server that doesn't report
+// them is too old to honour the call, so advertising them would only waste
+// a turn.
 let cachedScope = null
 async function getScopeInfo() {
   if (cachedScope) return cachedScope
@@ -963,7 +1011,8 @@ async function getToolPerms() {
     // default — and matching the browser gates' permissive-on-failure
     // posture rather than hiding a feature the user has enabled.
     tabNaming: s.tabNaming || { enabled: true },
-    copyEditing: s.copyEditing || { enabled: false }
+    copyEditing: s.copyEditing || { enabled: false },
+    reviews: s.reviews || { enabled: false }
   }
 }
 
@@ -986,6 +1035,7 @@ function filterToolsByPerms(tools, perms) {
     if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
     if (t.name === 'edit_copy') return perms.copyEditing.enabled
     if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
+    if (t.name === 'request_review') return perms.reviews.enabled === true
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
     const isFull = FULL_CONTROL_BROWSER_TOOLS.has(t.name)
     if (!isView && !isFull) return true
@@ -1114,6 +1164,34 @@ async function handleToolCall(name, args, signal, progressToken) {
   if (name === 'list_repos') {
     const r = await callControl('GET', '/repos')
     return JSON.stringify(r, null, 2)
+  }
+  if (name === 'create_project') {
+    const projectName = args && typeof args.name === 'string' ? args.name.trim() : ''
+    const parentDir = args && typeof args.parentDir === 'string' ? args.parentDir.trim() : ''
+    if (!projectName) throw new Error('name is required')
+    if (!parentDir) throw new Error('parentDir is required')
+    if (args.gitignorePreset !== undefined && !GITIGNORE_PRESETS.includes(args.gitignorePreset)) {
+      throw new Error('gitignorePreset must be one of ' + GITIGNORE_PRESETS.join(', '))
+    }
+    const r = await callControl('POST', '/projects', {
+      name: projectName,
+      parentDir,
+      includeReadme: args.includeReadme,
+      gitignorePreset: args.gitignorePreset
+    })
+    return (
+      'Created project ' + r.repoRoot + ' with an initial commit and added it to Ness. ' +
+      'Next: call create_worktree with repoRoot "' + r.repoRoot + '" and a branchName to start work in it.'
+    )
+  }
+  if (name === 'add_repo') {
+    const repoPath = args && typeof args.path === 'string' ? args.path.trim() : ''
+    if (!repoPath) throw new Error('path is required')
+    const r = await callControl('POST', '/repos', { path: repoPath })
+    return (
+      (r.alreadyOpen ? r.repoRoot + ' was already open in Ness. ' : 'Added ' + r.repoRoot + ' to Ness. ') +
+      'Next: call create_worktree with repoRoot "' + r.repoRoot + '" to start work in it.'
+    )
   }
   if (name === 'set_worktree_alias') {
     if (!args || typeof args.alias !== 'string') {

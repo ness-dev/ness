@@ -84,7 +84,7 @@ function setup(over: Partial<AppState> = {}) {
   store.dispatch({ type: 'jsonClaude/sessionStarted', payload: { sessionId: CHILD_TAB, worktreePath: CHILD } })
   const delivery = new NotificationBus(
     store,
-    { send, hasSession: (id: string) => live.has(id), wake: () => {}, respawn: () => {} },
+    { send, hasSession: (id: string) => live.has(id), isStarting: () => false, wake: () => {}, respawn: () => {} },
     async () => true
   )
   return { store, send, delivery }
@@ -448,7 +448,7 @@ describe('own-worktree PR notifications: delivery edge cases', () => {
     const canWake = { value: true }
     const bus = new NotificationBus(
       store,
-      { send, hasSession: (id) => live.has(id), wake, respawn: (wt, id) => wake(wt, id) },
+      { send, hasSession: (id) => live.has(id), isStarting: () => false, wake, respawn: (wt, id) => wake(wt, id) },
       async () => true
     )
     const notifier = new SubscriptionNotifier(store, bus, () => false)

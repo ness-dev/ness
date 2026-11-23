@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ExternalLink, GitMerge, GitMergeConflict, ChevronDown, Check, GitPullRequest, RefreshCw, Loader2, ArrowDown, CircleDot, CircleCheck, Bot } from 'lucide-react'
-import { useCiNotify, useRepoConfigs, useSettings } from '../store'
+import { useCiNotify, useLocalMergeState, useRepoConfigs, useSettings } from '../store'
 import { isCiNotifyEnabled } from '../../shared/state/ci-notify'
 import { useBackend } from '../backend'
 import type {
@@ -77,7 +77,11 @@ export function MergeLocallyPanel({
   if (!show || !worktree) return null
   return (
     <RightPanel id="merge-locally" title="Merge Locally">
+      {/* Keyed so each worktree gets its own instance: a merge started in one
+          worktree must never settle into another's view — a stale "Merged"
+          there would offer to remove a worktree that was never merged. */}
       <MergeLocallyBody
+        key={worktree.path}
         worktree={worktree}
         onMerged={onMerged}
         onRemoveWorktree={onRemoveWorktree}
@@ -101,6 +105,7 @@ function MergeLocallyBody({
   const [busy, setBusy] = useState<'idle' | 'checking' | 'fixing' | 'merging'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   // The in-flight (or settled) preview for the current worktree, so a merge
@@ -118,6 +123,17 @@ function MergeLocallyBody({
 
   const { repoRoot, branch, path } = worktree
 
+  // In-flight and merged both come from the prs slice, so they survive
+  // switching away and back (and show on every client) — otherwise coming
+  // back mid-merge would offer the merge button again. `mergedLocally` also
+  // covers worktrees merged in an earlier session: they open on the merged
+  // view with Remove, since merging them again is never what's wanted.
+  const {
+    merging: mergeInFlight,
+    repoBusy,
+    merged: mergedLocally
+  } = useLocalMergeState(path, repoRoot)
+
   const refreshStatus = useCallback(async () => {
     setBusy('checking')
     try {
@@ -130,10 +146,8 @@ function MergeLocallyBody({
   }, [backend, repoRoot])
 
   useEffect(() => {
-    setError(null)
-    setSuccess(null)
     void refreshStatus()
-  }, [path, refreshStatus])
+  }, [refreshStatus])
 
   // The conflict preview is a real three-way merge simulation (`git merge-tree
   // --write-tree`) answering a question the user hasn't asked yet — it only
@@ -227,10 +241,16 @@ function MergeLocallyBody({
   const ready = mainStatus?.ready === true
   const needsFix = mainStatus && !mainStatus.ready
   const hasConflict = conflictPreview?.hasConflict === true
+  const merging = busy === 'merging' || mergeInFlight
+  const successMessage =
+    success ??
+    (mergedLocally && !dismissed && !merging && mainStatus
+      ? `Merged into ${mainStatus.baseBranch}`
+      : null)
 
   return (
     <div className="px-3 py-2 space-y-2">
-        {!success && (
+        {!successMessage && (
           <>
             <div className="text-xs text-faint">
               Merge <span className="text-fg font-mono">{worktree.branch}</span>
@@ -247,16 +267,16 @@ function MergeLocallyBody({
               <div className="flex">
                 <button
                   onClick={handleMerge}
-                  disabled={!ready || busy !== 'idle' || !strategyLoaded || hasConflict}
+                  disabled={!ready || busy !== 'idle' || merging || repoBusy || !strategyLoaded || hasConflict}
                   title={hasConflict ? 'Resolve merge conflicts before merging' : undefined}
                   className="flex-1 text-xs bg-accent/20 hover:bg-accent/30 text-fg-bright px-2 py-1.5 rounded-l flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-r border-accent/40"
                 >
                   <GitMerge className="icon-xs" />
-                  {busy === 'merging' ? 'Merging…' : STRATEGY_BUTTON_LABELS[strategy]}
+                  {merging ? 'Merging…' : STRATEGY_BUTTON_LABELS[strategy]}
                 </button>
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
-                  disabled={busy === 'merging'}
+                  disabled={merging}
                   className="text-xs bg-accent/20 hover:bg-accent/30 text-fg-bright px-1.5 py-1.5 rounded-r flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   aria-label="Change merge strategy"
                   title="Change merge strategy"
@@ -344,7 +364,7 @@ function MergeLocallyBody({
                 </div>
                 <button
                   onClick={handleFix}
-                  disabled={busy !== 'idle'}
+                  disabled={busy !== 'idle' || repoBusy}
                   className="text-xs bg-panel-raised hover:bg-surface text-fg px-2 py-1 rounded disabled:opacity-50 cursor-pointer"
                 >
                   {busy === 'fixing'
@@ -362,9 +382,9 @@ function MergeLocallyBody({
           </>
         )}
 
-        {success && (
+        {successMessage && (
           <div className="space-y-2">
-            <div className="text-xs text-success">{success}</div>
+            <div className="text-xs text-success">{successMessage}</div>
             {onRemoveWorktree && (
               <button
                 onClick={handleRemoveAfterMerge}
@@ -376,6 +396,7 @@ function MergeLocallyBody({
             <button
               onClick={() => {
                 setSuccess(null)
+                setDismissed(true)
                 void refreshStatus()
               }}
               className="w-full text-xs text-faint hover:text-fg cursor-pointer"
@@ -999,7 +1020,7 @@ export function PRStatusPanel({
         <div className="px-3 py-2 text-xs text-faint">No PR for this branch</div>
       )}
 
-      {!needsGithubToken && pr !== undefined && aiReview.row}
+      {!needsGithubToken && pr !== undefined && settings.agentReviewsEnabled && aiReview.row}
 
       {!needsGithubToken && pr === undefined && (
         <div className="px-3 py-2 text-xs text-faint">Loading...</div>

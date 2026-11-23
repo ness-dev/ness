@@ -88,6 +88,16 @@ export interface CodexChatProviderOptions {
   /** The Codex thread id recorded on the tab, if any. */
   getThreadId: (sessionId: string) => string | undefined
   setThreadId: (sessionId: string, threadId: string) => void
+  /** True when a thread held by another Codex process should be continued
+   *  from a fork instead of reported as busy. Set for conversations brought
+   *  in by the onboarding import, which are expected to still be open in
+   *  the terminal they came from and must not make the user close it. */
+  forkWhenHeldElsewhere?: (sessionId: string) => boolean
+  /** The thread a start set out to resume is now open here, either resumed
+   *  or continued from a fork. `threadId` is the one the start began with,
+   *  not the fork's. A start that failed before getting this far doesn't
+   *  call it, so the caller's fork permission survives for the retry. */
+  onThreadOpened?: (sessionId: string, threadId: string) => void
   /** Model to request: the tab's override, else the Codex model setting.
    *  Undefined lets Codex use its own configured default. */
   getModel: (modelOverride?: string) => string | undefined
@@ -449,12 +459,40 @@ export class CodexChatProvider implements ChatProvider {
       }
       const existing = fork ? undefined : this.opts.getThreadId(sessionId)
       if (existing) {
+        const forkIfHeld = this.opts.forkWhenHeldElsewhere?.(sessionId) ?? false
         try {
-          resp = await this.resumeThread(inst, existing, threadParams)
+          // No point waiting out the retry window for a thread we expect
+          // to stay held: that wait is for a writer that is on its way out.
+          resp = await this.resumeThread(inst, existing, threadParams, !forkIfHeld)
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
           log('codex-chat', `resume failed sessionId=${sessionId} thread=${existing}`, reason)
-          if (isActiveWriterError(reason)) {
+          if (isActiveWriterError(reason) && forkIfHeld) {
+            try {
+              // Fork doesn't inherit the parent's model, and a held thread
+              // can't be opened to ask what it was using. threadParams
+              // carries the tab's override or the Codex default from
+              // Settings when there is one; otherwise config.toml decides,
+              // as it does for any new thread.
+              resp = await inst.client.request<CodexThreadResponse>('thread/fork', {
+                threadId: existing,
+                excludeTurns: true,
+                ...threadParams
+              })
+              this.opts.setThreadId(sessionId, resp.thread.id)
+              forked = true
+              log('codex-chat', `forked held thread sessionId=${sessionId} from=${existing} to=${resp.thread.id}`)
+            } catch (forkErr) {
+              log(
+                'codex-chat',
+                `fork of held thread failed sessionId=${sessionId}`,
+                forkErr instanceof Error ? forkErr.message : String(forkErr)
+              )
+            }
+          }
+          if (resp) {
+            // Continuing from the fork.
+          } else if (isActiveWriterError(reason)) {
             // Still held by another Codex process after the retry window.
             // Starting a fresh thread here would silently orphan the
             // conversation, so stop and keep the tab pointed at it.
@@ -479,6 +517,7 @@ export class CodexChatProvider implements ChatProvider {
           }
         }
       }
+      if (existing && resp) this.opts.onThreadOpened?.(sessionId, existing)
       if (!resp) {
         resp = await inst.client.request<CodexThreadResponse>('thread/start', threadParams)
         this.opts.setThreadId(sessionId, resp.thread.id)
@@ -535,13 +574,14 @@ export class CodexChatProvider implements ChatProvider {
   private async resumeThread(
     inst: CodexInstance,
     threadId: string,
-    threadParams: Record<string, unknown>
+    threadParams: Record<string, unknown>,
+    retryWhileHeld = true
   ): Promise<CodexThreadResponse> {
     const { intervalMs, windowMs } = this.opts.resumeRetry ?? {
       intervalMs: RESUME_RETRY_INTERVAL_MS,
       windowMs: RESUME_RETRY_WINDOW_MS
     }
-    const deadline = Date.now() + windowMs
+    const deadline = retryWhileHeld ? Date.now() + windowMs : 0
     for (;;) {
       try {
         return await inst.client.request<CodexThreadResponse>('thread/resume', {

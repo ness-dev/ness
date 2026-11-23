@@ -91,6 +91,28 @@ describe('prsReducer', () => {
     expect(next.mergedByPath).toEqual({ '/a': false, '/c': true })
   })
 
+  it('localMergeStarted marks the path as merging', () => {
+    const next = apply(initialPRs, { type: 'prs/localMergeStarted', payload: { path: '/a' } })
+    expect(next.mergingByPath).toEqual({ '/a': true })
+    expect(apply(next, { type: 'prs/localMergeStarted', payload: { path: '/a' } })).toBe(next)
+  })
+
+  it('localMergeFinished clears merging and marks merged on success', () => {
+    const start: PRsState = { ...initialPRs, mergingByPath: { '/a': true, '/b': true } }
+    const ok = apply(start, {
+      type: 'prs/localMergeFinished',
+      payload: { path: '/a', merged: true }
+    })
+    expect(ok.mergingByPath).toEqual({ '/b': true })
+    expect(ok.mergedByPath).toEqual({ '/a': true })
+    const failed = apply(start, {
+      type: 'prs/localMergeFinished',
+      payload: { path: '/a', merged: false }
+    })
+    expect(failed.mergingByPath).toEqual({ '/b': true })
+    expect(failed.mergedByPath).toBe(start.mergedByPath)
+  })
+
   it('loadingChanged toggles the flag', () => {
     const on = apply(initialPRs, { type: 'prs/loadingChanged', payload: true })
     expect(on.loading).toBe(true)
@@ -108,6 +130,7 @@ describe('prsReducer', () => {
     const start: PRsState = {
       byPath: { '/a': stubPR() },
       mergedByPath: { '/a': true },
+      mergingByPath: {},
       loading: false
     }
     const next = apply(start, { type: 'prs/loadingChanged', payload: true })

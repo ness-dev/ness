@@ -1,0 +1,21 @@
+/* loch conversation blame palette: one colour per agent turn, used by the
+   gutter bars and the hover card swatch. Shared with the marketing site
+   (site/src/styles.css), which draws the same preview. Fixed mid-saturation hues so they
+   read on both light and dark themes. */
+.loch-c0 { --loch-c: #e5734d; }
+.loch-c1 { --loch-c: #4d9de5; }
+.loch-c2 { --loch-c: #5dbb63; }
+.loch-c3 { --loch-c: #c46be0; }
+.loch-c4 { --loch-c: #e0b43a; }
+.loch-c5 { --loch-c: #3fbfb3; }
+.loch-c6 { --loch-c: #e05d8f; }
+.loch-c7 { --loch-c: #8a8fe8; }
+.loch-c8 { --loch-c: #a3b83a; }
+.loch-c9 { --loch-c: #b98a5e; }
+.loch-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--loch-c);
+}

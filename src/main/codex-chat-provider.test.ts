@@ -556,6 +556,102 @@ describe('CodexChatProvider', () => {
     expect(session().entries.at(-1)?.errorMessage).toMatch(/still open in another Codex process/)
   })
 
+  describe('a thread held by another process, when the caller asks for a fork', () => {
+    const held = (p: Record<string, unknown>): Error =>
+      new Error(`thread ${p.threadId} already has an active writer`)
+
+    it('forks at once instead of waiting out the retry window, and seeds the fork’s history', async () => {
+      const turns: CodexTurn[] = [
+        {
+          id: 'turn-a',
+          status: 'completed',
+          error: null,
+          items: [
+            { type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'hello' }] },
+            { type: 'agentMessage', id: 'a1', text: 'hi there' }
+          ]
+        }
+      ]
+      let resumes = 0
+      const { provider, opts, session, server } = setup(
+        {
+          'thread/resume': (p) => {
+            resumes++
+            return held(p)
+          },
+          'thread/fork': () => ({ thread: { id: 'thread-fork' }, model: 'gpt-test' }),
+          'thread/turns/list': () => ({ data: turns, nextCursor: null })
+        },
+        'thread-old'
+      )
+      // A window this long would time the test out if the retry loop ran.
+      opts.resumeRetry = { intervalMs: 1, windowMs: 60_000 }
+      opts.forkWhenHeldElsewhere = vi.fn(() => true)
+      opts.onThreadOpened = vi.fn()
+      opts.getModel = () => 'gpt-chosen'
+      provider.create('s1', process.cwd(), 'default')
+      for (let i = 0; i < 100 && session().state !== 'running'; i++) await new Promise((r) => setTimeout(r, 5))
+
+      expect(resumes).toBe(1)
+      const fork = server.received.find((m) => m.method === 'thread/fork')
+      expect(fork?.params).toMatchObject({ threadId: 'thread-old', excludeTurns: true, model: 'gpt-chosen' })
+      expect(opts.setThreadId).toHaveBeenCalledWith('s1', 'thread-fork')
+      // Reported against the thread the start began with, not the fork.
+      expect(opts.onThreadOpened).toHaveBeenCalledWith('s1', 'thread-old')
+      expect(server.received.some((m) => m.method === 'thread/start')).toBe(false)
+      expect(session().state).toBe('running')
+      expect(session().entries.map((e) => [e.kind, e.text ?? e.blocks?.[0]?.text])).toEqual([
+        ['user', 'hello'],
+        ['assistant', 'hi there']
+      ])
+    })
+
+    it('keeps the tab on the held thread when the fork fails too', async () => {
+      const { provider, opts, session, server } = setup(
+        { 'thread/resume': held, 'thread/fork': () => new Error('fork refused') },
+        'thread-old'
+      )
+      opts.forkWhenHeldElsewhere = () => true
+      opts.onThreadOpened = vi.fn()
+      provider.create('s1', process.cwd(), 'default')
+      for (let i = 0; i < 100 && session().state !== 'exited'; i++) await new Promise((r) => setTimeout(r, 5))
+
+      expect(session().state).toBe('exited')
+      expect(server.received.some((m) => m.method === 'thread/start')).toBe(false)
+      expect(opts.setThreadId).not.toHaveBeenCalled()
+      // Not opened, so the caller's permission to fork survives for a retry.
+      expect(opts.onThreadOpened).not.toHaveBeenCalled()
+      expect(session().entries.at(-1)?.errorMessage).toMatch(/still open in another Codex process/)
+    })
+
+    it('reports a plain resume as opened without forking', async () => {
+      const { provider, opts, session, server } = setup({}, 'thread-old')
+      opts.forkWhenHeldElsewhere = () => true
+      opts.onThreadOpened = vi.fn()
+      provider.create('s1', process.cwd(), 'default')
+      for (let i = 0; i < 100 && session().state !== 'running'; i++) await new Promise((r) => setTimeout(r, 5))
+
+      expect(server.received.some((m) => m.method === 'thread/fork')).toBe(false)
+      expect(opts.setThreadId).not.toHaveBeenCalled()
+      expect(opts.onThreadOpened).toHaveBeenCalledWith('s1', 'thread-old')
+    })
+
+    it('never forks when the caller has not asked for it', async () => {
+      const { provider, opts, session, server } = setup(
+        { 'thread/resume': held, 'thread/fork': () => ({ thread: { id: 'thread-fork' }, model: 'gpt-test' }) },
+        'thread-old'
+      )
+      opts.resumeRetry = { intervalMs: 1, windowMs: 20 }
+      opts.forkWhenHeldElsewhere = () => false
+      provider.create('s1', process.cwd(), 'default')
+      for (let i = 0; i < 100 && session().state !== 'exited'; i++) await new Promise((r) => setTimeout(r, 5))
+
+      expect(server.received.some((m) => m.method === 'thread/fork')).toBe(false)
+      expect(server.received.filter((m) => m.method === 'thread/resume').length).toBeGreaterThan(1)
+      expect(session().entries.at(-1)?.errorMessage).toMatch(/still open in another Codex process/)
+    })
+  })
+
   it('tells the user when an existing conversation fails to resume', async () => {
     const { provider, session } = setup(
       { 'thread/resume': () => new Error('rollout is corrupt') },

@@ -1,15 +1,21 @@
 import type { AppState } from '../shared/state'
 import { getLeaves } from '../shared/state/terminals'
 import { worktreeHandle } from '../shared/state/worktrees'
-import { findTabInWorktree } from '../shared/agent-tabs'
+import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
+import { parseChatMention, slugifyTabLabel } from '../shared/chat-mention'
 
 export interface ChatDeliveryDeps {
-  /** Injects a user turn into a running json-mode chat session. */
+  /** Injects a user turn into a json-mode chat session. A session that is
+   *  still starting gets it once the start completes. */
   send: (sessionId: string, text: string) => void
   /** True when the session has a live subprocess to receive the message. */
   hasSession: (sessionId: string) => boolean
-  /** Re-spawns a slept json-claude tab's subprocess. Synchronous — the
-   *  session is live by the time this returns (or the spawn failed). */
+  /** True while the session's start is in flight — waiting on the
+   *  worktree's shell-env probe before it spawns. */
+  isStarting: (sessionId: string) => boolean
+  /** Re-spawns a slept json-claude tab's subprocess. Asynchronous: the
+   *  start usually waits on the shell-env probe, so the session is
+   *  typically still starting when this returns. */
   wake: (worktreePath: string, tabId: string) => void
   /** Starts the subprocess of an awake json-claude tab whose process is
    *  gone (crashed, or not yet respawned by a client). Idempotent with the
@@ -44,6 +50,21 @@ function pickLiveSession(
   return best
 }
 
+/** A json-claude tab whose start is in flight. A woken tab is already
+ *  'awake' but has no live session until its shell-env probe finishes, so
+ *  without this tier a second notification in that window would miss it —
+ *  and either fail or wake a different slept tab. */
+function pickStartingTab(state: AppState, deps: ChatDeliveryDeps, worktreePath: string): string | null {
+  const tree = state.terminals.panes[worktreePath]
+  if (!tree) return null
+  for (const leaf of getLeaves(tree)) {
+    for (const tab of leaf.tabs) {
+      if (tab.type === 'json-claude' && deps.isStarting(tab.id)) return tab.id
+    }
+  }
+  return null
+}
+
 /** A slept json-claude tab to wake, preferring whichever tab its pane
  *  had focused. */
 function pickSleptTab(state: AppState, worktreePath: string): string | null {
@@ -63,6 +84,36 @@ function pickSleptTab(state: AppState, worktreePath: string): string | null {
 
 const WORKTREE_HANDLE_PREFIX = 'worktree:'
 
+/** Every live worktree a handle could mean: the exact path alone, else
+ *  each whose `<repo>/<branch>` handle, alias, or bare branch matches
+ *  case-insensitively. Also strips the composer's `worktree:` prefix. */
+function worktreeCandidates(state: AppState, query: string): { q: string; paths: string[] } {
+  // The chat composer's @-mention inserts `@worktree:<repo>/<branch>`, and
+  // agents routinely pass that token through verbatim. Strip the prefix so
+  // it resolves instead of 404ing on a handle we handed them ourselves.
+  let q = query.trim()
+  if (q.toLowerCase().startsWith(WORKTREE_HANDLE_PREFIX)) {
+    q = q.slice(WORKTREE_HANDLE_PREFIX.length).trim()
+  }
+  if (!q) return { q, paths: [] }
+  // A prunable worktree's directory is already gone, so nothing can be
+  // running in it to receive the message.
+  const list = state.worktrees.list.filter((w) => !w.prunable)
+  if (list.some((w) => w.path === q)) return { q, paths: [q] }
+  const lower = q.toLowerCase()
+  const paths = list
+    .filter((w) => {
+      const alias = state.aliases.byPath[w.path]
+      return (
+        alias?.toLowerCase() === lower ||
+        w.branch.toLowerCase() === lower ||
+        worktreeHandle(w.repoRoot, w.branch).toLowerCase() === lower
+      )
+    })
+    .map((w) => w.path)
+  return { q, paths: [...new Set(paths)] }
+}
+
 /** Resolve a caller-supplied worktree handle. Absolute path wins outright;
  *  otherwise a `<repo>/<branch>` handle, alias, and bare branch are matched
  *  case-insensitively. An ambiguous handle is an error rather than a guess —
@@ -72,37 +123,58 @@ export function resolveWorktreeQuery(
   state: AppState,
   query: string
 ): { path: string } | { error: string } {
-  // The chat composer's @-mention inserts `@worktree:<repo>/<branch>`, and
-  // agents routinely pass that token through verbatim. Strip the prefix so
-  // it resolves instead of 404ing on a handle we handed them ourselves.
-  let q = query.trim()
-  if (q.toLowerCase().startsWith(WORKTREE_HANDLE_PREFIX)) {
-    q = q.slice(WORKTREE_HANDLE_PREFIX.length).trim()
-  }
+  const { q, paths } = worktreeCandidates(state, query)
   if (!q) return { error: 'worktree required' }
-  // A prunable worktree's directory is already gone, so nothing can be
-  // running in it to receive the message.
-  const list = state.worktrees.list.filter((w) => !w.prunable)
-  if (list.some((w) => w.path === q)) return { path: q }
-  const lower = q.toLowerCase()
-  const matches = new Set<string>()
-  for (const w of list) {
-    const alias = state.aliases.byPath[w.path]
-    if (
-      alias?.toLowerCase() === lower ||
-      w.branch.toLowerCase() === lower ||
-      worktreeHandle(w.repoRoot, w.branch).toLowerCase() === lower
-    ) {
-      matches.add(w.path)
-    }
-  }
-  if (matches.size === 1) return { path: [...matches][0] }
-  if (matches.size > 1) {
+  if (paths.length === 1) return { path: paths[0] }
+  if (paths.length > 1) {
     return {
-      error: `"${q}" matches ${matches.size} worktrees — pass the absolute path instead`
+      error: `"${q}" matches ${paths.length} worktrees — pass the absolute path instead`
     }
   }
   return { error: `no worktree matching "${q}"` }
+}
+
+/** Resolve an `@chat:<repo>/<branch>#<tab>` mention to one Chat tab. The
+ *  tab half matches a tab id exactly, else the slug of a Chat tab's name.
+ *
+ *  The worktree half can be ambiguous through no fault of the token's —
+ *  `<repo>` is a basename, so two clones of `app` on `main` share a handle,
+ *  and a handle can also equal another worktree's alias or branch. The
+ *  sender holds only the token, so "pass the absolute path" isn't advice it
+ *  can follow. Instead the tab ref narrows the candidates: a resolve
+ *  succeeds when exactly one candidate worktree holds exactly one match.
+ *  Anything else is still an error, never a guess. */
+export function resolveChatQuery(
+  state: AppState,
+  query: string
+): { path: string; tabId: string } | { error: string } {
+  const parsed = parseChatMention(query)
+  if (!parsed) return { error: `"${query}" is not a chat mention — expected chat:<repo>/<branch>#<tab>` }
+  const { paths } = worktreeCandidates(state, parsed.worktree)
+  if (paths.length === 0) return { error: `no worktree matching "${parsed.worktree}"` }
+  const want = parsed.tab.toLowerCase()
+  const hits: Array<{ path: string; tabId: string }> = []
+  let slugCollisions = 0
+  for (const path of paths) {
+    const tabs = listChatTabs(state, path)
+    const byId = tabs.find((t) => t.id === parsed.tab)
+    if (byId) {
+      hits.push({ path, tabId: byId.id })
+      continue
+    }
+    const bySlug = tabs.filter((t) => slugifyTabLabel(t.label) === want)
+    if (bySlug.length === 1) hits.push({ path, tabId: bySlug[0].id })
+    else if (bySlug.length > 1) slugCollisions += bySlug.length
+  }
+  if (hits.length === 1 && slugCollisions === 0) return hits[0]
+  if (hits.length + slugCollisions > 1) {
+    return {
+      error: `"${parsed.tab}" matches ${hits.length + slugCollisions} Chat tabs for ${parsed.worktree} — call list_tabs and pass the tab id instead`
+    }
+  }
+  return {
+    error: `no Chat tab "${parsed.tab}" in ${parsed.worktree} — it may have been closed or renamed; call list_tabs to see them`
+  }
 }
 
 /** Human label for a worktree: alias when the user set one, else its branch. */
@@ -148,7 +220,12 @@ export function deliverToTab(
   if (tab.type !== 'json-claude') return { ok: false, reason: 'not-agent-tab' }
   if ((tab.mode ?? 'awake') === 'asleep') deps.wake(worktreePath, tabId)
   else deps.respawn(worktreePath, tabId)
-  if (!deps.hasSession(tabId)) return { ok: false, reason: 'wake-failed' }
+  // Only a start that never began (or already failed) is a failure; one
+  // still in flight receives the message through `send` once it's up.
+  // That makes `ok` optimistic: if the start later fails, the gate drops
+  // the held send and logs it under [json-claude], after the caller has
+  // already been told it was delivered.
+  if (!deps.hasSession(tabId) && !deps.isStarting(tabId)) return { ok: false, reason: 'wake-failed' }
   deps.send(tabId, message)
   return { ok: true, tabId, woke: true }
 }
@@ -182,7 +259,10 @@ export function deliverToWorktreeChat(
   worktreePath: string,
   message: string
 ): ChatDeliveryResult {
-  const tabId = pickLiveSession(state, deps, worktreePath) ?? pickSleptTab(state, worktreePath)
+  const tabId =
+    pickLiveSession(state, deps, worktreePath) ??
+    pickStartingTab(state, deps, worktreePath) ??
+    pickSleptTab(state, worktreePath)
   // No chat tab at all — a terminal-only worktree.
   if (!tabId) return { ok: false, reason: 'no-chat-tab' }
   const result = deliverToTab(state, deps, worktreePath, tabId, message)

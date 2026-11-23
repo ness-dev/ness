@@ -26,6 +26,16 @@ import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
+import { isAbsolute, join } from 'path'
+import { statSync } from 'fs'
+import type { AddRepoResult } from '../shared/repo-pick'
+import { parseChatMention } from '../shared/chat-mention'
+import {
+  validateProjectName,
+  type CreateNewProjectOpts,
+  type CreateNewProjectResult,
+  type GitignorePreset
+} from './repo-create'
 
 export interface BrowserTabSummary {
   id: string
@@ -119,12 +129,14 @@ export interface WorktreeStatusInfo {
 }
 
 export interface MessagingQueries {
-  /** Whether the experimental worktree-messaging setting is on. Re-read per
+  /** Whether the worktree-messaging setting is on. Re-read per
    * request so a toggle takes effect without restarting the bridge. */
   isEnabled: () => boolean
   /** Resolve a caller-supplied handle — absolute path, branch name, or
    * alias — to a known worktree path. */
   resolveTarget: (query: string) => { path: string } | { error: string }
+  /** Resolve an `@chat:<repo>/<branch>#<tab>` mention to one Chat tab. */
+  resolveChat: (query: string) => { path: string; tabId: string } | { error: string }
   /** Human label for a worktree: its alias when set, else its branch. Names
    * the sender in the delivered message. */
   describe: (worktreePath: string) => string
@@ -226,6 +238,12 @@ export interface BrowserPerms {
 
 export interface ControlServerDeps {
   getRepoRoots: () => string[]
+  /** Register an existing repo in the sidebar. Host wires this to the same
+   *  `addRepoAtPath` the `repo:addAtPath` IPC handler uses. */
+  addRepo: (path: string) => Promise<AddRepoResult>
+  /** Create a new git repo on disk and register it. Host wires this to the
+   *  same `createAndRegisterProject` the New Project screen uses. */
+  createProject: (opts: CreateNewProjectOpts) => Promise<CreateNewProjectResult>
   getWorktreeBase: () => 'remote' | 'local'
   /** Default prompt used when an MCP `create_worktree` call provides
    * `prNumber` but no explicit `initialPrompt`. Resolved per-request so
@@ -279,6 +297,8 @@ export interface ControlServerDeps {
   /** Whether agents may name their own tab. Re-read per request so the
    * toggle takes effect without restarting the bridge. */
   getAgentTabNamingEnabled: () => boolean
+  /** Whether agents may call request_review. Re-read per request. */
+  getAgentReviewsEnabled: () => boolean
   /** Rename one tab in the pane tree. Returns false when the rename was
    *  refused — for `source: 'agent'`, that means the user had already
    *  named the tab themselves. */
@@ -299,6 +319,9 @@ export interface ControlServerDeps {
     | { ok: false; error: string }
   >
 }
+
+/** Same default the New Project screen starts on. */
+const GITIGNORE_PRESETS: readonly GitignorePreset[] = ['macos', 'node', 'python', 'none']
 
 const FULL_CONTROL_BROWSER_PATHS = new Set([
   '/browser/click',
@@ -376,6 +399,84 @@ async function handleRequest(
   // helps agents understand the overall harness state.
   if (req.method === 'GET' && path === '/repos') {
     return sendJson(res, 200, { repoRoots: deps.getRepoRoots() })
+  }
+
+  // add_repo / create_project are workspace-wide like create_worktree: a
+  // chat asked to "make me an app" has to be able to stand up the repo the
+  // rest of the work happens in. Paths must be absolute so nothing resolves
+  // against the main process's cwd.
+  if (req.method === 'POST' && path === '/repos') {
+    const body = await readJson(req)
+    const picked = typeof body.path === 'string' ? body.path.trim() : ''
+    if (!picked) return sendJson(res, 400, { error: 'path is required' })
+    if (!isAbsolute(picked)) {
+      return sendJson(res, 400, { error: 'path must be absolute' })
+    }
+    const before = new Set(deps.getRepoRoots())
+    const result = await deps.addRepo(picked)
+    if (result.kind === 'added') {
+      return sendJson(res, 200, {
+        repoRoot: result.repoRoot,
+        alreadyOpen: before.has(result.repoRoot)
+      })
+    }
+    if (result.kind === 'walked-up') {
+      return sendJson(res, 400, {
+        error:
+          `${result.picked} is not a repo root — it is inside the git repo at ` +
+          `${result.resolved}. Pass that root if it's the repo you meant.`,
+        resolved: result.resolved
+      })
+    }
+    if (result.kind === 'not-a-repo') {
+      return sendJson(res, 400, {
+        error: `${result.picked} is not a git repository. Use create_project to start a new one.`
+      })
+    }
+    return sendJson(res, 400, { error: 'repo was not added' })
+  }
+
+  if (req.method === 'POST' && path === '/projects') {
+    const body = await readJson(req)
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const nameError = validateProjectName(name)
+    if (nameError) return sendJson(res, 400, { error: nameError })
+    const parentDir = typeof body.parentDir === 'string' ? body.parentDir.trim() : ''
+    if (!parentDir) return sendJson(res, 400, { error: 'parentDir is required' })
+    if (!isAbsolute(parentDir)) {
+      return sendJson(res, 400, { error: 'parentDir must be absolute' })
+    }
+    // createNewProject would mkdir -p the whole chain; for an agent a missing
+    // parent is far more likely a typo than an intent.
+    let parentIsDir = false
+    try { parentIsDir = statSync(parentDir).isDirectory() } catch {}
+    if (!parentIsDir) {
+      return sendJson(res, 400, { error: `parentDir ${parentDir} does not exist or is not a directory` })
+    }
+    if (body.includeReadme !== undefined && typeof body.includeReadme !== 'boolean') {
+      return sendJson(res, 400, { error: 'includeReadme must be a boolean' })
+    }
+    const gitignorePreset = (
+      body.gitignorePreset === undefined ? 'macos' : body.gitignorePreset
+    ) as GitignorePreset
+    if (!GITIGNORE_PRESETS.includes(gitignorePreset)) {
+      return sendJson(res, 400, {
+        error: `gitignorePreset must be one of ${GITIGNORE_PRESETS.join(', ')}`
+      })
+    }
+    const result = await deps.createProject({
+      parentDir,
+      name,
+      includeReadme: body.includeReadme !== false,
+      gitignorePreset
+    })
+    if ('error' in result) {
+      if (result.code === 'exists') {
+        return sendJson(res, 409, { error: `${join(parentDir, name)} already exists` })
+      }
+      return sendJson(res, result.code === 'invalid' ? 400 : 500, { error: result.error })
+    }
+    return sendJson(res, 200, { repoRoot: result.path })
   }
 
   // Worktree management tools are workspace-wide for every caller — a
@@ -1079,6 +1180,11 @@ async function handleRequest(
     }
 
     if (req.method === 'POST' && path === '/reviews/request') {
+      if (!deps.getAgentReviewsEnabled()) {
+        return sendJson(res, 403, {
+          error: 'agent reviews are disabled in Ness settings (Settings → Agent tools → Agent reviews)'
+        })
+      }
       const context = typeof body.context === 'string' ? body.context.trim() : ''
       if (!context) return sendJson(res, 400, { error: 'context required' })
       const result = deps.reviews.request(wt, terminalId, context)
@@ -1131,7 +1237,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)
@@ -1144,15 +1250,36 @@ async function handleRequest(
       })
     }
     const body = await readJson(req)
-    const target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
-    const tab = typeof body.tab === 'string' ? body.tab.trim() : ''
+    let target = typeof body.worktree === 'string' ? body.worktree.trim() : ''
+    let tab = typeof body.tab === 'string' ? body.tab.trim() : ''
     const message = typeof body.message === 'string' ? body.message.trim() : ''
     if (!target && !tab) return sendJson(res, 400, { error: 'worktree or tab required' })
     if (!message) return sendJson(res, 400, { error: 'message required' })
 
+    // A composer chat mention names worktree and tab at once. Agents put it
+    // in whichever field seems closest, so accept it in either — and one
+    // in `tab` wins over whatever `worktree` says, since it is the more
+    // specific of the two.
+    const chatToken = [tab, target].find((v) => parseChatMention(v) !== null)
+    let targetPath = scope.worktreePath
+    if (chatToken) {
+      const resolved = deps.messaging.resolveChat(chatToken)
+      if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
+      // A plain `tab` id alongside a token in `worktree` is a second,
+      // explicit recipient. Delivering to either one would mean ignoring
+      // something the caller asked for.
+      if (tab && tab !== chatToken && tab !== resolved.tabId) {
+        return sendJson(res, 400, {
+          error: `\`tab\` "${tab}" disagrees with the chat mention "${chatToken}" — pass only one of them`
+        })
+      }
+      targetPath = resolved.path
+      tab = resolved.tabId
+      target = ''
+    }
+
     // A tab id names exactly one recipient, so with `tab` set the worktree
     // defaults to the caller's own and only messaging yourself is refused.
-    let targetPath = scope.worktreePath
     if (target) {
       const resolved = deps.messaging.resolveTarget(target)
       if ('error' in resolved) return sendJson(res, 404, { error: resolved.error })
@@ -1236,7 +1363,7 @@ async function handleRequest(
     if (!deps.messaging.isEnabled()) {
       return sendJson(res, 403, {
         error:
-          'worktree messaging is disabled in Ness settings (Settings → Experimental → Worktree messaging)'
+          'worktree messaging is disabled in Ness settings (Settings → Agent tools → Worktree messaging)'
       })
     }
     const { scope, terminalId } = resolveScope(req, deps)
@@ -1385,7 +1512,8 @@ async function handleRequest(
       conversationFork: { enabled: deps.getConversationForkEnabled() },
       messaging: { enabled: deps.messaging.isEnabled() },
       tabNaming: { enabled: deps.getAgentTabNamingEnabled() },
-      copyEditing: { enabled: deps.copyDrafts.isEnabled() }
+      copyEditing: { enabled: deps.copyDrafts.isEnabled() },
+      reviews: { enabled: deps.getAgentReviewsEnabled() }
     })
   }
 

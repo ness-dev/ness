@@ -3,6 +3,7 @@ import { RotateCw, Moon, AlarmClock, Trash2, Tag, X, Pin, PinOff } from 'lucide-
 import { isPRMerged } from '../../shared/state/prs'
 import { formatWakeAt } from '../../shared/state/snooze'
 import type { WorktreeRowModel } from '../worktree-list-model'
+import type { Action } from '../hotkeys'
 
 /** One thing the user can do to a worktree row. Desktop renders these as
  *  hover-revealed icon buttons; touch renders the same list as an action
@@ -16,6 +17,11 @@ export interface WorktreeRowAction {
   /** Extra text appended to the desktop tooltip only — usually a modifier
    *  hint that means nothing on touch. */
   tooltipExtra?: string
+  /** Hotkey whose binding the desktop tooltip should show. */
+  hotkey?: Action
+  /** Desktop: right-click menu only, never a hover icon. Touch still lists
+   *  it in the action sheet, which is touch's stand-in for right-click. */
+  menuOnly?: boolean
   /** The event is only supplied by surfaces that have one to give — the
    *  desktop icon buttons pass it so snooze can branch on altKey. Sheet and
    *  context-menu callers invoke bare. */

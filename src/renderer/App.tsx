@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useOptimistic, startTransition, lazy, Suspense } from 'react'
 import { NessMark } from './components/NessMark'
-import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
+import { pickActiveAnnouncement } from '../shared/announcement-pick'
+import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, selectHistoryPromptRepos, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
 import { useTailLineBuffer } from './hooks/useTailLineBuffer'
@@ -9,10 +10,10 @@ import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
 import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
 import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
-import { useWorktreeListModel, useTabsByWorktree } from './hooks/useWorktreeListModel'
-import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
-import { getLeaves, findLeaf } from '../shared/state/terminals'
-import { CheckCircle2, FolderOpen } from 'lucide-react'
+import { useProjectAccordion, useTabsByWorktree, useWorktreeListBase } from './hooks/useWorktreeListModel'
+import type { Worktree, TerminalTab, PtyStatus, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
+import { getLeaves, findLeaf, findLeafByTabId } from '../shared/state/terminals'
+import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
 import { SCALES, scaleSpec } from '../shared/state/settings'
 import { useActiveTheme } from './hooks/useActiveTheme'
@@ -26,7 +27,7 @@ import { AppTitleSegment } from './components/AppTitleSegment'
 import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorktreeScreen'
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
-import { QuestCard } from './components/QuestCard'
+import { FirstRunTour } from './components/FirstRunTour'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -40,11 +41,14 @@ import { CollapsedRightPanel } from './components/CollapsedRightPanel'
 import { Settings } from './components/Settings'
 import { WeeklyWrappedScreen } from './components/WeeklyWrappedScreen'
 import { Guide } from './components/Guide'
-import { AGENT_REGISTRY } from '../shared/agent-registry'
+import { AGENT_REGISTRY, getAgentInfo, supportsChat } from '../shared/agent-registry'
+import { defaultSelectedRepoRoots, type DiscoveredWork } from '../shared/work-discovery'
+import { ImportWorkStep } from './components/ImportWorkStep'
 import { AgentIcon } from './components/AgentIcon'
-import { InterfaceToggle } from './components/InterfaceToggle'
 import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
+// Lazy: React Flow + ELK are only needed once someone opens the graph.
+const SubscriptionGraphView = lazy(() => import('./components/SubscriptionGraphView'))
 import { CommandCenter } from './components/CommandCenter'
 import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
@@ -57,6 +61,7 @@ import { ReportIssueScreen, onOpenReportIssue, type OpenReportIssueDetail } from
 import { AddBackendModal } from './components/AddBackendModal'
 import { InvalidConfigModal } from './components/InvalidConfigModal'
 import { MonacoWorkerFailedBanner } from './components/MonacoWorkerFailedBanner'
+import { HistoryTrackingExplainer } from './components/HistoryTrackingExplainer'
 import { PerfMonitorHUD } from './components/PerfMonitorHUD'
 import { GitHubApiLogPanel } from './components/GitHubApiLogPanel'
 import { HoldToQuitOverlay } from './components/HoldToQuitOverlay'
@@ -67,6 +72,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useViewport } from './hooks/useViewport'
 import { MobileApp } from './components/MobileApp'
 import { harnessReleaseNotesUrl } from '../shared/constants'
+import { windowControlsKind } from './window-controls'
 
 function isPendingId(id: string | null | undefined): id is string {
   return typeof id === 'string' && id.startsWith('pending:')
@@ -76,6 +82,15 @@ function isPendingId(id: string | null | undefined): id is string {
 // top-bar content — clears the macOS traffic lights. Also the left edge of
 // the "Ness" title segment when it sits above the sidebar.
 const TITLE_LEADING_PX = 80
+
+const WINDOW_CONTROLS = windowControlsKind()
+
+// Set at module load — before first paint — by both the Electron and the
+// web-client entry, which share only App. Drives the titlebar clearance
+// overrides in styles.css.
+if (typeof document !== 'undefined') {
+  document.documentElement.dataset.windowControls = WINDOW_CONTROLS
+}
 
 // Static cap for the sidebar's resizable width. The title segment above the
 // sidebar fills whatever width is chosen, so the cap is a pure UX choice,
@@ -187,6 +202,16 @@ function DesktopApp(): JSX.Element {
   // holding the full states re-rendered App on every streamed chat token
   // from any host. This only changes when some backend's list does.
   const fleetWorktreeLists = useAllBackendStatesSelector(getFleetWorktreeLists)
+  // loch history tracking: which repos get the sidebar nudge, and which one's
+  // full-screen explainer is open (per-client UI focus, so plain state).
+  const historyPromptRepos = useAllBackendStatesSelector(selectHistoryPromptRepos)
+  const [historyTrackingRepo, setHistoryTrackingRepo] = useState<string | null>(null)
+  const dismissHistoryPrompt = useCallback(
+    (repoRoot: string) => {
+      void getBackendFor(mergedData.repoBackendId[repoRoot] ?? null).setLochPromptDismissed(repoRoot, true)
+    },
+    [mergedData.repoBackendId]
+  )
   useEffect(() => {
     setOpenedWorktrees((prev) => {
       if (prev.size === 0) return prev
@@ -334,6 +359,11 @@ function DesktopApp(): JSX.Element {
   // dispatch through dedicated methods; the boot-time "already installed?"
   // detection lives in main.
   const { consent: hooksConsent } = useHooks()
+  // Step 3's history half only makes sense where loch exists or Ness can
+  // download it for this platform.
+  const historyOffered = useAppState((s) => s.loch.available || s.loch.installable)
+  // Form draft for step 3's history checkbox until "Install hooks" applies it.
+  const [recordHistoryDraft, setRecordHistoryDraft] = useState(true)
   const updaterStatus = useUpdater().status
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false)
   const [manualUpdateBannerDismissed, setManualUpdateBannerDismissed] = useState(false)
@@ -367,16 +397,23 @@ function DesktopApp(): JSX.Element {
   }, [rightPanelWidth])
   const collapse = useWorktreeCollapse()
   const {
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     unifiedRepos,
     setUnifiedRepos,
     isGroupCollapsed,
     toggleGroup,
-    toggleRepo
+    togglePinnedOpen
   } = collapse
-  const worktreeListModel = useWorktreeListModel(collapse)
+  // Two halves: hotkeys only need order + grouping, so they read the base
+  // and don't rebuild their action map on every worktree switch.
+  const worktreeListBase = useWorktreeListBase(collapse)
+  const worktreeListModel = useProjectAccordion(worktreeListBase, activeWorktreeId, collapse.pinnedOpenRepos)
+  // The palette groups by status; within a group, list worktrees in sidebar
+  // order so a dragged project order carries over.
+  const paletteWorktrees = useMemo(() => {
+    const rank = new Map(worktreeListBase.orderedPaths.map((p, i) => [p, i]))
+    return [...worktrees].sort((a, b) => (rank.get(a.path) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER))
+  }, [worktrees, worktreeListBase.orderedPaths])
   const handleSidebarResize = useCallback((delta: number) => {
     setSidebarWidth((w) => Math.max(160, Math.min(SIDEBAR_MAX_PX, w + delta)))
   }, [])
@@ -439,6 +476,8 @@ function DesktopApp(): JSX.Element {
   const [showMyWeek, setShowMyWeek] = useState(false)
   const [showActivity, setShowActivity] = useState(false)
   const [showCleanup, setShowCleanup] = useState(false)
+  /** Repo the subscription graph is showing, or null when it's closed. */
+  const [graphRepo, setGraphRepo] = useState<string | null>(null)
   const [showCommandCenter, setShowCommandCenter] = useState(false)
   const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -461,6 +500,63 @@ function DesktopApp(): JSX.Element {
   // explicit confirmation separately for the onboarding step checkmarks.
   const [themeChosen, setThemeChosen] = useState(false)
   const [agentChosen, setAgentChosen] = useState(false)
+  // Onboarding import. The scan result is a picker for this one wizard —
+  // per-client form state, not something another viewer needs to mirror.
+  const [existingWork, setExistingWork] = useState<DiscoveredWork | null>(null)
+  const [workScanned, setWorkScanned] = useState(false)
+  const [importSelection, setImportSelection] = useState<ReadonlySet<string>>(() => new Set())
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  // The agent step was answered from the scan rather than by a click.
+  const [agentInferred, setAgentInferred] = useState(false)
+  const [importFocusPath, setImportFocusPath] = useState<string | null>(null)
+  // Land on the worktree the user touched last, once the imported list
+  // has reached this client.
+  useEffect(() => {
+    if (!importFocusPath) return
+    if (!worktrees.some((w) => w.path === importFocusPath)) return
+    setActiveWorktreeId(importFocusPath)
+    setImportFocusPath(null)
+  }, [importFocusPath, worktrees])
+  const onboardingVisible = mergedData.repoRoots.length === 0 || previewOnboarding
+  const workScanStarted = useRef(false)
+  useEffect(() => {
+    if (!onboardingVisible) {
+      workScanStarted.current = false
+      return
+    }
+    if (workScanStarted.current) return
+    workScanStarted.current = true
+    setWorkScanned(false)
+    const scanStartedAt = Date.now()
+    backend
+      .scanExistingWork()
+      .then((work) => {
+        setExistingWork(work)
+        setImportSelection(new Set(defaultSelectedRepoRoots(work.repos, work.scannedAt)))
+        if (work.suggestedAgent && (work.mayPreselectAgent || previewOnboarding)) {
+          // Someone with a history of Claude or Codex sessions has already
+          // told us which agent they use. Chat is the interface we steer
+          // toward; the TUI stays one click away in the step itself.
+          // Only on a genuine first run: this screen also shows for an
+          // existing user with no repos left, whose settings are theirs.
+          // Preview mode must not rewrite the real settings just by opening.
+          if (!previewOnboarding) {
+            void backend.setDefaultAgent(work.suggestedAgent)
+            void backend.setDefaultClaudeTabType('json')
+          }
+          setAgentInferred(true)
+          setAgentChosen(true)
+        }
+      })
+      .catch(() => setExistingWork(null))
+      .finally(() => {
+        // The scan usually returns in well under a second. Hold the status
+        // row long enough to read, so it doesn't register as a flicker.
+        const remaining = 900 - (Date.now() - scanStartedAt)
+        window.setTimeout(() => setWorkScanned(true), Math.max(0, remaining))
+      })
+  }, [onboardingVisible, previewOnboarding, backend])
   // Only subscribe to the PTY stream when CommandCenter is open. Without
   // this gate, a chatty PTY pegs the renderer with re-renders for output
   // nobody is currently looking at.
@@ -497,64 +593,43 @@ function DesktopApp(): JSX.Element {
   const nameAgentSessions = nameClaudeSessions
   const hasGithubToken = hasGithubPat || !!githubAuthSource
   const hotkeyOverrides = settings.hotkeys ?? undefined
-  // Onboarding parallelism quest — see QuestCard.tsx for the steps.
-  // Quest state lives in the main-process store; its value is seeded from
-  // config on boot so it's already correct on first render.
-  const { quest: questStep } = useOnboarding()
-  const questVisitedRef = useRef<Set<string>>(new Set())
+  // First-run tour (see FirstRunTour.tsx). Progress lives in the main
+  // store, which also decides every transition but the user's clicks; this
+  // client only places the popouts.
+  const { tour } = useOnboarding()
+  const tourHomePath = useMemo(
+    () =>
+      tour.step === 'home'
+        ? (worktrees.find((w) => w.isMain && w.repoRoot === tour.repoRoot)?.path ?? null)
+        : null,
+    [tour, worktrees]
+  )
 
   const configLoadError = useConfigLoadError()
 
   // Count of "real" worktrees the user has spawned — main repo doesn't count
-  // as an agent. Used by empty state + quest advancement.
+  // as an agent. Used by the empty state.
   const agentWorktreeCount = useMemo(
     () => worktrees.filter((w) => !w.isMain).length,
     [worktrees]
   )
 
-  const activeAnnouncement = useMemo(() => {
-    if (settings.announcementsMuted) return null
-    const dismissed = new Set(settings.dismissedAnnouncementIds)
-    const now = Date.now()
-    const eligible = announcements.items.filter((a) => {
-      if (dismissed.has(a.id)) return false
-      if (a.expiresAt) {
-        const exp = Date.parse(a.expiresAt)
-        if (Number.isFinite(exp) && exp < now) return false
-      }
-      return true
-    })
-    if (eligible.length === 0) return null
-    return eligible.reduce((best, cur) =>
-      Date.parse(cur.publishedAt) > Date.parse(best.publishedAt) ? cur : best
-    )
-  }, [announcements.items, settings.announcementsMuted, settings.dismissedAnnouncementIds])
+  const activeAnnouncement = useMemo(
+    () =>
+      pickActiveAnnouncement(announcements.items, {
+        muted: settings.announcementsMuted,
+        dismissedIds: settings.dismissedAnnouncementIds,
+        firstLaunchAt: settings.firstLaunchAt,
+        now: Date.now()
+      }),
+    [
+      announcements.items,
+      settings.announcementsMuted,
+      settings.dismissedAnnouncementIds,
+      settings.firstLaunchAt
+    ]
+  )
   // Track which worktrees already have hooks installed so we only prompt once
-
-const setQuestStep = useCallback((next: QuestStep) => {
-    backend.setOnboardingQuest(next).catch(() => {})
-  }, [])
-
-  // Advance the quest based on how many agent worktrees exist (main excluded).
-  useEffect(() => {
-    if (questStep === 'done' || questStep === 'finale') return
-    if (questStep === 'hidden' && agentWorktreeCount >= 1) {
-      setQuestStep(agentWorktreeCount >= 2 ? 'switch-between' : 'spawn-second')
-      return
-    }
-    if (questStep === 'spawn-second' && agentWorktreeCount >= 2) {
-      setQuestStep('switch-between')
-    }
-  }, [agentWorktreeCount, questStep, setQuestStep])
-
-  // Advance the quest when the user switches between two different worktrees
-  useEffect(() => {
-    if (questStep !== 'switch-between' || !activeWorktreeId) return
-    questVisitedRef.current.add(activeWorktreeId)
-    if (questVisitedRef.current.size >= 2) {
-      setQuestStep('finale')
-    }
-  }, [activeWorktreeId, questStep, setQuestStep])
 
   // Panes + repos + worktrees are all hydrated from the main-process store
   // before App mounts. The only thing we still need to do at mount is ask
@@ -616,6 +691,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   useEffect(() => {
     document.documentElement.dataset.fullscreen = isFullscreen ? 'true' : 'false'
   }, [isFullscreen])
+
+  // Mirrors the styles.css titlebar-lead overrides for the inline-styled
+  // single-screen top bars, which a root-attribute selector can't reach.
+  // Only macOS hides its controls in fullscreen; LinuxWindowControls stay.
+  const singleScreenLeadingPx =
+    WINDOW_CONTROLS === 'none' || (WINDOW_CONTROLS === 'mac' && isFullscreen) ? 0 : TITLE_LEADING_PX
 
   // Open Keyboard Shortcuts from the menu
   useEffect(() => {
@@ -933,6 +1014,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowNewWorktree(false)
           setShowActivity(false)
           setShowCleanup(false)
+          setGraphRepo(null)
           setShowCommandCenter(false)
           setShowTaskList(false)
         }
@@ -950,6 +1032,35 @@ const setQuestStep = useCallback((next: QuestStep) => {
   )
 
   const handleEndAliasEdit = useCallback(() => setEditingAliasPath(null), [])
+
+  const handleOpenSubscriptionGraph = useCallback(
+    (repoRoot?: string) => {
+      const repo =
+        repoRoot ?? (activeWorktreeId ? worktreeRepoByPath[activeWorktreeId] : undefined) ?? repoRoots[0]
+      if (!repo) return
+      setShowNewWorktree(false)
+      setShowActivity(false)
+      setShowCleanup(false)
+      setShowCommandCenter(false)
+      setShowTaskList(false)
+      setGraphRepo(repo)
+    },
+    [activeWorktreeId, worktreeRepoByPath, repoRoots]
+  )
+  const handleGraphFocusTab = useCallback(
+    (wtPath: string, tabId: string) => {
+      const tree = panes[wtPath]
+      const leaf = tree ? findLeafByTabId(tree, tabId) : null
+      if (leaf) handleSidebarSelectTab(wtPath, leaf.id, tabId)
+      else handleSidebarSelectWorktree(wtPath)
+    },
+    [panes, handleSidebarSelectTab, handleSidebarSelectWorktree]
+  )
+  const handleCloseSubscriptionGraph = useCallback(() => setGraphRepo(null), [])
+  // Any other full-content view replaces the graph.
+  useEffect(() => {
+    if (showNewWorktree || showActivity || showCleanup || showCommandCenter) setGraphRepo(null)
+  }, [showNewWorktree, showActivity, showCleanup, showCommandCenter])
 
   // Hoisted for RightColumn's memo, so the sidebar's optimistic highlight
   // render doesn't re-render the whole right column with unchanged data.
@@ -988,7 +1099,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const workspaceVisible =
     !showNewWorktree &&
     !showActivity &&
-    !showCleanup &&
+    !showCleanup && graphRepo === null &&
     !showCommandCenter &&
     reportIssueState === null &&
     !!activeWorktreeId &&
@@ -1066,12 +1177,11 @@ const setQuestStep = useCallback((next: QuestStep) => {
   const { hotkeyActions, resolvedHotkeys } = useHotkeyHandlers({
     pathBackendId: fleetData.pathBackendId,
     worktrees,
+    listModel: worktreeListBase,
     repoRoots,
     unifiedRepos,
     prStatuses,
     mergedPaths,
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     isGroupCollapsed,
     activeWorktreeId,
@@ -1252,7 +1362,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   if (repoRoots.length === 0 || previewOnboarding) {
     const step1Complete = themeChosen
     const step2Complete = agentChosen
+    const recordNewRepos = settings.lochRecordNewRepos
     const step3Complete = hooksConsent !== 'pending'
+    // An answered step shows the saved choice. Hooks answered before this
+    // question existed leave it null, which records nothing, so show it off.
+    const historyChecked =
+      recordNewRepos ?? (hooksConsent === 'pending' ? recordHistoryDraft : false)
     const activeStep: 1 | 2 | 3 | 4 = !step1Complete
       ? 1
       : !step2Complete
@@ -1260,6 +1375,34 @@ const setQuestStep = useCallback((next: QuestStep) => {
         : !step3Complete
           ? 3
           : 4
+    // "Found work" means something the import could actually add. In preview
+    // mode everything is usually already added, and the step still renders
+    // so the layout can be inspected.
+    const foundWork =
+      existingWork && existingWork.repos.some((r) => previewOnboarding || !r.alreadyAdded)
+        ? existingWork
+        : null
+    const showImportStep = !!foundWork
+    const shownAgent = agentInferred && previewOnboarding ? (existingWork?.suggestedAgent ?? defaultAgent) : defaultAgent
+    const chatIsDefault = settings.defaultClaudeTabType === 'json'
+    const handleImportWork = async (): Promise<void> => {
+      if (previewOnboarding) {
+        setPreviewOnboarding(false)
+        return
+      }
+      setImporting(true)
+      setImportError(null)
+      try {
+        const result = await backend.importExistingWork([...importSelection])
+        if (result.focusWorktreePath) setImportFocusPath(result.focusWorktreePath)
+      } catch (err) {
+        // Repos are registered one at a time, so a failure part-way can
+        // leave some already added; say so instead of failing silently.
+        setImportError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setImporting(false)
+      }
+    }
     return (
       <HotkeysProvider bindings={resolvedHotkeys}>
       <div className="flex h-full flex-col">
@@ -1280,17 +1423,17 @@ const setQuestStep = useCallback((next: QuestStep) => {
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-xl w-full px-6 py-6">
+          <div className="mx-auto max-w-3xl w-full px-6 py-6">
+           <div className="mx-auto max-w-xl">
             <div className="text-center mb-6">
               <NessMark className="h-14 w-auto mx-auto mb-4 text-brand" />
               <h1 className="gradient-text text-3xl font-extrabold tracking-tight mb-2">Ness</h1>
               <p className="text-fg text-sm leading-relaxed max-w-md mx-auto">
-                Run many coding agents in parallel — one window, isolated git worktrees,
-                clear status on who needs you.
+                Run many coding agents in parallel
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 mb-8">
+            <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="rounded-lg border border-border bg-panel p-3">
                 <div className="h-14 mb-3 flex flex-col justify-center gap-1.5 bg-app/50 rounded border border-border px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
@@ -1345,10 +1488,21 @@ const setQuestStep = useCallback((next: QuestStep) => {
                 <div className="text-[11px] text-dim leading-snug">Dots show who's waiting</div>
               </div>
             </div>
+            {/* Collapses once the scan settles; what it found is reported in
+                the last step, next to the list it applies to. */}
+            <div className="mb-8">
+              {!workScanned && (
+                <div className="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-2.5 text-xs text-dim">
+                  <Loader2 className="icon-sm animate-spin shrink-0" />
+                  Looking for conversations and projects already on this machine…
+                </div>
+              )}
+            </div>
+           </div>
 
             <div className="space-y-3">
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 1
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1405,7 +1559,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 2
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1424,45 +1578,86 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Choose your default agent</div>
-                    <div className="text-xs text-dim mt-0.5">This is what new tabs will spawn. You can change it later in Settings.</div>
-                  </div>
-                </div>
-                <div className="flex gap-2 ml-8">
-                  {AGENT_REGISTRY.map((agent) => (
-                    <button
-                      key={agent.kind}
-                      onClick={() => {
-                        backend.setDefaultAgent(agent.kind)
-                        setAgentChosen(true)
-                      }}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                        defaultAgent === agent.kind && agentChosen
-                          ? 'bg-surface text-fg-bright border border-fg'
-                          : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
-                      }`}
-                    >
-                      <AgentIcon kind={agent.kind} className="icon-sm" />
-                      {agent.displayName}
-                    </button>
-                  ))}
-                </div>
-                {agentChosen && defaultAgent === 'claude' && (
-                  <div className="ml-8 mt-4 pl-4 border-l-2 border-border">
-                    <div className="text-xs text-dim mb-2">
-                      Which interface should new Claude tabs use?
+                    <div className="text-fg-bright text-sm font-medium">
+                      {agentInferred && agentChosen
+                        ? `You use ${getAgentInfo(shownAgent).displayName}`
+                        : 'Choose your default agent'}
                     </div>
-                    <InterfaceToggle
-                      value={settings.defaultClaudeTabType}
-                      onChange={(value) => { void backend.setDefaultClaudeTabType(value) }}
-                      size="compact"
-                    />
+                    <div className="text-xs text-dim mt-0.5">
+                      {agentInferred && agentChosen
+                        ? 'Automatically detected from the conversations on this machine'
+                        : 'This is what new tabs will spawn. You can change it later in Settings.'}
+                    </div>
+                  </div>
+                  {agentInferred && agentChosen && (
+                    <button
+                      onClick={() => {
+                        setAgentInferred(false)
+                        setAgentChosen(false)
+                      }}
+                      className="text-xs text-accent hover:underline cursor-pointer shrink-0 mt-0.5"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+                {!(agentInferred && agentChosen) && (
+                  <div className="flex gap-2 ml-8">
+                    {AGENT_REGISTRY.map((agent) => (
+                      <button
+                        key={agent.kind}
+                        onClick={() => {
+                          backend.setDefaultAgent(agent.kind)
+                          // Chat is the default interface for any agent that
+                          // has one; the line below is the way back to the TUI.
+                          if (!agentChosen && existingWork?.mayPreselectAgent === true && !previewOnboarding && supportsChat(agent.kind)) {
+                            void backend.setDefaultClaudeTabType('json')
+                          }
+                          setAgentChosen(true)
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                          defaultAgent === agent.kind && agentChosen
+                            ? 'bg-surface text-fg-bright border border-fg'
+                            : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
+                        }`}
+                      >
+                        <AgentIcon kind={agent.kind} className="icon-sm" />
+                        {agent.displayName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {agentChosen && supportsChat(shownAgent) && (
+                  <div className={`ml-8 text-xs text-dim leading-relaxed ${agentInferred ? '' : 'mt-3'}`}>
+                    {chatIsDefault ? (
+                      <>
+                        <span className="text-fg">Conversations open in Ness Chat</span>, with your full
+                        history. Same {getAgentInfo(shownAgent).displayName}, same config, same permissions.{' '}
+                        <button
+                          onClick={() => { void backend.setDefaultClaudeTabType('xterm') }}
+                          className="text-fg-bright hover:underline cursor-pointer whitespace-nowrap"
+                        >
+                          Prefer the terminal UI? Use the TUI instead
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-fg">Conversations open in the terminal UI</span>, exactly as you
+                        run it today.{' '}
+                        <button
+                          onClick={() => { void backend.setDefaultClaudeTabType('json') }}
+                          className="text-fg-bright hover:underline cursor-pointer whitespace-nowrap"
+                        >
+                          Switch to Ness Chat
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto max-w-xl rounded-xl border bg-panel p-4 transition-colors ${
                   activeStep === 3
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1481,7 +1676,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Install status hooks</div>
+                    <div className="text-fg-bright text-sm font-medium">Install hooks</div>
                     <div className="text-xs text-dim mt-0.5">
                       Adds a small hook at <code className="bg-app/50 px-1 rounded">~/.claude/settings.json</code> (and the Codex equivalent) so Ness can tell when an agent is{' '}
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -1495,13 +1690,44 @@ const setQuestStep = useCallback((next: QuestStep) => {
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-danger" />
                         <span className="text-fg">asking for approval</span>
-                      </span>. Only fires for sessions Ness launches — others are untouched.
+                      </span>. Only fires for sessions Ness launches. Others are untouched.
                     </div>
                   </div>
                 </div>
+                {historyOffered ? (
+                  <label
+                    className="flex items-start gap-2 ml-8 mb-3 cursor-pointer"
+                    title="Adds hooks to each new repo's worktrees (.claude/settings.local.json) and downloads loch if it isn't installed. Snapshots stay in ~/.loch; nothing is uploaded. Change it in Settings → Conversation blame."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={historyChecked}
+                      onChange={(e) => {
+                        // Once the step is answered the box edits the setting
+                        // itself; before that it's a draft the button applies.
+                        if (hooksConsent === 'pending' && recordNewRepos === null) setRecordHistoryDraft(e.target.checked)
+                        else void backend.setLochRecordNewRepos(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base shrink-0"
+                    />
+                    <div className="text-sm text-fg-bright">
+                      Keep track of which agent made every change.{' '}
+                      <span className="text-xs text-dim">Powered by loch</span>
+                    </div>
+                  </label>
+                ) : (
+                  <div className="text-xs text-dim ml-8 mb-3">
+                    Conversation history tracking isn&apos;t available on this platform yet.
+                  </div>
+                )}
                 <div className="flex gap-2 ml-8">
                   <button
-                    onClick={handleAcceptHooks}
+                    onClick={() => {
+                      handleAcceptHooks()
+                      if (historyOffered && recordNewRepos === null) {
+                        void backend.setLochRecordNewRepos(recordHistoryDraft)
+                      }
+                    }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'accepted'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1513,7 +1739,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     Install hooks
                   </button>
                   <button
-                    onClick={handleDeclineHooks}
+                    onClick={() => {
+                      handleDeclineHooks()
+                      if (historyOffered && recordNewRepos === null) void backend.setLochRecordNewRepos(false)
+                    }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'declined'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1526,7 +1755,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               </div>
 
               <div
-                className={`rounded-xl border bg-panel p-4 transition-colors ${
+                className={`mx-auto transition-[max-width] duration-300 ${showImportStep && activeStep === 4 ? 'max-w-3xl' : 'max-w-xl'} rounded-xl border bg-panel p-4 ${
                   activeStep === 4
                     ? 'border-accent/50 ring-1 ring-accent/25'
                     : 'border-border'
@@ -1541,32 +1770,51 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     4
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Open a git repository</div>
-                    <div className="text-xs text-dim mt-0.5">Ness creates worktrees inside a sibling folder — your original repo stays untouched.</div>
+                    <div className="text-fg-bright text-sm font-medium">
+                      {showImportStep ? 'Bring in your work' : 'Open a git repository'}
+                    </div>
+                    <div className="text-xs text-dim mt-0.5">
+                      {showImportStep
+                        ? 'We automatically detected your conversation history. Select projects to import your existing conversations. Nothing is moved or changed while importing.'
+                        : 'Ness creates worktrees inside a sibling folder — your original repo stays untouched.'}
+                    </div>
                   </div>
                 </div>
-                <div className="ml-8 flex items-center gap-3 flex-wrap">
-                  <button
-                    onClick={handleAddRepo}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer bg-fg-bright text-app hover:bg-fg border border-fg-bright"
-                  >
-                    <FolderOpen className="icon-base" />
-                    Open Repository
-                  </button>
-                  <span className="text-xs text-dim">
-                    or{' '}
+                {foundWork ? (
+                  <ImportWorkStep
+                    work={foundWork}
+                    selected={importSelection}
+                    onSelectedChange={setImportSelection}
+                    importing={importing}
+                    error={importError}
+                    onImport={() => { void handleImportWork() }}
+                    onAddManually={handleAddRepo}
+                    onNewProject={() => setShowNewProject(true)}
+                  />
+                ) : (
+                  <div className="ml-8 flex items-center gap-3 flex-wrap">
                     <button
-                      onClick={() => setShowNewProject(true)}
-                      className="text-fg-bright hover:underline cursor-pointer"
+                      onClick={handleAddRepo}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer bg-fg-bright text-app hover:bg-fg border border-fg-bright"
                     >
-                      start a new project
+                      <FolderOpen className="icon-base" />
+                      Open Repository
                     </button>
-                  </span>
-                </div>
+                    <span className="text-xs text-dim">
+                      or{' '}
+                      <button
+                        onClick={() => setShowNewProject(true)}
+                        className="text-fg-bright hover:underline cursor-pointer"
+                      >
+                        start a new project
+                      </button>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="mt-6 pt-5 border-t border-border/60 text-center">
+            <div className="mx-auto max-w-xl mt-6 pt-5 border-t border-border/60 text-center">
               <button
                 onClick={() => setShowGuide(true)}
                 className="text-xs text-accent hover:underline cursor-pointer"
@@ -1601,7 +1849,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
       return !!tree && getLeaves(tree).some((l) => l.tabs.length > 0)
     })()
   const inContentOverlay =
-    showNewWorktree || showActivity || showCleanup || showCommandCenter || reportIssueState !== null
+    showNewWorktree || showActivity || showCleanup || graphRepo !== null || showCommandCenter || reportIssueState !== null
   const activeIsPending =
     isPendingId(activeWorktreeId) && pendingWorktrees.some((p) => p.id === activeWorktreeId)
   const activeIsDeleting = !!activeWorktreeId && !!pendingDeletionByPath[activeWorktreeId]
@@ -1617,6 +1865,13 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <HotkeysProvider bindings={resolvedHotkeys}>
     <div className="flex h-full flex-col">
       <MonacoWorkerFailedBanner />
+      {historyTrackingRepo && (
+        <HistoryTrackingExplainer
+          repoRoot={historyTrackingRepo}
+          backendId={mergedData.repoBackendId[historyTrackingRepo] ?? null}
+          onClose={() => setHistoryTrackingRepo(null)}
+        />
+      )}
       {resizeToast && (
         <div className="pointer-events-none fixed top-12 left-1/2 -translate-x-1/2 z-[60]">
           <div className="rounded-md border border-border-strong bg-panel/95 px-3 py-1.5 text-sm text-fg-bright shadow-lg backdrop-blur">
@@ -1784,6 +2039,9 @@ const setQuestStep = useCallback((next: QuestStep) => {
             snoozeDefaultDays={settings.snoozeDefaultDays}
             prLoading={prLoading}
             onOpenAssignedPR={handleOpenAssignedPR}
+            historyPromptRepos={historyPromptRepos}
+            onOpenHistoryTracking={setHistoryTrackingRepo}
+            onDismissHistoryPrompt={dismissHistoryPrompt}
             agentCount={agentWorktreeCount}
             onSelectWorktree={handleSidebarSelectWorktree}
             pathBackendId={fleetData.pathBackendId}
@@ -1806,6 +2064,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenAddBackend={() => setShowAddBackend(true)}
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenActivity={() => setShowActivity(true)}
+            onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenCleanup={() => setShowCleanup(true)}
             onOpenTaskList={() => setShowTaskList(true)}
             onOpenCommandCenter={() => {
@@ -1818,7 +2077,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onOpenMyWeek={() => setShowMyWeek(true)}
             width={effectiveSidebarWidth}
             onToggleGroup={toggleGroup}
-            onToggleRepo={toggleRepo}
+            onTogglePinnedOpen={togglePinnedOpen}
             unifiedRepos={unifiedRepos}
             onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
             onCollapseSidebar={() => setSidebarVisible(false)}
@@ -1845,6 +2104,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             }}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenActivity={() => setShowActivity(true)}
+            onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenMyWeek={() => setShowMyWeek(true)}
             onOpenHotkeyCheatsheet={() => setShowHotkeyCheatsheet(true)}
             onOpenSettings={() => setShowSettings(true)}
@@ -1871,7 +2131,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           const everOpened = openedWorktrees.has(mountKey)
           const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
           if (!eagerMount && !everOpened && !isSelected) return null
-          const isVisible = !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
+          const isVisible = !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
           return (
             <div
               key={`${backendId}\u0000${wt.path}`}
@@ -1911,7 +2171,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   onSendToAgent={handleSendToAgent}
                   topBarLeadingPx={
                     singleScreenMode
-                      ? isFullscreen ? 0 : TITLE_LEADING_PX
+                      ? singleScreenLeadingPx
                       : sidebarVisible
                         ? 0
                         : effectiveSidebarWidth + 1
@@ -1921,7 +2181,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     singleScreenMode || sidebarVisible ? 0 : 48
                   }
                   topBarTrailingExtendPx={
-                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null
+                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null
                       ? rightColumnHidden
                         ? 48
                         : rightPanelWidth + 1
@@ -1984,6 +2244,23 @@ const setQuestStep = useCallback((next: QuestStep) => {
             />
           </div>
         )}
+        {graphRepo !== null && (
+          <div className="flex-1 min-w-0 flex">
+            {/* The repo can be on any backend (the sidebar merges them all),
+                so the view reads the one that owns it, not the active one. */}
+            <BackendScope backendId={mergedData.repoBackendId[graphRepo] ?? null}>
+            <Suspense fallback={<div className="flex-1 bg-app" />}>
+              <SubscriptionGraphView
+                repoRoot={graphRepo}
+                onChangeRepo={setGraphRepo}
+                onClose={handleCloseSubscriptionGraph}
+                onFocusTab={handleGraphFocusTab}
+                onOpenWorktree={handleSidebarSelectWorktree}
+              />
+            </Suspense>
+            </BackendScope>
+          </div>
+        )}
         {showCommandCenter && (
           <CommandCenter
             model={worktreeListModel}
@@ -1999,6 +2276,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               setShowNewWorktree(false)
               setShowActivity(false)
               setShowCleanup(false)
+              setGraphRepo(null)
               setActiveWorktreeId(path)
             }}
             onToggleGroup={toggleGroup}
@@ -2010,7 +2288,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
               className="drag-region h-10 shrink-0 border-b border-border bg-panel flex items-stretch relative z-10"
               style={{
                 paddingLeft: singleScreenMode
-                  ? isFullscreen ? undefined : TITLE_LEADING_PX
+                  ? singleScreenLeadingPx || undefined
                   : sidebarVisible
                     ? undefined
                     : effectiveSidebarWidth + 1,
@@ -2025,7 +2303,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             </div>
           </div>
         )}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
           const pending = pendingWorktrees.find((p) => p.id === activeWorktreeId)
           if (!pending) return null
           return (
@@ -2037,17 +2315,23 @@ const setQuestStep = useCallback((next: QuestStep) => {
             />
           )
         })()}
-        {!showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
           <DeletingWorktreeScreen
             deletion={pendingDeletionByPath[activeWorktreeId]}
             onDismiss={handleDismissPendingDeletion}
           />
         )}
-        <QuestCard
-          step={questStep}
-          onDismiss={() => setQuestStep('done')}
-          onFinish={() => setQuestStep('done')}
-        />
+        {!onboardingVisible && (
+          <FirstRunTour
+            tour={tour}
+            homePath={tourHomePath}
+            onStart={async () => {
+              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+              if (result.ok) setActiveWorktreeId(result.worktreePath)
+            }}
+            onDismiss={() => void backend.tourDismiss().catch(() => {})}
+          />
+        )}
         {/* Right panel — hidden on the new-worktree screen so the form gets the full width.
             Pushed down 40px so the workspace tab bar can extend across the top, full width.
             The 40px top spacers are deliberately NOT drag regions: the tab bar's trailing
@@ -2055,10 +2339,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
             out. macOS app-region rects are union/diff'd in DOM order (last wins per pixel), so a
             `drag-region` here — rendered after the tab bar — would re-mark the tab pixels as
             draggable and swallow clicks on tabs that overflow above the right column. */}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
           <BackendScope backendId={selectedBackendId}><div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
@@ -2083,7 +2367,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onBuildCustomTool={handleBuildCustomTool}
           /></div></div></BackendScope>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
             worktreePath={activeWorktreeId}
             onExpand={() => setRightColumnHidden(false)}
@@ -2123,7 +2407,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
     <Toasts />
     {showCommandPalette && (
       <CommandPalette
-        worktrees={worktrees}
+        worktrees={paletteWorktrees}
         worktreeStatuses={worktreeStatuses}
         prStatuses={prStatuses}
         mergedPaths={mergedPaths}
@@ -2135,6 +2419,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
           setShowNewWorktree(false)
           setShowActivity(false)
           setShowCleanup(false)
+          setGraphRepo(null)
           setShowCommandCenter(false)
           setActiveWorktreeId(path)
         }}

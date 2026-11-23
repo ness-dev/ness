@@ -1,12 +1,15 @@
 import { HeaderNav } from './components/HeaderNav'
 import { Hero } from './components/Hero'
 import { HeroMock } from './components/HeroMock'
-import { FeatureCallouts } from './components/FeatureCallouts'
+import { RemoteAndMobile } from './components/RemoteAndMobile'
+import { BrowserControl } from './components/BrowserControl'
 import { Features } from './components/Features'
 import { OpenSource } from './components/OpenSource'
 import { Install } from './components/Install'
 import { Footer } from './components/Footer'
-import { ScrollDiorama } from './components/ScrollDiorama'
+import { Highlights } from './components/Highlights'
+import { AgentsRunAgents } from './components/AgentsRunAgents'
+import { ConversationBlame } from './components/ConversationBlame'
 
 export function App() {
   return (
@@ -14,8 +17,11 @@ export function App() {
       <HeaderNav />
       <Hero />
       <HeroMock />
-      <ScrollDiorama />
-      <FeatureCallouts />
+      <Highlights />
+      <AgentsRunAgents />
+      <ConversationBlame />
+      <RemoteAndMobile />
+      <BrowserControl />
       <Features />
       <OpenSource />
       <Install />

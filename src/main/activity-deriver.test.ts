@@ -8,7 +8,7 @@ vi.mock('./activity', () => ({
 }))
 
 import { Store } from './store'
-import { ActivityDeriver } from './activity-deriver'
+import { ActivityDeriver, STATUS_RANK } from './activity-deriver'
 import { initialState, type AppState, type StateEvent } from '../shared/state'
 import type { PaneNode, TerminalsState } from '../shared/state/terminals'
 import { recordActivity } from './activity'
@@ -239,6 +239,35 @@ describe('ActivityDeriver auto-unsnooze', () => {
     store.dispatch({
       type: 'terminals/statusChanged',
       payload: { id: 'ta1', status: 'idle', pendingTool: null }
+    })
+
+    expect(cleared).toEqual([])
+    deriver.stop()
+  })
+
+  it('ranks waiting above processing, unlike the display rollup', () => {
+    // A reviewer starting beside a waiting chat must not read as the user
+    // sending a prompt. See the comment on STATUS_RANK.
+    expect(STATUS_RANK.waiting).toBeGreaterThan(STATUS_RANK.processing)
+  })
+
+  it('does not clear when a second tab starts processing beside a waiting one', () => {
+    const base = snoozedState()
+    const store = new Store({
+      ...base,
+      terminals: { ...base.terminals, panes: { ...base.terminals.panes, [A]: leaf('pa', ['ta1', 'ta2']) } }
+    })
+    const deriver = new ActivityDeriver(store)
+    store.dispatch({
+      type: 'terminals/statusChanged',
+      payload: { id: 'ta1', status: 'waiting', pendingTool: null }
+    })
+    deriver.start()
+    const cleared = clearedPaths(store)
+
+    store.dispatch({
+      type: 'terminals/statusChanged',
+      payload: { id: 'ta2', status: 'processing', pendingTool: null }
     })
 
     expect(cleared).toEqual([])

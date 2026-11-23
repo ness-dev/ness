@@ -5,6 +5,7 @@ import type { Worktree, PendingWorktree, PendingDeletion, ForkSource } from '../
 export type { Worktree, PendingWorktree, PendingDeletion, ForkSource }
 
 import type { RepoConfig } from '../shared/state/repo-configs'
+import type { DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 export type { RepoConfig }
 
 import type {
@@ -27,6 +28,7 @@ export type {
 }
 
 import type { ChatTabInfo } from '../shared/agent-tabs'
+import type { LochAskResult, LochBlameResult, LochRecordingResult } from '../shared/loch'
 export type { ChatTabInfo }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
@@ -124,8 +126,6 @@ export interface PersistedPane {
   tabs: PersistedTab[]
   activeTabId: string
 }
-
-export type QuestStep = 'hidden' | 'spawn-second' | 'switch-between' | 'finale' | 'done'
 
 import type { UpdaterStatus } from '../shared/state/updater'
 export type { UpdaterStatus }
@@ -358,6 +358,15 @@ export interface ElectronAPI {
   listAllFiles(worktreePath: string): Promise<string[]>
   listRecentCommitShas(worktreePath: string): Promise<string[]>
   readWorktreeFile(worktreePath: string, filePath: string): Promise<FileReadResult>
+  /** loch conversation blame for a file; `ok: false` with a quiet code when loch isn't set up. */
+  lochBlame(worktreePath: string, filePath: string): Promise<LochBlameResult>
+  /** Fork the conversation that wrote `line` and open it as a Chat tab here. */
+  lochAsk(
+    worktreePath: string,
+    filePath: string,
+    line: number,
+    opts?: { atTurn?: boolean }
+  ): Promise<LochAskResult>
   readWorktreeFileBinary(
     worktreePath: string,
     filePath: string
@@ -410,6 +419,17 @@ export interface ElectronAPI {
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
   setCopyEditingEnabled(enabled: boolean): Promise<boolean>
+  setLochBlameEnabled(enabled: boolean): Promise<boolean>
+  /** The standing answer for repos added from now on: `true` turns loch
+   *  recording on for each as it's added. */
+  setLochRecordNewRepos(enabled: boolean): Promise<boolean>
+  /** Opt a repo in to (or out of) loch recording: installs or removes loch's
+   *  hooks in every worktree of it. */
+  setLochRecording(repoRoot: string, enabled: boolean): Promise<LochRecordingResult>
+  /** Close (or restore) a repo's sidebar "Install history tracking" prompt. */
+  setLochPromptDismissed(repoRoot: string, dismissed: boolean): Promise<boolean>
+  /** Look for the loch binary again; resolves to whether it was found. */
+  refreshLochAvailability(): Promise<boolean>
   setAgentTabNamingEnabled(enabled: boolean): Promise<boolean>
   setDefaultClaudeTabType(value: 'xterm' | 'json'): Promise<boolean>
   setChatPromotionDismissed(value: boolean): Promise<boolean>
@@ -428,6 +448,7 @@ export interface ElectronAPI {
   setAutoSleepMinutes(value: number): Promise<boolean>
   setPreventSleepMode(value: PreventSleepMode): Promise<boolean>
   setAgentReviewDelivery(value: AgentReviewDelivery): Promise<boolean>
+  setAgentReviewsEnabled(enabled: boolean): Promise<boolean>
   setAutoReviewOnGreenCi(enabled: boolean): Promise<boolean>
   setReviewAgent(value: ReviewAgentChoice): Promise<boolean>
   setReviewModel(value: string): Promise<boolean>
@@ -482,7 +503,15 @@ export interface ElectronAPI {
   setTerminalFontFamily(fontFamily: string): Promise<boolean>
   getDefaultTerminalFontFamily(): Promise<string>
   setTerminalFontSize(fontSize: number): Promise<boolean>
-  setOnboardingQuest(quest: QuestStep): Promise<boolean>
+  /** First-run tour, popout 1: open a kickoff Chat in the tour project's
+   *  main workspace. `ok: false` when the tour isn't on that step. */
+  tourStartSomethingNew(): Promise<
+    { ok: true; worktreePath: string; tabId: string } | { ok: false }
+  >
+  /** End the first-run tour (either popout's ✕, or popout 2's button). */
+  tourDismiss(): Promise<boolean>
+  scanExistingWork(): Promise<DiscoveredWork>
+  importExistingWork(repoRoots: string[]): Promise<ImportWorkResult>
   setWorktreeScripts(scripts: { setup: string; teardown: string }): Promise<boolean>
   setRepoConfig(repoRoot: string, next: Partial<RepoConfig>): Promise<RepoConfig | null>
   migrateRepoConfigFilename(repoRoot: string): Promise<boolean>
@@ -493,6 +522,8 @@ export interface ElectronAPI {
   setSidebarDetails(prefs: SidebarDetailPrefsByMode): Promise<boolean>
   setHiddenBottomIcons(hidden: HiddenBottomIcons): Promise<boolean>
   setBottomIconOrder(order: BottomIconKey[]): Promise<boolean>
+  /** Section scope keys, top to bottom. Client-owned. */
+  setSidebarProjectOrder(order: string[]): Promise<boolean>
   setEditor(editorId: string): Promise<boolean>
   /** Set (or clear, with `null`) the per-repo editor override. */
   setRepoEditor(repoRoot: string, editorId: string | null): Promise<boolean>

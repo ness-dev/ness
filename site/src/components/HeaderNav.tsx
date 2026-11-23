@@ -48,7 +48,7 @@ export function HeaderNav() {
       </a>
 
       <div className="hidden sm:flex items-center gap-4 sm:gap-6 text-sm text-ink-400 flex-shrink-0">
-        <a href="#features" className="hover:text-ink-100 transition-colors">
+        <a href="#highlights" className="hover:text-ink-100 transition-colors">
           Features
         </a>
         <a href="/guide.html" className="hover:text-ink-100 transition-colors">
@@ -88,7 +88,7 @@ export function HeaderNav() {
         >
           <nav className="flex flex-col py-2 text-sm text-ink-400">
             <a
-              href="#features"
+              href="#highlights"
               onClick={close}
               className="px-4 py-3 hover:bg-ink-800/50 hover:text-ink-100 transition-colors"
             >

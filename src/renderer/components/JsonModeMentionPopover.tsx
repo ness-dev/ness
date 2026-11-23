@@ -3,6 +3,8 @@ import { useEffect, useRef, type ReactNode } from 'react'
 export interface MentionPopoverItem {
   key: string
   label: string
+  /** What picking the row inserts, when that isn't the label. */
+  insertText?: string
   labelMatchIndices?: number[]
   description?: string
   hint?: string

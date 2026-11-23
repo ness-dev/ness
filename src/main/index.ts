@@ -6,13 +6,29 @@
 // silently upgraded.
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16'
 
-import { existsSync, lstatSync, readFileSync } from 'fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from 'fs'
 import { createRequire } from 'module'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
-import { JsonClaudeManager, bundledClaudeBinPath } from './json-claude-manager'
+import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
+import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
+import { LochHooksCoordinator } from './loch-hooks-coordinator'
+import { LochAutoRecorder } from './loch-auto-recorder'
+import {
+  backfillRepo,
+  ensureCurrentLoch,
+  installLochHooks,
+  lochAsk,
+  isLochForkPath,
+  lochBinary,
+  lochBlame,
+  resetLochBinaryCache,
+  removeLochHooks,
+  worktreeRelativePath
+} from './loch'
+import { buildBlameAskBody, type LochAskResult, type LochRecordingResult } from '../shared/loch'
 import { ChatRouter } from './chat-provider'
 import { CodexChatProvider } from './codex-chat-provider'
 import { nessControlMcpServer, type StdioMcpServer } from './ness-control-mcp'
@@ -89,6 +105,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
+import { createLocalMergeOps } from './local-merge'
 import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
@@ -115,8 +132,7 @@ import {
   pruneTerminalHistory,
   LOCAL_BACKEND_ID,
   type BackendConnection,
-  type PersistedPaneNode,
-  type QuestStep
+  type PersistedPaneNode
 } from './persistence'
 import {
   loadRepoConfig,
@@ -125,12 +141,14 @@ import {
   migrateRepoConfigFilename,
   type RepoConfig
 } from './repo-config'
-import { createNewProject, type GitignorePreset } from './repo-create'
-import { resolveRepoPath } from './repo-resolve'
-import { registerRepoRoot } from './repo-roots'
+import type { GitignorePreset } from './repo-create'
+import { addRepoAtPath, createAndRegisterProject, registerRepoRoot } from './repo-roots'
+import { buildFirstRunKickoff, installFirstRunTour, tourHomePath } from './first-run-tour'
+import { scanExistingWork, readLiveClaudeSessions } from './work-discovery'
+import type { DiscoveredSession, DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 import type { AddRepoResult } from '../shared/repo-pick'
 import { isWorktreeMerged } from '../shared/state/prs'
-import type { ForkSource } from '../shared/state/worktrees'
+import type { ForkSource, Worktree } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
 import type { ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../shared/state/reviews'
@@ -183,7 +201,7 @@ import { listConfiguredHosts } from './ssh-config'
 import { SshTunnelManager } from './ssh-tunnel-manager'
 import { SshReconnectSupervisor } from './ssh-reconnect-supervisor'
 import { startControlServer, type BrowserTabSummary } from './control-server'
-import { describeWorktree, resolveWorktreeQuery } from './chat-delivery'
+import { describeWorktree, resolveChatQuery, resolveWorktreeQuery } from './chat-delivery'
 import { findTabInWorktree, listChatTabs } from '../shared/agent-tabs'
 import { ReviewSpawner } from './review-spawner'
 import {
@@ -205,7 +223,7 @@ import { recordActivity, getActivityLog, clearAllActivity, clearActivityForWorkt
 import { log, getLogFilePath } from './debug'
 import { loadCustomThemes } from './themes-loader'
 import { perfLog, flushPerfLogSync } from './perf-log'
-import { buildInitialAppState } from './build-initial-state'
+import { buildInitialAppState, sanitizeProjectOrder } from './build-initial-state'
 import { AnnouncementsPoller } from './announcements-poller'
 
 function toAgentKind(value: string | undefined): AgentKind {
@@ -521,6 +539,15 @@ const codexChatProvider = new CodexChatProvider(store, {
   clientVersion: getHarnessVersion(),
   getThreadId: (sessionId) => findJsonClaudeTab(sessionId)?.providerSessionId,
   setThreadId: (sessionId, threadId) => panesFSM.setTabProviderSessionId(sessionId, threadId),
+  forkWhenHeldElsewhere: (sessionId) => {
+    const threadId = findJsonClaudeTab(sessionId)?.providerSessionId
+    return !!threadId && importedCodexThreads.has(threadId)
+  },
+  // From here on it's an ordinary Ness tab. Cleared only once the thread
+  // is actually open: a start that died earlier keeps its permission.
+  onThreadOpened: (_sessionId, threadId) => {
+    importedCodexThreads.delete(threadId)
+  },
   getModel: (modelOverride) =>
     modelOverride || store.getSnapshot().state.settings.codexModel || undefined,
   requestApproval: (request) => approvalBridge.requestApproval(request),
@@ -798,6 +825,8 @@ transport.onRequest('contextWindow:setInterest', (ctx, expanded: boolean) => {
 transport.onRequest('claude:getAuthStatus', async () => {
   return getClaudeAuthStatus()
 })
+
+installFirstRunTour({ store, config: () => config, saveConfig })
 
 // Auto-persist the costs slice to config.json on each change. Debounced
 // inside saveConfig; cheap to fire on every dispatch.
@@ -1369,8 +1398,12 @@ const activityDeriver = new ActivityDeriver(store)
 // The primitives for reaching a worktree's agent chat. Only the
 // notification bus below uses them directly.
 const chatDeliveryDeps = {
-  send: (sessionId: string, text: string) => chatRouter.send(sessionId, text),
+  // A woken tab is usually still waiting on its shell-env probe, so the
+  // send has to wait for the start rather than hit a missing instance.
+  send: (sessionId: string, text: string) =>
+    chatStarts.afterStart(sessionId, () => chatRouter.send(sessionId, text)),
   hasSession: (sessionId: string) => chatRouter.hasSession(sessionId),
+  isStarting: (sessionId: string) => chatStarts.isStarting(sessionId),
   wake: (worktreePath: string, tabId: string) =>
     panesFSM.wakeJsonClaudeTab(worktreePath, tabId),
   respawn: (worktreePath: string, tabId: string) => startJsonClaudeSession(tabId, worktreePath)
@@ -1390,7 +1423,7 @@ const notificationBus = new NotificationBus(store, chatDeliveryDeps, startJsonCl
 const subscriptionNotifier = new SubscriptionNotifier(
   store,
   notificationBus,
-  () => config.worktreeMessagingEnabled === true
+  () => config.worktreeMessagingEnabled !== false
 )
 
 const listWorktreeChatTabs = (worktreePath: string) =>
@@ -1415,7 +1448,10 @@ const reviewServiceDeps: ReviewServiceDeps = {
 // green, open a reviewer for its author tab on the same path a hand-made
 // request takes. Declared after reviewServiceDeps, which it closes over.
 const reviewSpawner = new ReviewSpawner(store, {
-  isEnabled: () => store.getSnapshot().state.settings.autoReviewOnGreenCi === true,
+  isEnabled: () => {
+    const s = store.getSnapshot().state.settings
+    return s.agentReviewsEnabled && s.autoReviewOnGreenCi
+  },
   requestReview: (worktreePath, requesterTabId, context) =>
     requestReview(reviewServiceDeps, worktreePath, requesterTabId, context, 'ci-green')
 })
@@ -1610,6 +1646,149 @@ function isMidCreation(wtPath: string): boolean {
     )
 }
 
+// Worktrees that arrived through the onboarding import, mapped to the
+// conversation to open in them (null once seeded, or when there is none).
+// A sweep must not hand these the default fresh agent + Shell pair: a
+// worktree with history gets that history, and one without stays empty
+// until the user opens it (panes:ensureInitialized on activation), so
+// importing dozens of worktrees starts nothing. Kept for the life of the
+// process because every later list refresh re-runs the sweep.
+const importedWorktrees = new Map<string, DiscoveredSession | null>()
+// Imported chat tabs whose session was running in another process at import
+// time and that Ness hasn't woken yet — see forkIfRunningElsewhere.
+const importedLiveChatTabs = new Set<string>()
+// Imported Codex thread ids not yet opened here.
+const importedCodexThreads = new Set<string>()
+
+// Worktrees whose live terminal-mode conversation is being forked right now,
+// and the ones among them the user opened while that was pending.
+const importForksPending = new Set<string>()
+const activatedDuringImportFork = new Set<string>()
+
+/** Give a worktree its first tabs. `activated` is the user opening it (the
+ *  renderer's panes:ensureInitialized); otherwise it's a background sweep.
+ *  Both must seed an imported conversation — on a fresh install the boot
+ *  drain hasn't run yet, so the user's click on the worktree they land on
+ *  reaches here before any sweep does. */
+function initWorktreePanes(wtPath: string, activated: boolean): void {
+  if (isMidCreation(wtPath)) {
+    // The user opened it while an import fork is still pending. Remember
+    // that, so a failed fork doesn't leave the worktree they're looking at
+    // blank.
+    if (activated && importForksPending.has(wtPath)) activatedDuringImportFork.add(wtPath)
+    return
+  }
+  if (!importedWorktrees.has(wtPath)) {
+    panesFSM.ensureInitialized(wtPath)
+    return
+  }
+  const session = importedWorktrees.get(wtPath)
+  if (!session) {
+    if (activated) panesFSM.ensureInitialized(wtPath)
+    return
+  }
+  importedWorktrees.set(wtPath, null)
+  const tabType = store.getSnapshot().state.settings.defaultClaudeTabType === 'json' ? 'json' : 'xterm'
+  if (tabType !== 'json') {
+    // A terminal tab has no wake step to fork at: it runs `claude --resume`
+    // the moment the worktree is shown. So a Claude conversation that is
+    // running elsewhere is forked now, and the tab resumes the copy — two
+    // processes must never append to one transcript. If the copy can't be
+    // made, open a fresh agent rather than the live session.
+    //
+    // Codex needs no equivalent: its thread store refuses a second writer
+    // outright, so `codex resume` on a held thread reports it as busy in
+    // the TUI instead of writing to it.
+    if (session.agentKind !== 'claude' || !session.live) {
+      panesFSM.seedImportedSession(wtPath, session, tabType)
+      return
+    }
+    // Nothing to fork for if the seed wouldn't land: the copy would sit in
+    // the projects dir unreferenced and be counted by the next scan.
+    if (!panesFSM.canSeedImported(wtPath)) return
+    // The fork has to read the transcript from this worktree's Claude home,
+    // which is only known once its shell env is. Hold the path as
+    // mid-creation meanwhile so an activation or sweep arriving during the
+    // await doesn't hand it default tabs first.
+    seedingWorktreePaths.add(wtPath)
+    importForksPending.add(wtPath)
+    void resolveShellEnv(wtPath)
+      .catch(() => undefined)
+      .then(() => {
+        if (!panesFSM.canSeedImported(wtPath)) return
+        const outcome = jsonClaudeManager.forkIntoWorktree({
+          sourceSessionId: session.sessionId,
+          sourceWorktreePath: wtPath,
+          destWorktreePath: wtPath
+        })
+        if (!outcome.ok || !outcome.newSessionId) {
+          log('onboarding', `fork of live session ${session.sessionId} failed: ${outcome.reason ?? 'unknown'}`)
+          return
+        }
+        panesFSM.seedImportedSession(wtPath, { ...session, sessionId: outcome.newSessionId }, tabType)
+      })
+      .finally(() => {
+        seedingWorktreePaths.delete(wtPath)
+        importForksPending.delete(wtPath)
+        const opened = activatedDuringImportFork.delete(wtPath) || activated
+        // The worktree the user is looking at must not stay blank if the
+        // copy couldn't be made.
+        if (opened && panesFSM.canSeedImported(wtPath)) panesFSM.ensureInitialized(wtPath)
+      })
+    return
+  }
+  if (!panesFSM.seedImportedSession(wtPath, session, tabType)) return
+  if (session.agentKind === 'claude') {
+    if (session.live) importedLiveChatTabs.add(session.sessionId)
+  } else {
+    // Codex keeps no registry of running sessions, so there is no telling
+    // at import time whether this thread is still open somewhere. Codex
+    // itself says so on resume; the provider forks then.
+    importedCodexThreads.add(session.sessionId)
+  }
+}
+
+const forksInFlight = new Map<string, Promise<string>>()
+
+/** Two processes can't safely append to one session. If an imported
+ *  conversation is still running in the terminal it came from, opening it
+ *  here continues from a copy under a new session id and leaves the
+ *  original untouched — so the user never has to stop what they're doing
+ *  elsewhere to start using Ness. Returns the tab id to wake. */
+function forkIfRunningElsewhere(wtPath: string, tabId: string): Promise<string> {
+  const pending = forksInFlight.get(tabId)
+  if (pending) return pending
+  if (!importedLiveChatTabs.has(tabId)) return Promise.resolve(tabId)
+  const run = (async (): Promise<string> => {
+    try {
+      await resolveShellEnv(wtPath)
+      const live = await readLiveClaudeSessions(knownClaudeConfigDirs(), new Set())
+      if (!live.has(tabId)) return tabId
+      const outcome = jsonClaudeManager.forkIntoWorktree({
+        sourceSessionId: tabId,
+        sourceWorktreePath: wtPath,
+        destWorktreePath: wtPath
+      })
+      if (!outcome.ok || !outcome.newSessionId) {
+        log('onboarding', `fork of live session ${tabId} failed: ${outcome.reason ?? 'unknown'}`)
+        return tabId
+      }
+      return panesFSM.retargetSleepingChatTab(wtPath, tabId, outcome.newSessionId)
+        ? outcome.newSessionId
+        : tabId
+    } catch (err) {
+      log('onboarding', `live-session check failed for ${tabId}`, err)
+      return tabId
+    } finally {
+      // Once Ness has opened it, it's an ordinary Ness tab.
+      importedLiveChatTabs.delete(tabId)
+      forksInFlight.delete(tabId)
+    }
+  })()
+  forksInFlight.set(tabId, run)
+  return run
+}
+
 async function drainBootInit(force: boolean): Promise<void> {
   if (bootDrained) return
   bootDrained = true
@@ -1622,9 +1801,7 @@ async function drainBootInit(force: boolean): Promise<void> {
   pendingBootInit.clear()
   for (let i = 0; i < paths.length; i++) {
     const path = paths[i]
-    if ((force || !isWorktreeMerged(state.prs, path)) && !isMidCreation(path)) {
-      panesFSM.ensureInitialized(path)
-    }
+    if (force || !isWorktreeMerged(state.prs, path)) initWorktreePanes(path, false)
     if (i + 1 < paths.length && (i + 1) % BOOT_INIT_BATCH_SIZE === 0) {
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
@@ -1639,9 +1816,7 @@ store.subscribe((event) => {
       // Paths whose creation FSM hasn't reached onWorktreeCreated yet own
       // their own init — it carries the kickoff prompt, agent kind and
       // model that this sweep doesn't have.
-      for (const wt of list) {
-        if (!isMidCreation(wt.path)) panesFSM.ensureInitialized(wt.path)
-      }
+      for (const wt of list) initWorktreePanes(wt.path, false)
       return
     }
     for (const wt of list) pendingBootInit.add(wt.path)
@@ -1703,6 +1878,146 @@ store.subscribe((event) => {
     }
   }
 })
+
+// loch recording: every worktree of an opted-in repo gets loch's hooks,
+// including ones created after the opt-in. listChanged is infrequent and the
+// in-memory set means each path is installed once per process (the first
+// pass after boot re-installs everything, which refreshes the binary path).
+// Installs and removals go through one coordinator: serialized per path,
+// and an opt-out wins over an install still in flight (see
+// loch-hooks-coordinator.ts for how).
+function isLochRecording(repoRoot: string): boolean {
+  return (config.lochRecordingRepos ?? []).includes(repoRoot)
+}
+const lochHooks = new LochHooksCoordinator({
+  isRecording: isLochRecording,
+  install: installLochHooks,
+  remove: (path) => {
+    removeLochHooks(path)
+  },
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
+async function syncLochHooks(): Promise<void> {
+  if ((config.lochRecordingRepos ?? []).length === 0) return
+  for (const wt of store.getSnapshot().state.worktrees.list) {
+    // Re-checked per worktree: the binary can change mid-sweep.
+    if (wt.prunable || !isLochRecording(wt.repoRoot) || lochHooks.isCurrent(wt.path, lochBinary())) continue
+    await lochHooks.installIfRecording(wt)
+  }
+}
+function setLochRecordingRepos(next: string[]): void {
+  if (next.length > 0) config.lochRecordingRepos = next
+  else delete config.lochRecordingRepos
+  saveConfig(config)
+  store.dispatch({ type: 'settings/lochRecordingReposChanged', payload: next })
+}
+/** Opt a repo out: drop it from the list first (so in-flight installs roll
+ *  themselves back), then strip hooks from each worktree. */
+async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Promise<number> {
+  const current = config.lochRecordingRepos ?? []
+  if (current.includes(repoRoot)) setLochRecordingRepos(current.filter((r) => r !== repoRoot))
+  // Nothing records while opted out, so a later opt-in must backfill that gap.
+  if (config.lochBackfilledVersions?.[repoRoot]) {
+    const { [repoRoot]: _gone, ...rest } = config.lochBackfilledVersions
+    config.lochBackfilledVersions = rest
+    saveConfig(config)
+  }
+  const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
+  return results.filter((ok) => !ok).length
+}
+/** Opt a repo in: fetch loch if needed, add the repo to the list, install
+ *  hooks in `worktrees`. Shared by the explicit `loch:setRecording` and the
+ *  automatic opt-in for repos added while `lochRecordNewRepos` is on. */
+async function enableLochRecording(
+  repoRoot: string,
+  worktrees: readonly Worktree[]
+): Promise<LochRecordingResult> {
+  // Opting in is the explicit go-ahead to fetch loch when it's missing
+  // or older than the release Ness is written against.
+  await ensureCurrentLoch(true)
+  if (!lochBinary()) {
+    const got = await installLoch()
+    if (!got.ok) return { ok: false, code: got.code, error: got.error }
+    store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+    if (!lochBinary()) return { ok: false, code: 'not-installed' }
+  }
+  // Opt in BEFORE installing: the installs re-check the list, so a
+  // concurrent opt-out during them rolls them back rather than losing.
+  const wasRecording = isLochRecording(repoRoot)
+  if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
+  let installed = 0
+  let viaProject = 0
+  let firstFailure: { code: string; error?: string } | null = null
+  for (const wt of worktrees) {
+    const r = await lochHooks.installIfRecording(wt)
+    if (!r) continue
+    if (r.ok) {
+      if (r.viaProject) viaProject++
+      else installed++
+    } else {
+      firstFailure ??= { code: r.code, error: r.error }
+    }
+  }
+  if (installed + viaProject === 0) {
+    if (!wasRecording && isLochRecording(repoRoot)) {
+      setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
+    }
+    return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
+  }
+  // Other recording repos' hooks may name a binary just passed over.
+  void syncLochHooks()
+  // Recording only covers turns from now on; backfill reconstructs what
+  // it can of the history so the gutter isn't empty on day one.
+  void backfillIfNewLoch(repoRoot, lochBinary())
+  return {
+    ok: true,
+    installed,
+    viaProject,
+    failed: worktrees.length - installed - viaProject
+  }
+}
+
+// Repos registered while the onboarding answer is on start recording
+// through the same path as the explicit opt-in (see loch-auto-recorder.ts).
+const lochAutoRecorder = new LochAutoRecorder(store, {
+  recordNewRepos: () => config.lochRecordNewRepos === true,
+  repoRoots: () => config.repoRoots || [],
+  isRecording: isLochRecording,
+  canRecord: () => !!lochBinary() || canInstallLoch(),
+  enable: enableLochRecording,
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
+lochAutoRecorder.start()
+store.subscribe((event) => {
+  if (event.type === 'worktrees/listChanged') void syncLochHooks()
+})
+store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+store.dispatch({ type: 'loch/installableChanged', payload: canInstallLoch() })
+void (async () => {
+  await ensureCurrentLoch((config.lochRecordingRepos ?? []).length > 0)
+  const bin = lochBinary()
+  store.dispatch({ type: 'loch/availabilityChanged', payload: !!bin })
+  // Hook lines name the binary by path; the sweep rewrites any that name
+  // another one (a stale PATH copy Ness has now passed over).
+  await syncLochHooks()
+  for (const repo of config.lochRecordingRepos ?? []) await backfillIfNewLoch(repo, bin)
+})()
+
+/** A new loch can attribute more of the past than the one that last
+ *  backfilled a repo (0.3.0 reaches removed worktrees), so each version
+ *  backfills each recording repo once. Tracked per repo, so one that keeps
+ *  failing retries alone rather than re-running every repo each boot.
+ *  Callers run these one at a time: it's a full transcript scan, and nothing
+ *  is waiting on it. */
+async function backfillIfNewLoch(repoRoot: string, bin: string | null): Promise<void> {
+  if (!bin || !isLochRecording(repoRoot) || !existsSync(repoRoot)) return
+  const version = await binaryVersion(bin)
+  if (!version || config.lochBackfilledVersions?.[repoRoot] === version) return
+  // An opt-out during the scan cleared this entry; don't write it back.
+  if (!(await backfillRepo(repoRoot)) || !isLochRecording(repoRoot)) return
+  config.lochBackfilledVersions = { ...config.lochBackfilledVersions, [repoRoot]: version }
+  saveConfig(config)
+}
 
 // Same for pins — a removed worktree must not leave an orphan entry
 // keeping an empty Pinned section alive.
@@ -2148,20 +2463,9 @@ function registerIpcHandlers(): void {
   // Native repo:add (folder picker) and dialog:pickDirectory live in
   // desktop-shell.ts. The web client uses repo:addAtPath below combined
   // with the renderer-side RemoteFilePicker.
-  transport.onRequest('repo:addAtPath', async (_ctx, picked: string): Promise<AddRepoResult> => {
-    if (!picked || typeof picked !== 'string') {
-      return { kind: 'not-a-repo', picked: picked || '' }
-    }
-    const resolution = await resolveRepoPath(picked)
-    if (resolution.kind === 'ok') {
-      const repoRoot = resolution.root
-      if (registerRepoRoot(repoRoot, { config, store, worktreesFSM })) {
-        void worktreesFSM.refreshList()
-      }
-      return { kind: 'added', repoRoot }
-    }
-    return resolution
-  })
+  transport.onRequest('repo:addAtPath', (_ctx, picked: string): Promise<AddRepoResult> =>
+    addRepoAtPath(picked, { config, store, worktreesFSM })
+  )
 
   transport.onRequest(
     'fs:listDir',
@@ -2172,26 +2476,34 @@ function registerIpcHandlers(): void {
 
   transport.onRequest(
     'repo:createNewProject',
-    async (_ctx, opts: {
+    (_ctx, opts: {
       parentDir: string
       name: string
       includeReadme: boolean
       gitignorePreset: GitignorePreset
-    }) => {
-      const result = await createNewProject(opts)
-      if ('error' in result) return result
-      const repoRoot = result.path
-      if (registerRepoRoot(repoRoot, { config, store, worktreesFSM })) {
-        void worktreesFSM.refreshList()
-      }
-      return { path: repoRoot }
-    }
+    }) => createAndRegisterProject(opts, { config, store, worktreesFSM })
   )
 
   transport.onRequest('repo:remove', (_ctx, repoRoot: string) => {
     const idx = config.repoRoots.indexOf(repoRoot)
     if (idx === -1) return false
     config.repoRoots.splice(idx, 1)
+    // A removed repo stops recording: strip loch's hooks from its worktrees
+    // (captured now, before the list refresh drops them) and forget its
+    // history-tracking prompt state.
+    if (isLochRecording(repoRoot)) {
+      const paths = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot)
+        .map((w) => w.path)
+      void stopLochRecording(repoRoot, paths)
+    }
+    if (config.lochPromptDismissedRepos?.includes(repoRoot)) {
+      const next = config.lochPromptDismissedRepos.filter((r) => r !== repoRoot)
+      if (next.length > 0) config.lochPromptDismissedRepos = next
+      else delete config.lochPromptDismissedRepos
+      store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    }
     // Also drop any persisted panes for the removed repo so they don't
     // linger as orphans.
     if (config.panes && config.panes[repoRoot]) {
@@ -2557,30 +2869,28 @@ function registerIpcHandlers(): void {
     return previewMergeConflicts(repoRoot, branch, status.baseBranch)
   })
 
-  transport.onRequest('worktree:prepareMain', async (_ctx, repoRoot: string) => {
-    if (!repoRoot) throw new Error('No repo root provided')
-    return prepareMainForMerge(repoRoot)
+  const localMerge = createLocalMergeOps({
+    dispatch: (event) => store.dispatch(event),
+    getCurrentBranch,
+    mergeWorktreeLocally,
+    prepareMainForMerge,
+    getBranchSha,
+    recordLocallyMerged: (branch, sha) => {
+      if (!config.locallyMerged) config.locallyMerged = {}
+      config.locallyMerged[branch] = sha
+      saveConfig(config)
+    },
+    refreshAll: () => void prPoller.refreshAll()
   })
+
+  transport.onRequest('worktree:prepareMain', (_ctx, repoRoot: string) =>
+    localMerge.prepareMain(repoRoot)
+  )
 
   transport.onRequest(
     'worktree:mergeLocal',
-    async (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) => {
-      if (!repoRoot) throw new Error('No repo root provided')
-      let branch = sourceBranch
-      if (worktreePath) {
-        const resolved = await getCurrentBranch(worktreePath)
-        if (resolved) branch = resolved
-      }
-      const result = await mergeWorktreeLocally(repoRoot, branch, strategy)
-      const sha = await getBranchSha(repoRoot, branch)
-      if (sha) {
-        if (!config.locallyMerged) config.locallyMerged = {}
-        config.locallyMerged[branch] = sha
-        saveConfig(config)
-      }
-      void prPoller.refreshAll()
-      return result
-    }
+    (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) =>
+      localMerge.mergeLocal(repoRoot, sourceBranch, strategy, worktreePath)
   )
 
   // Legacy worktree:mergedStatus handler is gone — the computation is now
@@ -2970,15 +3280,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setAutoApprovePermissions', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.autoApprovePermissions = true
-    } else {
       delete config.autoApprovePermissions
+    } else {
+      config.autoApprovePermissions = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/autoApprovePermissionsChanged',
-      payload: config.autoApprovePermissions === true
+      payload: config.autoApprovePermissions !== false
     })
     return true
   })
@@ -3128,15 +3439,16 @@ function registerIpcHandlers(): void {
   })
 
   transport.onRequest('config:setConversationForkEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
-      config.conversationForkEnabled = true
-    } else {
       delete config.conversationForkEnabled
+    } else {
+      config.conversationForkEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/conversationForkEnabledChanged',
-      payload: config.conversationForkEnabled === true
+      payload: config.conversationForkEnabled !== false
     })
     return true
   })
@@ -3171,16 +3483,40 @@ function registerIpcHandlers(): void {
     return true
   })
 
-  transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
+  transport.onRequest('config:setLochBlameEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
-      config.worktreeMessagingEnabled = true
+      delete config.lochBlameEnabled
     } else {
+      config.lochBlameEnabled = false
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/lochBlameEnabledChanged',
+      payload: config.lochBlameEnabled !== false
+    })
+    return true
+  })
+
+  // The standing "record history in repos I add" answer. Only governs repos
+  // added after it's set; already-added repos keep their own choice.
+  transport.onRequest('config:setLochRecordNewRepos', (_ctx, enabled: boolean) => {
+    config.lochRecordNewRepos = enabled === true
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochRecordNewReposChanged', payload: config.lochRecordNewRepos })
+    return true
+  })
+
+  transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
+    // Default ON, so only an explicit opt-out is persisted.
+    if (enabled) {
       delete config.worktreeMessagingEnabled
+    } else {
+      config.worktreeMessagingEnabled = false
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/worktreeMessagingEnabledChanged',
-      payload: config.worktreeMessagingEnabled === true
+      payload: config.worktreeMessagingEnabled !== false
     })
     return true
   })
@@ -3555,21 +3891,90 @@ function registerIpcHandlers(): void {
     }
   )
 
+  transport.onRequest('config:setSidebarProjectOrder', (_ctx, order: unknown) => {
+    if (!Array.isArray(order)) return false
+    const clean = sanitizeProjectOrder(order)
+    if (clean.length === 0) delete config.sidebarProjectOrder
+    else config.sidebarProjectOrder = clean
+    saveConfig(config)
+    store.dispatch({ type: 'settings/sidebarProjectOrderChanged', payload: clean })
+    return true
+  })
+
   transport.onRequest('config:getAvailableThemes', (_ctx) => {
     return AVAILABLE_THEMES
   })
 
-  transport.onRequest('config:setOnboardingQuest', (_ctx, quest: string) => {
-    const valid = ['hidden', 'spawn-second', 'switch-between', 'finale', 'done']
-    if (!valid.includes(quest)) return false
-    config.onboarding = { ...(config.onboarding || {}), quest: quest as QuestStep }
-    saveConfig(config)
-    store.dispatch({
-      type: 'onboarding/questChanged',
-      payload: quest as QuestStep
-    })
+  // First-run tour clicks. Every other transition is main's own — see
+  // first-run-tour.ts.
+  transport.onRequest('onboarding:tourStartSomethingNew', () => {
+    const homePath = tourHomePath(store.getSnapshot().state)
+    if (!homePath) return { ok: false as const }
+    const tabId = panesFSM.openKickoffChat(homePath, buildFirstRunKickoff(), { label: 'Getting started' })
+    store.dispatch({ type: 'onboarding/tourKickedOff', payload: { tabId, worktreePath: homePath } })
+    return { ok: true as const, worktreePath: homePath, tabId }
+  })
+  transport.onRequest('onboarding:tourDismiss', () => {
+    store.dispatch({ type: 'onboarding/tourEnded' })
     return true
   })
+
+  // Onboarding import. The scan result is returned to the asking client
+  // rather than put in a slice: it's a transient picker for one wizard, not
+  // world state. Main keeps the last one so the import can only ever
+  // register repos the scan itself found, never an arbitrary path.
+  let lastWorkScan: DiscoveredWork | null = null
+  transport.onRequest('onboarding:scanExistingWork', async (): Promise<DiscoveredWork> => {
+    const ownSessionIds = new Set<string>()
+    for (const tree of Object.values(store.getSnapshot().state.terminals.panes)) {
+      for (const leaf of getLeaves(tree)) {
+        for (const tab of leaf.tabs) {
+          if (tab.sessionId && (tab.mode ?? 'awake') === 'awake') ownSessionIds.add(tab.sessionId)
+        }
+      }
+    }
+    lastWorkScan = await scanExistingWork({
+      claudeConfigDirs: knownClaudeConfigDirs(),
+      addedRepoRoots: config.repoRoots,
+      ownSessionIds,
+      mayPreselectAgent:
+        config.defaultAgent === undefined &&
+        config.defaultClaudeTabType === undefined &&
+        store.getSnapshot().state.onboarding.tour.step === 'eligible'
+    })
+    return lastWorkScan
+  })
+
+  transport.onRequest(
+    'onboarding:importWork',
+    async (_ctx, repoRoots: string[]): Promise<ImportWorkResult> => {
+      const wanted = new Set(Array.isArray(repoRoots) ? repoRoots : [])
+      const chosen = (lastWorkScan?.repos ?? []).filter(
+        (r) => wanted.has(r.repoRoot) && !config.repoRoots.includes(r.repoRoot)
+      )
+      if (chosen.length === 0) return { addedRepoRoots: [], focusWorktreePath: null }
+      // Someone importing a sidebar full of worktrees and live conversations
+      // already works this way; "start something new" on the first imported
+      // repo is the wrong lesson. End the tour before the repos register,
+      // or the first reposChanged would start it.
+      store.dispatch({ type: 'onboarding/tourEnded' })
+      let focus: { path: string; at: number } | null = null
+      for (const repo of chosen) {
+        for (const wt of repo.worktrees) {
+          importedWorktrees.set(wt.path, wt.session ?? null)
+          if (wt.lastActiveAt != null && (!focus || wt.lastActiveAt > focus.at)) {
+            focus = { path: wt.path, at: wt.lastActiveAt }
+          }
+        }
+        registerRepoRoot(repo.repoRoot, { config, store, worktreesFSM })
+      }
+      await worktreesFSM.refreshList()
+      return {
+        addedRepoRoots: chosen.map((r) => r.repoRoot),
+        focusWorktreePath: focus?.path ?? null
+      }
+    }
+  )
 
   // Pane / tab tree — fully main-owned via PanesFSM. Renderers call these
   // methods instead of computing pane state locally. ensureInitialized is
@@ -3673,15 +4078,16 @@ function registerIpcHandlers(): void {
     panesFSM.sleepJsonClaudeTab(wtPath, tabId)
     return true
   })
-  transport.onRequest('panes:wakeTab', (_ctx, wtPath: string, tabId: string) => {
+  transport.onRequest('panes:wakeTab', async (_ctx, wtPath: string, tabId: string) => {
     // Route by tab type. json-claude needs its subprocess spawned;
     // shell only flips mode (XTerminal owns the PTY spawn). Dispatch by
     // type here rather than fanning out to both methods so any future
     // unconditional side-effect added to either wake path can't silently
     // fire on the wrong tab type.
     const type = panesFSM.getTabType(wtPath, tabId)
-    if (type === 'json-claude') panesFSM.wakeJsonClaudeTab(wtPath, tabId)
-    else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)
+    if (type === 'json-claude') {
+      panesFSM.wakeJsonClaudeTab(wtPath, await forkIfRunningElsewhere(wtPath, tabId))
+    } else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)
     return true
   })
   // Renderer-driven lastActive bump. The composer fires this while the
@@ -3701,7 +4107,7 @@ function registerIpcHandlers(): void {
   // skips merged worktrees, so this is the only path that wakes them.
   // No-op for paths that already have panes.
   transport.onRequest('panes:ensureInitialized', (_ctx, wtPath: string) => {
-    if (!isMidCreation(wtPath)) panesFSM.ensureInitialized(wtPath)
+    initWorktreePanes(wtPath, true)
     return true
   })
 
@@ -4344,6 +4750,146 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // loch blame gutter. Gated here as well as in the renderer so a stale or
+  // remote client can't run loch on a backend that has it switched off.
+  onWorktreeRequest('loch:blame', async (_ctx, worktreePath: string, filePath: string) => {
+    if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+      return { ok: false, code: 'disabled' }
+    }
+    return lochBlame(worktreePath, filePath)
+  })
+
+  // Re-probe for the loch binary — the explainer's "Check again" after the
+  // user installs it.
+  transport.onRequest('loch:refreshAvailability', () => {
+    resetLochBinaryCache()
+    const available = !!lochBinary()
+    store.dispatch({ type: 'loch/availabilityChanged', payload: available })
+    return available
+  })
+
+  transport.onRequest('loch:setPromptDismissed', (_ctx, repoRoot: string, dismissed: boolean) => {
+    const current = config.lochPromptDismissedRepos ?? []
+    const next = dismissed
+      ? current.includes(repoRoot)
+        ? current
+        : [...current, repoRoot]
+      : current.filter((r) => r !== repoRoot)
+    if (next.length > 0) config.lochPromptDismissedRepos = next
+    else delete config.lochPromptDismissedRepos
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochPromptDismissedReposChanged', payload: next })
+    return true
+  })
+
+  // Explicit per-repo opt-in to loch recording. Nothing is installed
+  // anywhere until the user asks for it here, and turning it off removes the
+  // hook lines Ness wrote (loch has no uninstall of its own).
+  transport.onRequest(
+    'loch:setRecording',
+    async (_ctx, repoRoot: string, enabled: boolean): Promise<LochRecordingResult> => {
+      if (!(config.repoRoots || []).includes(repoRoot)) return { ok: false, code: 'unknown-repo' }
+      const worktrees = store
+        .getSnapshot()
+        .state.worktrees.list.filter((w) => w.repoRoot === repoRoot && !w.prunable)
+      if (!enabled) {
+        const failed = await stopLochRecording(
+          repoRoot,
+          worktrees.map((w) => w.path)
+        )
+        return { ok: true, installed: 0, viaProject: 0, failed }
+      }
+
+      return enableLochRecording(repoRoot, worktrees)
+    }
+  )
+
+  // "Ask the conversation that wrote this": loch forks the session that wrote
+  // the line, then Ness re-files that fork under THIS worktree (loch writes it
+  // under the original session's cwd, which may be another worktree or one
+  // that's gone) and opens it as a Chat tab with a kickoff turn about the line.
+  onWorktreeRequest(
+    'loch:ask',
+    async (
+      _ctx,
+      worktreePath: string,
+      filePath: string,
+      line: number,
+      opts?: { atTurn?: boolean }
+    ): Promise<LochAskResult> => {
+      if (!store.getSnapshot().state.settings.lochBlameEnabled) {
+        return { ok: false, code: 'disabled' }
+      }
+      const rel = worktreeRelativePath(worktreePath, filePath)
+      if (!rel || !Number.isInteger(line) || line < 1) {
+        return { ok: false, code: 'usage', error: 'bad file or line' }
+      }
+      await resolveShellEnv(worktreePath)
+      const asked = await lochAsk(worktreePath, rel, line, { atTurn: opts?.atTurn === true })
+      if (!asked.ok) return asked
+      const { fork } = asked
+
+      const copied = forkTranscript({
+        sourceSessionId: fork.sessionId,
+        sourceWorktreePath: fork.cwd,
+        sourceTranscriptPath: fork.path,
+        destWorktreePath: worktreePath
+      })
+      if (!copied.ok || !copied.newSessionId) {
+        return { ok: false, code: 'fork-failed', error: copied.reason }
+      }
+      const newSessionId = copied.newSessionId
+      // loch's fork was only ever an intermediate — ours is the one that gets
+      // resumed. Leaving it would add an orphan session to the other
+      // directory's `claude --resume` picker on every ask.
+      try {
+        if (isLochForkPath(fork.path, fork.sessionId, fork.conversation.session, knownClaudeConfigDirs())) {
+          unlinkSync(fork.path)
+        } else {
+          log('loch', `not deleting ${fork.path}: doesn't look like loch's fork of ${fork.conversation.session}`)
+        }
+      } catch (err) {
+        log('loch', `could not remove intermediate fork ${fork.path}`, err instanceof Error ? err.message : err)
+      }
+
+      const real = (p: string): string => {
+        try {
+          return realpathSync(p)
+        } catch {
+          return resolvePath(p)
+        }
+      }
+      const relocated = real(fork.cwd) !== real(worktreePath)
+      const relocationPreamble = relocated
+        ? await buildRelocationPreamble({ sourceWorktreePath: fork.cwd, destWorktreePath: worktreePath })
+        : undefined
+
+      let lineText: string | null = null
+      try {
+        lineText = readFileSync(resolvePath(worktreePath, rel), 'utf8').split('\n')[line - 1] ?? null
+      } catch {
+        lineText = null
+      }
+
+      panesFSM.addTab(worktreePath, {
+        id: newSessionId,
+        type: 'json-claude',
+        label: `Ask · ${basename(rel)}:${line}`,
+        sessionId: newSessionId,
+        mode: 'awake'
+      })
+      notificationBus.startWithPrompt(
+        newSessionId,
+        worktreePath,
+        wrapAutomatedMessage(
+          'blame-ask',
+          buildBlameAskBody({ relPath: rel, line, lineText, conversation: fork.conversation, relocationPreamble })
+        )
+      )
+      return { ok: true, sessionId: newSessionId, relocated }
+    }
+  )
+
   transport.onRequest(
     'jsonClaude:openAuthLoginTab',
     (_ctx, worktreePath: string): { ok: true; tabId: string } | { ok: false; error: string } => {
@@ -4809,6 +5355,16 @@ function registerIpcHandlers(): void {
     store.dispatch({
       type: 'settings/reviewPromptChanged',
       payload: trimmed || DEFAULT_REVIEW_PROMPT
+    })
+    return true
+  })
+
+  transport.onRequest('config:setAgentReviewsEnabled', (_ctx, enabled: boolean) => {
+    config.agentReviewsEnabled = enabled === true
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/agentReviewsEnabledChanged',
+      payload: config.agentReviewsEnabled === true
     })
     return true
   })
@@ -5340,6 +5896,9 @@ function registerIpcHandlers(): void {
       return { ok: false, error: 'No worktree' }
     }
     const state = store.getSnapshot().state
+    if (!state.settings.agentReviewsEnabled) {
+      return { ok: false, error: 'Agent reviews are off — turn them on in Settings → Agent tools' }
+    }
     const author = pickAuthorTab(state, worktreePath)
     if (!author) {
       return {
@@ -5748,12 +6307,14 @@ async function runBoot(): Promise<void> {
   // Local HTTP control server for the bundled ness-control MCP bridge.
   startControlServer({
     getRepoRoots: () => config.repoRoots,
+    addRepo: (path) => addRepoAtPath(path, { config, store, worktreesFSM }),
+    createProject: (opts) => createAndRegisterProject(opts, { config, store, worktreesFSM }),
     getWorktreeBase: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
     getPrReviewPrompt: () => config.prReviewPrompt || DEFAULT_PR_REVIEW_PROMPT,
     resolveCallerScope,
     forkableConversationKind: (sessionId: string, worktreePath: string) =>
       chatRouter.forkableConversationKind(sessionId, worktreePath),
-    getConversationForkEnabled: () => config.conversationForkEnabled === true,
+    getConversationForkEnabled: () => config.conversationForkEnabled !== false,
     getBrowserPerms: () => ({
       enabled: config.browserToolsEnabled !== false,
       mode: config.browserToolsMode === 'view' ? 'view' : 'full'
@@ -5774,6 +6335,7 @@ async function runBoot(): Promise<void> {
       store.dispatch({ type: 'aliases/cleared', payload: { path: worktreePath } })
     },
     getAgentTabNamingEnabled: () => config.agentTabNamingEnabled !== false,
+    getAgentReviewsEnabled: () => store.getSnapshot().state.settings.agentReviewsEnabled,
     renameTab: (worktreePath, tabId, label, source) =>
       panesFSM.renameTab(worktreePath, tabId, label, source),
     renameBranch: async (worktreePath, newBranch) => {
@@ -5789,9 +6351,10 @@ async function runBoot(): Promise<void> {
       cancel: (id) => copyDraftBroker.cancel(id)
     },
     messaging: {
-      isEnabled: () => config.worktreeMessagingEnabled === true,
+      isEnabled: () => config.worktreeMessagingEnabled !== false,
       resolveTarget: (query) =>
         resolveWorktreeQuery(store.getSnapshot().state, query),
+      resolveChat: (query) => resolveChatQuery(store.getSnapshot().state, query),
       describe: (worktreePath) =>
         describeWorktree(store.getSnapshot().state, worktreePath),
       send: (worktreePath, message) => notificationBus.toWorktree(worktreePath, message),

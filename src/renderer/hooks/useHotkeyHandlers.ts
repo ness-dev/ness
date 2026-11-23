@@ -4,14 +4,13 @@ import { getLeaves, findLeaf } from '../../shared/state/terminals'
 import { resolveHotkeys, isEditableTarget, type Action, type HotkeyBinding } from '../hotkeys'
 import { useHotkeys } from './useHotkeys'
 import { useDoubleTapShift } from './useDoubleTapShift'
-import { groupWorktrees, getGroupKey, type GroupKey } from '../../shared/worktree-sort'
+import { getGroupKey, type GroupKey } from '../../shared/worktree-sort'
+import type { WorktreeListModel } from '../worktree-list-model'
 import { focusTerminalById } from '../components/XTerminal'
 import {
   useConnections,
   getBackendsRegistry,
   useSettings,
-  useSnooze,
-  usePinned,
   useJsonClaudePendingApprovals
 } from '../store'
 import { useGlobalBackend, useBackendForWorktree } from '../backend-routing'
@@ -27,12 +26,12 @@ interface UseHotkeyHandlersArgs {
    *  See backend-routing.ts. */
   pathBackendId: Record<string, string>
   worktrees: Worktree[]
+  /** The sidebar's model — the single source of worktree display order. */
+  listModel: WorktreeListModel
   repoRoots: string[]
   unifiedRepos: boolean
   prStatuses: Record<string, PRStatus | null>
   mergedPaths: Record<string, boolean>
-  collapsedRepos: Record<string, boolean>
-  setCollapsedRepos: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   isGroupCollapsed: (scope: string, key: GroupKey) => boolean
   activeWorktreeId: string | null
@@ -81,12 +80,11 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 } {
   const {
     worktrees,
+    listModel,
     repoRoots,
     unifiedRepos,
     prStatuses,
     mergedPaths,
-    collapsedRepos,
-    setCollapsedRepos,
     setCollapsedGroups,
     isGroupCollapsed,
     activeWorktreeId,
@@ -121,55 +119,23 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     pathBackendId
   } = args
 
-  // Mirror the sidebar's grouping/rendering order so hotkey navigation
-  // matches what's on screen.
   const allSettings = useSettings()
-  const viewerLogin = allSettings.viewerLogin
   const uiScale = allSettings.uiScale
   const preventSleepMode = allSettings.preventSleepMode
   const preventSleepUntil = allSettings.preventSleepUntil
-  const snoozeByPath = useSnooze().byPath
-  const snoozedPaths = useMemo(() => {
-    const m: Record<string, true> = {}
-    for (const p of Object.keys(snoozeByPath)) m[p] = true
-    return m
-  }, [snoozeByPath])
-  const pinnedPaths = usePinned().byPath
-  const byRepoGroups = useMemo(() => {
-    if (unifiedRepos && repoRoots.length > 1) {
-      return [{ repoRoot: '__unified__', groups: groupWorktrees(worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths) }]
-    }
-    const map = new Map<string, Worktree[]>()
-    for (const root of repoRoots) map.set(root, [])
-    for (const wt of worktrees) {
-      if (!map.has(wt.repoRoot)) map.set(wt.repoRoot, [])
-      map.get(wt.repoRoot)!.push(wt)
-    }
-    return Array.from(map.entries()).map(([repoRoot, wts]) => ({
-      repoRoot,
-      groups: groupWorktrees(wts, prStatuses, mergedPaths, snoozedPaths, viewerLogin, undefined, pinnedPaths)
-    }))
-  }, [unifiedRepos, repoRoots, worktrees, prStatuses, mergedPaths, snoozedPaths, viewerLogin, pinnedPaths])
 
+  // Navigation order comes straight from the sidebar's model, so hotkeys
+  // can never disagree with what's on screen (project homes first, folded tail
+  // skipped when collapsed).
   const allOrderedWorktrees = useMemo(() => {
-    const out: Worktree[] = []
-    for (const { groups } of byRepoGroups) {
-      for (const group of groups) out.push(...group.worktrees)
-    }
-    return out
-  }, [byRepoGroups])
+    const byPath = new Map(worktrees.map((w) => [w.path, w]))
+    return listModel.orderedPaths.flatMap((p) => byPath.get(p) ?? [])
+  }, [listModel, worktrees])
 
   const visibleWorktrees = useMemo(() => {
-    const out: Worktree[] = []
-    for (const { repoRoot, groups } of byRepoGroups) {
-      if (collapsedRepos[repoRoot]) continue
-      for (const group of groups) {
-        if (isGroupCollapsed(repoRoot, group.key)) continue
-        out.push(...group.worktrees)
-      }
-    }
-    return out
-  }, [byRepoGroups, collapsedRepos, isGroupCollapsed])
+    const byPath = new Map(worktrees.map((w) => [w.path, w]))
+    return listModel.numberedPaths.flatMap((p) => byPath.get(p) ?? [])
+  }, [listModel, worktrees])
 
   const scopeForWorktree = useCallback(
     (wt: Worktree): string =>
@@ -179,16 +145,20 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
 
   const ensureWorktreeVisible = useCallback(
     (wt: Worktree) => {
-      const scope = scopeForWorktree(wt)
+      // Selecting a worktree makes its project the active one, which opens
+      // it, so only a collapsed status group can still hide it. Mains sit
+      // outside the groups entirely.
+      if (wt.isMain) return
+      // The model knows the real scope — a section merged across hosts keys
+      // on `repo:<key>`, not on any one root.
+      const section = listModel.sections.find((s) => s.groups.some((g) => g.rows.some((r) => r.path === wt.path)))
+      const scope = section?.scope ?? scopeForWorktree(wt)
       const key = getGroupKey(wt, prStatuses[wt.path], mergedPaths?.[wt.path])
       if (isGroupCollapsed(scope, key)) {
         setCollapsedGroups((prev) => ({ ...prev, [`${scope}:${key}`]: false }))
       }
-      if (scope !== '__unified__' && collapsedRepos[scope]) {
-        setCollapsedRepos((prev) => ({ ...prev, [scope]: false }))
-      }
     },
-    [scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, collapsedRepos, setCollapsedGroups, setCollapsedRepos]
+    [listModel, scopeForWorktree, prStatuses, mergedPaths, isGroupCollapsed, setCollapsedGroups]
   )
 
   const switchToWorktreeByIndex = useCallback(

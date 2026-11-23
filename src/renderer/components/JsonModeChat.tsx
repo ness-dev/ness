@@ -15,6 +15,8 @@ import { rehypeHighlightShared } from '../rehype-highlight-shared'
 import remarkGfm from 'remark-gfm'
 import { remarkInsight } from '../remark-insight'
 import { remarkMermaid } from '../remark-mermaid'
+import { USER_REMARK_PLUGINS } from '../remark-user-text'
+import type { PluggableList } from 'unified'
 import { InsightCard } from './InsightCard'
 import { MarkdownPre } from './MermaidDiagram'
 import {
@@ -23,6 +25,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Square,
   Terminal,
@@ -39,6 +42,7 @@ import {
 import { openForkIntoWorktree } from './NewWorktreeScreen'
 import {
   useAliases,
+  useAppState,
   useCopyDraftForTerminal,
   useWithdrawnCopyDraftForTerminal,
   useJsonClaudeSession,
@@ -46,6 +50,8 @@ import {
   useWorktrees
 } from '../store'
 import { CopyDraftCard } from './CopyDraftOverlay'
+import { AgentIcon } from './AgentIcon'
+import { listChatMentionTargets, matchChatMentions } from '../../shared/chat-mention'
 import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
@@ -292,9 +298,12 @@ function rehypeColorHex() {
  *  [query, currentHitBlockId, forceOpenTick] — none of which move while
  *  a message streams — so the memo actually gets to bail. */
 const MarkdownWithFind = memo(function MarkdownWithFind({
-  children
+  children,
+  remarkPlugins = REMARK_PLUGINS
 }: {
   children: string
+  /** Must be a stable (module-level) reference, or the memo never bails. */
+  remarkPlugins?: PluggableList
 }): JSX.Element {
   const { query } = useFind()
   const rehypePlugins = useMemo(() => {
@@ -303,7 +312,7 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
   }, [query])
   return (
     <ReactMarkdown
-      remarkPlugins={REMARK_PLUGINS}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       components={MARKDOWN_COMPONENTS}
       urlTransform={chatUrlTransform}
@@ -910,7 +919,7 @@ function RateLimitErrorCard({
 function automationLabel(
   source: JsonClaudeAutomationSource,
   from?: string
-): { label: string; note: string; brand: boolean } {
+): { label: string; note: string; brand: boolean; collapsed?: boolean } {
   if (source === 'worktree-message') {
     return {
       label: from ? `Agent Message · from ${from}` : 'Agent Message',
@@ -986,6 +995,14 @@ function automationLabel(
   if (source === 'ci-failure') {
     return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
   }
+  if (source === 'first-run-kickoff') {
+    // The brief is instructions to the agent, not something the user needs
+    // to read before its greeting, so it starts folded away.
+    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true, collapsed: true }
+  }
+  if (source === 'blame-ask') {
+    return { label: 'Blame · Ask about a line', note: 'you opened this from the gutter', brand: true }
+  }
   const unhandled: never = source
   return { label: `Ness · ${unhandled}`, note: 'sent automatically', brand: false }
 }
@@ -1006,7 +1023,8 @@ function AutomatedTurnCard({
   isQueued: boolean
   onCancelQueued: () => void
 }): JSX.Element {
-  const { label, note, brand } = automationLabel(source, from)
+  const { label, note, brand, collapsed } = automationLabel(source, from)
+  const [open, setOpen] = useState(!collapsed)
   const Icon = brand ? NessIcon : Bot
   return (
     <div className="flex justify-end">
@@ -1035,6 +1053,16 @@ function AutomatedTurnCard({
             {label}
           </span>
           <span className="text-muted truncate">{note}</span>
+          {collapsed && (
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="flex items-center gap-0.5 shrink-0 ml-auto text-muted hover:text-fg cursor-pointer"
+              aria-expanded={open}
+            >
+              {open ? 'Hide prompt' : 'Show prompt'}
+              {open ? <ChevronDown className="icon-xs" /> : <ChevronRight className="icon-xs" />}
+            </button>
+          )}
           {isQueued && (
             <div className="flex items-center gap-1 shrink-0 ml-auto">
               <span
@@ -1054,12 +1082,18 @@ function AutomatedTurnCard({
             </div>
           )}
         </div>
-        <div
-          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
-          style={{ fontSize: 'var(--chat-body-text)' }}
-        >
-          <HighlightedText text={text} />
-        </div>
+        {open ? (
+          <div
+            className="px-4 pt-1 pb-2.5 markdown leading-relaxed"
+            style={{ fontSize: 'var(--chat-body-text)' }}
+          >
+            {/* Ness-composed bodies are plain text with markdown sprinkled in
+                and rely on single newlines, same as typed text. */}
+            <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>{text}</MarkdownWithFind>
+          </div>
+        ) : (
+          <div className="pb-2.5" />
+        )}
       </div>
     </div>
   )
@@ -1101,8 +1135,8 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
                 <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
                   {automationLabel(n.source, n.from).label}
                 </div>
-                <div className="whitespace-pre-wrap break-words">
-                  <HighlightedText text={n.body} />
+                <div className="markdown leading-relaxed">
+                  <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>{n.body}</MarkdownWithFind>
                 </div>
               </div>
             ))}
@@ -1187,10 +1221,12 @@ function renderEntries(
               }}
             >
               <div
-                className="flex-1 min-w-0 whitespace-pre-wrap break-words"
+                className="flex-1 min-w-0 markdown markdown-user"
                 style={{ fontSize: 'var(--chat-body-text)' }}
               >
-                <HighlightedText text={entry.text ?? ''} />
+                <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>
+                  {entry.text ?? ''}
+                </MarkdownWithFind>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <span
@@ -1213,14 +1249,18 @@ function renderEntries(
         ) : (
           <div className="flex justify-end">
             <div
-              className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
+              className="bg-accent/10 px-4 py-2.5"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
                 borderRadius: 'var(--chat-prompt-radius)',
                 fontSize: 'var(--chat-body-text)'
               }}
             >
-              <HighlightedText text={entry.text ?? ''} />
+              <div className="markdown markdown-user">
+                <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>
+                  {entry.text ?? ''}
+                </MarkdownWithFind>
+              </div>
               {entry.images && entry.images.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {entry.images.map((img) => (
@@ -2548,6 +2588,20 @@ export function JsonModeChat({
       }))
   }, [worktreeMessagingEnabled, worktrees.list, aliases.byPath, worktreePath])
 
+  // Panes are read only while an @-mention is being typed: the map changes
+  // on every tab focus/rename in any worktree, and re-rendering every
+  // mounted chat for that would buy nothing the rest of the time.
+  const mentionPanes = useAppState((s) =>
+    mentionTrigger !== null && worktreeMessagingEnabled ? s.terminals.panes : null
+  )
+  const chatMentionTargets = useMemo(
+    () =>
+      mentionPanes
+        ? listChatMentionTargets(worktrees.list, mentionPanes, aliases.byPath, sessionId)
+        : [],
+    [mentionPanes, worktrees.list, aliases.byPath, sessionId]
+  )
+
   const mentionItems = useMemo<MentionPopoverItem[]>(() => {
     if (mentionDismissed === draft) return []
     if (modelPickerTrigger !== null) {
@@ -2648,7 +2702,22 @@ export function JsonModeChat({
         labelMatchIndices: r.indices,
         icon: <FileText className="icon-xs" />
       }))
-      return [...matchWorktreeMentions(q, worktreeMentionTargets), ...fileRows]
+      // The row shows the tab's name; picking it inserts the token, which
+      // is what send_message resolves.
+      const chatRows: MentionPopoverItem[] = matchChatMentions(q, chatMentionTargets).map(
+        ({ target, labelAt }) => ({
+          key: `chat:${target.worktreePath}#${target.tabId}`,
+          label: target.label,
+          insertText: target.token,
+          labelMatchIndices:
+            labelAt === -1
+              ? undefined
+              : Array.from({ length: q.trim().length }, (_, i) => labelAt + i),
+          description: target.worktreeName,
+          icon: <AgentIcon kind={target.agentKind} className="icon-xs" />
+        })
+      )
+      return [...matchWorktreeMentions(q, worktreeMentionTargets), ...chatRows, ...fileRows]
     }
     return []
   }, [
@@ -2657,6 +2726,7 @@ export function JsonModeChat({
     modelPickerTrigger,
     files,
     worktreeMentionTargets,
+    chatMentionTargets,
     draft,
     mentionDismissed,
     session?.slashCommands,
@@ -2760,7 +2830,7 @@ export function JsonModeChat({
       // Replace `@<query>` with `@<filepath> ` so the user can keep
       // typing. The trailing space also closes the popover (whitespace
       // breaks the trigger).
-      replaceTriggerToken(mentionTrigger.start, `@${item.label} `)
+      replaceTriggerToken(mentionTrigger.start, `@${item.insertText ?? item.label} `)
     }
   }
 
