@@ -501,12 +501,18 @@ export function WorktreeList({
         // tall project doesn't drag a screenful of rows around with it.
         const lifted = drag.activeScope === section.scope
         const showBody = !section.collapsed && !lifted
+        // A project expanded on the plain background (pinned open, not the
+        // one you're in) has no well to mark where it ends, so keep the
+        // wider gap after it; collapsed rows and the well need less.
+        const prev = i > 0 ? model.sections[i - 1] : undefined
+        const prevExpandedFlat =
+          !!prev && !prev.unified && !prev.collapsed && !prev.holdsActive && drag.activeScope !== prev.scope
         return (
         <ProjectSection
           key={section.scope}
           scope={section.scope}
           name={section.repoName}
-          className={i > 0 ? 'mt-1.5' : ''}
+          className={i === 0 ? '' : prevExpandedFlat ? 'mt-3' : 'mt-1.5'}
           panel={showBody && !section.unified && section.holdsActive}
           draggable={reorderable}
           lifted={lifted}

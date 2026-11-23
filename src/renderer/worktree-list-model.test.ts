@@ -1169,7 +1169,7 @@ describe('homeHoldsActive', () => {
 })
 
 describe('homeShowsTabs', () => {
-  const twoRepos = (overrides: Partial<WorktreeListModelInput> = {}) =>
+  const threeRepos = (overrides: Partial<WorktreeListModelInput> = {}) =>
     buildWorktreeListModel(
       input({
         repoRoots: ['/repos/alpha', '/repos/beta', '/repos/gamma'],
@@ -1184,7 +1184,7 @@ describe('homeShowsTabs', () => {
     )
 
   it('shows the main of the active project and of every pinned-open project', () => {
-    const model = twoRepos({ activeWorktreeId: '/w/a', pinnedOpenRepos: { '/repos/beta': true } })
+    const model = threeRepos({ activeWorktreeId: '/w/a', pinnedOpenRepos: { '/repos/beta': true } })
     const [alpha, beta, gamma] = model.sections
     expect(homeShowsTabs(model, alpha.homes[0])).toBe(true)
     expect(homeShowsTabs(model, beta.homes[0])).toBe(true)
@@ -1192,8 +1192,40 @@ describe('homeShowsTabs', () => {
   })
 
   it('never applies to a pinned project’s other worktrees', () => {
-    const model = twoRepos({ activeWorktreeId: '/repos/beta', pinnedOpenRepos: { '/repos/alpha': true } })
+    const model = threeRepos({ activeWorktreeId: '/repos/beta', pinnedOpenRepos: { '/repos/alpha': true } })
     const workRow = model.sections[0].groups.flatMap((g) => g.rows).find((r) => r.path === '/w/a')!
     expect(homeShowsTabs(model, workRow)).toBe(false)
+  })
+
+  it('lists every host’s main in a pinned cross-host section, only the active host’s otherwise', () => {
+    const localRoot = '/Users/mike/dev/ness'
+    const remoteRoot = '/home/mike/code/ness'
+    const build = (pinnedScope: string | null) =>
+      buildWorktreeListModel(
+        input({
+          repoRoots: [localRoot, remoteRoot],
+          repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+          repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+          worktrees: [
+            wt({ path: localRoot, repoRoot: localRoot, isMain: true, branch: 'main' }),
+            wt({ path: remoteRoot, repoRoot: remoteRoot, isMain: true, branch: 'main' }),
+            wt({ path: '/w/remote-feature', repoRoot: remoteRoot })
+          ],
+          activeWorktreeId: '/w/remote-feature',
+          pinnedOpenRepos: pinnedScope ? { [pinnedScope]: true } : {}
+        })
+      )
+    const unpinned = build(null)
+    expect(unpinned.sections).toHaveLength(1)
+    const [uHeader, uRemote] = unpinned.sections[0].homes
+    expect(homeShowsTabs(unpinned, uHeader)).toBe(false)
+    expect(homeShowsTabs(unpinned, uRemote)).toBe(true)
+
+    // Cross-host sections are keyed by a merged scope, not either repo root.
+    const pinned = build(unpinned.sections[0].scope)
+    expect(pinned.sections[0].pinnedOpen).toBe(true)
+    const [pHeader, pRemote] = pinned.sections[0].homes
+    expect(homeShowsTabs(pinned, pHeader)).toBe(true)
+    expect(homeShowsTabs(pinned, pRemote)).toBe(true)
   })
 })

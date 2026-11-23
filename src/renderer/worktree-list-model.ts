@@ -639,7 +639,11 @@ export function homeHoldsActive(model: WorktreeListModel, row: WorktreeRowModel)
 /** True for a project's main row whose chats should stay listed under
  *  'selected' tabs expansion: the main of the project you're in, plus every
  *  main of a pinned-open project. Pinning keeps the project expanded, and an
- *  expanded project's header shows its chats. */
+ *  expanded project's header shows its chats.
+ *
+ *  Unlike `homeHoldsActive`, the pinned case is per section, not per host:
+ *  pinning a project merged across hosts lists every host's main, while
+ *  being in it without a pin lists only the host you're on. */
 export function homeShowsTabs(model: WorktreeListModel, row: WorktreeRowModel): boolean {
   if (!row.home) return false
   if (homeHoldsActive(model, row)) return true
