@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'vm'
 import {
+  BLOCK_UNDEFINED_HINT,
+  EVAL_ENCODE_BUDGET,
   EVAL_MAX_TIMEOUT_MS,
+  EVAL_TRUNCATED_MARKER,
+  explainEvalTimeout,
   EVAL_TIMEOUT_MS,
   buildEvalScript,
   clampEvalTimeout,
@@ -133,9 +137,40 @@ describe('buildEvalScript', () => {
     })
   })
 
+  it('awaits code that uses await even when await_promise is off', async () => {
+    expect(await run('await Promise.resolve(7)', { awaitPromise: false })).toEqual({
+      ok: true,
+      value: '7'
+    })
+    expect(
+      await run('const v = await Promise.resolve(8)\nreturn v', { awaitPromise: false })
+    ).toEqual({ ok: true, value: '8' })
+  })
+
+  it('explains that a block without return yields nothing', async () => {
+    expect(await run('const r = {w: 3}; r.w')).toEqual({ ok: true, value: BLOCK_UNDEFINED_HINT })
+    // A bare expression that really is undefined is not a missing return.
+    expect(await run('({}).nope')).toEqual({ ok: true, value: 'undefined' })
+  })
+
+  it('truncates an exponential shared-reference graph instead of hanging', async () => {
+    const r = (await run(
+      'const a = {}\nlet o = {l: a, r: a}\nfor (let i = 0; i < 30; i++) o = {l: o, r: o, s: o, t: o}\nreturn o'
+    )) as { ok: true; value: string }
+    expect(r.ok).toBe(true)
+    expect(r.value).toContain(EVAL_TRUNCATED_MARKER)
+  })
+
+  it('stops a huge array at the budget and says how much is left', async () => {
+    const r = (await run('Array.from({length: 200000}, (_, i) => i)')) as { value: string }
+    const arr = JSON.parse(r.value) as unknown[]
+    expect(arr.length).toBeLessThanOrEqual(EVAL_ENCODE_BUDGET + 1)
+    expect(String(arr[arr.length - 1])).toMatch(/more items$/)
+  })
+
   it('reports undefined distinctly from null', async () => {
     expect(await run('undefined')).toEqual({ ok: true, value: 'undefined' })
-    expect(await run('let x = 1')).toEqual({ ok: true, value: 'undefined' })
+    expect(await run('let x = 1')).toEqual({ ok: true, value: BLOCK_UNDEFINED_HINT })
     expect(await run('null')).toEqual({ ok: true, value: 'null' })
   })
 
@@ -180,5 +215,17 @@ describe('clampEvalTimeout', () => {
     expect(clampEvalTimeout(-1)).toBe(EVAL_TIMEOUT_MS)
     expect(clampEvalTimeout(1500)).toBe(1500)
     expect(clampEvalTimeout(10 * 60_000)).toBe(EVAL_MAX_TIMEOUT_MS)
+  })
+})
+
+describe('explainEvalTimeout', () => {
+  it('points a timed-out eval at reload_tab', () => {
+    const err = explainEvalTimeout(new Error('evalTab tab=t1 timed out after 5000ms')) as Error
+    expect(err.message).toMatch(/timed out after 5000ms .*reload_tab/)
+  })
+
+  it('leaves other failures alone', () => {
+    const original = new Error('tab renderer crashed — reload the tab')
+    expect(explainEvalTimeout(original)).toBe(original)
   })
 })

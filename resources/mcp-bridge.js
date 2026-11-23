@@ -698,7 +698,7 @@ const TOOLS = [
   {
     name: 'eval_tab',
     description:
-      "Run JavaScript in a browser tab in this worktree and return the result as JSON. Use it to measure layout and read computed state the other tools can't — getBoundingClientRect(), scrollWidth vs clientWidth, getComputedStyle(), app state on window — or as an escape hatch for actions they can't do (window.scrollTo). Accepts a bare expression (`document.documentElement.scrollWidth`) or a statement block that uses `return`; top-level `await` works in both. DOM nodes come back as short descriptors like `<div#id.cls>`, cycles as \"[Circular]\", and a thrown error is returned as the tool error with its stack. Runs with the page's origin, cookies and sessions. Prefer get_tab_clickables + click_tab for clicking. Result truncated to 100KB by default.",
+      "Run JavaScript in a browser tab in this worktree and return the result as JSON. Use it to measure layout and read computed state the other tools can't — getBoundingClientRect(), scrollWidth vs clientWidth, getComputedStyle(), app state on window — or as an escape hatch for actions they can't do (window.scrollTo). Accepts a bare expression (`document.documentElement.scrollWidth`) or a statement block — a block needs `return` to give a value back; top-level `await` works in both. DOM nodes come back as short descriptors like `<div#id.cls>`, cycles as \"[Circular]\", and a thrown error is returned as the tool error with its stack. Runs with the page's origin, cookies and sessions, and can't be interrupted: a runaway synchronous loop wedges the tab until reload_tab. Prefer get_tab_clickables + click_tab for clicking. Result truncated to 100KB by default.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -709,7 +709,7 @@ const TOOLS = [
         },
         await_promise: {
           type: 'boolean',
-          description: 'Wait for a returned promise to settle and return its value. Default true.'
+          description: 'Wait for a promise the code returns to settle and return its value. Default true. Code that itself uses `await` is always awaited.'
         },
         timeout_ms: {
           type: 'number',

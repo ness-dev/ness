@@ -14,6 +14,7 @@ import {
   evalBlockedReason,
   buildEvalScript,
   clampEvalTimeout,
+  explainEvalTimeout,
   type TabEvalResult
 } from './browser-eval'
 import { canSurfaceCapture, emulatedViewRect } from './browser-layout'
@@ -1066,7 +1067,9 @@ export class BrowserManager implements BrowserManagerLike {
       built.script,
       'evalTab',
       clampEvalTimeout(opts?.timeoutMs)
-    )
+    ).catch((err: unknown) => {
+      throw explainEvalTimeout(err)
+    })
     return result as TabEvalResult
   }
 

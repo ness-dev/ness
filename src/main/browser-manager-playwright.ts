@@ -30,6 +30,7 @@ import {
   evalWithTimeout,
   buildEvalScript,
   clampEvalTimeout,
+  explainEvalTimeout,
   type TabEvalResult
 } from './browser-eval'
 
@@ -805,7 +806,7 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
         `evalTab failed tab=${tabId}`,
         err instanceof Error ? err.message : err
       )
-      throw err
+      throw explainEvalTimeout(err)
     })
   }
 }

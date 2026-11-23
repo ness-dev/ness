@@ -85,30 +85,42 @@ function compiles(source: string): string | null {
  * rather than in the page with `new Function` keeps eval working on pages
  * whose CSP forbids `unsafe-eval` — the injected script itself bypasses CSP,
  * but a Function constructor running inside it would not. */
-export function wrapEvalCode(code: string): { fn: string } | { error: string } {
+export function wrapEvalCode(
+  code: string
+): { fn: string; isAsync: boolean; isBlock: boolean } | { error: string } {
   // `document.title;` is an expression to anyone typing it, but `(x;)` isn't.
   const expr = code.trim().replace(/;+\s*$/, '')
   // The newline keeps a trailing `// comment` from swallowing the paren.
   const candidates = [
-    `() => (${expr}\n)`,
-    `async () => (${expr}\n)`,
-    `function () {\n${code}\n}`,
-    `async function () {\n${code}\n}`
+    { fn: `() => (${expr}\n)`, isAsync: false, isBlock: false },
+    { fn: `async () => (${expr}\n)`, isAsync: true, isBlock: false },
+    { fn: `function () {\n${code}\n}`, isAsync: false, isBlock: true },
+    { fn: `async function () {\n${code}\n}`, isAsync: true, isBlock: true }
   ]
   let lastError = ''
-  for (const fn of candidates) {
-    const err = compiles(`(${fn})`)
-    if (err === null) return { fn }
+  for (const c of candidates) {
+    const err = compiles(`(${c.fn})`)
+    if (err === null) return c
     lastError = err
   }
   return { error: `SyntaxError: ${lastError}` }
 }
+
+/** Values the encoder visits before it stops and marks the rest truncated.
+ * Cycle detection is per-path so shared references still serialize in full,
+ * which means a DAG (a React fiber, an app store) is expanded once per path
+ * reaching each node — exponential in depth. Without a budget that runs into
+ * the eval timeout instead of degrading into a truncated answer. */
+export const EVAL_ENCODE_BUDGET = 50_000
+export const EVAL_TRUNCATED_MARKER = '[…truncated]'
 
 /** Page-side encoder. JSON.stringify alone throws on cycles and BigInt,
  * silently drops undefined/functions, and walks a DOM node's entire
  * reachable graph — exactly what layout debugging returns most. */
 const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
   var MAX_DEPTH = 12
+  var budget = ${EVAL_ENCODE_BUDGET}
+  var TRUNC = '${EVAL_TRUNCATED_MARKER}'
   var stack = []
   function describeNode(n) {
     if (n.nodeType === 1) {
@@ -124,6 +136,7 @@ const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
     return '[' + n.nodeName + ']'
   }
   function enc(v, depth) {
+    if (--budget < 0) return TRUNC
     if (v === null) return null
     var t = typeof v
     if (t === 'string' || t === 'boolean') return v
@@ -145,14 +158,16 @@ const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
         try { return enc(v.toJSON(), depth + 1) } catch (e) {}
       }
       if (v instanceof Map) {
-        return Array.from(v.entries()).map(function (e) { return [enc(e[0], depth + 1), enc(e[1], depth + 1)] })
+        return encList(Array.from(v.entries()), depth, function (e) {
+          return [enc(e[0], depth + 1), enc(e[1], depth + 1)]
+        })
       }
       if (
         Array.isArray(v) || v instanceof Set || ArrayBuffer.isView(v) ||
         (typeof NodeList !== 'undefined' && v instanceof NodeList) ||
         (typeof HTMLCollection !== 'undefined' && v instanceof HTMLCollection)
       ) {
-        return Array.from(v).map(function (x) {
+        return encList(v instanceof Set ? Array.from(v) : v, depth, function (x) {
           var e = enc(x, depth + 1)
           return e === undefined ? null : e
         })
@@ -160,6 +175,7 @@ const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
       var out = {}
       var keys = Object.keys(v)
       for (var i = 0; i < keys.length; i++) {
+        if (budget < 0) { out[TRUNC] = (keys.length - i) + ' more keys'; break }
         var val
         try { val = v[keys[i]] } catch (e) { val = '[Threw: ' + (e && e.message) + ']' }
         var e2 = enc(val, depth + 1)
@@ -170,10 +186,25 @@ const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
       stack.pop()
     }
   }
+  // Indexed rather than Array.from(...).map so a 100k-element NodeList
+  // stops at the budget instead of being copied whole first.
+  function encList(list, depth, each) {
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      if (budget < 0) { out.push(TRUNC + ' ' + (list.length - i) + ' more items'); break }
+      out.push(each(list[i]))
+    }
+    return out
+  }
   if (root === undefined) return 'undefined'
   var encoded = enc(root, 0)
   return encoded === undefined ? 'undefined' : JSON.stringify(encoded)
 }`
+
+/** A statement block's completion value isn't recoverable without `eval`, so
+ * `a; b` yields undefined — say why, or it reads as a real measurement. */
+export const BLOCK_UNDEFINED_HINT =
+  'undefined (ran as a statement block — add `return` to get a value back)'
 
 /** The script both backends inject. It always resolves (never rejects) with
  * a structured-clone-safe TabEvalResult, so a throw inside the agent's code
@@ -186,16 +217,23 @@ export function buildEvalScript(
   const wrapped = wrapEvalCode(code)
   if ('error' in wrapped) return wrapped
   const awaitPromise = opts.awaitPromise !== false
+  // Code that uses `await` is wrapped in an async function, whose own promise
+  // is not the agent's value — always await that, and let await_promise only
+  // decide about a promise the code itself hands back.
   return {
     script: `(async () => {
   ${ENCODE_SOURCE}
   try {
-    let v = (${wrapped.fn})()
+    let v = ${wrapped.isAsync ? 'await ' : ''}(${wrapped.fn})()
     if (v !== null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function') {
       if (!${awaitPromise}) return { ok: true, value: '"[Promise — not awaited]"' }
       v = await v
     }
-    return { ok: true, value: __nessEncode(v) }
+    const value = __nessEncode(v)
+    if (${wrapped.isBlock} && value === 'undefined') {
+      return { ok: true, value: ${JSON.stringify(BLOCK_UNDEFINED_HINT)} }
+    }
+    return { ok: true, value }
   } catch (e) {
     const msg = e instanceof Error ? (e.stack || (e.name + ': ' + e.message)) : 'Uncaught ' + String(e)
     return { ok: false, error: msg }
@@ -210,4 +248,17 @@ export function clampEvalTimeout(raw: unknown): number {
   const n = Number(raw)
   if (!Number.isFinite(n) || n <= 0) return EVAL_TIMEOUT_MS
   return Math.min(Math.round(n), EVAL_MAX_TIMEOUT_MS)
+}
+
+/** `evalWithTimeout` can't cancel the page's script — a runaway synchronous
+ * loop keeps the tab's renderer pinned, and every later read on the tab
+ * times out too. Say so, so the agent recovers instead of retrying. */
+export function explainEvalTimeout(err: unknown): unknown {
+  if (err instanceof Error && /timed out after \d+ms/.test(err.message)) {
+    return new Error(
+      `${err.message} — if the code loops synchronously the page is still stuck in it; ` +
+        'reload_tab to recover before using this tab again'
+    )
+  }
+  return err
 }
