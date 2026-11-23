@@ -24,3 +24,27 @@ describe('getEntrySegments for Bash', () => {
     expect(texts).toEqual(['Bash', 'Read a.ts', 'cat a.ts'])
   })
 })
+
+describe('getEntrySegments for user text', () => {
+  it('searches the rendered text, not the markdown source', () => {
+    const entry: JsonClaudeChatEntry = {
+      entryId: 'u1',
+      kind: 'user',
+      timestamp: 0,
+      text: '- **bold** and `code`'
+    }
+    expect(getEntrySegments(entry).map((s) => s.text)).toEqual(['bold and code'])
+  })
+
+  it('keeps intraword underscores, which GFM does not treat as emphasis', () => {
+    const entry: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 0,
+      text: 'rename snake_case_name and _this_ in __init__.py'
+    }
+    expect(getEntrySegments(entry).map((s) => s.text)).toEqual([
+      'rename snake_case_name and this in init.py'
+    ])
+  })
+})

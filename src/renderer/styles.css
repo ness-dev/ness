@@ -560,6 +560,18 @@ mark.find-hit-current {
   margin-left: -1.4em;
 }
 
+/* Text the user typed, inside their bubble. It should still read as a
+   typed message: tight block spacing, and a stray `# ` doesn't turn into
+   a page title. */
+.markdown-user > * + * {
+  margin-top: 0.4em;
+}
+.markdown-user :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 /* Tiny inline swatch the rehypeColorHex plugin inserts after a hex
    color literal (#fff, #FF00AA, etc.) in chat markdown. em-based so it
    tracks the surrounding text size; border keeps near-background
