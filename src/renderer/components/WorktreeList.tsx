@@ -30,7 +30,7 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
+import { homeHoldsActive, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
@@ -280,19 +280,19 @@ export function WorktreeList({
     return actions
   }
 
-  // `projectActive` is passed only for a project's main row: under 'selected'
-  // main stays expanded while you're anywhere in its project, so its chats
-  // are one click away from a worktree, not hidden until you go back to main.
-  const showTabsFor = (row: WorktreeRowModel, projectActive: boolean): boolean =>
+  // Under 'selected' a project's main also stays expanded while you're
+  // anywhere in its project, so its chats are one click away from a
+  // worktree rather than hidden until you go back to main.
+  const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
     // Project rows show their tabs even while the project is collapsed:
     // collapsing hides the worktrees, not main.
     (tabsExpansion === 'all' ||
-      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || projectActive)))
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeHoldsActive(model, row))))
 
-  const renderTabRows = (row: WorktreeRowModel, projectActive = false): JSX.Element | null =>
-    showTabsFor(row, projectActive) && onSelectTab ? (
+  const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
+    showTabsFor(row) && onSelectTab ? (
       <WorktreeTabRows
         worktreePath={row.path}
         backendId={pathBackendId?.[row.path] ?? null}
@@ -565,7 +565,7 @@ export function WorktreeList({
                   onTogglePinnedOpen: () => onTogglePinnedOpen(section.scope),
                   actions: projectActions(section.repoName, section.repoRoots)
                 })}
-                {renderTabRows(home, section.holdsActive)}
+                {renderTabRows(home)}
               </RowBlock>
             ) : (
               <RepoHeader
@@ -582,12 +582,11 @@ export function WorktreeList({
             <div className="mb-2">
               {section.homes.map((h) => {
                 const name = repoLabelFor(h.worktree.repoRoot)
-                const projectActive = h.worktree.repoRoot === model.activeRepoRoot
                 return (
                   <RowBlock
                     key={h.path}
                     active={h.path === activeWorktreeId}
-                    context={projectActive}
+                    context={homeHoldsActive(model, h)}
                   >
                     {renderTab(h, {
                       name,
@@ -595,7 +594,7 @@ export function WorktreeList({
                         { backendId: pathBackendId?.[h.path] ?? null, repoRoot: h.worktree.repoRoot }
                       ])
                     })}
-                    {renderTabRows(h, projectActive)}
+                    {renderTabRows(h)}
                   </RowBlock>
                 )
               })}
