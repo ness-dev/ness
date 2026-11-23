@@ -702,9 +702,11 @@ export function stripMarkdown(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     // Bold / italic / strikethrough.
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
+    // Underscores only count at word edges: GFM leaves intraword ones
+    // (snake_case) alone, so the corpus must too.
+    .replace(/(?<!\w)__([^_]+)__(?!\w)/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/_([^_]+)_/g, '$1')
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, '$1')
     .replace(/~~([^~]+)~~/g, '$1')
     // Leading heading / blockquote / list markers on each line.
     .replace(/^#{1,6}\s+/gm, '')

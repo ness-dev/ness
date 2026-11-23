@@ -35,4 +35,17 @@ describe('user-text markdown', () => {
   it('keeps angle-bracket text the user typed', () => {
     expect(render('wrap it in <Provider> please')).toContain('&lt;Provider&gt;')
   })
+
+  // Automated cards and held notices use these plugins too: Ness-composed
+  // bodies (e.g. review-spawner's CI-green context) join lines with '\n'.
+  it('keeps the lines of a Ness-composed body apart', () => {
+    const html = render('PR title: Fix login\nPR: https://github.com/o/r/pull/1')
+    expect(html).toContain('Fix login<br/>')
+  })
+
+  // Deliberate: GFM reads a closing `__` before punctuation as strong, so
+  // a bare `__init__.py` bolds. Backticks are the escape hatch.
+  it('renders a bare __init__.py as strong, like GFM', () => {
+    expect(render('edit __init__.py')).toContain('<strong>init</strong>.py')
+  })
 })

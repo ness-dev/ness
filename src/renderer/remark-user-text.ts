@@ -11,6 +11,8 @@ export function remarkNoIndentedCode(this: Processor): void {
   ;(data.micromarkExtensions ??= []).push({ disable: { null: ['codeIndented'] } })
 }
 
-/** Markdown for text a person typed. Gentler than assistant text: a
- *  single newline stays a line break, and indentation is never code. */
+/** Markdown for the sent side of the chat: text a person typed, and the
+ *  plain-text bodies Ness composes for automated turns and held notices.
+ *  Gentler than assistant text: a single newline stays a line break, and
+ *  indentation is never code. */
 export const USER_REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkNoIndentedCode, remarkMermaid]

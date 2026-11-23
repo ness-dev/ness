@@ -1059,7 +1059,9 @@ function AutomatedTurnCard({
           className="px-4 pt-1 pb-2.5 markdown leading-relaxed"
           style={{ fontSize: 'var(--chat-body-text)' }}
         >
-          <MarkdownWithFind>{text}</MarkdownWithFind>
+          {/* Ness-composed bodies are plain text with markdown sprinkled in
+              and rely on single newlines, same as typed text. */}
+          <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>{text}</MarkdownWithFind>
         </div>
       </div>
     </div>
@@ -1103,7 +1105,7 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
                   {automationLabel(n.source, n.from).label}
                 </div>
                 <div className="markdown leading-relaxed">
-                  <MarkdownWithFind>{n.body}</MarkdownWithFind>
+                  <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>{n.body}</MarkdownWithFind>
                 </div>
               </div>
             ))}

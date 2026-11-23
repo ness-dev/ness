@@ -35,4 +35,16 @@ describe('getEntrySegments for user text', () => {
     }
     expect(getEntrySegments(entry).map((s) => s.text)).toEqual(['bold and code'])
   })
+
+  it('keeps intraword underscores, which GFM does not treat as emphasis', () => {
+    const entry: JsonClaudeChatEntry = {
+      entryId: 'u2',
+      kind: 'user',
+      timestamp: 0,
+      text: 'rename snake_case_name and _this_ in __init__.py'
+    }
+    expect(getEntrySegments(entry).map((s) => s.text)).toEqual([
+      'rename snake_case_name and this in init.py'
+    ])
+  })
 })
