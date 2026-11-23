@@ -30,7 +30,7 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { homeHoldsActive, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
+import { homeHoldsActive, homeShowsTabs, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
@@ -280,15 +280,15 @@ export function WorktreeList({
   }
 
   // Under 'selected' a project's main also stays expanded while you're
-  // anywhere in its project, so its chats are one click away from a
-  // worktree rather than hidden until you go back to main.
+  // anywhere in its project, or while the project is pinned open, so its
+  // chats are one click away rather than hidden until you go back to main.
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
     // Project rows show their tabs even while the project is collapsed:
     // collapsing hides the worktrees, not main.
     (tabsExpansion === 'all' ||
-      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeHoldsActive(model, row))))
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeShowsTabs(model, row))))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -507,7 +507,7 @@ export function WorktreeList({
           scope={section.scope}
           name={section.repoName}
           className={i > 0 ? 'mt-3' : ''}
-          panel={showBody && !section.unified}
+          panel={showBody && !section.unified && section.holdsActive}
           draggable={reorderable}
           lifted={lifted}
           dropLine={drag.dropLine?.scope === section.scope ? drag.dropLine.edge : null}
@@ -740,8 +740,9 @@ function ProjectSection({
   scope: string
   name: string
   className: string
-  /** Expanded: sit the whole project on a recessed backdrop so it reads as
-   *  one unit against the flat collapsed rows around it. */
+  /** The expanded project holding the active worktree: sit it on a
+   *  recessed backdrop so it reads as one unit against the rows around it.
+   *  Pinned-open projects you aren't in stay on the plain background. */
   panel: boolean
   draggable: boolean
   lifted: boolean

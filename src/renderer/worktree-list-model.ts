@@ -636,6 +636,16 @@ export function homeHoldsActive(model: WorktreeListModel, row: WorktreeRowModel)
   return !!row.home && model.activeRepoRoot !== null && row.worktree.repoRoot === model.activeRepoRoot
 }
 
+/** True for a project's main row whose chats should stay listed under
+ *  'selected' tabs expansion: the main of the project you're in, plus every
+ *  main of a pinned-open project. Pinning keeps the project expanded, and an
+ *  expanded project's header shows its chats. */
+export function homeShowsTabs(model: WorktreeListModel, row: WorktreeRowModel): boolean {
+  if (!row.home) return false
+  if (homeHoldsActive(model, row)) return true
+  return model.sections.some((s) => !s.unified && s.pinnedOpen && s.homes.includes(row))
+}
+
 /** The project accordion: the project holding the active worktree is open,
  *  others collapse to their row unless pinned open. Cheap and
  *  allocation-light: rows are never copied, so they keep their identity

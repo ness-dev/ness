@@ -6,6 +6,7 @@ import {
   buildWorktreeListBase,
   buildWorktreeListModel,
   homeHoldsActive,
+  homeShowsTabs,
   mergeProjectOrder,
   planProjectDrop,
   UNIFIED_REPO_ROOT,
@@ -951,6 +952,16 @@ describe('project accordion', () => {
     expect(model.sections.map((s) => s.collapsed)).toEqual([false, false])
   })
 
+  it('marks only the active project as holding it, even with both pinned open', () => {
+    // The sidebar's recessed well follows holdsActive, not pinnedOpen.
+    const model = twoRepos({
+      activeWorktreeId: '/w/b',
+      pinnedOpenRepos: { '/repos/alpha': true, '/repos/beta': true }
+    })
+    expect(model.sections.map((s) => s.collapsed)).toEqual([false, false])
+    expect(model.sections.map((s) => s.holdsActive)).toEqual([false, true])
+  })
+
   it('treats a pending creation as being in its project', () => {
     const model = twoRepos({
       activeWorktreeId: 'pending-1',
@@ -1154,5 +1165,35 @@ describe('homeHoldsActive', () => {
     expect(model.sections[0].holdsActive).toBe(true)
     expect(homeHoldsActive(model, header)).toBe(false)
     expect(homeHoldsActive(model, remoteHome)).toBe(true)
+  })
+})
+
+describe('homeShowsTabs', () => {
+  const twoRepos = (overrides: Partial<WorktreeListModelInput> = {}) =>
+    buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta', '/repos/gamma'],
+        worktrees: [
+          wt({ path: '/repos/alpha', repoRoot: '/repos/alpha', isMain: true, branch: 'main' }),
+          wt({ path: '/w/a', repoRoot: '/repos/alpha' }),
+          wt({ path: '/repos/beta', repoRoot: '/repos/beta', isMain: true, branch: 'main' }),
+          wt({ path: '/repos/gamma', repoRoot: '/repos/gamma', isMain: true, branch: 'main' })
+        ],
+        ...overrides
+      })
+    )
+
+  it('shows the main of the active project and of every pinned-open project', () => {
+    const model = twoRepos({ activeWorktreeId: '/w/a', pinnedOpenRepos: { '/repos/beta': true } })
+    const [alpha, beta, gamma] = model.sections
+    expect(homeShowsTabs(model, alpha.homes[0])).toBe(true)
+    expect(homeShowsTabs(model, beta.homes[0])).toBe(true)
+    expect(homeShowsTabs(model, gamma.homes[0])).toBe(false)
+  })
+
+  it('never applies to a pinned project’s other worktrees', () => {
+    const model = twoRepos({ activeWorktreeId: '/repos/beta', pinnedOpenRepos: { '/repos/alpha': true } })
+    const workRow = model.sections[0].groups.flatMap((g) => g.rows).find((r) => r.path === '/w/a')!
+    expect(homeShowsTabs(model, workRow)).toBe(false)
   })
 })
