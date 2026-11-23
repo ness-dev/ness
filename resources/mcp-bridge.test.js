@@ -522,6 +522,79 @@ describe('mcp-bridge edit_copy', () => {
   })
 })
 
+describe('mcp-bridge eval_tab', () => {
+  let stub
+  let bridge
+  let lastBody
+
+  afterEach(async () => {
+    if (bridge) await bridge.kill()
+    if (stub) await stub.close()
+  })
+
+  async function callEval(args) {
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'eval_tab', arguments: args }
+    })
+    return bridge.next()
+  }
+
+  function serveEval(reply, mode = 'full') {
+    return startStub((req, body, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      if (req.url === '/scope') {
+        return res.end(JSON.stringify({ scope: null, browser: { enabled: true, mode } }))
+      }
+      lastBody = body
+      res.end(JSON.stringify(reply))
+    })
+  }
+
+  async function listTools() {
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    await bridge.next()
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    return (await bridge.next()).result.tools.map((t) => t.name)
+  }
+
+  it('posts the expression and returns the JSON value', async () => {
+    stub = await serveEval({ ok: true, value: '{"w":390}' })
+    bridge = spawnBridge(stub.port, 'tok')
+    const response = await callEval({ tab_id: 'tab-1', expression: '({w: innerWidth})' })
+    expect(response.result.content[0].text).toBe('{"w":390}')
+    expect(lastBody).toEqual({ tabId: 'tab-1', expression: '({w: innerWidth})', awaitPromise: true })
+  })
+
+  it('reports a throw inside the page as a tool error', async () => {
+    stub = await serveEval({ ok: false, error: 'TypeError: x is undefined\n    at <anonymous>:1:1' })
+    bridge = spawnBridge(stub.port, 'tok')
+    const response = await callEval({ tab_id: 'tab-1', expression: 'x.y' })
+    expect(response.result.isError).toBe(true)
+    expect(response.result.content[0].text).toMatch(/TypeError: x is undefined/)
+  })
+
+  it('caps a large result', async () => {
+    stub = await serveEval({ ok: true, value: JSON.stringify('z'.repeat(300_000)) })
+    bridge = spawnBridge(stub.port, 'tok')
+    const text = (await callEval({ tab_id: 'tab-1', expression: 'big' })).result.content[0].text
+    expect(text.length).toBeLessThan(101_000)
+    expect(text).toMatch(/truncated by Ness: showing the first 100000 of 300002 bytes/)
+  })
+
+  it('is hidden when browser tools are View Only', async () => {
+    stub = await serveEval({}, 'view')
+    bridge = spawnBridge(stub.port, 'tok')
+    const names = await listTools()
+    expect(names).toContain('get_tab_dom')
+    expect(names).not.toContain('eval_tab')
+  })
+})
+
 describe('mcp-bridge log-size cap on startup', () => {
   let tmpDir
 

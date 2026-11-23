@@ -9,7 +9,14 @@ import {
   viewportCaptureError
 } from './browser-screenshot'
 import { normalizeBrowserUrl } from './browser-url'
-import { evalWithTimeout, evalBlockedReason } from './browser-eval'
+import {
+  evalWithTimeout,
+  evalBlockedReason,
+  buildEvalScript,
+  clampEvalTimeout,
+  explainEvalTimeout,
+  type TabEvalResult
+} from './browser-eval'
 import { canSurfaceCapture, emulatedViewRect } from './browser-layout'
 import type { BrowserViewport } from '../shared/browser-viewport'
 
@@ -854,7 +861,8 @@ export class BrowserManager implements BrowserManagerLike {
     tabId: string,
     inst: BrowserInstance,
     script: string,
-    what: string
+    what: string,
+    timeoutMs?: number
   ): Promise<unknown> {
     const wc = inst.view.webContents
     const blocked = evalBlockedReason({
@@ -868,7 +876,11 @@ export class BrowserManager implements BrowserManagerLike {
       throw new Error(blocked)
     }
     try {
-      return await evalWithTimeout(() => wc.executeJavaScript(script), `${what} tab=${tabId}`)
+      return await evalWithTimeout(
+        () => wc.executeJavaScript(script),
+        `${what} tab=${tabId}`,
+        timeoutMs
+      )
     } catch (err) {
       log('browser', `${what} failed tab=${tabId}`, err instanceof Error ? err.message : err)
       throw err
@@ -1036,6 +1048,29 @@ export class BrowserManager implements BrowserManagerLike {
       'getDom'
     )
     return typeof result === 'string' ? result : null
+  }
+
+  async evalTab(
+    tabId: string,
+    code: string,
+    opts?: { awaitPromise?: boolean; timeoutMs?: number }
+  ): Promise<TabEvalResult | null> {
+    const inst = this.instances.get(tabId)
+    if (!inst) return null
+    const built = buildEvalScript(code, opts)
+    if ('error' in built) return { ok: false, error: built.error }
+    // Layout reads off an unparented view measure a 0x0 viewport.
+    if (!inst.visible) this.park(inst)
+    const result = await this.evalInTab(
+      tabId,
+      inst,
+      built.script,
+      'evalTab',
+      clampEvalTimeout(opts?.timeoutMs)
+    ).catch((err: unknown) => {
+      throw explainEvalTimeout(err)
+    })
+    return result as TabEvalResult
   }
 
   getTabInfo(tabId: string): {

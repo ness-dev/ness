@@ -6486,6 +6486,7 @@ async function runBoot(): Promise<void> {
       screenshotTab: (tabId, opts) => browserManager.capturePage(tabId, opts),
       getTabDom: (tabId) => browserManager.getDom(tabId),
       getTabClickables: (tabId) => browserManager.getClickables(tabId),
+      evalTab: (tabId, code, opts) => browserManager.evalTab(tabId, code, opts),
       navigateTab: (tabId, url) => browserManager.navigate(tabId, url),
       backTab: (tabId) => browserManager.back(tabId),
       forwardTab: (tabId) => browserManager.forward(tabId),

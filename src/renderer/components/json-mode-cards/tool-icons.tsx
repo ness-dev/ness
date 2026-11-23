@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Bell,
   Bot,
+  Braces,
   CalendarClock,
   Camera,
   CircleCheck,
@@ -155,6 +156,7 @@ export const ReloadIcon: ToolIcon = ({ className }) => <RotateCw className={clas
 export const BackIcon: ToolIcon = ({ className }) => <ArrowLeft className={className} />
 export const ForwardIcon: ToolIcon = ({ className }) => <ArrowRight className={className} />
 export const DomIcon: ToolIcon = ({ className }) => <Code className={className} />
+export const EvalIcon: ToolIcon = ({ className }) => <Braces className={className} />
 export const ClickablesIcon: ToolIcon = ({ className }) => <Crosshair className={className} />
 export const ConsoleIcon: ToolIcon = ({ className }) => <SquareTerminal className={className} />
 export const UrlIcon: ToolIcon = ({ className }) => <Link className={className} />

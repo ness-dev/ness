@@ -23,6 +23,7 @@ import {
   ConsoleIcon,
   CursorIcon,
   DomIcon,
+  EvalIcon,
   ForwardIcon,
   ClickupIcon,
   CloudflareIcon,
@@ -398,6 +399,7 @@ const NESS_ACTIONS: Record<string, ToolAction> = {
   forward_tab: { icon: ForwardIcon, one: 'navigation', many: 'navigations' },
   reload_tab: { icon: ReloadIcon, one: 'reload', many: 'reloads' },
   get_tab_dom: { icon: DomIcon, one: 'DOM read', many: 'DOM reads' },
+  eval_tab: { icon: EvalIcon, one: 'page script', many: 'page scripts' },
   get_tab_clickables: {
     icon: ClickablesIcon,
     one: 'element scan',

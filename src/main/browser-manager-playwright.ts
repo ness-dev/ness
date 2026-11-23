@@ -26,7 +26,13 @@ import type { BrowserViewport } from '../shared/browser-viewport'
 import type { Store } from './store'
 import { log } from './debug'
 import { normalizeBrowserUrl } from './browser-url'
-import { evalWithTimeout } from './browser-eval'
+import {
+  evalWithTimeout,
+  buildEvalScript,
+  clampEvalTimeout,
+  explainEvalTimeout,
+  type TabEvalResult
+} from './browser-eval'
 
 const CONSOLE_LOG_CAP = 200
 
@@ -779,5 +785,28 @@ export class PlaywrightBrowserManager implements BrowserManagerLike {
         throw err
       }
     )
+  }
+
+  async evalTab(
+    tabId: string,
+    code: string,
+    opts?: { awaitPromise?: boolean; timeoutMs?: number }
+  ): Promise<TabEvalResult | null> {
+    const inst = this.instances.get(tabId)
+    if (!inst) return null
+    const built = buildEvalScript(code, opts)
+    if ('error' in built) return { ok: false, error: built.error }
+    return await evalWithTimeout(
+      () => inst.page.evaluate(built.script) as Promise<TabEvalResult>,
+      `evalTab tab=${tabId}`,
+      clampEvalTimeout(opts?.timeoutMs)
+    ).catch((err: unknown) => {
+      log(
+        'browser-playwright',
+        `evalTab failed tab=${tabId}`,
+        err instanceof Error ? err.message : err
+      )
+      throw explainEvalTimeout(err)
+    })
   }
 }

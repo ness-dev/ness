@@ -23,6 +23,7 @@ import type { Subscriber } from '../shared/subscribers'
 import type { FanOutResult, SubscribeResult, UnsubscribeResult } from './worktree-subscriptions'
 import type { CaptureResult } from './browser-manager-types'
 import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
+import type { TabEvalResult } from './browser-eval'
 import { wrapAutomatedMessage } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import { log } from './debug'
@@ -58,6 +59,11 @@ export interface BrowserQueries {
   ) => Promise<CaptureResult | null>
   getTabDom: (tabId: string) => Promise<string | null>
   getTabClickables: (tabId: string) => Promise<unknown | null>
+  evalTab: (
+    tabId: string,
+    code: string,
+    opts: { awaitPromise: boolean; timeoutMs?: number }
+  ) => Promise<TabEvalResult | null>
   navigateTab: (tabId: string, url: string) => void
   backTab: (tabId: string) => void
   forwardTab: (tabId: string) => void
@@ -327,7 +333,10 @@ const FULL_CONTROL_BROWSER_PATHS = new Set([
   '/browser/click',
   '/browser/type',
   '/browser/scroll',
-  '/browser/cursor'
+  '/browser/cursor',
+  // Arbitrary script with the tab's cookies and origin — at least as
+  // powerful as click/type, so View Only must not reach it.
+  '/browser/eval'
 ])
 
 let serverInfo: { port: number; token: string } | null = null
@@ -822,7 +831,7 @@ async function handleRequest(
     if (perms.mode === 'view' && FULL_CONTROL_BROWSER_PATHS.has(path)) {
       return sendJson(res, 403, {
         error:
-          'browser tools are set to View Only in Ness settings — click/type/scroll/cursor are unavailable'
+          'browser tools are set to View Only in Ness settings — click/type/scroll/cursor/eval are unavailable'
       })
     }
     const callerWorktree = scope.worktreePath
@@ -916,6 +925,25 @@ async function handleRequest(
         snapshot: data,
         error: data != null ? undefined : 'clickables read failed'
       })
+    }
+    if (req.method === 'POST' && path === '/browser/eval') {
+      const code = typeof body.expression === 'string' ? body.expression : ''
+      if (!code.trim()) return sendJson(res, 400, { error: 'expression required' })
+      try {
+        const result = await deps.browser.evalTab(tabId, code, {
+          awaitPromise: body.awaitPromise !== false,
+          timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined
+        })
+        if (!result) {
+          return sendJson(res, 500, { error: 'eval failed: tab is no longer available' })
+        }
+        // A throw inside the page is the agent's answer, not a server fault.
+        return sendJson(res, 200, result)
+      } catch (err) {
+        return sendJson(res, 500, {
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
     }
     if (req.method === 'POST' && path === '/browser/navigate') {
       const nextUrl = String(body.url || '').trim()

@@ -11,6 +11,7 @@
 
 import type { BrowserViewport } from '../shared/browser-viewport'
 import type { Store } from './store'
+import type { TabEvalResult } from './browser-eval'
 
 export interface ConsoleLog {
   ts: number
@@ -77,4 +78,12 @@ export interface BrowserManagerLike {
     opts?: { format?: 'jpeg' | 'png'; quality?: number }
   ): Promise<CaptureResult | null>
   getDom(tabId: string): Promise<string | null>
+  /** Run agent-supplied JS in the page. Resolves with the thrown error as a
+   * result rather than rejecting; rejects only when the tab can't be
+   * evaluated at all (crashed, never loaded, timed out). */
+  evalTab(
+    tabId: string,
+    code: string,
+    opts?: { awaitPromise?: boolean; timeoutMs?: number }
+  ): Promise<TabEvalResult | null>
 }
