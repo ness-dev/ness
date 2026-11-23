@@ -435,6 +435,9 @@ interface JsonModeChatProps {
   /** Mount the subagents column beside the transcript. Only the tab on
    *  screen should — the column polls while agents run. */
   showSubagents?: boolean
+  /** This tab is the one on screen in its pane. Defaults to true for
+   *  callers that only mount the selected tab. */
+  visible?: boolean
 }
 
 // All per-tool card components live in src/renderer/components/json-mode-cards/
@@ -1582,7 +1585,8 @@ export function JsonModeChat({
   sessionId,
   worktreePath,
   mode = 'awake',
-  showSubagents = false
+  showSubagents = false,
+  visible = true
 }: JsonModeChatProps): JSX.Element {
   const [subagentChipSlot, setSubagentChipSlot] = useState<HTMLSpanElement | null>(null)
   const backend = useBackend()
@@ -1597,7 +1601,8 @@ export function JsonModeChat({
     jsonModeTranscriptWindow,
     defaultClaudeTabType,
     conversationForkEnabled,
-    worktreeMessagingEnabled
+    worktreeMessagingEnabled,
+    promptSuggestionsEnabled
   } = useSettings()
   const worktrees = useWorktrees()
   const aliases = useAliases()
@@ -1657,6 +1662,25 @@ export function JsonModeChat({
     }>
   >([])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Tell main whether this composer is on screen, so a chat nobody is
+  // looking at doesn't spend a prompt-suggestion generation every turn.
+  // Page visibility rather than window focus: a paused process generates
+  // nothing at turn end, so pausing on blur would lose the suggestion for
+  // someone watching the chat from another app.
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible'
+  )
+  useEffect(() => {
+    const onChange = (): void => setPageVisible(document.visibilityState === 'visible')
+    document.addEventListener('visibilitychange', onChange)
+    return () => document.removeEventListener('visibilitychange', onChange)
+  }, [])
+  const composerOnScreen = visible && pageVisible && mode !== 'asleep'
+  useEffect(() => {
+    if (!composerOnScreen) return
+    void backend.setJsonClaudeComposerVisible(sessionId, true)
+    return () => void backend.setJsonClaudeComposerVisible(sessionId, false)
+  }, [backend, sessionId, composerOnScreen])
   // px = null means never resized, so the composer auto-grows with content.
   // Once the user drags the divider it becomes a fixed height and auto-grow
   // stops; double-clicking the divider returns it to null.
@@ -2966,6 +2990,28 @@ export function JsonModeChat({
   const busy = !!session?.busy
   const hasOutgoing = draft.trim().length > 0 || attachments.length > 0
   const permissionMode = session?.permissionMode ?? 'default'
+  // Offered only into an empty composer on an idle session: once the user
+  // types, the placeholder (where it renders) is gone, and the first
+  // keystroke of a new turn clears it in the slice anyway.
+  const promptSuggestion =
+    promptSuggestionsEnabled &&
+    mode !== 'asleep' &&
+    !busy &&
+    draft === '' &&
+    attachments.length === 0 &&
+    pending.length === 0
+      ? session?.promptSuggestion
+      : undefined
+
+  function acceptPromptSuggestion(text: string): void {
+    setDraft(text)
+    setCursorPos(text.length)
+    handleComposerActivity()
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) el.setSelectionRange(text.length, text.length)
+    })
+  }
 
   function cyclePermissionMode(): void {
     // default → acceptEdits → plan → auto → default. Matches the order
@@ -3439,6 +3485,18 @@ export function JsonModeChat({
                   return
                 }
               }
+              if (
+                promptSuggestion &&
+                (e.key === 'Tab' || e.key === 'ArrowRight') &&
+                !e.shiftKey &&
+                !e.metaKey &&
+                !e.ctrlKey &&
+                !e.altKey
+              ) {
+                e.preventDefault()
+                acceptPromptSuggestion(promptSuggestion)
+                return
+              }
               if (e.key === 'Escape') {
                 // Leave the composer. Global hotkeys bound to a bare key
                 // (approve = "a") are suppressed while an editable element
@@ -3476,10 +3534,16 @@ export function JsonModeChat({
                 // textarea inserts a newline as usual.
               }
             }}
+            // The suggestion rides in the placeholder: same font, wrap and
+            // faint colour as ghost text, and it disappears on the first
+            // keystroke without any overlay to keep aligned.
             placeholder={
               mode === 'asleep'
                 ? 'Type to wake this session…'
-                : composerPlaceholder
+                : promptSuggestion ?? composerPlaceholder
+            }
+            aria-description={
+              promptSuggestion ? 'Suggested reply. Press Tab to use it.' : undefined
             }
             // text-base (16px) below sm: prevents iOS Safari from zooming
             // the viewport when the textarea takes focus. text-sm on
@@ -3518,6 +3582,20 @@ export function JsonModeChat({
               </button>
             )}
             <span ref={setSubagentChipSlot} className="contents" />
+            {promptSuggestion && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  acceptPromptSuggestion(promptSuggestion)
+                  textareaRef.current?.focus()
+                }}
+                className="text-xs text-faint hover:text-muted cursor-pointer"
+                title="Use Claude's suggested reply"
+              >
+                <kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to use suggestion
+              </button>
+            )}
             <div className="flex-1" />
             {busy && (
               <button

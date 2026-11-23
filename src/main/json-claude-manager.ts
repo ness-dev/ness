@@ -1352,12 +1352,18 @@ export class JsonClaudeManager implements ChatProvider {
    *  documents for "a host whose composer is not on screen": while paused,
    *  a turn end starts no suggestion generation, so background chats cost
    *  nothing. No-op when the value hasn't changed or the process wasn't
-   *  spawned with --prompt-suggestions. */
+   *  spawned with --prompt-suggestions.
+   *
+   *  The CLI documents that a build where pausing isn't enabled yet
+   *  acknowledges the request and keeps generating; the bundled 2.1.327
+   *  is one. Sending it anyway costs a line on stdin and starts saving
+   *  as soon as a bundled build honors it. */
   setPromptSuggestionsPaused(sessionId: string, paused: boolean): void {
     const inst = this.instances.get(sessionId)
     if (!inst || !inst.promptSuggestions) return
     if ((inst.promptSuggestionsPaused ?? false) === paused) return
     inst.promptSuggestionsPaused = paused
+    log('json-claude', `prompt suggestions paused=${paused} sessionId=${sessionId}`)
     const frame = {
       type: 'control_request',
       request_id: `suggestions-paused-${randomUUID()}`,
