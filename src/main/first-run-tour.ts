@@ -112,7 +112,7 @@ export function buildFirstRunKickoff(): string {
   return wrapAutomatedMessage(
     'first-run-kickoff',
     [
-      'This is the user\'s first time using Ness. They just added their own project and pressed "Start something new" on its main workspace. This message is hidden from them; your reply is the first thing they read.',
+      'This is the user\'s first time using Ness. They just added their own project and pressed "Start something new" on its main workspace. This message is folded away in their chat; your reply is the first thing they read.',
       '',
       'Your job is to teach them how Ness works by getting one real task going. They know this codebase far better than you, so do not explore the repo, summarize it, or suggest tasks from it unless they ask.',
       '',

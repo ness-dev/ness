@@ -904,7 +904,7 @@ function RateLimitErrorCard({
 function automationLabel(
   source: JsonClaudeAutomationSource,
   from?: string
-): { label: string; note: string; brand: boolean; hidden?: boolean } {
+): { label: string; note: string; brand: boolean; collapsed?: boolean } {
   if (source === 'worktree-message') {
     return {
       label: from ? `Agent Message · from ${from}` : 'Agent Message',
@@ -983,7 +983,7 @@ function automationLabel(
   if (source === 'first-run-kickoff') {
     // The brief is instructions to the agent, not something the user needs
     // to read before its greeting, so it starts folded away.
-    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true, hidden: true }
+    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true, collapsed: true }
   }
   if (source === 'blame-ask') {
     return { label: 'Blame · Ask about a line', note: 'you opened this from the gutter', brand: true }
@@ -1008,8 +1008,8 @@ function AutomatedTurnCard({
   isQueued: boolean
   onCancelQueued: () => void
 }): JSX.Element {
-  const { label, note, brand, hidden } = automationLabel(source, from)
-  const [open, setOpen] = useState(!hidden)
+  const { label, note, brand, collapsed } = automationLabel(source, from)
+  const [open, setOpen] = useState(!collapsed)
   const Icon = brand ? NessIcon : Bot
   return (
     <div className="flex justify-end">
@@ -1038,7 +1038,7 @@ function AutomatedTurnCard({
             {label}
           </span>
           <span className="text-muted truncate">{note}</span>
-          {hidden && (
+          {collapsed && (
             <button
               onClick={() => setOpen((o) => !o)}
               className="flex items-center gap-0.5 shrink-0 ml-auto text-muted hover:text-fg cursor-pointer"
