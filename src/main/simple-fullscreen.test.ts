@@ -102,6 +102,20 @@ describe('full screen modes', () => {
     expect(win.simple).toBe(true)
   })
 
+  it('a stale whole-screen request does not fire on a later native leave', () => {
+    const { win, w } = setup()
+    win.clickGreenButton()
+    win.setFullScreen.mockImplementationOnce(() => {}) // AppKit drops the exit
+    mod.toggleWholeScreen(w)
+    vi.runAllTimers()
+    expect(win.native).toBe(true)
+    win.native = false
+    win.clickGreenButton()
+    win.native = false
+    win.emit('leave-full-screen')
+    expect(win.simple).toBe(false)
+  })
+
   it('a native entry while in whole screen leaves both', () => {
     const { win, w } = setup()
     mod.toggleWholeScreen(w)

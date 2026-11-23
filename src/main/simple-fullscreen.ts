@@ -97,6 +97,10 @@ export function attachFullScreenHandling(win: BrowserWindow, notify: () => void)
   notifiers.set(win, notify)
 
   win.on('enter-full-screen', () => {
+    // A native entry supersedes any whole-screen request still waiting on a
+    // native exit that never arrived, so a later, unrelated leave can't
+    // pull the window into whole screen.
+    pendingWholeScreen.delete(win)
     // fn-F and the AppKit/Window-menu entries call toggleFullScreen:
     // directly, so they can land here while in whole-screen mode, which
     // AppKit doesn't model. Treat that as "leave full screen". Simple mode
