@@ -15,6 +15,8 @@ import { rehypeHighlightShared } from '../rehype-highlight-shared'
 import remarkGfm from 'remark-gfm'
 import { remarkInsight } from '../remark-insight'
 import { remarkMermaid } from '../remark-mermaid'
+import { USER_REMARK_PLUGINS } from '../remark-user-text'
+import type { PluggableList } from 'unified'
 import { InsightCard } from './InsightCard'
 import { MarkdownPre } from './MermaidDiagram'
 import {
@@ -285,9 +287,12 @@ function rehypeColorHex() {
  *  [query, currentHitBlockId, forceOpenTick] — none of which move while
  *  a message streams — so the memo actually gets to bail. */
 const MarkdownWithFind = memo(function MarkdownWithFind({
-  children
+  children,
+  remarkPlugins = REMARK_PLUGINS
 }: {
   children: string
+  /** Must be a stable (module-level) reference, or the memo never bails. */
+  remarkPlugins?: PluggableList
 }): JSX.Element {
   const { query } = useFind()
   const rehypePlugins = useMemo(() => {
@@ -296,7 +301,7 @@ const MarkdownWithFind = memo(function MarkdownWithFind({
   }, [query])
   return (
     <ReactMarkdown
-      remarkPlugins={REMARK_PLUGINS}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       components={MARKDOWN_COMPONENTS}
       urlTransform={chatUrlTransform}
@@ -1051,10 +1056,10 @@ function AutomatedTurnCard({
           )}
         </div>
         <div
-          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
+          className="px-4 pt-1 pb-2.5 markdown leading-relaxed"
           style={{ fontSize: 'var(--chat-body-text)' }}
         >
-          <HighlightedText text={text} />
+          <MarkdownWithFind>{text}</MarkdownWithFind>
         </div>
       </div>
     </div>
@@ -1097,8 +1102,8 @@ function HeldNoticesCard({ notices }: { notices: HeldNotice[] }): JSX.Element {
                 <div className="text-muted mb-1" style={{ fontSize: 'var(--chat-meta-text)' }}>
                   {automationLabel(n.source, n.from).label}
                 </div>
-                <div className="whitespace-pre-wrap break-words">
-                  <HighlightedText text={n.body} />
+                <div className="markdown leading-relaxed">
+                  <MarkdownWithFind>{n.body}</MarkdownWithFind>
                 </div>
               </div>
             ))}
@@ -1183,10 +1188,12 @@ function renderEntries(
               }}
             >
               <div
-                className="flex-1 min-w-0 whitespace-pre-wrap break-words"
+                className="flex-1 min-w-0 markdown markdown-user"
                 style={{ fontSize: 'var(--chat-body-text)' }}
               >
-                <HighlightedText text={entry.text ?? ''} />
+                <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>
+                  {entry.text ?? ''}
+                </MarkdownWithFind>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <span
@@ -1209,14 +1216,18 @@ function renderEntries(
         ) : (
           <div className="flex justify-end">
             <div
-              className="bg-accent/10 px-4 py-2.5 whitespace-pre-wrap break-words"
+              className="bg-accent/10 px-4 py-2.5"
               style={{
                 maxWidth: 'var(--chat-bubble-max)',
                 borderRadius: 'var(--chat-prompt-radius)',
                 fontSize: 'var(--chat-body-text)'
               }}
             >
-              <HighlightedText text={entry.text ?? ''} />
+              <div className="markdown markdown-user">
+                <MarkdownWithFind remarkPlugins={USER_REMARK_PLUGINS}>
+                  {entry.text ?? ''}
+                </MarkdownWithFind>
+              </div>
               {entry.images && entry.images.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {entry.images.map((img) => (

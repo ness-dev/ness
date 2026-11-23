@@ -24,3 +24,15 @@ describe('getEntrySegments for Bash', () => {
     expect(texts).toEqual(['Bash', 'Read a.ts', 'cat a.ts'])
   })
 })
+
+describe('getEntrySegments for user text', () => {
+  it('searches the rendered text, not the markdown source', () => {
+    const entry: JsonClaudeChatEntry = {
+      entryId: 'u1',
+      kind: 'user',
+      timestamp: 0,
+      text: '- **bold** and `code`'
+    }
+    expect(getEntrySegments(entry).map((s) => s.text)).toEqual(['bold and code'])
+  })
+})

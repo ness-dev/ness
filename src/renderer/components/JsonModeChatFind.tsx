@@ -152,7 +152,11 @@ export function getEntrySegments(entry: JsonClaudeChatEntry): FindSegment[] {
 
   // Top-level entry.text (user messages that aren't in blocks; some
   // system/error cards).
-  if (entry.text) out.push({ text: entry.text })
+  // User turns (typed and automated) render as markdown, so count what
+  // rehype will mark, not the raw source.
+  if (entry.text) {
+    out.push({ text: entry.kind === 'user' ? stripMarkdown(entry.text) : entry.text })
+  }
   if (entry.errorMessage) out.push({ text: entry.errorMessage })
 
   // Compact card body — static string, but the card is collapsible so
