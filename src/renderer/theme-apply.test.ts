@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { applyTheme, SEMANTIC_KEYS } from './theme-apply'
+import { applyTheme, EXPORTED_THEME_KEYS, SEMANTIC_KEYS } from './theme-apply'
 import type { ResolvedTheme } from './hooks/useActiveTheme'
 
 const builtIn = (id = 'dark'): ResolvedTheme =>
@@ -100,5 +100,13 @@ describe('applyTheme', () => {
     for (const k of ['brand', 'brand-mid', 'brand-deep', 'accent']) {
       expect(SEMANTIC_KEYS.has(k)).toBe(true)
     }
+  })
+})
+
+describe('EXPORTED_THEME_KEYS', () => {
+  it('lets custom themes set well but leaves it out of the built-in export', () => {
+    expect(SEMANTIC_KEYS.has('well')).toBe(true)
+    expect(EXPORTED_THEME_KEYS.has('well')).toBe(false)
+    expect(EXPORTED_THEME_KEYS.has('app')).toBe(true)
   })
 })
