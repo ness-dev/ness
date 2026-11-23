@@ -18,6 +18,7 @@ export const SEMANTIC_KEYS: ReadonlySet<string> = new Set([
   'panel-raised',
   'surface',
   'surface-hover',
+  'well',
   'border',
   'border-strong',
   'fg',
