@@ -154,6 +154,16 @@ describe('PlaywrightBrowserManager', () => {
       }
       expect(domSaw).toBe(true)
 
+      const measured = await m.evalTab(
+        tabId,
+        'const b = document.getElementById("btn")\nreturn {el: b, w: b.getBoundingClientRect().width > 0, title: document.title}'
+      )
+      expect(measured?.ok).toBe(true)
+      expect(JSON.parse(measured!.value!)).toEqual({ el: '<button#btn>', w: true, title: 'clicked' })
+      const thrown = await m.evalTab(tabId, 'document.querySelector("#nope").click()')
+      expect(thrown?.ok).toBe(false)
+      expect(thrown?.error).toMatch(/TypeError/)
+
       m.destroy(tabId)
       expect(m.hasTab(tabId)).toBe(false)
       expect(m.getUrl(tabId)).toBeNull()
