@@ -202,9 +202,10 @@ const ENCODE_SOURCE = String.raw`function __nessEncode(root) {
 }`
 
 /** A statement block's completion value isn't recoverable without `eval`, so
- * `a; b` yields undefined — say why, or it reads as a real measurement. */
+ * `a; b` yields undefined — say why, or it reads as a real measurement. Worded
+ * to stay true when the block did return something that is undefined. */
 export const BLOCK_UNDEFINED_HINT =
-  'undefined (ran as a statement block — add `return` to get a value back)'
+  'undefined (ran as a statement block — if you didn\'t `return` a value, add it)'
 
 /** The script both backends inject. It always resolves (never rejects) with
  * a structured-clone-safe TabEvalResult, so a throw inside the agent's code
