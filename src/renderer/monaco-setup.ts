@@ -134,16 +134,68 @@ function readVar(name: string, fallback: string): string {
   return v || fallback
 }
 
+// Monaco only accepts #rrggbb / #rrggbbaa, and throws lazily (on first
+// tokenize) for anything else — leaving the editor on whatever theme it had.
+// Custom properties come back verbatim, so the CSS minifier's `#fff` for
+// `#ffffff`, or a custom theme's `rgb(...)`, would break it. Let the browser
+// resolve the colour on a probe and re-serialize it as 6-digit hex.
+let colorProbe: HTMLElement | null = null
+function toHex(color: string, fallback: string): string {
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color
+  if (!colorProbe) {
+    colorProbe = document.createElement('span')
+    colorProbe.style.display = 'none'
+    document.body.appendChild(colorProbe)
+  }
+  colorProbe.style.color = ''
+  colorProbe.style.color = color
+  const m = getComputedStyle(colorProbe).color.match(/\d+(\.\d+)?/g)
+  if (!colorProbe.style.color || !m || m.length < 3) return fallback
+  return '#' + m.slice(0, 3).map((c) => Math.round(+c).toString(16).padStart(2, '0')).join('')
+}
+
+function readColor(name: string, fallback: string): string {
+  return toHex(readVar(name, fallback), fallback)
+}
+
+let themeObserver: MutationObserver | null = null
+
 export function defineHarnessTheme(): void {
-  const bg = readVar('--color-app', '#0b0d10')
-  const panel = readVar('--color-panel', '#12151a')
-  const fg = readVar('--color-fg', '#e6e6e6')
-  const muted = readVar('--color-muted', '#b0b0b0')
-  const faint = readVar('--color-faint', '#6b7280')
-  const border = readVar('--color-border', '#1f242c')
+  applyHarnessTheme()
+  // Monaco themes are global and static, so re-derive on every theme switch
+  // (theme-apply.ts rewrites [data-theme] and inline style on :root).
+  // Without this, a diff opened after switching kept the boot theme.
+  if (!themeObserver && typeof MutationObserver !== 'undefined') {
+    themeObserver = new MutationObserver(() => applyHarnessTheme())
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'style']
+    })
+  }
+}
+
+let lastThemeKey = ''
+
+function applyHarnessTheme(): void {
+  const bg = readColor('--color-app', '#0b0d10')
+  const panel = readColor('--color-panel', '#12151a')
+  const fg = readColor('--color-fg', '#e6e6e6')
+  const muted = readColor('--color-muted', '#b0b0b0')
+  const faint = readColor('--color-faint', '#6b7280')
+  const border = readColor('--color-border', '#1f242c')
+  const borderStrong = readColor('--color-border-strong', '#3a424d')
+  // Set by every light theme in styles.css (custom light themes inherit it
+  // from the default light selector they're layered on).
+  const light = readVar('--theme-scheme', 'dark') === 'light'
+
+  // The observer also fires for unrelated inline-style writes on :root
+  // (uiScale, brand colour); skip the redefine when nothing Monaco reads moved.
+  const key = [bg, panel, fg, muted, faint, border, borderStrong, light].join('|')
+  if (key === lastThemeKey) return
+  lastThemeKey = key
 
   monaco.editor.defineTheme('harness', {
-    base: 'vs-dark',
+    base: light ? 'vs' : 'vs-dark',
     inherit: true,
     rules: [
       { token: '', foreground: fg.replace('#', '') }
@@ -157,20 +209,20 @@ export function defineHarnessTheme(): void {
       'editor.lineHighlightBackground': panel,
       'editor.lineHighlightBorder': '#00000000',
       'editorCursor.foreground': fg,
-      'editorWhitespace.foreground': '#2a2f38',
-      'editor.selectionBackground': '#3a4252',
-      'editor.inactiveSelectionBackground': '#2a3040',
+      'editorWhitespace.foreground': light ? borderStrong : '#2a2f38',
+      'editor.selectionBackground': light ? '#add6ff' : '#3a4252',
+      'editor.inactiveSelectionBackground': light ? '#e5ebf1' : '#2a3040',
       'editorIndentGuide.background1': border,
-      'editorIndentGuide.activeBackground1': '#3a424d',
+      'editorIndentGuide.activeBackground1': light ? borderStrong : '#3a424d',
       'editorWidget.background': panel,
       'editorWidget.border': border,
-      'scrollbarSlider.background': '#3a424d55',
-      'scrollbarSlider.hoverBackground': '#4a5260aa',
-      'scrollbarSlider.activeBackground': '#5a6270',
-      'diffEditor.insertedTextBackground': '#2ea04355',
-      'diffEditor.removedTextBackground': '#f8514955',
-      'diffEditor.insertedLineBackground': '#2ea04322',
-      'diffEditor.removedLineBackground': '#f8514922'
+      'scrollbarSlider.background': light ? '#64646433' : '#3a424d55',
+      'scrollbarSlider.hoverBackground': light ? '#64646455' : '#4a5260aa',
+      'scrollbarSlider.activeBackground': light ? '#00000055' : '#5a6270',
+      'diffEditor.insertedTextBackground': light ? '#1a7f3730' : '#2ea04355',
+      'diffEditor.removedTextBackground': light ? '#cf222e2a' : '#f8514955',
+      'diffEditor.insertedLineBackground': light ? '#1a7f3714' : '#2ea04322',
+      'diffEditor.removedLineBackground': light ? '#cf222e12' : '#f8514922'
     }
   })
   monaco.editor.setTheme('harness')
