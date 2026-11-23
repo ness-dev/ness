@@ -362,6 +362,8 @@ function DesktopApp(): JSX.Element {
   // Step 3's history half only makes sense where loch exists or Ness can
   // download it for this platform.
   const historyOffered = useAppState((s) => s.loch.available || s.loch.installable)
+  // Form draft for step 3's history checkbox until "Install hooks" applies it.
+  const [recordHistoryDraft, setRecordHistoryDraft] = useState(true)
   const updaterStatus = useUpdater().status
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false)
   const [manualUpdateBannerDismissed, setManualUpdateBannerDismissed] = useState(false)
@@ -1380,8 +1382,11 @@ const setQuestStep = useCallback((next: QuestStep) => {
     const step1Complete = themeChosen
     const step2Complete = agentChosen
     const recordNewRepos = settings.lochRecordNewRepos
-    const step3Complete =
-      hooksConsent !== 'pending' && (!historyOffered || recordNewRepos !== null)
+    const step3Complete = hooksConsent !== 'pending'
+    // An answered step shows the saved choice. Hooks answered before this
+    // question existed leave it null, which records nothing, so show it off.
+    const historyChecked =
+      recordNewRepos ?? (hooksConsent === 'pending' ? recordHistoryDraft : false)
     const activeStep: 1 | 2 | 3 | 4 = !step1Complete
       ? 1
       : !step2Complete
@@ -1708,9 +1713,43 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   </div>
                 </div>
+                {historyOffered ? (
+                  <label className="flex items-start gap-2 ml-8 mb-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={historyChecked}
+                      onChange={(e) => {
+                        // Once the step is answered the box edits the setting
+                        // itself; before that it's a draft the button applies.
+                        if (hooksConsent === 'pending' && recordNewRepos === null) setRecordHistoryDraft(e.target.checked)
+                        else void backend.setLochRecordNewRepos(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base shrink-0"
+                    />
+                    <div className="text-xs text-dim">
+                      <span className="text-sm text-fg-bright">Also record conversation history</span> in
+                      repos you add, so you can point at any line in the file viewer and get back to the
+                      agent turn that wrote it. Powered by <span className="text-fg">loch</span>, which runs
+                      on this machine: it adds hooks to each worktree&apos;s{' '}
+                      <code className="bg-app/50 px-1 rounded">.claude/settings.local.json</code> and keeps
+                      snapshots in <code className="bg-app/50 px-1 rounded">~/.loch</code>. Nothing is
+                      uploaded. If loch isn&apos;t installed, Ness downloads a checksum-pinned copy when the
+                      first repo is added. Change this in Settings → Conversation blame.
+                    </div>
+                  </label>
+                ) : (
+                  <div className="text-xs text-dim ml-8 mb-3">
+                    Conversation history tracking isn&apos;t available on this platform yet.
+                  </div>
+                )}
                 <div className="flex gap-2 ml-8">
                   <button
-                    onClick={handleAcceptHooks}
+                    onClick={() => {
+                      handleAcceptHooks()
+                      if (historyOffered && recordNewRepos === null) {
+                        void backend.setLochRecordNewRepos(recordHistoryDraft)
+                      }
+                    }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'accepted'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1719,10 +1758,13 @@ const setQuestStep = useCallback((next: QuestStep) => {
                           : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
                     }`}
                   >
-                    Install status hooks
+                    Install hooks
                   </button>
                   <button
-                    onClick={handleDeclineHooks}
+                    onClick={() => {
+                      handleDeclineHooks()
+                      if (historyOffered && recordNewRepos === null) void backend.setLochRecordNewRepos(false)
+                    }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'declined'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1731,52 +1773,6 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   >
                     Not now
                   </button>
-                </div>
-
-                <div className="ml-8 mt-4 pt-4 border-t border-border">
-                  <div className="text-fg-bright text-sm font-medium">Record conversation history</div>
-                  {historyOffered ? (
-                    <>
-                      <div className="text-xs text-dim mt-0.5">
-                        Turns on history tracking for each repo you add, so you can point at any line
-                        in the file viewer and get back to the agent turn that wrote it. Powered by{' '}
-                        <span className="text-fg">loch</span>, which runs on this machine: it adds hooks
-                        to each worktree&apos;s{' '}
-                        <code className="bg-app/50 px-1 rounded">.claude/settings.local.json</code> and
-                        keeps snapshots in <code className="bg-app/50 px-1 rounded">~/.loch</code>. Nothing
-                        is uploaded. If loch isn&apos;t installed, Ness downloads a checksum-pinned copy
-                        when the first repo is added. Change this in Settings → Conversation blame.
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          onClick={() => { void backend.setLochRecordNewRepos(true) }}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                            recordNewRepos === true
-                              ? 'bg-surface text-fg-bright border border-fg'
-                              : activeStep === 3
-                                ? 'bg-accent/20 hover:bg-accent/30 text-fg-bright border border-accent/40'
-                                : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
-                          }`}
-                        >
-                          Record history
-                        </button>
-                        <button
-                          onClick={() => { void backend.setLochRecordNewRepos(false) }}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                            recordNewRepos === false
-                              ? 'bg-surface text-fg-bright border border-fg'
-                              : 'bg-panel border border-border text-dim hover:text-fg hover:border-border-strong'
-                          }`}
-                        >
-                          Not now
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-xs text-dim mt-0.5">
-                      Not available on this platform yet, so there&apos;s nothing to install.
-                    </div>
-                  )}
                 </div>
               </div>
 
