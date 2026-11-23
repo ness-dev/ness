@@ -30,7 +30,7 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { homeHoldsActive, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
+import { homeHoldsActive, homeShowsTabs, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
@@ -280,15 +280,15 @@ export function WorktreeList({
   }
 
   // Under 'selected' a project's main also stays expanded while you're
-  // anywhere in its project, so its chats are one click away from a
-  // worktree rather than hidden until you go back to main.
+  // anywhere in its project, or while the project is pinned open, so its
+  // chats are one click away rather than hidden until you go back to main.
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
     // Project rows show their tabs even while the project is collapsed:
     // collapsing hides the worktrees, not main.
     (tabsExpansion === 'all' ||
-      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeHoldsActive(model, row))))
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeShowsTabs(model, row))))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -501,13 +501,19 @@ export function WorktreeList({
         // tall project doesn't drag a screenful of rows around with it.
         const lifted = drag.activeScope === section.scope
         const showBody = !section.collapsed && !lifted
+        // A project expanded on the plain background (pinned open, not the
+        // one you're in) has no well to mark where it ends, so keep the
+        // wider gap after it; collapsed rows and the well need less.
+        const prev = i > 0 ? model.sections[i - 1] : undefined
+        const prevExpandedFlat =
+          !!prev && !prev.unified && !prev.collapsed && !prev.holdsActive && drag.activeScope !== prev.scope
         return (
         <ProjectSection
           key={section.scope}
           scope={section.scope}
           name={section.repoName}
-          className={i > 0 ? 'mt-3' : ''}
-          panel={showBody && !section.unified}
+          className={i === 0 ? '' : prevExpandedFlat ? 'mt-3' : 'mt-1.5'}
+          panel={showBody && !section.unified && section.holdsActive}
           draggable={reorderable}
           lifted={lifted}
           dropLine={drag.dropLine?.scope === section.scope ? drag.dropLine.edge : null}
@@ -740,8 +746,9 @@ function ProjectSection({
   scope: string
   name: string
   className: string
-  /** Expanded: sit the whole project on a recessed backdrop so it reads as
-   *  one unit against the flat collapsed rows around it. */
+  /** The expanded project holding the active worktree: sit it on a
+   *  recessed backdrop so it reads as one unit against the rows around it.
+   *  Pinned-open projects you aren't in stay on the plain background. */
   panel: boolean
   draggable: boolean
   lifted: boolean
@@ -777,7 +784,7 @@ function ProjectSection({
       ref={outerRef}
       className={`relative ${panel ? 'bg-well py-1' : ''} ${className}`}
     >
-      {dropLine === 'before' && <DropLine className="-top-2" />}
+      {dropLine === 'before' && <DropLine className="-top-1" />}
       <div
         ref={setNodeRef}
         {...(draggable ? listeners : undefined)}
@@ -794,7 +801,7 @@ function ProjectSection({
         {header}
       </div>
       {children}
-      {dropLine === 'after' && <DropLine className="-bottom-2" />}
+      {dropLine === 'after' && <DropLine className="-bottom-1" />}
     </div>
   )
 }
