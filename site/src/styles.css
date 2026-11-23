@@ -321,7 +321,7 @@
    anchor every tip to the logo row (which is `relative`) instead of its own
    logo: it centers inside the content column, and the arrow is dropped because
    it no longer lines up with the logo. */
-@media (max-width: 639px) {
+@media (max-width: 767px) {
   .logo-tip {
     position: static;
   }

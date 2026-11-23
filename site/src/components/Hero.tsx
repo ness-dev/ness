@@ -44,6 +44,8 @@ export function Hero() {
         </span>
       </div>
 
+      {/* `relative` anchors the logo tips on narrow screens: see the
+          `.logo-tip` media query in styles.css. */}
       <div className="relative flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-3 text-xs text-ink-500">
         <span>Loved by engineers at</span>
 
