@@ -57,7 +57,9 @@ function makeManager(store: Store): JsonClaudeManager {
     getControlBridgeScriptPath: () => '/tmp/bridge.js',
     isHarnessMcpEnabled: () => false,
     getCallerScope: () => null,
-    getLaunchSettings: () => ({ tuiFullscreen: true })
+    getLaunchSettings: () => ({ tuiFullscreen: true }),
+    getPromptSuggestionsEnabled: () => true,
+    isComposerVisible: () => true
   })
 }
 

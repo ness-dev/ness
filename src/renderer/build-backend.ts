@@ -294,6 +294,8 @@ export function buildBackend(
     setCodexEnvVars: (vars: Record<string, string>) => reqConfig('config:setCodexEnvVars', vars),
     setCursorEnvVars: (vars: Record<string, string>) => reqConfig('config:setCursorEnvVars', vars),
     setHarnessMcpEnabled: (enabled: boolean) => reqConfig('config:setHarnessMcpEnabled', enabled),
+    setPromptSuggestionsEnabled: (enabled: boolean) =>
+      reqConfig('config:setPromptSuggestionsEnabled', enabled),
     setAutoApprovePermissions: (enabled: boolean) =>
       reqConfig('config:setAutoApprovePermissions', enabled),
     setAutoApproveSteerInstructions: (text: string) =>
@@ -772,6 +774,8 @@ export function buildBackend(
       req('jsonClaude:forkAt', id, entryId),
     openJsonClaudeAuthLoginTab: (worktreePath: string) =>
       req('jsonClaude:openAuthLoginTab', worktreePath),
+    setJsonClaudeComposerVisible: (id: string, visible: boolean) =>
+      req('jsonClaude:setComposerVisible', id, visible),
     setJsonClaudePermissionMode: (
       id: string,
       mode: JsonClaudePermissionMode

@@ -339,6 +339,9 @@ export interface SettingsState {
   codexEnvVars: Record<string, string>
   cursorEnvVars: Record<string, string>
   harnessMcpEnabled: boolean
+  /** Chat tabs pass --prompt-suggestions so Claude offers a predicted next
+   *  prompt after each turn, shown as ghost text in the empty composer. */
+  promptSuggestionsEnabled: boolean
   nameClaudeSessions: boolean
   terminalFontFamily: string
   terminalFontSize: number
@@ -607,6 +610,7 @@ export type SettingsEvent =
   | { type: 'settings/codexEnvVarsChanged'; payload: Record<string, string> }
   | { type: 'settings/cursorEnvVarsChanged'; payload: Record<string, string> }
   | { type: 'settings/harnessMcpEnabledChanged'; payload: boolean }
+  | { type: 'settings/promptSuggestionsEnabledChanged'; payload: boolean }
   | { type: 'settings/nameClaudeSessionsChanged'; payload: boolean }
   | { type: 'settings/terminalFontFamilyChanged'; payload: string }
   | { type: 'settings/terminalFontSizeChanged'; payload: number }
@@ -702,6 +706,7 @@ export const initialSettings: SettingsState = {
   codexEnvVars: {},
   cursorEnvVars: {},
   harnessMcpEnabled: true,
+  promptSuggestionsEnabled: false,
   nameClaudeSessions: false,
   terminalFontFamily: '',
   terminalFontSize: 13,
@@ -992,6 +997,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, cursorEnvVars: event.payload }
     case 'settings/harnessMcpEnabledChanged':
       return { ...state, harnessMcpEnabled: event.payload }
+    case 'settings/promptSuggestionsEnabledChanged':
+      return { ...state, promptSuggestionsEnabled: event.payload }
     case 'settings/nameClaudeSessionsChanged':
       return { ...state, nameClaudeSessions: event.payload }
     case 'settings/terminalFontFamilyChanged':

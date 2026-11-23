@@ -46,6 +46,7 @@ import { listChatMentionTargets, matchChatMentions } from '../../shared/chat-men
 import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
+import { isPromptSuggestionAcceptKey, offeredPromptSuggestion } from './prompt-suggestion'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
 import { JsonClaudeQuestionCard } from './JsonClaudeQuestionCard'
@@ -435,6 +436,9 @@ interface JsonModeChatProps {
   /** Mount the subagents column beside the transcript. Only the tab on
    *  screen should — the column polls while agents run. */
   showSubagents?: boolean
+  /** This tab is the one on screen in its pane. Defaults to true for
+   *  callers that only mount the selected tab. */
+  visible?: boolean
 }
 
 // All per-tool card components live in src/renderer/components/json-mode-cards/
@@ -1582,7 +1586,8 @@ export function JsonModeChat({
   sessionId,
   worktreePath,
   mode = 'awake',
-  showSubagents = false
+  showSubagents = false,
+  visible = true
 }: JsonModeChatProps): JSX.Element {
   const [subagentChipSlot, setSubagentChipSlot] = useState<HTMLSpanElement | null>(null)
   const backend = useBackend()
@@ -1597,7 +1602,8 @@ export function JsonModeChat({
     jsonModeTranscriptWindow,
     defaultClaudeTabType,
     conversationForkEnabled,
-    worktreeMessagingEnabled
+    worktreeMessagingEnabled,
+    promptSuggestionsEnabled
   } = useSettings()
   const worktrees = useWorktrees()
   const aliases = useAliases()
@@ -1657,6 +1663,25 @@ export function JsonModeChat({
     }>
   >([])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Tell main whether this composer is on screen, so a chat nobody is
+  // looking at doesn't spend a prompt-suggestion generation every turn.
+  // Page visibility rather than window focus: a paused process generates
+  // nothing at turn end, so pausing on blur would lose the suggestion for
+  // someone watching the chat from another app.
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible'
+  )
+  useEffect(() => {
+    const onChange = (): void => setPageVisible(document.visibilityState === 'visible')
+    document.addEventListener('visibilitychange', onChange)
+    return () => document.removeEventListener('visibilitychange', onChange)
+  }, [])
+  const composerOnScreen = visible && pageVisible && mode !== 'asleep'
+  useEffect(() => {
+    if (!composerOnScreen) return
+    void backend.setJsonClaudeComposerVisible(sessionId, true)
+    return () => void backend.setJsonClaudeComposerVisible(sessionId, false)
+  }, [backend, sessionId, composerOnScreen])
   // px = null means never resized, so the composer auto-grows with content.
   // Once the user drags the divider it becomes a fixed height and auto-grow
   // stops; double-clicking the divider returns it to null.
@@ -2966,6 +2991,26 @@ export function JsonModeChat({
   const busy = !!session?.busy
   const hasOutgoing = draft.trim().length > 0 || attachments.length > 0
   const permissionMode = session?.permissionMode ?? 'default'
+  const promptSuggestion = offeredPromptSuggestion({
+    suggestion: session?.promptSuggestion,
+    enabled: promptSuggestionsEnabled,
+    asleep: mode === 'asleep',
+    busy,
+    draft,
+    attachmentCount: attachments.length,
+    pendingApprovalCount: pending.length,
+    mentionPopoverOpen: mentionItems.length > 0
+  })
+
+  function acceptPromptSuggestion(text: string): void {
+    setDraft(text)
+    setCursorPos(text.length)
+    handleComposerActivity()
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) el.setSelectionRange(text.length, text.length)
+    })
+  }
 
   function cyclePermissionMode(): void {
     // default → acceptEdits → plan → auto → default. Matches the order
@@ -3383,6 +3428,7 @@ export function JsonModeChat({
               })}
             </div>
           )}
+          <div className="relative">
           <textarea
             ref={textareaRef}
             value={draft}
@@ -3439,6 +3485,12 @@ export function JsonModeChat({
                   return
                 }
               }
+              // After the mention block on purpose: an open popover owns Tab.
+              if (promptSuggestion && isPromptSuggestionAcceptKey(e)) {
+                e.preventDefault()
+                acceptPromptSuggestion(promptSuggestion)
+                return
+              }
               if (e.key === 'Escape') {
                 // Leave the composer. Global hotkeys bound to a bare key
                 // (approve = "a") are suppressed while an editable element
@@ -3479,7 +3531,12 @@ export function JsonModeChat({
             placeholder={
               mode === 'asleep'
                 ? 'Type to wake this session…'
-                : composerPlaceholder
+                : promptSuggestion
+                  ? ''
+                  : composerPlaceholder
+            }
+            aria-description={
+              promptSuggestion ? 'Suggested reply. Press Tab to use it.' : undefined
             }
             // text-base (16px) below sm: prevents iOS Safari from zooming
             // the viewport when the textarea takes focus. text-sm on
@@ -3500,6 +3557,40 @@ export function JsonModeChat({
             // textarea, kicking the user out mid-keystroke. send() guards
             // the actual "no live subprocess" case.
           />
+          {promptSuggestion && (
+            // Ghost text drawn over the empty textarea rather than in its
+            // placeholder, so the hint can carry a styled key. Same padding
+            // and text classes as the textarea keep it aligned. One line,
+            // truncated, so a long suggestion can't push the hint out of a
+            // two-row composer; Tab inserts the full text anyway.
+            //
+            // Only the hint is a tap/click target, on touch too: tapping
+            // into the empty composer to type your own reply is the most
+            // common action there, so it must still just focus the box.
+            <div className="pointer-events-none absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint flex items-start gap-1">
+              <span aria-hidden className="min-w-0 truncate">
+                {promptSuggestion}
+              </span>
+              <button
+                type="button"
+                // Out of the tab order: from the textarea, Tab itself accepts.
+                tabIndex={-1}
+                aria-label="Accept suggested reply"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  acceptPromptSuggestion(promptSuggestion)
+                  textareaRef.current?.focus()
+                }}
+                className="pointer-events-auto shrink-0 whitespace-nowrap cursor-pointer hover:text-muted rounded pointer-coarse:-my-1 pointer-coarse:px-1.5 pointer-coarse:py-1 pointer-coarse:border pointer-coarse:border-border"
+              >
+                <span className="pointer-coarse:hidden">
+                  (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept suggestion)
+                </span>
+                <span className="hidden pointer-coarse:inline">Tap to accept suggestion</span>
+              </button>
+            </div>
+          )}
+          </div>
           <div className="flex items-center gap-2 px-2 pb-1.5 pt-0.5">
             <div
               className="flex items-center gap-1.5 text-xs text-muted"

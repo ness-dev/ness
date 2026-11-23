@@ -96,7 +96,9 @@ describe('JsonClaudeManager', () => {
       getControlBridgeScriptPath: () => '/tmp/bridge.js',
       isHarnessMcpEnabled: () => false,
       getCallerScope: () => null,
-      getLaunchSettings: () => launchSettings
+      getLaunchSettings: () => launchSettings,
+      getPromptSuggestionsEnabled: () => true,
+      isComposerVisible: () => true
     })
   }
 
@@ -927,7 +929,9 @@ describeChatProviderContract('claude', () => {
     getControlBridgeScriptPath: () => '/tmp/bridge.js',
     isHarnessMcpEnabled: () => false,
     getCallerScope: () => null,
-    getLaunchSettings: () => ({ tuiFullscreen: true })
+    getLaunchSettings: () => ({ tuiFullscreen: true }),
+    getPromptSuggestionsEnabled: () => true,
+    isComposerVisible: () => true
   })
   const proc = (): ReturnType<typeof makeFakeProc> => sessionProcs().at(-1)!
   const emit = (line: unknown): void => {
@@ -991,5 +995,115 @@ describe('extractAssistantBlocks', () => {
     })
     expect(blocks[0].intent).toBe('Run tests')
     expect(blocks[1].intent).toBeUndefined()
+  })
+})
+
+describe('JsonClaudeManager prompt suggestions', () => {
+  beforeEach(() => {
+    spawnedProcs.length = 0
+    spawnCalls.length = 0
+  })
+
+  function setup(opts: { enabled?: boolean; visible?: boolean; useSystemClaude?: boolean } = {}) {
+    const store = new Store()
+    let visible = opts.visible ?? true
+    const mgr = new JsonClaudeManager(store, {
+      getClaudeCommand: () => 'claude',
+      getUseSystemClaude: () => opts.useSystemClaude ?? false,
+      getApprovalSocketPath: (sid) => `/tmp/sock-${sid}`,
+      closeApprovalSession: vi.fn(),
+      cancelApprovalForToolUse: vi.fn(),
+      getClaudeEnvVars: () => ({}),
+      getControlServer: () => null,
+      getControlBridgeScriptPath: () => '/tmp/bridge.js',
+      isHarnessMcpEnabled: () => false,
+      getCallerScope: () => null,
+      getLaunchSettings: () => ({ tuiFullscreen: true }),
+      getPromptSuggestionsEnabled: () => opts.enabled ?? true,
+      isComposerVisible: () => visible
+    })
+    const sessionId = 'sess-suggest'
+    store.dispatch({ type: 'jsonClaude/sessionStarted', payload: { sessionId, worktreePath: '/tmp/wt' } })
+    mgr.create(sessionId, '/tmp/wt')
+    const proc = sessionProcs().at(-1)!
+    const emit = (line: unknown): void => {
+      proc.stdout.emit('data', Buffer.from(JSON.stringify(line) + '\n'))
+    }
+    const pauseFrames = (): boolean[] =>
+      proc.stdin.write.mock.calls
+        .map(([raw]) => JSON.parse(String(raw)))
+        .filter((f) => f.request?.subtype === 'set_prompt_suggestions_paused')
+        .map((f) => f.request.paused)
+    const suggestion = () => store.getSnapshot().state.jsonClaude.sessions[sessionId]?.promptSuggestion
+    return {
+      store,
+      mgr,
+      sessionId,
+      proc,
+      emit,
+      pauseFrames,
+      suggestion,
+      setVisible: (v: boolean) => (visible = v)
+    }
+  }
+
+  it('passes --prompt-suggestions to the bundled binary when enabled', () => {
+    const { proc } = setup()
+    expect(proc.spawnArgs).toContain('--prompt-suggestions')
+  })
+
+  it('omits the flag when the setting is off', () => {
+    const { proc } = setup({ enabled: false })
+    expect(proc.spawnArgs).not.toContain('--prompt-suggestions')
+  })
+
+  it('omits the flag for a PATH claude, which may not know it', () => {
+    setup({ useSystemClaude: true })
+    const call = spawnCalls.filter((c) => c.args.some((a) => a.includes('--permission-prompt-tool'))).at(-1)!
+    expect(call.args.join(' ')).not.toContain('--prompt-suggestions')
+  })
+
+  it('stores a prompt_suggestion emitted while idle', () => {
+    const { emit, suggestion } = setup()
+    emit({ type: 'prompt_suggestion', suggestion: '  show me the code ', uuid: 'u', session_id: 's' })
+    expect(suggestion()).toBe('show me the code')
+  })
+
+  it('drops a suggestion that arrives after the next turn started', () => {
+    const { store, sessionId, emit, suggestion } = setup()
+    store.dispatch({ type: 'jsonClaude/busyChanged', payload: { sessionId, busy: true, turnStartedAt: 1 } })
+    emit({ type: 'prompt_suggestion', suggestion: 'stale', uuid: 'u', session_id: 's' })
+    expect(suggestion()).toBeUndefined()
+  })
+
+  it('ignores an empty suggestion', () => {
+    const { emit, suggestion } = setup()
+    emit({ type: 'prompt_suggestion', suggestion: '   ', uuid: 'u', session_id: 's' })
+    expect(suggestion()).toBeUndefined()
+  })
+
+  it('a process spawned with no composer on screen starts paused', () => {
+    const { pauseFrames } = setup({ visible: false })
+    expect(pauseFrames()).toEqual([true])
+  })
+
+  it('a process spawned on screen sends no pause frame', () => {
+    const { pauseFrames } = setup()
+    expect(pauseFrames()).toEqual([])
+  })
+
+  it('setPromptSuggestionsPaused only writes when the value flips', () => {
+    const { mgr, sessionId, pauseFrames } = setup()
+    mgr.setPromptSuggestionsPaused(sessionId, false)
+    mgr.setPromptSuggestionsPaused(sessionId, true)
+    mgr.setPromptSuggestionsPaused(sessionId, true)
+    mgr.setPromptSuggestionsPaused(sessionId, false)
+    expect(pauseFrames()).toEqual([true, false])
+  })
+
+  it('never sends pause frames to a process spawned without the flag', () => {
+    const { mgr, sessionId, pauseFrames } = setup({ enabled: false, visible: false })
+    mgr.setPromptSuggestionsPaused(sessionId, true)
+    expect(pauseFrames()).toEqual([])
   })
 })

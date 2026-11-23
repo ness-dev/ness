@@ -547,6 +547,13 @@ export interface JsonClaudeSession {
    *  Entries persist after completion so the Task card can keep showing
    *  the final usage totals. */
   backgroundAgents: Record<string, JsonClaudeBackgroundAgent>
+  /** Claude's predicted next user prompt (`prompt_suggestion` on the
+   *  stream, enabled by --prompt-suggestions), offered as ghost text in
+   *  the empty composer. Only ever describes the conversation as it stood
+   *  at the last turn end, so it's dropped when the next turn starts, on
+   *  respawn, and on rewind. Shared state because every client looking at
+   *  this chat should offer the same suggestion. */
+  promptSuggestion?: string
 }
 
 /** Status of the LLM-based auto-reviewer for a single pending approval.
@@ -701,6 +708,11 @@ export type JsonClaudeEvent =
   | {
       type: 'jsonClaude/entriesTruncated'
       payload: { sessionId: string; fromEntryId: string }
+    }
+  | {
+      /** null clears it. */
+      type: 'jsonClaude/promptSuggestionChanged'
+      payload: { sessionId: string; suggestion: string | null }
     }
   | {
       type: 'jsonClaude/slashCommandsChanged'
@@ -1110,7 +1122,12 @@ export function jsonClaudeReducer(
             busy: event.payload.busy,
             ...(event.payload.busy && event.payload.turnStartedAt !== undefined
               ? { turnStartedAt: event.payload.turnStartedAt }
-              : {})
+              : {}),
+            // A new turn makes the last suggestion stale. The sole place
+            // it's cleared for sends, so every path that starts a turn
+            // (typed, queued, automated) is covered without each one
+            // remembering to.
+            ...(event.payload.busy ? { promptSuggestion: undefined } : {})
           }
         }
       }
@@ -1249,8 +1266,22 @@ export function jsonClaudeReducer(
           ...state.sessions,
           [session.sessionId]: {
             ...session,
-            entries: session.entries.slice(0, idx)
+            entries: session.entries.slice(0, idx),
+            promptSuggestion: undefined
           }
+        }
+      }
+    }
+    case 'jsonClaude/promptSuggestionChanged': {
+      const session = state.sessions[event.payload.sessionId]
+      if (!session) return state
+      const next = event.payload.suggestion ?? undefined
+      if (session.promptSuggestion === next) return state
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [session.sessionId]: { ...session, promptSuggestion: next }
         }
       }
     }
