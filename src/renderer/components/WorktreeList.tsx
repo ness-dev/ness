@@ -506,7 +506,7 @@ export function WorktreeList({
           key={section.scope}
           scope={section.scope}
           name={section.repoName}
-          className={i > 0 ? 'mt-3' : ''}
+          className={i > 0 ? 'mt-1.5' : ''}
           panel={showBody && !section.unified && section.holdsActive}
           draggable={reorderable}
           lifted={lifted}
@@ -778,7 +778,7 @@ function ProjectSection({
       ref={outerRef}
       className={`relative ${panel ? 'bg-well py-1' : ''} ${className}`}
     >
-      {dropLine === 'before' && <DropLine className="-top-2" />}
+      {dropLine === 'before' && <DropLine className="-top-1" />}
       <div
         ref={setNodeRef}
         {...(draggable ? listeners : undefined)}
@@ -795,7 +795,7 @@ function ProjectSection({
         {header}
       </div>
       {children}
-      {dropLine === 'after' && <DropLine className="-bottom-2" />}
+      {dropLine === 'after' && <DropLine className="-bottom-1" />}
     </div>
   )
 }
