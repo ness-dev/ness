@@ -141,14 +141,6 @@ describe('settingsReducer', () => {
     expect(on.warnBeforeQuitting).toBe(true)
   })
 
-  it('simpleFullScreenChanged toggles the simple full screen flag', () => {
-    expect(initialSettings.simpleFullScreen).toBe(true)
-    const off = apply(initialSettings, { type: 'settings/simpleFullScreenChanged', payload: false })
-    expect(off.simpleFullScreen).toBe(false)
-    const on = apply(off, { type: 'settings/simpleFullScreenChanged', payload: true })
-    expect(on.simpleFullScreen).toBe(true)
-  })
-
   it('openPrInBrowserTabChanged toggles the in-app PR browser flag', () => {
     expect(initialSettings.openPrInBrowserTab).toBe(false)
     const on = apply(initialSettings, {

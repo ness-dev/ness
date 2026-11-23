@@ -50,10 +50,9 @@ import { DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME } from '../shared/state/setting
 import { registerWindowControlHandlers } from './window-controls'
 import {
   attachFullScreenHandling,
-  configureSimpleFullScreen,
   isWindowFullScreen,
-  leaveSimpleFullScreen,
   notchInsetFor,
+  toggleWholeScreen,
   toggleWindowFullScreen
 } from './simple-fullscreen'
 import { sealAllActive } from './activity'
@@ -558,10 +557,10 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
             accelerator: 'F12',
             click: () => transport.sendSignal('app:toggleSingleScreen')
           },
-          // macOS would append its own "Enter Full Screen" here, which goes
-          // straight to native full screen. It's suppressed (registerDefaults
-          // in app.whenReady) in favour of this one, which follows the
-          // simpleFullScreen setting via toggleWindowFullScreen.
+          // macOS would append its own "Enter Full Screen" here; it's
+          // suppressed (registerDefaults in app.whenReady) so Ctrl+Cmd+F can
+          // also take a window out of whole-screen mode, which AppKit's item
+          // knows nothing about. The green button is untouched (native).
           ...(process.platform === 'darwin'
             ? ([
                 { type: 'separator' },
@@ -570,6 +569,13 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
                   accelerator: 'Ctrl+Cmd+F',
                   click: (_item, focused) => {
                     if (focused instanceof BrowserWindow) toggleWindowFullScreen(focused)
+                  }
+                },
+                {
+                  label: 'Toggle Whole Screen',
+                  accelerator: 'Ctrl+Cmd+Shift+F',
+                  click: (_item, focused) => {
+                    if (focused instanceof BrowserWindow) toggleWholeScreen(focused)
                   }
                 }
               ] satisfies Electron.MenuItemConstructorOptions[])
@@ -853,7 +859,6 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
       // Registration domain only (not persisted), so removing this brings
       // AppKit's own "Enter Full Screen" item back.
       systemPreferences.registerDefaults({ NSFullScreenMenuItemEverywhere: false })
-      configureSimpleFullScreen(() => store.getSnapshot().state.settings.simpleFullScreen)
     }
     buildMenu()
     void runBoot()
@@ -972,16 +977,11 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
   // is toggled from Settings (or anywhere). Cheap: re-derive one boolean
   // per store event and only rebuild the menu when it actually flips.
   let lastWarnBeforeQuitting = store.getSnapshot().state.settings.warnBeforeQuitting
-  let lastSimpleFullScreen = store.getSnapshot().state.settings.simpleFullScreen
   store.subscribe(() => {
-    const { warnBeforeQuitting: warn, simpleFullScreen } = store.getSnapshot().state.settings
+    const warn = store.getSnapshot().state.settings.warnBeforeQuitting
     if (warn !== lastWarnBeforeQuitting) {
       lastWarnBeforeQuitting = warn
       buildMenu()
-    }
-    if (simpleFullScreen !== lastSimpleFullScreen) {
-      lastSimpleFullScreen = simpleFullScreen
-      if (!simpleFullScreen) for (const w of BrowserWindow.getAllWindows()) leaveSimpleFullScreen(w)
     }
   })
 

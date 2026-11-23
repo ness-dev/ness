@@ -13,10 +13,8 @@ vi.mock('electron', () => ({
 vi.mock('./debug', () => ({ log: () => {} }))
 
 let mod: typeof import('./simple-fullscreen')
-let enabled = true
 beforeAll(async () => {
   mod = await import('./simple-fullscreen')
-  mod.configureSimpleFullScreen(() => enabled)
 })
 
 /** Mimics AppKit: native transitions report back via events, a tick later. */
@@ -35,90 +33,82 @@ class FakeWindow extends EventEmitter {
       this.emit(flag ? 'enter-full-screen' : 'leave-full-screen')
     }, 0)
   })
-  /** The green button: AppKit enters native full screen directly. */
+  /** The green button / fn-F: AppKit enters native full screen directly. */
   clickGreenButton(): void {
     this.native = true
     this.emit('enter-full-screen')
   }
 }
 
-function setup(): { win: FakeWindow; notify: ReturnType<typeof vi.fn> } {
+function setup(): { win: FakeWindow; w: BrowserWindow; notify: ReturnType<typeof vi.fn> } {
   const win = new FakeWindow()
   const notify = vi.fn()
-  mod.attachFullScreenHandling(win as unknown as BrowserWindow, notify)
-  return { win, notify }
+  const w = win as unknown as BrowserWindow
+  mod.attachFullScreenHandling(w, notify)
+  return { win, w, notify }
 }
 
-describe('simple full screen bounce', () => {
-  beforeEach(() => {
-    enabled = true
-    vi.useFakeTimers()
-  })
+describe('full screen modes', () => {
+  beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('green button: windowed → native → simple', () => {
-    const { win, notify } = setup()
-    win.clickGreenButton()
-    expect(win.setFullScreen).toHaveBeenCalledWith(false)
-    vi.runAllTimers()
-    expect(win.native).toBe(false)
-    expect(win.simple).toBe(true)
-    expect(notify).toHaveBeenCalled()
-  })
-
-  it('native entry from simple mode leaves full screen entirely', () => {
-    const { win } = setup()
-    win.simple = true
-    win.clickGreenButton()
-    vi.runAllTimers()
-    expect(win.native).toBe(false)
-    expect(win.simple).toBe(false)
-  })
-
-  it('Ctrl+Cmd+F toggles simple mode directly and notifies', () => {
-    const { win, notify } = setup()
-    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
-    expect(win.simple).toBe(true)
-    expect(win.setFullScreen).not.toHaveBeenCalled()
-    expect(notify).toHaveBeenCalledTimes(1)
-    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
-    expect(win.simple).toBe(false)
-  })
-
-  it('with the setting off, the green button and Ctrl+Cmd+F stay native', () => {
-    enabled = false
+  it('the green button stays native', () => {
     const { win, notify } = setup()
     win.clickGreenButton()
     vi.runAllTimers()
     expect(win.native).toBe(true)
+    expect(win.simple).toBe(false)
     expect(win.setFullScreen).not.toHaveBeenCalled()
     expect(notify).toHaveBeenCalledTimes(1)
-    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
-    vi.runAllTimers()
-    expect(win.native).toBe(false)
-    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
+  })
+
+  it('Ctrl+Cmd+F toggles native full screen', () => {
+    const { win, w } = setup()
+    mod.toggleWindowFullScreen(w)
     vi.runAllTimers()
     expect(win.native).toBe(true)
+    mod.toggleWindowFullScreen(w)
+    vi.runAllTimers()
+    expect(win.native).toBe(false)
     expect(win.simple).toBe(false)
   })
 
-  it('turning the setting off takes a window out of simple full screen', () => {
-    const { win, notify } = setup()
-    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
-    enabled = false
-    mod.leaveSimpleFullScreen(win as unknown as BrowserWindow)
+  it('Ctrl+Cmd+Shift+F toggles whole screen directly and notifies', () => {
+    const { win, w, notify } = setup()
+    mod.toggleWholeScreen(w)
+    expect(win.simple).toBe(true)
+    expect(win.setFullScreen).not.toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledTimes(1)
+    mod.toggleWholeScreen(w)
     expect(win.simple).toBe(false)
-    expect(notify).toHaveBeenCalledTimes(2)
   })
 
-  it('a stale bounce does not fire on a later, unrelated leave', () => {
-    const { win } = setup()
-    win.setFullScreen.mockImplementation(() => {}) // AppKit drops the exit
+  it('Ctrl+Cmd+F leaves whole screen', () => {
+    const { win, w } = setup()
+    mod.toggleWholeScreen(w)
+    mod.toggleWindowFullScreen(w)
+    vi.runAllTimers()
+    expect(win.simple).toBe(false)
+    expect(win.native).toBe(false)
+  })
+
+  it('whole screen from native waits for native to leave first', () => {
+    const { win, w } = setup()
     win.clickGreenButton()
-    vi.advanceTimersByTime(5000)
-    win.native = false
-    win.emit('leave-full-screen')
-    expect(win.setSimpleFullScreen).not.toHaveBeenCalled()
+    mod.toggleWholeScreen(w)
+    expect(win.simple).toBe(false)
+    vi.runAllTimers()
+    expect(win.native).toBe(false)
+    expect(win.simple).toBe(true)
+  })
+
+  it('a native entry while in whole screen leaves both', () => {
+    const { win, w } = setup()
+    mod.toggleWholeScreen(w)
+    win.clickGreenButton()
+    vi.runAllTimers()
+    expect(win.simple).toBe(false)
+    expect(win.native).toBe(false)
   })
 })
 

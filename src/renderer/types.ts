@@ -458,7 +458,6 @@ export interface ElectronAPI {
   setPreventSleepUntil(value: number | null): Promise<boolean>
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>
   setWarnBeforeQuitting(enabled: boolean): Promise<boolean>
-  setSimpleFullScreen(enabled: boolean): Promise<boolean>
   setOpenPrInBrowserTab(enabled: boolean): Promise<boolean>
   setTerminalPlainClickOpensInApp(enabled: boolean): Promise<boolean>
   setExpandedDiagnosticLoggingEnabled(enabled: boolean): Promise<boolean>

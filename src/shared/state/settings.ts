@@ -384,11 +384,6 @@ export interface SettingsState {
    *  "Warn Before Quitting"); a tap shows a toast and does nothing. When
    *  false, ⌘Q quits immediately. */
   warnBeforeQuitting: boolean
-  /** macOS: when true (default), full screen uses the whole display,
-   *  including the strips beside the camera notch (Electron's "simple"
-   *  full screen). When false, macOS's native full screen, which parks the
-   *  window below the notch in its own Space. */
-  simpleFullScreen: boolean
   /** When true, the Open PR action (⌘⇧G) opens the PR in a Ness browser
    *  tab instead of handing the URL to the system browser. */
   openPrInBrowserTab: boolean
@@ -638,7 +633,6 @@ export type SettingsEvent =
   | { type: 'settings/cursorModelChanged'; payload: string | null }
   | { type: 'settings/autoUpdateEnabledChanged'; payload: boolean }
   | { type: 'settings/warnBeforeQuittingChanged'; payload: boolean }
-  | { type: 'settings/simpleFullScreenChanged'; payload: boolean }
   | { type: 'settings/openPrInBrowserTabChanged'; payload: boolean }
   | { type: 'settings/terminalPlainClickOpensInAppChanged'; payload: boolean }
   | { type: 'settings/harnessSystemPromptEnabledChanged'; payload: boolean }
@@ -735,7 +729,6 @@ export const initialSettings: SettingsState = {
   harnessStarred: null,
   autoUpdateEnabled: true,
   warnBeforeQuitting: true,
-  simpleFullScreen: true,
   openPrInBrowserTab: false,
   terminalPlainClickOpensInApp: false,
   harnessSystemPromptEnabled: true,
@@ -874,7 +867,6 @@ export const CLIENT_OWNED_SETTING_KEYS = [
   'newWorktreeAdvancedOpen',
   'autoUpdateEnabled',
   'warnBeforeQuitting',
-  'simpleFullScreen',
   'openPrInBrowserTab',
   'terminalPlainClickOpensInApp',
   'defaultClaudeTabType',
@@ -929,7 +921,6 @@ export const CLIENT_OWNED_CONFIG_CHANNELS: ReadonlySet<string> = new Set([
   'config:setNewWorktreeAdvancedOpen',
   'config:setAutoUpdateEnabled',
   'config:setWarnBeforeQuitting',
-  'config:setSimpleFullScreen',
   'config:setOpenPrInBrowserTab',
   'config:setTerminalPlainClickOpensInApp',
   'config:setDefaultClaudeTabType',
@@ -1056,8 +1047,6 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, autoUpdateEnabled: event.payload }
     case 'settings/warnBeforeQuittingChanged':
       return { ...state, warnBeforeQuitting: event.payload }
-    case 'settings/simpleFullScreenChanged':
-      return { ...state, simpleFullScreen: event.payload }
     case 'settings/openPrInBrowserTabChanged':
       return { ...state, openPrInBrowserTab: event.payload }
     case 'settings/terminalPlainClickOpensInAppChanged':
