@@ -73,6 +73,7 @@ import { useViewport } from './hooks/useViewport'
 import { MobileApp } from './components/MobileApp'
 import { harnessReleaseNotesUrl } from '../shared/constants'
 import { windowControlsKind } from './window-controls'
+import { setNotchInset } from './notch'
 
 function isPendingId(id: string | null | undefined): id is string {
   return typeof id === 'string' && id.startsWith('pending:')
@@ -687,6 +688,8 @@ function DesktopApp(): JSX.Element {
     const cleanup = backend.onFullscreenChanged((next) => setIsFullscreen(next))
     return cleanup
   }, [])
+
+  useEffect(() => backend.onNotchInsetChanged(setNotchInset), [])
 
   useEffect(() => {
     document.documentElement.dataset.fullscreen = isFullscreen ? 'true' : 'false'

@@ -38,7 +38,7 @@ import type {
   LocalTransportHandle,
   StateEventListener
 } from '../shared/transport/transport'
-import type { ElectronAPI, AgentKind, ReviewCommentStatus, ReviewVerdict } from './types'
+import type { ElectronAPI, AgentKind, ReviewCommentStatus, ReviewVerdict, NotchInset } from './types'
 import type { RendererPerfSample } from '../shared/perf-types'
 import type { ForkSource } from '../shared/state/worktrees'
 import type { BrowserViewport } from '../shared/browser-viewport'
@@ -668,6 +668,10 @@ export function buildBackend(
     onFullscreenChanged: (callback: (isFullscreen: boolean) => void) =>
       onLocalSignal('window:fullscreenChanged', (...args: unknown[]) =>
         callback(Boolean(args[0]))
+      ),
+    onNotchInsetChanged: (callback: (inset: NotchInset | null) => void) =>
+      onLocalSignal('window:notchInsetChanged', (...args: unknown[]) =>
+        callback((args[0] as NotchInset | null | undefined) ?? null)
       ),
 
     acceptHooks: () => req('hooks:accept'),

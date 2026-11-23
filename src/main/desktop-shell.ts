@@ -27,7 +27,7 @@
 //     update checks) for the few shared handlers that need to call into
 //     the desktop side.
 
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, shell } from 'electron'
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, shell, systemPreferences } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { BrowserManager } from './browser-manager'
@@ -48,6 +48,13 @@ import {
 } from './persistence'
 import { DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME } from '../shared/state/settings'
 import { registerWindowControlHandlers } from './window-controls'
+import {
+  attachFullScreenHandling,
+  isWindowFullScreen,
+  notchInsetFor,
+  toggleWindowFullScreen,
+  USE_SIMPLE_FULLSCREEN
+} from './simple-fullscreen'
 import { sealAllActive } from './activity'
 import { log, getLogFilePath } from './debug'
 import { isManualUpdateInstallType } from './manual-update'
@@ -389,6 +396,8 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
 
     const saveBounds = (): void => {
       if (win.isDestroyed()) return
+      // Full-screen frames would relaunch as a screen-sized normal window.
+      if (isWindowFullScreen(win)) return
       config.windowBounds = win.getBounds()
       saveConfig(config)
     }
@@ -403,14 +412,18 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
       else if (direction === 'right') transport.sendSignal('window:navigateForward')
     })
 
-    // macOS hides the traffic lights in native fullscreen, so the renderer
-    // shouldn't reserve the 80px leading clearance for them. Notify on
-    // transition and on initial paint so first render matches reality.
+    // macOS hides the traffic lights in full screen (native and simple), so
+    // the renderer shouldn't reserve the 80px leading clearance for them.
+    // Notify on transition and on initial paint so first render matches
+    // reality. Sent to this window only — another window's state differs.
+    // The notch inset rides along: non-null only in simple full screen on a
+    // notched display, where the top bar has to leave the notch band clear.
     const sendFullscreen = (): void => {
-      transport.sendSignal('window:fullscreenChanged', win.isFullScreen())
+      if (win.isDestroyed() || win.webContents.isDestroyed()) return
+      win.webContents.send('window:fullscreenChanged', isWindowFullScreen(win))
+      win.webContents.send('window:notchInsetChanged', notchInsetFor(win))
     }
-    win.on('enter-full-screen', sendFullscreen)
-    win.on('leave-full-screen', sendFullscreen)
+    attachFullScreenHandling(win, sendFullscreen)
     win.webContents.once('did-finish-load', sendFullscreen)
 
     if (process.env['ELECTRON_RENDERER_URL']) {
@@ -543,10 +556,24 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
             label: 'Single Screen Mode',
             accelerator: 'F12',
             click: () => transport.sendSignal('app:toggleSingleScreen')
-          }
-          // macOS appends "Enter Full Screen" to the View menu
-          // automatically — explicit togglefullscreen role would show up
-          // a second time, so it's intentionally not listed here.
+          },
+          // Without simple full screen, macOS appends "Enter Full Screen"
+          // to the View menu automatically — an explicit togglefullscreen
+          // role would show up a second time. With it, AppKit's item is
+          // suppressed (registerDefaults in app.whenReady) and this one
+          // routes through toggleWindowFullScreen.
+          ...(USE_SIMPLE_FULLSCREEN
+            ? ([
+                { type: 'separator' },
+                {
+                  label: 'Toggle Full Screen',
+                  accelerator: 'Ctrl+Cmd+F',
+                  click: (_item, focused) => {
+                    if (focused instanceof BrowserWindow) toggleWindowFullScreen(focused)
+                  }
+                }
+              ] satisfies Electron.MenuItemConstructorOptions[])
+            : [])
         ]
       },
       {
@@ -821,6 +848,11 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
         applicationName: APP_DISPLAY_NAME,
         applicationVersion: app.getVersion()
       })
+    }
+    if (USE_SIMPLE_FULLSCREEN) {
+      // Registration domain only (not persisted), so dropping the
+      // experiment brings AppKit's own "Enter Full Screen" item back.
+      systemPreferences.registerDefaults({ NSFullScreenMenuItemEverywhere: false })
     }
     buildMenu()
     void runBoot()
