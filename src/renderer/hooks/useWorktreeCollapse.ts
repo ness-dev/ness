@@ -49,11 +49,14 @@ export function useWorktreeCollapse(): WorktreeCollapseState {
     localStorage.setItem('harness:pinnedOpenRepos', JSON.stringify(pinnedOpenRepos))
   }, [pinnedOpenRepos])
 
-  const [unifiedRepos, setUnifiedRepos] = useState<boolean>(() => {
-    const saved = localStorage.getItem('harness:unifiedRepos')
-    return saved === null ? true : saved === '1'
-  })
+  // New clients start split by repo. Existing clients keep their choice
+  // because the effect below writes the key on every mount, so anyone who
+  // has run before (even on the old merged default) has a saved value.
+  const [unifiedRepos, setUnifiedRepos] = useState<boolean>(
+    () => localStorage.getItem('harness:unifiedRepos') === '1'
+  )
   useEffect(() => {
+    // Must write on mount, not only after a toggle: see the comment above.
     localStorage.setItem('harness:unifiedRepos', unifiedRepos ? '1' : '0')
   }, [unifiedRepos])
 
