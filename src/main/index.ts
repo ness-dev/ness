@@ -4987,6 +4987,16 @@ function registerIpcHandlers(): void {
   )
 
   transport.onRequest(
+    'jsonClaude:resetComposerVisibility',
+    (ctx) => {
+      for (const sessionId of composerVisibility.removeClient(ctx.clientId)) {
+        jsonClaudeManager.setPromptSuggestionsPaused(sessionId, true)
+      }
+      return true
+    }
+  )
+
+  transport.onRequest(
     'jsonClaude:setComposerVisible',
     (ctx, sessionId: string, visible: boolean) => {
       if (!sessionId) return false

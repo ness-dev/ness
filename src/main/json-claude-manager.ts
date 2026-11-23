@@ -1857,6 +1857,10 @@ export class JsonClaudeManager implements ChatProvider {
       // Generated after `result`, so the user may have started another turn
       // in the ~1s it takes; that turn already made this one stale.
       const session = this.store.getSnapshot().state.jsonClaude.sessions[instance.sessionId]
+      log(
+        'json-claude',
+        `prompt_suggestion sessionId=${instance.sessionId} chars=${suggestion.length} busy=${session?.busy === true}`
+      )
       if (!suggestion || !session || session.busy) return
       this.store.dispatch({
         type: 'jsonClaude/promptSuggestionChanged',

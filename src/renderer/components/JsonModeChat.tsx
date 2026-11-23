@@ -46,6 +46,7 @@ import { listChatMentionTargets, matchChatMentions } from '../../shared/chat-men
 import { ChatAgentColumn } from './ChatAgentColumn'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../shared/state/settings'
 import { useBackend } from '../backend'
+import { isPromptSuggestionAcceptKey, offeredPromptSuggestion } from './prompt-suggestion'
 import { useJsonClaudeApprovals } from '../hooks/useJsonClaudeApprovals'
 import { JsonClaudeApprovalCard } from './JsonClaudeApprovalCard'
 import { JsonClaudeQuestionCard } from './JsonClaudeQuestionCard'
@@ -2990,18 +2991,16 @@ export function JsonModeChat({
   const busy = !!session?.busy
   const hasOutgoing = draft.trim().length > 0 || attachments.length > 0
   const permissionMode = session?.permissionMode ?? 'default'
-  // Offered only into an empty composer on an idle session: once the user
-  // types, the placeholder (where it renders) is gone, and the first
-  // keystroke of a new turn clears it in the slice anyway.
-  const promptSuggestion =
-    promptSuggestionsEnabled &&
-    mode !== 'asleep' &&
-    !busy &&
-    draft === '' &&
-    attachments.length === 0 &&
-    pending.length === 0
-      ? session?.promptSuggestion
-      : undefined
+  const promptSuggestion = offeredPromptSuggestion({
+    suggestion: session?.promptSuggestion,
+    enabled: promptSuggestionsEnabled,
+    asleep: mode === 'asleep',
+    busy,
+    draft,
+    attachmentCount: attachments.length,
+    pendingApprovalCount: pending.length,
+    mentionPopoverOpen: mentionItems.length > 0
+  })
 
   function acceptPromptSuggestion(text: string): void {
     setDraft(text)
@@ -3486,14 +3485,8 @@ export function JsonModeChat({
                   return
                 }
               }
-              if (
-                promptSuggestion &&
-                (e.key === 'Tab' || e.key === 'ArrowRight') &&
-                !e.shiftKey &&
-                !e.metaKey &&
-                !e.ctrlKey &&
-                !e.altKey
-              ) {
+              // After the mention block on purpose: an open popover owns Tab.
+              if (promptSuggestion && isPromptSuggestionAcceptKey(e)) {
                 e.preventDefault()
                 acceptPromptSuggestion(promptSuggestion)
                 return
@@ -3566,16 +3559,29 @@ export function JsonModeChat({
           />
           {promptSuggestion && (
             // Ghost text drawn over the empty textarea rather than in its
-            // placeholder, so the Tab hint can be a styled key. Same
-            // padding and text classes as the textarea keep it aligned;
-            // pointer-events-none lets clicks land on the textarea.
+            // placeholder, so the hint can carry a styled key. Same padding
+            // and text classes as the textarea keep it aligned. One line,
+            // truncated, so a long suggestion can't push the hint out of a
+            // two-row composer; Tab inserts the full text anyway.
+            //
+            // A mouse click on the empty box should still just focus it, so
+            // with a fine pointer only the hint is clickable. Touch has no
+            // Tab key, so there the whole suggestion is the tap target.
             <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint whitespace-pre-wrap break-words"
+              onClick={() => {
+                acceptPromptSuggestion(promptSuggestion)
+                textareaRef.current?.focus()
+              }}
+              className="absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint flex items-start gap-1 pointer-events-none pointer-coarse:pointer-events-auto cursor-pointer"
             >
-              {promptSuggestion}{' '}
-              <span className="whitespace-nowrap">
-                (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept suggestion)
+              <span className="min-w-0 truncate" title={promptSuggestion}>
+                {promptSuggestion}
+              </span>
+              <span className="shrink-0 whitespace-nowrap pointer-events-auto hover:text-muted">
+                <span className="pointer-coarse:hidden">
+                  (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept suggestion)
+                </span>
+                <span className="hidden pointer-coarse:inline">(tap to accept suggestion)</span>
               </span>
             </div>
           )}
