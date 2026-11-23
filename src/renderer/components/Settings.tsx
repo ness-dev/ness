@@ -36,7 +36,6 @@ import {
 } from '../../shared/state/settings'
 import { isJsonClaudePermissionMode } from '../../shared/state/json-claude'
 import { QRCodeSVG } from 'qrcode.react'
-import { windowControlsKind } from '../window-controls'
 
 interface SettingsProps {
   onClose: () => void
@@ -1636,7 +1635,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                   </div>
                 </div>
               </label>
-              {windowControlsKind() === 'mac' && (
+              {window.__HARNESS_PLATFORM__ === 'darwin' && (
                 <label className="flex items-start gap-2 cursor-pointer mt-4">
                   <input
                     type="checkbox"
@@ -1649,7 +1648,8 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       Full screen (⌃⌘F or the green button) fills the entire display,
                       including the strips beside the camera notch, and keeps tabs clear
                       of the notch. Turn off to use macOS&apos;s standard full screen,
-                      which opens in its own Space below the notch.
+                      which opens in its own Space below the notch. Turning this off
+                      while a window is in full screen takes it out of full screen.
                     </div>
                   </div>
                 </label>
