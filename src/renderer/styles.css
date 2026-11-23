@@ -25,8 +25,11 @@
   --color-surface: #262626;
   --color-surface-hover: #404040;
   /* Backdrop for the expanded project in the sidebar (which sits on
-   * --color-panel), so it reads as one unit. Recessed toward --color-app;
-   * light themes override it below. */
+   * --color-panel), so it reads as one unit. It is --color-app in every
+   * built-in, light themes included: selected rows paint --color-surface on
+   * it, and the app colour is the end of the ramp furthest from surface.
+   * Light themes used to tint it toward surface, which squashed exactly that
+   * contrast. */
   --color-well: var(--color-app);
   --color-border: #262626;
   --color-border-strong: #404040;
@@ -145,29 +148,34 @@
  * carry real information in ~850 places, and a light background loses
  * low-contrast greys faster than a dark one does. Status and accent
  * colours clear 3.6:1 against app and panel (they also colour diff counts
- * and short labels). Syntax tokens are
- * darkened until each clears 5:1 on --color-panel-raised, the code-block
- * background. Where a published palette falls short of these, its colours
- * are nudged darker along the same hue rather than replaced.
+ * and short labels). Syntax tokens are darkened until each clears 5:1 on
+ * --color-panel-raised, the code-block background. Where a published
+ * palette falls short of these, its colours are nudged darker along the
+ * same hue rather than replaced.
  *
- * Custom light themes fall back to the [data-theme="light"] block for any
- * key they don't set (see theme-apply.ts).
+ * Surfaces mirror each theme's dark counterpart (Light ↔ Dark, Latte ↔
+ * Mocha, …): --color-surface, --color-surface-hover and the borders sit at
+ * least as far from --color-app, in L*, as they do in the dark theme, just
+ * in the other direction. That step is what makes a selected sidebar row
+ * read as selected.
+ *
+ * Custom light themes layer over the built-in named by their `base`, or
+ * over Solarized Light when they have none (see theme-apply.ts).
  */
 [data-theme="light"] {
   --theme-scheme: light;
   --color-app: #ffffff;
   --color-panel: #f4f4f4;
   --color-panel-raised: #efefef;
-  --color-surface: #e4e4e4;
-  --color-surface-hover: #d8d8d8;
-  --color-well: #ececec;
-  --color-border: #dddddd;
-  --color-border-strong: #bdbdbd;
+  --color-surface: #dbdbdb;
+  --color-surface-hover: #bababa;
+  --color-border: #dbdbdb;
+  --color-border-strong: #bababa;
   --color-fg: #262626;
   --color-fg-bright: #0a0a0a;
-  --color-muted: #525252;
-  --color-dim: #616161;
-  --color-faint: #757575;
+  --color-muted: #4e4e4e;
+  --color-dim: #5c5c5c;
+  --color-faint: #6f6f6f;
   --color-success: #149343;
   --color-warning: #b45309;
   --color-danger: #dc2626;
@@ -215,16 +223,15 @@
   --color-app: #fdf6e3;
   --color-panel: #f2ebd6;
   --color-panel-raised: #eae3cd;
-  --color-surface: #e2dac2;
-  --color-surface-hover: #d6cdb4;
-  --color-well: #e9e1ca;
+  --color-surface: #d8d1b9;
+  --color-surface-hover: #beb59d;
   --color-border: #d8d1ba;
-  --color-border-strong: #ada58f;
-  --color-fg: #334146;
+  --color-border-strong: #aca48e;
+  --color-fg: #2f3b40;
   --color-fg-bright: #002b36;
-  --color-muted: #405055;
-  --color-dim: #4d5e64;
-  --color-faint: #677171;
+  --color-muted: #3c4a4f;
+  --color-dim: #48585e;
+  --color-faint: #616a6a;
   --color-success: #718200;
   --color-warning: #9a7400;
   --color-danger: #dc322f;
@@ -266,16 +273,15 @@
   --color-app: #eff1f5;
   --color-panel: #e6e8ee;
   --color-panel-raised: #e0e3e9;
-  --color-surface: #d4d8e0;
-  --color-surface-hover: #c3c7d0;
-  --color-well: #dbdfe6;
+  --color-surface: #d2d6de;
+  --color-surface-hover: #b6bac3;
   --color-border: #c9cdd5;
   --color-border-strong: #a2a5af;
-  --color-fg: #3a3c51;
+  --color-fg: #393b50;
   --color-fg-bright: #232634;
-  --color-muted: #484b5d;
-  --color-dim: #56596d;
-  --color-faint: #6a6c7e;
+  --color-muted: #474a5c;
+  --color-dim: #55586c;
+  --color-faint: #696b7d;
   --color-success: #368825;
   --color-warning: #cc5009;
   --color-danger: #d20f39;
@@ -320,8 +326,7 @@
   --color-panel: #f1e6bd;
   --color-panel-raised: #ecdfb7;
   --color-surface: #e3d3ac;
-  --color-surface-hover: #d6c69f;
-  --color-well: #e9dcb3;
+  --color-surface-hover: #c7b791;
   --color-border: #dacca4;
   --color-border-strong: #a3967e;
   --color-fg: #3c3836;
@@ -345,8 +350,9 @@
   --syntax-addition: #625e0c;
   --syntax-deletion: #9d0006;
 
-  /* gruvbox's published light terminal palette. */
-  --term-black: #fbf1c7;
+  /* gruvbox's published light terminal palette, except black: gruvbox maps
+   * it to the background, which makes `\e[30m` "dark ink" text invisible. */
+  --term-black: #3c3836;
   --term-red: #cc241d;
   --term-green: #98971a;
   --term-yellow: #d79921;
@@ -374,8 +380,7 @@
   --color-panel: #d6d8e0;
   --color-panel-raised: #cbd0dd;
   --color-surface: #c2c6d4;
-  --color-surface-hover: #b4b8ca;
-  --color-well: #cbced8;
+  --color-surface-hover: #a6aabc;
   --color-border: #bcbfcc;
   --color-border-strong: #9096af;
   --color-fg: #1a2f65;
@@ -426,8 +431,7 @@
   --color-panel: #ececed;
   --color-panel-raised: #e4e4e5;
   --color-surface: #ddddde;
-  --color-surface-hover: #d1d1d2;
-  --color-well: #e2e2e3;
+  --color-surface-hover: #c1c1c2;
   --color-border: #d2d2d3;
   --color-border-strong: #a9a9ac;
   --color-fg: #383a42;
