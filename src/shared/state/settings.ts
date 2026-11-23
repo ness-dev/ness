@@ -163,7 +163,7 @@ export const EMPTY_CUSTOM_THEMES: CustomTheme[] = []
  *  matches the default so don't persist it" guard, and the fallback
  *  `[data-theme]` selector for partial custom themes. Kept in shared so
  *  main and renderer agree without crossing the import boundary. */
-export const DEFAULT_LIGHT_THEME = 'solarized-light'
+export const DEFAULT_LIGHT_THEME = 'light'
 export const DEFAULT_DARK_THEME = 'dark'
 
 /** Default for `jsonModeTranscriptWindow`. Sized so a normal session never

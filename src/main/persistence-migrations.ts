@@ -229,6 +229,16 @@ export const migrations: Migration[] = [
     if (c.agentReviewsEnabled === undefined && c.autoReviewOnGreenCi === true) {
       c.agentReviewsEnabled = true
     }
+  },
+
+  // v9 → v10: the default light theme moved from Solarized Light to the new
+  // neutral 'light'. The setter recorded "Solarized Light" by deleting the
+  // key (it was the default), so an absent `themeLight` on an existing
+  // install can't be told apart from "picked Solarized Light on purpose".
+  // Pin it, so nobody's light mode changes under them; fresh installs start
+  // at the current version and get the new default.
+  (c) => {
+    if (c.themeLight === undefined) c.themeLight = 'solarized-light'
   }
 ]
 

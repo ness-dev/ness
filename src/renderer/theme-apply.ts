@@ -132,7 +132,7 @@ export function applyTheme(theme: ResolvedTheme, nessieColorId: string): void {
  *  background on the next boot. */
 export function effectiveAppBg(theme: ResolvedTheme): string {
   if (theme.kind === 'custom') {
-    return theme.colors.app ?? (theme.mode === 'dark' ? '#0a0a0a' : '#fdf6e3')
+    return theme.colors.app ?? (theme.mode === 'dark' ? '#0a0a0a' : '#ffffff')
   }
   // First swatch on every built-in is its app background hex.
   return theme.swatches[0]

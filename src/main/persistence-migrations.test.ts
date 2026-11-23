@@ -468,3 +468,17 @@ describe('v8 → v9: pin auto-approve and agent reviews for upgraders', () => {
     expect(c.agentReviewsEnabled).toBe(false)
   })
 })
+
+describe('v9 → v10: pin Solarized Light for upgraders', () => {
+  it('records Solarized Light when themeLight is absent', () => {
+    const c: AnyConfig = { repoRoots: ['/a/repo'] }
+    runOne(9, c)
+    expect(c.themeLight).toBe('solarized-light')
+  })
+
+  it('leaves an explicit light theme alone', () => {
+    const c: AnyConfig = { themeLight: 'my-custom-light' }
+    runOne(9, c)
+    expect(c.themeLight).toBe('my-custom-light')
+  })
+})
