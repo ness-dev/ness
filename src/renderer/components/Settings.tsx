@@ -445,6 +445,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     conversationForkEnabled,
     worktreeMessagingEnabled,
     lochBlameEnabled,
+    lochRecordNewRepos,
     agentTabNamingEnabled,
     agentReviewDelivery,
     agentReviewsEnabled,
@@ -3978,6 +3979,21 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                 data stays.
               </p>
               <LochRecordingRepos />
+
+              <label className="flex items-start gap-3 cursor-pointer mt-6">
+                <input
+                  type="checkbox"
+                  checked={lochRecordNewRepos === true}
+                  onChange={(e) => { void backend.setLochRecordNewRepos(e.target.checked) }}
+                  className="mt-0.5 cursor-pointer icon-base" />
+                <div className="flex-1">
+                  <div className="text-sm text-fg-bright">Record history in repos you add</div>
+                  <div className="text-xs text-dim mt-0.5">
+                    Ticks each newly added repo above automatically. Repos already in
+                    the list keep their current setting.
+                  </div>
+                </div>
+              </label>
             </section>
 
             {/* GitHub section */}

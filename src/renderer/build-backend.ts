@@ -312,6 +312,7 @@ export function buildBackend(
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
     setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
+    setLochRecordNewRepos: (enabled: boolean) => req('config:setLochRecordNewRepos', enabled),
     setLochRecording: (repoRoot: string, enabled: boolean) =>
       req('loch:setRecording', repoRoot, enabled),
     setLochPromptDismissed: (repoRoot: string, dismissed: boolean) =>

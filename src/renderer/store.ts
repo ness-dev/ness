@@ -605,6 +605,9 @@ export function selectHistoryPromptRepos(entries: readonly BackendStateEntry[]):
     const { lochRecordingRepos, lochPromptDismissedRepos } = state.settings
     for (const root of state.worktrees.repoRoots) {
       if (lochRecordingRepos.includes(root) || lochPromptDismissedRepos.includes(root)) continue
+      // Being turned on because of the onboarding answer; if that fails the
+      // repo leaves this list and the prompt is the fallback.
+      if (state.loch.autoRecording.includes(root)) continue
       out.push(root)
     }
   }

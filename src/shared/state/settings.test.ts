@@ -616,6 +616,14 @@ describe('settingsReducer', () => {
     expect(next.lochPromptDismissedRepos).toEqual(['/repo/a'])
   })
 
+  it('lochRecordNewReposChanged sets the standing answer, defaulting to unanswered', () => {
+    expect(initialSettings.lochRecordNewRepos).toBeNull()
+    const yes = apply(initialSettings, { type: 'settings/lochRecordNewReposChanged', payload: true })
+    expect(yes.lochRecordNewRepos).toBe(true)
+    const no = apply(yes, { type: 'settings/lochRecordNewReposChanged', payload: false })
+    expect(no.lochRecordNewRepos).toBe(false)
+  })
+
   it('agentTabNamingEnabledChanged toggles flag, defaulting ON', () => {
     expect(initialSettings.agentTabNamingEnabled).toBe(true)
     const off = apply(initialSettings, {

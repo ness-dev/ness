@@ -359,6 +359,11 @@ function DesktopApp(): JSX.Element {
   // dispatch through dedicated methods; the boot-time "already installed?"
   // detection lives in main.
   const { consent: hooksConsent } = useHooks()
+  // Step 3's history half only makes sense where loch exists or Ness can
+  // download it for this platform.
+  const historyOffered = useAppState((s) => s.loch.available || s.loch.installable)
+  // Form draft for step 3's history checkbox until "Install hooks" applies it.
+  const [recordHistoryDraft, setRecordHistoryDraft] = useState(true)
   const updaterStatus = useUpdater().status
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false)
   const [manualUpdateBannerDismissed, setManualUpdateBannerDismissed] = useState(false)
@@ -1376,7 +1381,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   if (repoRoots.length === 0 || previewOnboarding) {
     const step1Complete = themeChosen
     const step2Complete = agentChosen
+    const recordNewRepos = settings.lochRecordNewRepos
     const step3Complete = hooksConsent !== 'pending'
+    // An answered step shows the saved choice. Hooks answered before this
+    // question existed leave it null, which records nothing, so show it off.
+    const historyChecked =
+      recordNewRepos ?? (hooksConsent === 'pending' ? recordHistoryDraft : false)
     const activeStep: 1 | 2 | 3 | 4 = !step1Complete
       ? 1
       : !step2Complete
@@ -1685,7 +1695,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Install status hooks</div>
+                    <div className="text-fg-bright text-sm font-medium">Install hooks</div>
                     <div className="text-xs text-dim mt-0.5">
                       Adds a small hook at <code className="bg-app/50 px-1 rounded">~/.claude/settings.json</code> (and the Codex equivalent) so Ness can tell when an agent is{' '}
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -1703,9 +1713,40 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   </div>
                 </div>
+                {historyOffered ? (
+                  <label
+                    className="flex items-start gap-2 ml-8 mb-3 cursor-pointer"
+                    title="Adds hooks to each new repo's worktrees (.claude/settings.local.json) and downloads loch if it isn't installed. Snapshots stay in ~/.loch; nothing is uploaded. Change it in Settings → Conversation blame."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={historyChecked}
+                      onChange={(e) => {
+                        // Once the step is answered the box edits the setting
+                        // itself; before that it's a draft the button applies.
+                        if (hooksConsent === 'pending' && recordNewRepos === null) setRecordHistoryDraft(e.target.checked)
+                        else void backend.setLochRecordNewRepos(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base shrink-0"
+                    />
+                    <div className="text-sm text-fg-bright">
+                      Keep track of which agent made every change.{' '}
+                      <span className="text-xs text-dim">Powered by loch</span>
+                    </div>
+                  </label>
+                ) : (
+                  <div className="text-xs text-dim ml-8 mb-3">
+                    Conversation history tracking isn&apos;t available on this platform yet.
+                  </div>
+                )}
                 <div className="flex gap-2 ml-8">
                   <button
-                    onClick={handleAcceptHooks}
+                    onClick={() => {
+                      handleAcceptHooks()
+                      if (historyOffered && recordNewRepos === null) {
+                        void backend.setLochRecordNewRepos(recordHistoryDraft)
+                      }
+                    }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'accepted'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1717,7 +1758,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     Install hooks
                   </button>
                   <button
-                    onClick={handleDeclineHooks}
+                    onClick={() => {
+                      handleDeclineHooks()
+                      if (historyOffered && recordNewRepos === null) void backend.setLochRecordNewRepos(false)
+                    }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'declined'
                         ? 'bg-surface text-fg-bright border border-fg'
