@@ -44,7 +44,7 @@ export function Hero() {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-3 text-xs text-ink-500">
+      <div className="relative flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-3 text-xs text-ink-500">
         <span>Loved by engineers at</span>
 
         <LogoTip label="Clay">
