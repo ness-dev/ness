@@ -23,6 +23,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Square,
   Terminal,
@@ -903,7 +904,7 @@ function RateLimitErrorCard({
 function automationLabel(
   source: JsonClaudeAutomationSource,
   from?: string
-): { label: string; note: string; brand: boolean } {
+): { label: string; note: string; brand: boolean; hidden?: boolean } {
   if (source === 'worktree-message') {
     return {
       label: from ? `Agent Message · from ${from}` : 'Agent Message',
@@ -980,7 +981,9 @@ function automationLabel(
     return { label: 'Ness · CI failure', note: 'sent automatically', brand: false }
   }
   if (source === 'first-run-kickoff') {
-    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true }
+    // The brief is instructions to the agent, not something the user needs
+    // to read before its greeting, so it starts folded away.
+    return { label: 'Ness · Getting started', note: 'sent when you pressed Start something new', brand: true, hidden: true }
   }
   if (source === 'blame-ask') {
     return { label: 'Blame · Ask about a line', note: 'you opened this from the gutter', brand: true }
@@ -1005,7 +1008,8 @@ function AutomatedTurnCard({
   isQueued: boolean
   onCancelQueued: () => void
 }): JSX.Element {
-  const { label, note, brand } = automationLabel(source, from)
+  const { label, note, brand, hidden } = automationLabel(source, from)
+  const [open, setOpen] = useState(!hidden)
   const Icon = brand ? NessIcon : Bot
   return (
     <div className="flex justify-end">
@@ -1034,6 +1038,16 @@ function AutomatedTurnCard({
             {label}
           </span>
           <span className="text-muted truncate">{note}</span>
+          {hidden && (
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="flex items-center gap-0.5 shrink-0 ml-auto text-muted hover:text-fg cursor-pointer"
+              aria-expanded={open}
+            >
+              {open ? 'Hide prompt' : 'Show prompt'}
+              {open ? <ChevronDown className="icon-xs" /> : <ChevronRight className="icon-xs" />}
+            </button>
+          )}
           {isQueued && (
             <div className="flex items-center gap-1 shrink-0 ml-auto">
               <span
@@ -1053,12 +1067,16 @@ function AutomatedTurnCard({
             </div>
           )}
         </div>
-        <div
-          className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
-          style={{ fontSize: 'var(--chat-body-text)' }}
-        >
-          <HighlightedText text={text} />
-        </div>
+        {open ? (
+          <div
+            className="px-4 pt-1 pb-2.5 whitespace-pre-wrap break-words"
+            style={{ fontSize: 'var(--chat-body-text)' }}
+          >
+            <HighlightedText text={text} />
+          </div>
+        ) : (
+          <div className="pb-2.5" />
+        )}
       </div>
     </div>
   )

@@ -112,16 +112,16 @@ export function buildFirstRunKickoff(): string {
   return wrapAutomatedMessage(
     'first-run-kickoff',
     [
-      'This is the user\'s first time using Ness. They just added this project and pressed "Start something new" on the main workspace.',
+      'This is the user\'s first time using Ness. They just added their own project and pressed "Start something new" on its main workspace. This message is hidden from them; your reply is the first thing they read.',
       '',
-      'Help them work out what to work on first:',
-      '1. Take a quick look around the repo — README, recent commits, open TODOs, anything obviously unfinished — so your suggestions are grounded in this codebase.',
-      '2. Suggest three or four concrete, reasonably small ideas, each in a sentence, and ask what they would like to do. Their own idea is welcome too.',
-      '3. Once they pick a task, do not start it here. Create a new worktree for it with the ness-control `create_worktree` tool, with a thorough `initialPrompt` that gives the new agent everything it needs to work independently, and a short Title Case `alias`.',
+      'Your job is to teach them how Ness works by getting one real task going. They know this codebase far better than you, so do not explore the repo, summarize it, or suggest tasks from it unless they ask.',
       '',
-      'Then tell them the new worktree is in the sidebar and that its agent is already working on it.',
+      '1. Greet them and explain the idea in a few short lines: this main workspace chat is where they ask for work. Each task gets its own worktree, an isolated copy of the project on its own branch with its own agent, so several tasks can run in parallel without touching each other or their checkout. The dots in the sidebar show which agents are working, waiting, or need approval.',
+      '2. Ask what they would like to build or fix first. Anything is fine, big or small.',
+      '3. When they answer, do not do the work here. Create a worktree for it with the ness-control `create_worktree` tool, with a thorough `initialPrompt` that gives the new agent everything it needs to work on its own, and a short Title Case `alias`.',
+      '4. Then tell them where to go next: the new worktree is in the sidebar and its agent has already started; click it to watch or chat with that agent, which can also take them through opening a pull request when it is done. They can come back here any time to start another task alongside it.',
       '',
-      'Keep it friendly and brief. Do not explain Ness at length — they will see that as they go.'
+      'Keep it friendly and brief: a few sentences per message, no long lists or headings.'
     ].join('\n')
   )
 }
