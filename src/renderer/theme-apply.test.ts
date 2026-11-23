@@ -96,6 +96,27 @@ describe('applyTheme', () => {
     expect(read('--color-brand')).toBe('#4ade80')
   })
 
+  it('keeps baseless light custom themes on Solarized Light', () => {
+    // Written before `base` existed, tuned over the old default. Moving the
+    // default light theme must not repaint the keys they leave unset.
+    applyTheme(custom({ accent: '#ff00ff' }, 'light'), 'loch')
+    expect(dataset.theme).toBe('solarized-light')
+    applyTheme(custom({ accent: '#ff00ff' }, 'dark'), 'loch')
+    expect(dataset.theme).toBe('dark')
+  })
+
+  it('layers a custom theme over its named base', () => {
+    const withBase = (base: string, mode: 'light' | 'dark'): ResolvedTheme =>
+      ({ ...custom({}, mode), base }) as ResolvedTheme
+    applyTheme(withBase('catppuccin-latte', 'light'), 'loch')
+    expect(dataset.theme).toBe('catppuccin-latte')
+    // A base of the other mode, or an unknown id, falls back.
+    applyTheme(withBase('dracula', 'light'), 'loch')
+    expect(dataset.theme).toBe('solarized-light')
+    applyTheme(withBase('nope', 'dark'), 'loch')
+    expect(dataset.theme).toBe('dark')
+  })
+
   it('exposes the brand ramp as settable semantic keys', () => {
     for (const k of ['brand', 'brand-mid', 'brand-deep', 'accent']) {
       expect(SEMANTIC_KEYS.has(k)).toBe(true)

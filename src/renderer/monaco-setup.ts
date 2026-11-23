@@ -137,25 +137,36 @@ function readVar(name: string, fallback: string): string {
 // Monaco only accepts #rrggbb / #rrggbbaa, and throws lazily (on first
 // tokenize) for anything else — leaving the editor on whatever theme it had.
 // Custom properties come back verbatim, so the CSS minifier's `#fff` for
-// `#ffffff`, or a custom theme's `rgb(...)`, would break it. Let the browser
-// resolve the colour on a probe and re-serialize it as 6-digit hex.
-let colorProbe: HTMLElement | null = null
-function toHex(color: string, fallback: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) return color
-  if (!colorProbe) {
-    colorProbe = document.createElement('span')
-    colorProbe.style.display = 'none'
-    document.body.appendChild(colorProbe)
-  }
-  colorProbe.style.color = ''
-  colorProbe.style.color = color
-  const m = getComputedStyle(colorProbe).color.match(/\d+(\.\d+)?/g)
-  if (!colorProbe.style.color || !m || m.length < 3) return fallback
-  return '#' + m.slice(0, 3).map((c) => Math.round(+c).toString(16).padStart(2, '0')).join('')
+// `#ffffff`, or a custom theme's `rgb(...)` / `oklch(...)`, would break it.
+export function toMonacoColor(color: string, fallback: string): string {
+  if (/^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color)) return color
+  return normalizeColor(color) ?? fallback
+}
+
+// A 2D context's fillStyle round-trips any CSS colour into sRGB, serialized
+// as `#rrggbb` when opaque and `rgba(r, g, b, a)` otherwise. (A computed
+// `color` doesn't: Chromium keeps oklch()/lab()/color-mix() in their own
+// space, so their channels can't be read as RGB.) An invalid colour leaves
+// fillStyle unchanged, which the sentinel detects.
+let colorCtx: CanvasRenderingContext2D | null | undefined
+function normalizeColor(color: string): string | null {
+  if (colorCtx === undefined) colorCtx = document.createElement('canvas').getContext('2d')
+  if (!colorCtx) return null
+  const sentinel = '#010203'
+  colorCtx.fillStyle = sentinel
+  colorCtx.fillStyle = color
+  const out = String(colorCtx.fillStyle)
+  if (out === sentinel && color.trim().toLowerCase() !== sentinel) return null
+  if (/^#[0-9a-f]{6}$/i.test(out)) return out
+  const m = out.match(/^rgba?\(([^)]+)\)$/)
+  if (!m) return null
+  const [r, g, b, a = 1] = m[1].split(',').map((v) => Number(v.trim()))
+  const hex = (v: number): string => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}${a < 1 ? hex(a * 255) : ''}`
 }
 
 function readColor(name: string, fallback: string): string {
-  return toHex(readVar(name, fallback), fallback)
+  return toMonacoColor(readVar(name, fallback), fallback)
 }
 
 let themeObserver: MutationObserver | null = null
@@ -198,7 +209,7 @@ function applyHarnessTheme(): void {
     base: light ? 'vs' : 'vs-dark',
     inherit: true,
     rules: [
-      { token: '', foreground: fg.replace('#', '') }
+      { token: '', foreground: fg.slice(1, 7) } // token colours can't carry alpha
     ],
     colors: {
       'editor.background': bg,
