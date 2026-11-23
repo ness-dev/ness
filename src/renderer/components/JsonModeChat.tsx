@@ -3575,7 +3575,7 @@ export function JsonModeChat({
             >
               {promptSuggestion}{' '}
               <span className="whitespace-nowrap">
-                (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept)
+                (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept suggestion)
               </span>
             </div>
           )}
