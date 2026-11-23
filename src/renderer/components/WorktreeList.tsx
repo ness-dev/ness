@@ -775,7 +775,7 @@ function ProjectSection({
   return (
     <div
       ref={outerRef}
-      className={`relative ${panel ? 'mx-1.5 rounded-lg bg-well py-1' : ''} ${className}`}
+      className={`relative ${panel ? 'bg-well py-1' : ''} ${className}`}
     >
       {dropLine === 'before' && <DropLine className="-top-2" />}
       <div
