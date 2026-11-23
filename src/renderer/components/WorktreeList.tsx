@@ -19,7 +19,7 @@ import {
   type DragMoveEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, Sparkles, History, Waypoints } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, Loader2, GitPullRequest, History, Waypoints } from 'lucide-react'
 import type { PendingWorktree } from '../types'
 import type { AssignedPR } from '../../shared/state/assigned-prs'
 import type { GroupKey } from '../../shared/worktree-sort'
@@ -30,14 +30,13 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
+import { homeHoldsActive, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
 import { SnoozeCalendar } from './SnoozeCalendar'
 import { Tooltip } from './Tooltip'
 import { ContextMenu } from './ContextMenu'
-import { HotkeyBadge } from './HotkeyBadge'
 import { RepoIcon } from './RepoIcon'
 import { useBackend } from '../backend'
 import { useSettings } from '../store'
@@ -280,12 +279,16 @@ export function WorktreeList({
     return actions
   }
 
+  // Under 'selected' a project's main also stays expanded while you're
+  // anywhere in its project, so its chats are one click away from a
+  // worktree rather than hidden until you go back to main.
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // Project rows follow the same rule, and show their tabs even while the
-    // project is collapsed: collapsing hides the worktrees, not main.
-    (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
+    // Project rows show their tabs even while the project is collapsed:
+    // collapsing hides the worktrees, not main.
+    (tabsExpansion === 'all' ||
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeHoldsActive(model, row))))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -441,8 +444,6 @@ export function WorktreeList({
     )
   }
 
-  const firstHome = model.sections.flatMap((s) => s.homes)[0]
-
   const reorderable = !touch && model.sections.length > 1 && !model.sections.some((s) => s.unified)
   const storedOrder = settings.sidebarProjectOrder
   const commitOrder = useCallback(
@@ -469,37 +470,6 @@ export function WorktreeList({
 
   return (
     <>
-      {agentCount === 0 && (firstHome || onNewWorktree) && (
-        <div className="group relative mx-2 mb-2 mt-1 bg-panel-raised border border-border-strong rounded-lg overflow-hidden">
-          <div className="brand-gradient-bg h-0.5" />
-          <button
-            onClick={() => (firstHome ? onSelectWorktree(firstHome.path) : onNewWorktree?.())}
-            className="w-full text-left p-3 pb-2 cursor-pointer hover:bg-surface/40 transition-colors"
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <Sparkles className="icon-xs text-accent" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-accent">
-                Get started
-              </span>
-            </div>
-            <div className="text-sm font-semibold text-fg-bright leading-snug">
-              Ask your project for what you want built
-            </div>
-            <div className="text-xs text-dim mt-0.5 leading-snug">
-              Open the project, describe a task in its chat, and it spins up a worktree with an agent for it.
-            </div>
-          </button>
-          {onNewWorktree && (
-            <button
-              onClick={() => onNewWorktree()}
-              className="w-full flex items-center gap-1.5 px-3 pb-2.5 text-xs text-faint hover:text-fg transition-colors cursor-pointer"
-            >
-              <span>or start one yourself</span>
-              {!touch && <HotkeyBadge action="newWorktree" />}
-            </button>
-          )}
-        </div>
-      )}
       {/* Unified mode has no per-project header to hang the nudge under, so
           offer one repo at a time at the top; closing it moves to the next. */}
       {model.sections.some((s) => s.unified) && historyPromptRepos?.[0] && onOpenHistoryTracking && onDismissHistoryPrompt && (
@@ -582,7 +552,7 @@ export function WorktreeList({
                   <RowBlock
                     key={h.path}
                     active={h.path === activeWorktreeId}
-                    context={h.worktree.repoRoot === model.activeRepoRoot}
+                    context={homeHoldsActive(model, h)}
                   >
                     {renderTab(h, {
                       name,

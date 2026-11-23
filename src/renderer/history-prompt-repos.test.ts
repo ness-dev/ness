@@ -34,7 +34,11 @@ describe('selectHistoryPromptRepos through the backend-state segments', () => {
     ['recording starts', { type: 'settings/lochRecordingReposChanged', payload: ['/repo'] }],
     ['prompt is dismissed', { type: 'settings/lochPromptDismissedReposChanged', payload: ['/repo'] }],
     ['blame gutter is turned off', { type: 'settings/lochBlameEnabledChanged', payload: false }],
-    ['loch becomes unavailable', { type: 'loch/availabilityChanged', payload: false }]
+    ['loch becomes unavailable', { type: 'loch/availabilityChanged', payload: false }],
+    [
+      'main starts recording it by itself',
+      { type: 'loch/autoRecordingChanged', payload: { repoRoot: '/repo', active: true } }
+    ]
   ]
   for (const [name, event] of cases) {
     it(`drops the prompt when ${name}`, () => {

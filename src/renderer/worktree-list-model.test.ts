@@ -5,6 +5,7 @@ import {
   applyProjectAccordion,
   buildWorktreeListBase,
   buildWorktreeListModel,
+  homeHoldsActive,
   mergeProjectOrder,
   planProjectDrop,
   UNIFIED_REPO_ROOT,
@@ -1097,5 +1098,61 @@ describe('planProjectDrop', () => {
 
   it('swaps two projects', () => {
     expect(planProjectDrop(['a', 'b'], 'b', 'a')).toEqual({ order: ['b', 'a'], line: { scope: 'a', edge: 'before' } })
+  })
+})
+
+describe('homeHoldsActive', () => {
+  it('marks the main of the project holding the active worktree, and only that', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha', '/repos/beta'],
+        worktrees: [
+          wt({ path: '/repos/alpha', repoRoot: '/repos/alpha', isMain: true, branch: 'main' }),
+          wt({ path: '/w/a', repoRoot: '/repos/alpha' }),
+          wt({ path: '/repos/beta', repoRoot: '/repos/beta', isMain: true, branch: 'main' })
+        ],
+        activeWorktreeId: '/w/a'
+      })
+    )
+    const [alpha, beta] = model.sections
+    expect(homeHoldsActive(model, alpha.homes[0])).toBe(true)
+    expect(homeHoldsActive(model, beta.homes[0])).toBe(false)
+    // A non-main worktree is never a home, even when it's the active one.
+    const workRow = alpha.groups.flatMap((g) => g.rows).find((r) => r.path === '/w/a')!
+    expect(homeHoldsActive(model, workRow)).toBe(false)
+  })
+
+  it('is false for every home when nothing is selected', () => {
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: ['/repos/alpha'],
+        worktrees: [wt({ path: '/repos/alpha', repoRoot: '/repos/alpha', isMain: true, branch: 'main' })]
+      })
+    )
+    expect(homeHoldsActive(model, model.sections[0].homes[0])).toBe(false)
+  })
+
+  it('marks only the host whose worktree is active in a cross-host section', () => {
+    const localRoot = '/Users/mike/dev/ness'
+    const remoteRoot = '/home/mike/code/ness'
+    const model = buildWorktreeListModel(
+      input({
+        repoRoots: [localRoot, remoteRoot],
+        repoBackendId: { [localRoot]: 'local', [remoteRoot]: 'beta' },
+        repoRemotes: { [localRoot]: null, [remoteRoot]: null },
+        worktrees: [
+          wt({ path: localRoot, repoRoot: localRoot, isMain: true, branch: 'main' }),
+          wt({ path: remoteRoot, repoRoot: remoteRoot, isMain: true, branch: 'main' }),
+          wt({ path: '/w/remote-feature', repoRoot: remoteRoot })
+        ],
+        activeWorktreeId: '/w/remote-feature'
+      })
+    )
+    expect(model.sections).toHaveLength(1)
+    const [header, remoteHome] = model.sections[0].homes
+    expect(header.worktree.repoRoot).toBe(localRoot)
+    expect(model.sections[0].holdsActive).toBe(true)
+    expect(homeHoldsActive(model, header)).toBe(false)
+    expect(homeHoldsActive(model, remoteHome)).toBe(true)
   })
 })

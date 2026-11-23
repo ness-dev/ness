@@ -15,6 +15,7 @@ import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
 import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
+import { LochAutoRecorder } from './loch-auto-recorder'
 import {
   backfillRepo,
   ensureCurrentLoch,
@@ -130,8 +131,7 @@ import {
   pruneTerminalHistory,
   LOCAL_BACKEND_ID,
   type BackendConnection,
-  type PersistedPaneNode,
-  type QuestStep
+  type PersistedPaneNode
 } from './persistence'
 import {
   loadRepoConfig,
@@ -142,11 +142,12 @@ import {
 } from './repo-config'
 import type { GitignorePreset } from './repo-create'
 import { addRepoAtPath, createAndRegisterProject, registerRepoRoot } from './repo-roots'
+import { buildFirstRunKickoff, installFirstRunTour, tourHomePath } from './first-run-tour'
 import { scanExistingWork, readLiveClaudeSessions } from './work-discovery'
 import type { DiscoveredSession, DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 import type { AddRepoResult } from '../shared/repo-pick'
 import { isWorktreeMerged } from '../shared/state/prs'
-import type { ForkSource } from '../shared/state/worktrees'
+import type { ForkSource, Worktree } from '../shared/state/worktrees'
 import { MAX_WAKE } from '../shared/state/snooze'
 import { hasScratchpadNote } from '../shared/state/scratchpad'
 import type { ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../shared/state/reviews'
@@ -818,6 +819,8 @@ transport.onRequest('contextWindow:setInterest', (ctx, expanded: boolean) => {
 transport.onRequest('claude:getAuthStatus', async () => {
   return getClaudeAuthStatus()
 })
+
+installFirstRunTour({ store, config: () => config, saveConfig })
 
 // Auto-persist the costs slice to config.json on each change. Debounced
 // inside saveConfig; cheap to fire on every dispatch.
@@ -1915,6 +1918,69 @@ async function stopLochRecording(repoRoot: string, worktreePaths: string[]): Pro
   const results = await Promise.all(worktreePaths.map((p) => lochHooks.remove(p)))
   return results.filter((ok) => !ok).length
 }
+/** Opt a repo in: fetch loch if needed, add the repo to the list, install
+ *  hooks in `worktrees`. Shared by the explicit `loch:setRecording` and the
+ *  automatic opt-in for repos added while `lochRecordNewRepos` is on. */
+async function enableLochRecording(
+  repoRoot: string,
+  worktrees: readonly Worktree[]
+): Promise<LochRecordingResult> {
+  // Opting in is the explicit go-ahead to fetch loch when it's missing
+  // or older than the release Ness is written against.
+  await ensureCurrentLoch(true)
+  if (!lochBinary()) {
+    const got = await installLoch()
+    if (!got.ok) return { ok: false, code: got.code, error: got.error }
+    store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
+    if (!lochBinary()) return { ok: false, code: 'not-installed' }
+  }
+  // Opt in BEFORE installing: the installs re-check the list, so a
+  // concurrent opt-out during them rolls them back rather than losing.
+  const wasRecording = isLochRecording(repoRoot)
+  if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
+  let installed = 0
+  let viaProject = 0
+  let firstFailure: { code: string; error?: string } | null = null
+  for (const wt of worktrees) {
+    const r = await lochHooks.installIfRecording(wt)
+    if (!r) continue
+    if (r.ok) {
+      if (r.viaProject) viaProject++
+      else installed++
+    } else {
+      firstFailure ??= { code: r.code, error: r.error }
+    }
+  }
+  if (installed + viaProject === 0) {
+    if (!wasRecording && isLochRecording(repoRoot)) {
+      setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
+    }
+    return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
+  }
+  // Other recording repos' hooks may name a binary just passed over.
+  void syncLochHooks()
+  // Recording only covers turns from now on; backfill reconstructs what
+  // it can of the history so the gutter isn't empty on day one.
+  void backfillIfNewLoch(repoRoot, lochBinary())
+  return {
+    ok: true,
+    installed,
+    viaProject,
+    failed: worktrees.length - installed - viaProject
+  }
+}
+
+// Repos registered while the onboarding answer is on start recording
+// through the same path as the explicit opt-in (see loch-auto-recorder.ts).
+const lochAutoRecorder = new LochAutoRecorder(store, {
+  recordNewRepos: () => config.lochRecordNewRepos === true,
+  repoRoots: () => config.repoRoots || [],
+  isRecording: isLochRecording,
+  canRecord: () => !!lochBinary() || canInstallLoch(),
+  enable: enableLochRecording,
+  log: (msg, detail) => log('loch', msg, detail instanceof Error ? detail.message : detail)
+})
+lochAutoRecorder.start()
 store.subscribe((event) => {
   if (event.type === 'worktrees/listChanged') void syncLochHooks()
 })
@@ -3424,6 +3490,15 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  // The standing "record history in repos I add" answer. Only governs repos
+  // added after it's set; already-added repos keep their own choice.
+  transport.onRequest('config:setLochRecordNewRepos', (_ctx, enabled: boolean) => {
+    config.lochRecordNewRepos = enabled === true
+    saveConfig(config)
+    store.dispatch({ type: 'settings/lochRecordNewReposChanged', payload: config.lochRecordNewRepos })
+    return true
+  })
+
   transport.onRequest('config:setWorktreeMessagingEnabled', (_ctx, enabled: boolean) => {
     // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
@@ -3809,15 +3884,17 @@ function registerIpcHandlers(): void {
     return AVAILABLE_THEMES
   })
 
-  transport.onRequest('config:setOnboardingQuest', (_ctx, quest: string) => {
-    const valid = ['hidden', 'spawn-second', 'switch-between', 'finale', 'done']
-    if (!valid.includes(quest)) return false
-    config.onboarding = { ...(config.onboarding || {}), quest: quest as QuestStep }
-    saveConfig(config)
-    store.dispatch({
-      type: 'onboarding/questChanged',
-      payload: quest as QuestStep
-    })
+  // First-run tour clicks. Every other transition is main's own — see
+  // first-run-tour.ts.
+  transport.onRequest('onboarding:tourStartSomethingNew', () => {
+    const homePath = tourHomePath(store.getSnapshot().state)
+    if (!homePath) return { ok: false as const }
+    const tabId = panesFSM.openKickoffChat(homePath, buildFirstRunKickoff(), { label: 'Getting started' })
+    store.dispatch({ type: 'onboarding/tourKickedOff', payload: { tabId, worktreePath: homePath } })
+    return { ok: true as const, worktreePath: homePath, tabId }
+  })
+  transport.onRequest('onboarding:tourDismiss', () => {
+    store.dispatch({ type: 'onboarding/tourEnded' })
     return true
   })
 
@@ -3842,7 +3919,7 @@ function registerIpcHandlers(): void {
       mayPreselectAgent:
         config.defaultAgent === undefined &&
         config.defaultClaudeTabType === undefined &&
-        (config.onboarding?.quest ?? 'hidden') === 'hidden'
+        store.getSnapshot().state.onboarding.tour.step === 'eligible'
     })
     return lastWorkScan
   })
@@ -3855,12 +3932,11 @@ function registerIpcHandlers(): void {
         (r) => wanted.has(r.repoRoot) && !config.repoRoots.includes(r.repoRoot)
       )
       if (chosen.length === 0) return { addedRepoRoots: [], focusWorktreePath: null }
-      // The quest teaches spawning a second worktree and switching between
-      // two — someone who just imported a sidebar full has done both. Settle
-      // it before the worktrees appear, or the renderer's quest effect sees
-      // them first and advances a quest that should never have started.
-      config.onboarding = { ...(config.onboarding || {}), quest: 'done' }
-      store.dispatch({ type: 'onboarding/questChanged', payload: 'done' })
+      // Someone importing a sidebar full of worktrees and live conversations
+      // already works this way; "start something new" on the first imported
+      // repo is the wrong lesson. End the tour before the repos register,
+      // or the first reposChanged would start it.
+      store.dispatch({ type: 'onboarding/tourEnded' })
       let focus: { path: string; at: number } | null = null
       for (const repo of chosen) {
         for (const wt of repo.worktrees) {
@@ -4674,49 +4750,7 @@ function registerIpcHandlers(): void {
         return { ok: true, installed: 0, viaProject: 0, failed }
       }
 
-      // Opting in is the explicit go-ahead to fetch loch when it's missing
-      // or older than the release Ness is written against.
-      await ensureCurrentLoch(true)
-      if (!lochBinary()) {
-        const got = await installLoch()
-        if (!got.ok) return { ok: false, code: got.code, error: got.error }
-        store.dispatch({ type: 'loch/availabilityChanged', payload: !!lochBinary() })
-        if (!lochBinary()) return { ok: false, code: 'not-installed' }
-      }
-      // Opt in BEFORE installing: the installs re-check the list, so a
-      // concurrent opt-out during them rolls them back rather than losing.
-      const wasRecording = isLochRecording(repoRoot)
-      if (!wasRecording) setLochRecordingRepos([...(config.lochRecordingRepos ?? []), repoRoot])
-      let installed = 0
-      let viaProject = 0
-      let firstFailure: { code: string; error?: string } | null = null
-      for (const wt of worktrees) {
-        const r = await lochHooks.installIfRecording(wt)
-        if (!r) continue
-        if (r.ok) {
-          if (r.viaProject) viaProject++
-          else installed++
-        } else {
-          firstFailure ??= { code: r.code, error: r.error }
-        }
-      }
-      if (installed + viaProject === 0) {
-        if (!wasRecording && isLochRecording(repoRoot)) {
-          setLochRecordingRepos((config.lochRecordingRepos ?? []).filter((r) => r !== repoRoot))
-        }
-        return { ok: false, code: firstFailure?.code ?? 'no-worktrees', error: firstFailure?.error }
-      }
-      // Other recording repos' hooks may name a binary just passed over.
-      void syncLochHooks()
-      // Recording only covers turns from now on; backfill reconstructs what
-      // it can of the history so the gutter isn't empty on day one.
-      void backfillIfNewLoch(repoRoot, lochBinary())
-      return {
-        ok: true,
-        installed,
-        viaProject,
-        failed: worktrees.length - installed - viaProject
-      }
+      return enableLochRecording(repoRoot, worktrees)
     }
   )
 

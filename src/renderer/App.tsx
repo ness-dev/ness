@@ -11,7 +11,7 @@ import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
 import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useProjectAccordion, useTabsByWorktree, useWorktreeListBase } from './hooks/useWorktreeListModel'
-import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
+import type { Worktree, TerminalTab, PtyStatus, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
 import { getLeaves, findLeaf, findLeafByTabId } from '../shared/state/terminals'
 import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
@@ -27,7 +27,7 @@ import { AppTitleSegment } from './components/AppTitleSegment'
 import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorktreeScreen'
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
-import { QuestCard } from './components/QuestCard'
+import { FirstRunTour } from './components/FirstRunTour'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -359,6 +359,11 @@ function DesktopApp(): JSX.Element {
   // dispatch through dedicated methods; the boot-time "already installed?"
   // detection lives in main.
   const { consent: hooksConsent } = useHooks()
+  // Step 3's history half only makes sense where loch exists or Ness can
+  // download it for this platform.
+  const historyOffered = useAppState((s) => s.loch.available || s.loch.installable)
+  // Form draft for step 3's history checkbox until "Install hooks" applies it.
+  const [recordHistoryDraft, setRecordHistoryDraft] = useState(true)
   const updaterStatus = useUpdater().status
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false)
   const [manualUpdateBannerDismissed, setManualUpdateBannerDismissed] = useState(false)
@@ -588,16 +593,22 @@ function DesktopApp(): JSX.Element {
   const nameAgentSessions = nameClaudeSessions
   const hasGithubToken = hasGithubPat || !!githubAuthSource
   const hotkeyOverrides = settings.hotkeys ?? undefined
-  // Onboarding parallelism quest — see QuestCard.tsx for the steps.
-  // Quest state lives in the main-process store; its value is seeded from
-  // config on boot so it's already correct on first render.
-  const { quest: questStep } = useOnboarding()
-  const questVisitedRef = useRef<Set<string>>(new Set())
+  // First-run tour (see FirstRunTour.tsx). Progress lives in the main
+  // store, which also decides every transition but the user's clicks; this
+  // client only places the popouts.
+  const { tour } = useOnboarding()
+  const tourHomePath = useMemo(
+    () =>
+      tour.step === 'home'
+        ? (worktrees.find((w) => w.isMain && w.repoRoot === tour.repoRoot)?.path ?? null)
+        : null,
+    [tour, worktrees]
+  )
 
   const configLoadError = useConfigLoadError()
 
   // Count of "real" worktrees the user has spawned — main repo doesn't count
-  // as an agent. Used by empty state + quest advancement.
+  // as an agent. Used by the empty state.
   const agentWorktreeCount = useMemo(
     () => worktrees.filter((w) => !w.isMain).length,
     [worktrees]
@@ -619,31 +630,6 @@ function DesktopApp(): JSX.Element {
     ]
   )
   // Track which worktrees already have hooks installed so we only prompt once
-
-const setQuestStep = useCallback((next: QuestStep) => {
-    backend.setOnboardingQuest(next).catch(() => {})
-  }, [])
-
-  // Advance the quest based on how many agent worktrees exist (main excluded).
-  useEffect(() => {
-    if (questStep === 'done' || questStep === 'finale') return
-    if (questStep === 'hidden' && agentWorktreeCount >= 1) {
-      setQuestStep(agentWorktreeCount >= 2 ? 'switch-between' : 'spawn-second')
-      return
-    }
-    if (questStep === 'spawn-second' && agentWorktreeCount >= 2) {
-      setQuestStep('switch-between')
-    }
-  }, [agentWorktreeCount, questStep, setQuestStep])
-
-  // Advance the quest when the user switches between two different worktrees
-  useEffect(() => {
-    if (questStep !== 'switch-between' || !activeWorktreeId) return
-    questVisitedRef.current.add(activeWorktreeId)
-    if (questVisitedRef.current.size >= 2) {
-      setQuestStep('finale')
-    }
-  }, [activeWorktreeId, questStep, setQuestStep])
 
   // Panes + repos + worktrees are all hydrated from the main-process store
   // before App mounts. The only thing we still need to do at mount is ask
@@ -1376,7 +1362,12 @@ const setQuestStep = useCallback((next: QuestStep) => {
   if (repoRoots.length === 0 || previewOnboarding) {
     const step1Complete = themeChosen
     const step2Complete = agentChosen
+    const recordNewRepos = settings.lochRecordNewRepos
     const step3Complete = hooksConsent !== 'pending'
+    // An answered step shows the saved choice. Hooks answered before this
+    // question existed leave it null, which records nothing, so show it off.
+    const historyChecked =
+      recordNewRepos ?? (hooksConsent === 'pending' ? recordHistoryDraft : false)
     const activeStep: 1 | 2 | 3 | 4 = !step1Complete
       ? 1
       : !step2Complete
@@ -1685,7 +1676,7 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-fg-bright text-sm font-medium">Install status hooks</div>
+                    <div className="text-fg-bright text-sm font-medium">Install hooks</div>
                     <div className="text-xs text-dim mt-0.5">
                       Adds a small hook at <code className="bg-app/50 px-1 rounded">~/.claude/settings.json</code> (and the Codex equivalent) so Ness can tell when an agent is{' '}
                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -1703,9 +1694,40 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     </div>
                   </div>
                 </div>
+                {historyOffered ? (
+                  <label
+                    className="flex items-start gap-2 ml-8 mb-3 cursor-pointer"
+                    title="Adds hooks to each new repo's worktrees (.claude/settings.local.json) and downloads loch if it isn't installed. Snapshots stay in ~/.loch; nothing is uploaded. Change it in Settings → Conversation blame."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={historyChecked}
+                      onChange={(e) => {
+                        // Once the step is answered the box edits the setting
+                        // itself; before that it's a draft the button applies.
+                        if (hooksConsent === 'pending' && recordNewRepos === null) setRecordHistoryDraft(e.target.checked)
+                        else void backend.setLochRecordNewRepos(e.target.checked)
+                      }}
+                      className="mt-0.5 cursor-pointer icon-base shrink-0"
+                    />
+                    <div className="text-sm text-fg-bright">
+                      Keep track of which agent made every change.{' '}
+                      <span className="text-xs text-dim">Powered by loch</span>
+                    </div>
+                  </label>
+                ) : (
+                  <div className="text-xs text-dim ml-8 mb-3">
+                    Conversation history tracking isn&apos;t available on this platform yet.
+                  </div>
+                )}
                 <div className="flex gap-2 ml-8">
                   <button
-                    onClick={handleAcceptHooks}
+                    onClick={() => {
+                      handleAcceptHooks()
+                      if (historyOffered && recordNewRepos === null) {
+                        void backend.setLochRecordNewRepos(recordHistoryDraft)
+                      }
+                    }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'accepted'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -1717,7 +1739,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
                     Install hooks
                   </button>
                   <button
-                    onClick={handleDeclineHooks}
+                    onClick={() => {
+                      handleDeclineHooks()
+                      if (historyOffered && recordNewRepos === null) void backend.setLochRecordNewRepos(false)
+                    }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                       hooksConsent === 'declined'
                         ? 'bg-surface text-fg-bright border border-fg'
@@ -2296,11 +2321,17 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onDismiss={handleDismissPendingDeletion}
           />
         )}
-        <QuestCard
-          step={questStep}
-          onDismiss={() => setQuestStep('done')}
-          onFinish={() => setQuestStep('done')}
-        />
+        {!onboardingVisible && (
+          <FirstRunTour
+            tour={tour}
+            homePath={tourHomePath}
+            onStart={async () => {
+              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+              if (result.ok) setActiveWorktreeId(result.worktreePath)
+            }}
+            onDismiss={() => void backend.tourDismiss().catch(() => {})}
+          />
+        )}
         {/* Right panel — hidden on the new-worktree screen so the form gets the full width.
             Pushed down 40px so the workspace tab bar can extend across the top, full width.
             The 40px top spacers are deliberately NOT drag regions: the tab bar's trailing

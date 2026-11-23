@@ -312,6 +312,7 @@ export function buildBackend(
     setWorktreeMessagingEnabled: (enabled: boolean) =>
       reqConfig('config:setWorktreeMessagingEnabled', enabled),
     setLochBlameEnabled: (enabled: boolean) => reqConfig('config:setLochBlameEnabled', enabled),
+    setLochRecordNewRepos: (enabled: boolean) => req('config:setLochRecordNewRepos', enabled),
     setLochRecording: (repoRoot: string, enabled: boolean) =>
       req('loch:setRecording', repoRoot, enabled),
     setLochPromptDismissed: (repoRoot: string, dismissed: boolean) =>
@@ -467,7 +468,8 @@ export function buildBackend(
       }
     ) => req('agent:buildSpawnArgs', agentKind, opts),
 
-    setOnboardingQuest: (quest: string) => reqConfig('config:setOnboardingQuest', quest),
+    tourStartSomethingNew: () => req('onboarding:tourStartSomethingNew'),
+    tourDismiss: () => req('onboarding:tourDismiss'),
     scanExistingWork: () => req('onboarding:scanExistingWork'),
     importExistingWork: (repoRoots: string[]) => req('onboarding:importWork', repoRoots),
     setWorktreeBase: (mode: 'remote' | 'local') => reqConfig('config:setWorktreeBase', mode),

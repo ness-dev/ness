@@ -628,6 +628,14 @@ export function mergeProjectOrder(stored: readonly string[], nextVisible: readon
   return [...new Set(out)]
 }
 
+/** True for a project's main row while the active worktree is anywhere in
+ *  that project. Checked per home rather than via the section's
+ *  `holdsActive`, which spans every host merged into the section: selecting
+ *  a worktree on one host must expand that host's main, not the header's. */
+export function homeHoldsActive(model: WorktreeListModel, row: WorktreeRowModel): boolean {
+  return !!row.home && model.activeRepoRoot !== null && row.worktree.repoRoot === model.activeRepoRoot
+}
+
 /** The project accordion: the project holding the active worktree is open,
  *  others collapse to their row unless pinned open. Cheap and
  *  allocation-light: rows are never copied, so they keep their identity

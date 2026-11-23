@@ -9,8 +9,8 @@ export type ClaudeTabType = 'xterm' | 'json'
 interface InterfaceToggleProps {
   value: ClaudeTabType
   onChange: (next: ClaudeTabType) => void
-  /** Rendered inside Settings (wider, descriptions visible) or inside the
-   *  QuestCard (narrower, descriptions trimmed). */
+  /** Rendered inside Settings (wider, descriptions visible) or in a
+   *  narrower spot (descriptions trimmed). */
   size?: 'normal' | 'compact'
 }
 

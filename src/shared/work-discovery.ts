@@ -46,7 +46,8 @@ export interface DiscoveredWork {
    *  nothing was found. */
   suggestedAgent: DiscoveredAgentKind | null
   /** True only when this install has never had an agent or interface
-   *  chosen and never got as far as the quest — i.e. a genuine first run.
+   *  chosen and is still eligible for the first-run tour — i.e. a genuine
+   *  first run.
    *  The wizard also shows for an existing user who removed their last
    *  repo, and it must not rewrite that user's settings from a scan. */
   mayPreselectAgent: boolean

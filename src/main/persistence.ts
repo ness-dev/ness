@@ -26,10 +26,9 @@ import type { WorktreeSubscription } from '../shared/state/subscriptions'
 import type { WorktreeOrigin } from '../shared/state/origins'
 import type { PreventSleepMode } from '../shared/state/settings'
 import type { JsonClaudePermissionMode } from '../shared/state/json-claude'
+import type { TourState } from '../shared/state/onboarding'
 
 export type { PersistedPane, PersistedPaneNode, PersistedTab }
-
-export type QuestStep = 'hidden' | 'spawn-second' | 'switch-between' | 'finale' | 'done'
 
 /** A configured backend (multi-backend UX, Tier 1).
  *  - `kind: 'local'` is the in-process Electron backend; exactly one exists,
@@ -204,13 +203,16 @@ export interface Config {
    // as setup. Failures are logged but don't block removal.
   worktreeTeardownCommand?: string
   locallyMerged?: Record<string, string>
-  // First-run parallelism quest — advances through steps as the user learns.
   // When true, pass --name "repo/branch" to Claude so sessions are named by
   // their worktree rather than auto-summarized. Also sets the name visible
   // to `claude --resume` and remote control.
   nameClaudeSessions?: boolean
+  // First-run sidebar tour. Absent means finished: only a fresh install
+  // (no config.json before this boot) is written with `eligible`, so every
+  // config that predates the tour skips it. A leftover `quest` key from the
+  // retired parallelism quest is ignored.
   onboarding?: {
-    quest?: QuestStep
+    tour?: TourState
   }
   // True once we've auto-starred ness-dev/ness on behalf of a
   // gh-cli-detected user. Sticky — if they later unstar manually, we
@@ -296,6 +298,9 @@ export interface Config {
   lochRecordingRepos?: string[]
   // Repo roots whose "Install history tracking" sidebar prompt was closed.
   lochPromptDismissedRepos?: string[]
+  /** Record history in repos added from now on (asked in onboarding).
+   *  Absent = never answered. */
+  lochRecordNewRepos?: boolean
   /** Per recording repo root, the loch version that last backfilled it; a
    *  different binary at boot backfills that repo again. */
   lochBackfilledVersions?: Record<string, string>
@@ -598,7 +603,10 @@ export function loadConfig(): Config {
       writesSuspended = false
       // Persist right away so the first-launch stamp survives even if
       // nothing else triggers a save before the next boot.
-      const fresh = applyFirstLaunchDefault(defaultConfig(), false)
+      const fresh = applyFirstLaunchDefault(
+        { ...defaultConfig(), onboarding: { tour: { step: 'eligible' } } },
+        false
+      )
       saveConfigSync(fresh)
       return fresh
     } else {
