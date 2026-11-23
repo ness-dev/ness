@@ -2096,7 +2096,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     {
                       id: 'selected' as const,
                       label: 'Only the selected is expanded',
-                      description: 'The selected worktree lists its tabs'
+                      description: 'The selected worktree lists its tabs, and so does its project\'s main'
                     },
                     {
                       id: 'all' as const,

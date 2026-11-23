@@ -30,7 +30,7 @@ import type {
   WorktreeListGroupModel,
   WorktreeRowModel
 } from '../worktree-list-model'
-import { mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
+import { homeHoldsActive, mergeProjectOrder, planProjectDrop, repoLabelFor } from '../worktree-list-model'
 import { WorktreeTab, type ProjectRowProps, type WorktreeListVariant } from './WorktreeTab'
 import type { WorktreeRowAction, WorktreeRowActionHandlers } from './worktree-row-actions'
 import { WorktreeTabRows } from './WorktreeTabRows'
@@ -280,12 +280,16 @@ export function WorktreeList({
     return actions
   }
 
+  // Under 'selected' a project's main also stays expanded while you're
+  // anywhere in its project, so its chats are one click away from a
+  // worktree rather than hidden until you go back to main.
   const showTabsFor = (row: WorktreeRowModel): boolean =>
     !!onSelectTab &&
     !row.deleting &&
-    // Project rows follow the same rule, and show their tabs even while the
-    // project is collapsed: collapsing hides the worktrees, not main.
-    (tabsExpansion === 'all' || (tabsExpansion === 'selected' && row.path === activeWorktreeId))
+    // Project rows show their tabs even while the project is collapsed:
+    // collapsing hides the worktrees, not main.
+    (tabsExpansion === 'all' ||
+      (tabsExpansion === 'selected' && (row.path === activeWorktreeId || homeHoldsActive(model, row))))
 
   const renderTabRows = (row: WorktreeRowModel): JSX.Element | null =>
     showTabsFor(row) && onSelectTab ? (
@@ -582,7 +586,7 @@ export function WorktreeList({
                   <RowBlock
                     key={h.path}
                     active={h.path === activeWorktreeId}
-                    context={h.worktree.repoRoot === model.activeRepoRoot}
+                    context={homeHoldsActive(model, h)}
                   >
                     {renderTab(h, {
                       name,
