@@ -3429,6 +3429,7 @@ export function JsonModeChat({
               })}
             </div>
           )}
+          <div className="relative">
           <textarea
             ref={textareaRef}
             value={draft}
@@ -3534,13 +3535,12 @@ export function JsonModeChat({
                 // textarea inserts a newline as usual.
               }
             }}
-            // The suggestion rides in the placeholder: same font, wrap and
-            // faint colour as ghost text, and it disappears on the first
-            // keystroke without any overlay to keep aligned.
             placeholder={
               mode === 'asleep'
                 ? 'Type to wake this session…'
-                : promptSuggestion ?? composerPlaceholder
+                : promptSuggestion
+                  ? ''
+                  : composerPlaceholder
             }
             aria-description={
               promptSuggestion ? 'Suggested reply. Press Tab to use it.' : undefined
@@ -3564,6 +3564,22 @@ export function JsonModeChat({
             // textarea, kicking the user out mid-keystroke. send() guards
             // the actual "no live subprocess" case.
           />
+          {promptSuggestion && (
+            // Ghost text drawn over the empty textarea rather than in its
+            // placeholder, so the Tab hint can be a styled key. Same
+            // padding and text classes as the textarea keep it aligned;
+            // pointer-events-none lets clicks land on the textarea.
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint whitespace-pre-wrap break-words"
+            >
+              {promptSuggestion}{' '}
+              <span className="whitespace-nowrap">
+                (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept)
+              </span>
+            </div>
+          )}
+          </div>
           <div className="flex items-center gap-2 px-2 pb-1.5 pt-0.5">
             <div
               className="flex items-center gap-1.5 text-xs text-muted"
@@ -3582,20 +3598,6 @@ export function JsonModeChat({
               </button>
             )}
             <span ref={setSubagentChipSlot} className="contents" />
-            {promptSuggestion && (
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  acceptPromptSuggestion(promptSuggestion)
-                  textareaRef.current?.focus()
-                }}
-                className="text-xs text-faint hover:text-muted cursor-pointer"
-                title="Use Claude's suggested reply"
-              >
-                <kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to use suggestion
-              </button>
-            )}
             <div className="flex-1" />
             {busy && (
               <button
