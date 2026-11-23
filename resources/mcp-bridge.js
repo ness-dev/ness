@@ -142,11 +142,15 @@ function callControl(method, path, body, timeoutMs) {
 const DOM_DEFAULT_MAX_BYTES = 100_000
 const DOM_HARD_MAX_BYTES = 2_000_000
 
-function truncateDom(html, maxBytes) {
+function capBytes(maxBytes) {
   const requested = Number(maxBytes)
-  const cap = Number.isFinite(requested) && requested > 0
+  return Number.isFinite(requested) && requested > 0
     ? Math.min(Math.round(requested), DOM_HARD_MAX_BYTES)
     : DOM_DEFAULT_MAX_BYTES
+}
+
+function truncateDom(html, maxBytes) {
+  const cap = capBytes(maxBytes)
   const total = Buffer.byteLength(html, 'utf-8')
   if (total <= cap) return html
   const head = Buffer.from(html, 'utf-8').subarray(0, cap).toString('utf-8')
@@ -157,6 +161,23 @@ function truncateDom(html, maxBytes) {
     ' of ' +
     total +
     ' bytes. Pass max_bytes to raise the cap, or use get_tab_clickables for a compact view. -->'
+  )
+}
+
+/** Same cap as truncateDom, for eval_tab's JSON — a whole-document query is
+ *  just as context-blowing as outerHTML. */
+function truncateText(text, maxBytes) {
+  const cap = capBytes(maxBytes)
+  const total = Buffer.byteLength(text, 'utf-8')
+  if (total <= cap) return text
+  const head = Buffer.from(text, 'utf-8').subarray(0, cap).toString('utf-8')
+  return (
+    head +
+    '\n[truncated by Ness: showing the first ' +
+    cap +
+    ' of ' +
+    total +
+    ' bytes. Narrow the expression, or pass max_bytes to raise the cap.]'
   )
 }
 
@@ -675,6 +696,34 @@ const TOOLS = [
     }
   },
   {
+    name: 'eval_tab',
+    description:
+      "Run JavaScript in a browser tab in this worktree and return the result as JSON. Use it to measure layout and read computed state the other tools can't — getBoundingClientRect(), scrollWidth vs clientWidth, getComputedStyle(), app state on window — or as an escape hatch for actions they can't do (window.scrollTo). Accepts a bare expression (`document.documentElement.scrollWidth`) or a statement block — a block needs `return` to give a value back; top-level `await` works in both. DOM nodes come back as short descriptors like `<div#id.cls>`, cycles as \"[Circular]\", and a thrown error is returned as the tool error with its stack. Runs with the page's origin, cookies and sessions, and can't be interrupted: a runaway synchronous loop wedges the tab until reload_tab. Prefer get_tab_clickables + click_tab for clicking. Result truncated to 100KB by default.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string', description: 'Browser tab id from list_browser_tabs.' },
+        expression: {
+          type: 'string',
+          description: 'JS expression, or a statement block that returns a value.'
+        },
+        await_promise: {
+          type: 'boolean',
+          description: 'Wait for a promise the code returns to settle and return its value. Default true. Code that itself uses `await` is always awaited.'
+        },
+        timeout_ms: {
+          type: 'number',
+          description: 'Give up after this many ms. Default 5000, max 60000.'
+        },
+        max_bytes: {
+          type: 'number',
+          description: 'Truncate the JSON result to this many bytes. Default 100000, max 2000000.'
+        }
+      },
+      required: ['tab_id', 'expression']
+    }
+  },
+  {
     name: 'get_tab_url',
     description: 'Return the current URL of the tab (may differ from the last-navigated URL if the page redirected).',
     inputSchema: {
@@ -948,7 +997,8 @@ const FULL_CONTROL_BROWSER_TOOLS = new Set([
   'click_tab',
   'type_tab',
   'scroll_tab',
-  'show_cursor'
+  'show_cursor',
+  'eval_tab'
 ])
 
 // One /scope fetch backs every capability gate below. Defaults on failure are
@@ -1405,6 +1455,27 @@ async function handleToolCall(name, args) {
     )
     if (r == null || r.html == null) throw new Error(r && r.error ? r.error : 'dom read failed')
     return truncateDom(r.html, args.max_bytes)
+  }
+  if (name === 'eval_tab') {
+    if (!args || !args.tab_id) throw new Error('tab_id is required')
+    if (typeof args.expression !== 'string' || !args.expression.trim()) {
+      throw new Error('expression is required')
+    }
+    // Outlast the page-side timeout (max 60s) so its clearer error wins.
+    const r = await callControl(
+      'POST',
+      '/browser/eval',
+      {
+        tabId: args.tab_id,
+        expression: args.expression,
+        awaitPromise: args.await_promise !== false,
+        timeoutMs: args.timeout_ms
+      },
+      Math.max(CALL_TIMEOUT_MS, 70_000)
+    )
+    if (r == null) throw new Error('eval failed')
+    if (r.ok !== true) throw new Error(r.error || 'eval failed')
+    return truncateText(r.value, args.max_bytes)
   }
   if (name === 'get_tab_url') {
     if (!args || !args.tab_id) throw new Error('tab_id is required')

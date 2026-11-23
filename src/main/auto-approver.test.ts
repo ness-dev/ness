@@ -11,6 +11,12 @@ describe('checkDenyList', () => {
     ).toBeNull()
   })
 
+  it('never sends browser-tab script eval to the reviewer', () => {
+    expect(
+      checkDenyList('mcp__ness-control__eval_tab', { tab_id: 't', expression: 'document.cookie' })
+    ).toMatch(/deny list/)
+  })
+
   it('blocks WebFetch and WebSearch outright', () => {
     expect(checkDenyList('WebFetch', { url: 'https://x' })).toMatch(/deny list/)
     expect(checkDenyList('WebSearch', { query: 'foo' })).toMatch(/deny list/)

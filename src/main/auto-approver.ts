@@ -47,7 +47,10 @@ const MAX_INPUT_BYTES = 4096
 // name as Claude Code reports it through the permission-prompt request.
 const DENY_TOOL_NAMES = new Set<string>([
   'WebFetch',
-  'WebSearch'
+  'WebSearch',
+  // Arbitrary script in a browser tab, with that tab's cookies and logged-in
+  // sessions — a reviewer reading the code can't bound what it reaches.
+  'mcp__ness-control__eval_tab'
 ])
 
 // Tools whose inputs always need a human's eyes regardless of arguments.

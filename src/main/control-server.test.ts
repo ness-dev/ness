@@ -189,6 +189,8 @@ let captureResult: CaptureResult | null = null
 /** Stands in for BrowserManager.getDom, which rejects when the tab can't be
  * evaluated (load failed, or the eval timed out). */
 let domResult: () => Promise<string | null> = async () => null
+let browserMode: 'view' | 'full' = 'full'
+const evalTab = vi.fn<ControlServerDeps['browser']['evalTab']>(async () => null)
 
 /** Mutable so the add_repo / create_project tests can register roots; reset
  *  after each of those so the rest of the file still sees one repo. */
@@ -222,7 +224,7 @@ const deps: ControlServerDeps = {
     terminalId === CALLER_TERMINAL || terminalId === NO_TRANSCRIPT_TERMINAL ? scope : null,
   forkableConversationKind: (sessionId) => (sessionId === CALLER_TERMINAL ? callerForkKind : null),
   getConversationForkEnabled: () => conversationForkEnabled,
-  getBrowserPerms: () => ({ enabled: browserEnabled, mode: 'full' }),
+  getBrowserPerms: () => ({ enabled: browserEnabled, mode: browserMode }),
   getWorktreeStatus: () => ({ status: 'no-pr', statusLabel: 'Active' }),
   browser: {
     listTabsForWorktree: () => [],
@@ -232,6 +234,7 @@ const deps: ControlServerDeps = {
     screenshotTab: async () => captureResult,
     getTabDom: () => domResult(),
     getTabClickables: async () => null,
+    evalTab,
     navigateTab: () => {},
     backTab: () => {},
     forwardTab: () => {},
@@ -1125,6 +1128,69 @@ describe('control-server /browser/dom endpoint', () => {
     const r = await get(`/browser/dom?tabId=${BROWSER_TAB}`)
     expect(r.status).toBe(500)
     expect(r.json.error).toMatch(/tab has no document loaded/)
+  })
+})
+
+describe('control-server /browser/eval endpoint', () => {
+  beforeAll(() => {
+    browserEnabled = true
+  })
+  afterAll(() => {
+    browserEnabled = false
+    browserMode = 'full'
+    evalTab.mockReset()
+  })
+
+  it('passes the expression and options through and returns the value', async () => {
+    evalTab.mockResolvedValueOnce({ ok: true, value: '1280' })
+    const r = await call('POST', '/browser/eval', {
+      tabId: BROWSER_TAB,
+      expression: 'document.documentElement.scrollWidth',
+      awaitPromise: false,
+      timeoutMs: 2000
+    })
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ ok: true, value: '1280' })
+    expect(evalTab).toHaveBeenLastCalledWith(BROWSER_TAB, 'document.documentElement.scrollWidth', {
+      awaitPromise: false,
+      timeoutMs: 2000
+    })
+  })
+
+  it('returns a throw inside the page as a 200 result, not a server error', async () => {
+    evalTab.mockResolvedValueOnce({ ok: false, error: 'ReferenceError: nope is not defined' })
+    const r = await call('POST', '/browser/eval', { tabId: BROWSER_TAB, expression: 'nope' })
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ ok: false, error: 'ReferenceError: nope is not defined' })
+  })
+
+  it('surfaces an unusable tab as a 500 with the reason', async () => {
+    evalTab.mockRejectedValueOnce(new Error('evalTab tab=t1 timed out after 5000ms'))
+    const r = await call('POST', '/browser/eval', { tabId: BROWSER_TAB, expression: '1' })
+    expect(r.status).toBe(500)
+    expect(r.json.error).toMatch(/timed out after 5000ms/)
+  })
+
+  it('requires an expression', async () => {
+    const r = await call('POST', '/browser/eval', { tabId: BROWSER_TAB, expression: '  ' })
+    expect(r.status).toBe(400)
+  })
+
+  it('refuses a tab the caller cannot see', async () => {
+    evalTab.mockClear()
+    const r = await call('POST', '/browser/eval', { tabId: 'someone-elses-tab', expression: '1' })
+    expect(r.status).toBe(403)
+    expect(evalTab).not.toHaveBeenCalled()
+  })
+
+  it('is unavailable when browser tools are View Only', async () => {
+    browserMode = 'view'
+    evalTab.mockClear()
+    const r = await call('POST', '/browser/eval', { tabId: BROWSER_TAB, expression: '1' })
+    browserMode = 'full'
+    expect(r.status).toBe(403)
+    expect(r.json.error).toMatch(/View Only/)
+    expect(evalTab).not.toHaveBeenCalled()
   })
 })
 
