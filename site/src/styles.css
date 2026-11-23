@@ -316,6 +316,22 @@
   pointer-events: auto;
   transform: translateX(-50%) translateY(0);
 }
+/* A hidden (opacity 0) tip still takes up layout width, so a 280px tip
+   centered on an edge logo widened the page on phones. On narrow screens,
+   anchor every tip to the logo row (which is `relative`) instead of its own
+   logo: it centers inside the content column, and the arrow is dropped because
+   it no longer lines up with the logo. */
+@media (max-width: 767px) {
+  .logo-tip {
+    position: static;
+  }
+  .logo-tip .tip {
+    width: min(280px, 100%);
+  }
+  .logo-tip .tip::after {
+    display: none;
+  }
+}
 .logo-tip .bubble {
   padding: 7px 12px;
   border-radius: 18px;
