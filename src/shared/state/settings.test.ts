@@ -199,6 +199,17 @@ describe('settingsReducer', () => {
     expect(on.harnessMcpEnabled).toBe(true)
   })
 
+  it('promptSuggestionsEnabledChanged toggles the flag', () => {
+    expect(initialSettings.promptSuggestionsEnabled).toBe(true)
+    const off = apply(initialSettings, {
+      type: 'settings/promptSuggestionsEnabledChanged',
+      payload: false
+    })
+    expect(off.promptSuggestionsEnabled).toBe(false)
+    const on = apply(off, { type: 'settings/promptSuggestionsEnabledChanged', payload: true })
+    expect(on.promptSuggestionsEnabled).toBe(true)
+  })
+
   it('nameClaudeSessionsChanged toggles flag', () => {
     const next = apply(initialSettings, {
       type: 'settings/nameClaudeSessionsChanged',

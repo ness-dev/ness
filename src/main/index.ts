@@ -13,6 +13,7 @@ import { basename, join, resolve as resolvePath } from 'path'
 import { PtyManager } from './pty-manager'
 import { ApprovalBridge } from './approval-bridge'
 import { JsonClaudeManager, bundledClaudeBinPath, forkTranscript } from './json-claude-manager'
+import { ComposerVisibility } from './composer-visibility'
 import { binaryVersion, canInstallLoch, installLoch } from './loch-install'
 import { LochHooksCoordinator } from './loch-hooks-coordinator'
 import { LochAutoRecorder } from './loch-auto-recorder'
@@ -496,6 +497,7 @@ const approvalBridge = new ApprovalBridge(store, {
   getAutoApproveSteerInstructions: () =>
     store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
 })
+const composerVisibility = new ComposerVisibility()
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
     store.getSnapshot().state.settings.claudeCommand || DEFAULT_CLAUDE_COMMAND,
@@ -526,7 +528,10 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
       worktrees: store.getSnapshot().state.worktrees.list,
       config,
       modelOverride
-    })
+    }),
+  getPromptSuggestionsEnabled: () =>
+    store.getSnapshot().state.settings.promptSuggestionsEnabled !== false,
+  isComposerVisible: (sessionId) => composerVisibility.isVisible(sessionId)
 })
 const codexChatProvider = new CodexChatProvider(store, {
   getBinPath: () => bundledCodexBinPath(),
@@ -723,6 +728,9 @@ transport.onClientDisconnect((clientId) => {
   })
   costTracker.removeClient(clientId)
   contextTracker.removeClient(clientId)
+  for (const sessionId of composerVisibility.removeClient(clientId)) {
+    jsonClaudeManager.setPromptSuggestionsPaused(sessionId, true)
+  }
 })
 
 if (webHttpServer && wsTransport) {
@@ -3272,6 +3280,20 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setPromptSuggestionsEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      delete config.promptSuggestionsEnabled
+    } else {
+      config.promptSuggestionsEnabled = false
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/promptSuggestionsEnabledChanged',
+      payload: config.promptSuggestionsEnabled !== false
+    })
+    return true
+  })
+
   transport.onRequest('config:setAutoApprovePermissions', (_ctx, enabled: boolean) => {
     // Default ON, so only an explicit opt-out is persisted.
     if (enabled) {
@@ -4961,6 +4983,16 @@ function registerIpcHandlers(): void {
       killJsonClaudeSession(sessionId)
       void startJsonClaudeSession(sessionId, worktreePath)
       return { ok: true }
+    }
+  )
+
+  transport.onRequest(
+    'jsonClaude:setComposerVisible',
+    (ctx, sessionId: string, visible: boolean) => {
+      if (!sessionId) return false
+      const flipped = composerVisibility.set(ctx.clientId, sessionId, visible === true)
+      if (flipped !== null) jsonClaudeManager.setPromptSuggestionsPaused(sessionId, !flipped)
+      return true
     }
   )
 

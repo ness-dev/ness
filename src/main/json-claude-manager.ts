@@ -66,6 +66,13 @@ interface JsonClaudeInstance {
    *  whether the last emitted warning was over-threshold and the
    *  resetAt that was on the most recent dispatched warning. */
   lastRateLimitWarning: { overThreshold: boolean; resetAt?: number }
+  /** Spawned with --prompt-suggestions. Pause requests to a process
+   *  without it would only produce control_response errors. */
+  promptSuggestions: boolean
+  /** Last paused value sent via set_prompt_suggestions_paused. The CLI
+   *  starts un-paused, so undefined means false. Dedups the frame —
+   *  focus and tab switches fire far more often than the value flips. */
+  promptSuggestionsPaused?: boolean
 }
 
 interface PartialMessageState {
@@ -139,6 +146,12 @@ export interface JsonClaudeManagerOptions {
    *  source of truth as the xterm spawn path; see buildClaudeLaunchSettings
    *  in claude-launch.ts. */
   getLaunchSettings: (worktreePath: string, modelOverride?: string) => ClaudeLaunchSettings
+  /** settings.promptSuggestionsEnabled, read at spawn time. */
+  getPromptSuggestionsEnabled: () => boolean
+  /** True when some client has this chat's composer on screen. Seeds the
+   *  pause state of a freshly spawned process; later changes arrive via
+   *  setPromptSuggestionsPaused. */
+  isComposerVisible: (sessionId: string) => boolean
 }
 
 /** Resolves the bundled @anthropic-ai/claude-code native binary by going
@@ -701,6 +714,14 @@ export class JsonClaudeManager implements ChatProvider {
     if (launchSettings.sessionName) {
       args.push('--name', launchSettings.sessionName)
     }
+    // Bundled binary only: it's pinned, so the flag is known to exist. A
+    // PATH claude (the diagnostic useSystemClaudeForJsonMode path) may
+    // predate it, and commander rejects unknown options by exiting, which
+    // would take the whole chat down to offer a nicety.
+    const promptSuggestions = !useSystemClaude && this.opts.getPromptSuggestionsEnabled()
+    if (promptSuggestions) {
+      args.push('--prompt-suggestions')
+    }
 
     log(
       'json-claude',
@@ -773,9 +794,13 @@ export class JsonClaudeManager implements ChatProvider {
       worktreePath,
       buf: '',
       partial: null,
-      lastRateLimitWarning: { overThreshold: false }
+      lastRateLimitWarning: { overThreshold: false },
+      promptSuggestions
     }
     this.instances.set(sessionId, instance)
+    // A tab woken in the background (restore, automated message) has no
+    // composer on screen, so it shouldn't spend a generation per turn.
+    this.setPromptSuggestionsPaused(sessionId, !this.opts.isComposerVisible(sessionId))
     log('json-claude', `create spawned sessionId=${sessionId} pid=${proc.pid ?? '?'} → running`)
     this.dispatchState(sessionId, 'running')
 
@@ -1323,6 +1348,32 @@ export class JsonClaudeManager implements ChatProvider {
     }
   }
 
+  /** Pause or resume prompt suggestions via the control_request the CLI
+   *  documents for "a host whose composer is not on screen": while paused,
+   *  a turn end starts no suggestion generation, so background chats cost
+   *  nothing. No-op when the value hasn't changed or the process wasn't
+   *  spawned with --prompt-suggestions. */
+  setPromptSuggestionsPaused(sessionId: string, paused: boolean): void {
+    const inst = this.instances.get(sessionId)
+    if (!inst || !inst.promptSuggestions) return
+    if ((inst.promptSuggestionsPaused ?? false) === paused) return
+    inst.promptSuggestionsPaused = paused
+    const frame = {
+      type: 'control_request',
+      request_id: `suggestions-paused-${randomUUID()}`,
+      request: { subtype: 'set_prompt_suggestions_paused', paused }
+    }
+    try {
+      inst.proc.stdin.write(JSON.stringify(frame) + '\n')
+    } catch (err) {
+      log(
+        'json-claude',
+        `set_prompt_suggestions_paused write failed sessionId=${sessionId}`,
+        err instanceof Error ? err.message : String(err)
+      )
+    }
+  }
+
   /** Spawn a one-shot `claude -p` probe to harvest the system/init event's
    *  slash_commands list. We need this because claude in stream-json input
    *  mode never emits init until a real user message arrives — so the
@@ -1792,6 +1843,19 @@ export class JsonClaudeManager implements ChatProvider {
     }
     if (type === 'rate_limit_event') {
       this.maybeDispatchRateLimitWarning(instance, parsed)
+      return
+    }
+    if (type === 'prompt_suggestion') {
+      const suggestion =
+        typeof parsed['suggestion'] === 'string' ? parsed['suggestion'].trim() : ''
+      // Generated after `result`, so the user may have started another turn
+      // in the ~1s it takes; that turn already made this one stale.
+      const session = this.store.getSnapshot().state.jsonClaude.sessions[instance.sessionId]
+      if (!suggestion || !session || session.busy) return
+      this.store.dispatch({
+        type: 'jsonClaude/promptSuggestionChanged',
+        payload: { sessionId: instance.sessionId, suggestion }
+      })
       return
     }
     // Unknown types fall through silently — the SDK adds new envelope

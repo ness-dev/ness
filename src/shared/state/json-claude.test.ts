@@ -1887,3 +1887,85 @@ describe('held notifications digest', () => {
     expect(wire).not.toContain('</ness-held-notifications>')
   })
 })
+
+describe('jsonClaudeReducer prompt suggestions', () => {
+  function withSuggestion(text = 'show me the code'): JsonClaudeState {
+    return jsonClaudeReducer(seedSession(initialJsonClaude), {
+      type: 'jsonClaude/promptSuggestionChanged',
+      payload: { sessionId: SID, suggestion: text }
+    })
+  }
+
+  it('promptSuggestionChanged sets the suggestion', () => {
+    expect(withSuggestion().sessions[SID].promptSuggestion).toBe('show me the code')
+  })
+
+  it('promptSuggestionChanged with null clears it', () => {
+    const next = jsonClaudeReducer(withSuggestion(), {
+      type: 'jsonClaude/promptSuggestionChanged',
+      payload: { sessionId: SID, suggestion: null }
+    })
+    expect(next.sessions[SID].promptSuggestion).toBeUndefined()
+  })
+
+  it('promptSuggestionChanged returns the same state when nothing changes', () => {
+    const before = withSuggestion()
+    const same = jsonClaudeReducer(before, {
+      type: 'jsonClaude/promptSuggestionChanged',
+      payload: { sessionId: SID, suggestion: 'show me the code' }
+    })
+    expect(same).toBe(before)
+    const empty = seedSession(initialJsonClaude)
+    expect(
+      jsonClaudeReducer(empty, {
+        type: 'jsonClaude/promptSuggestionChanged',
+        payload: { sessionId: SID, suggestion: null }
+      })
+    ).toBe(empty)
+  })
+
+  it('promptSuggestionChanged is a no-op for an unknown session', () => {
+    const next = jsonClaudeReducer(initialJsonClaude, {
+      type: 'jsonClaude/promptSuggestionChanged',
+      payload: { sessionId: 'nope', suggestion: 'hi' }
+    })
+    expect(next).toBe(initialJsonClaude)
+  })
+
+  it('a turn starting clears the suggestion; a turn ending keeps it', () => {
+    const busy = jsonClaudeReducer(withSuggestion(), {
+      type: 'jsonClaude/busyChanged',
+      payload: { sessionId: SID, busy: true, turnStartedAt: 1 }
+    })
+    expect(busy.sessions[SID].promptSuggestion).toBeUndefined()
+
+    const idleWithSuggestion = jsonClaudeReducer(
+      jsonClaudeReducer(busy, {
+        type: 'jsonClaude/busyChanged',
+        payload: { sessionId: SID, busy: false }
+      }),
+      { type: 'jsonClaude/promptSuggestionChanged', payload: { sessionId: SID, suggestion: 'next' } }
+    )
+    expect(idleWithSuggestion.sessions[SID].promptSuggestion).toBe('next')
+  })
+
+  it('a respawn drops the suggestion', () => {
+    const next = seedSession(withSuggestion())
+    expect(next.sessions[SID].promptSuggestion).toBeUndefined()
+  })
+
+  it('a rewind drops the suggestion', () => {
+    const seeded = jsonClaudeReducer(withSuggestion(), {
+      type: 'jsonClaude/entryAppended',
+      payload: {
+        sessionId: SID,
+        entry: { entryId: 'u1', kind: 'user', text: 'hi', timestamp: 1 }
+      }
+    })
+    const next = jsonClaudeReducer(seeded, {
+      type: 'jsonClaude/entriesTruncated',
+      payload: { sessionId: SID, fromEntryId: 'u1' }
+    })
+    expect(next.sessions[SID].promptSuggestion).toBeUndefined()
+  })
+})
