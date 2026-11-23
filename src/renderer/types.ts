@@ -127,8 +127,6 @@ export interface PersistedPane {
   activeTabId: string
 }
 
-export type QuestStep = 'hidden' | 'spawn-second' | 'switch-between' | 'finale' | 'done'
-
 import type { UpdaterStatus } from '../shared/state/updater'
 export type { UpdaterStatus }
 
@@ -504,7 +502,13 @@ export interface ElectronAPI {
   setTerminalFontFamily(fontFamily: string): Promise<boolean>
   getDefaultTerminalFontFamily(): Promise<string>
   setTerminalFontSize(fontSize: number): Promise<boolean>
-  setOnboardingQuest(quest: QuestStep): Promise<boolean>
+  /** First-run tour, popout 1: open a kickoff Chat in the tour project's
+   *  main workspace. `ok: false` when the tour isn't on that step. */
+  tourStartSomethingNew(): Promise<
+    { ok: true; worktreePath: string; tabId: string } | { ok: false }
+  >
+  /** End the first-run tour (either popout's ✕, or popout 2's button). */
+  tourDismiss(): Promise<boolean>
   scanExistingWork(): Promise<DiscoveredWork>
   importExistingWork(repoRoots: string[]): Promise<ImportWorkResult>
   setWorktreeScripts(scripts: { setup: string; teardown: string }): Promise<boolean>

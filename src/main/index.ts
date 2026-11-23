@@ -131,8 +131,7 @@ import {
   pruneTerminalHistory,
   LOCAL_BACKEND_ID,
   type BackendConnection,
-  type PersistedPaneNode,
-  type QuestStep
+  type PersistedPaneNode
 } from './persistence'
 import {
   loadRepoConfig,
@@ -143,6 +142,7 @@ import {
 } from './repo-config'
 import type { GitignorePreset } from './repo-create'
 import { addRepoAtPath, createAndRegisterProject, registerRepoRoot } from './repo-roots'
+import { buildFirstRunKickoff, installFirstRunTour, tourHomePath } from './first-run-tour'
 import { scanExistingWork, readLiveClaudeSessions } from './work-discovery'
 import type { DiscoveredSession, DiscoveredWork, ImportWorkResult } from '../shared/work-discovery'
 import type { AddRepoResult } from '../shared/repo-pick'
@@ -819,6 +819,8 @@ transport.onRequest('contextWindow:setInterest', (ctx, expanded: boolean) => {
 transport.onRequest('claude:getAuthStatus', async () => {
   return getClaudeAuthStatus()
 })
+
+installFirstRunTour({ store, config: () => config, saveConfig })
 
 // Auto-persist the costs slice to config.json on each change. Debounced
 // inside saveConfig; cheap to fire on every dispatch.
@@ -3882,15 +3884,17 @@ function registerIpcHandlers(): void {
     return AVAILABLE_THEMES
   })
 
-  transport.onRequest('config:setOnboardingQuest', (_ctx, quest: string) => {
-    const valid = ['hidden', 'spawn-second', 'switch-between', 'finale', 'done']
-    if (!valid.includes(quest)) return false
-    config.onboarding = { ...(config.onboarding || {}), quest: quest as QuestStep }
-    saveConfig(config)
-    store.dispatch({
-      type: 'onboarding/questChanged',
-      payload: quest as QuestStep
-    })
+  // First-run tour clicks. Every other transition is main's own — see
+  // first-run-tour.ts.
+  transport.onRequest('onboarding:tourStartSomethingNew', () => {
+    const homePath = tourHomePath(store.getSnapshot().state)
+    if (!homePath) return { ok: false as const }
+    const tabId = panesFSM.openKickoffChat(homePath, buildFirstRunKickoff(), { label: 'Getting started' })
+    store.dispatch({ type: 'onboarding/tourKickedOff', payload: { tabId, worktreePath: homePath } })
+    return { ok: true as const, worktreePath: homePath, tabId }
+  })
+  transport.onRequest('onboarding:tourDismiss', () => {
+    store.dispatch({ type: 'onboarding/tourEnded' })
     return true
   })
 
@@ -3915,7 +3919,7 @@ function registerIpcHandlers(): void {
       mayPreselectAgent:
         config.defaultAgent === undefined &&
         config.defaultClaudeTabType === undefined &&
-        (config.onboarding?.quest ?? 'hidden') === 'hidden'
+        store.getSnapshot().state.onboarding.tour.step === 'eligible'
     })
     return lastWorkScan
   })
@@ -3928,12 +3932,11 @@ function registerIpcHandlers(): void {
         (r) => wanted.has(r.repoRoot) && !config.repoRoots.includes(r.repoRoot)
       )
       if (chosen.length === 0) return { addedRepoRoots: [], focusWorktreePath: null }
-      // The quest teaches spawning a second worktree and switching between
-      // two — someone who just imported a sidebar full has done both. Settle
-      // it before the worktrees appear, or the renderer's quest effect sees
-      // them first and advances a quest that should never have started.
-      config.onboarding = { ...(config.onboarding || {}), quest: 'done' }
-      store.dispatch({ type: 'onboarding/questChanged', payload: 'done' })
+      // Someone importing a sidebar full of worktrees and live conversations
+      // already works this way; "start something new" on the first imported
+      // repo is the wrong lesson. End the tour before the repos register,
+      // or the first reposChanged would start it.
+      store.dispatch({ type: 'onboarding/tourEnded' })
       let focus: { path: string; at: number } | null = null
       for (const repo of chosen) {
         for (const wt of repo.worktrees) {

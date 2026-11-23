@@ -11,7 +11,7 @@ import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
 import { useTabHistory } from './hooks/useTabHistory'
 import { useWorktreeCollapse } from './hooks/useWorktreeCollapse'
 import { useProjectAccordion, useTabsByWorktree, useWorktreeListBase } from './hooks/useWorktreeListModel'
-import type { Worktree, TerminalTab, PtyStatus, QuestStep, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
+import type { Worktree, TerminalTab, PtyStatus, PendingWorktree, UpdaterStatus, RepoConfig, PaneNode, ForkSource, AgentKind } from './types'
 import { getLeaves, findLeaf, findLeafByTabId } from '../shared/state/terminals'
 import { CheckCircle2, FolderOpen, Loader2 } from 'lucide-react'
 import { BUILT_IN_THEMES_BY_MODE } from './themes'
@@ -27,7 +27,7 @@ import { AppTitleSegment } from './components/AppTitleSegment'
 import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorktreeScreen'
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
-import { QuestCard } from './components/QuestCard'
+import { FirstRunTour } from './components/FirstRunTour'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -593,16 +593,22 @@ function DesktopApp(): JSX.Element {
   const nameAgentSessions = nameClaudeSessions
   const hasGithubToken = hasGithubPat || !!githubAuthSource
   const hotkeyOverrides = settings.hotkeys ?? undefined
-  // Onboarding parallelism quest — see QuestCard.tsx for the steps.
-  // Quest state lives in the main-process store; its value is seeded from
-  // config on boot so it's already correct on first render.
-  const { quest: questStep } = useOnboarding()
-  const questVisitedRef = useRef<Set<string>>(new Set())
+  // First-run tour (see FirstRunTour.tsx). Progress lives in the main
+  // store, which also decides every transition but the user's clicks; this
+  // client only places the popouts.
+  const { tour } = useOnboarding()
+  const tourHomePath = useMemo(
+    () =>
+      tour.step === 'home'
+        ? (worktrees.find((w) => w.isMain && w.repoRoot === tour.repoRoot)?.path ?? null)
+        : null,
+    [tour, worktrees]
+  )
 
   const configLoadError = useConfigLoadError()
 
   // Count of "real" worktrees the user has spawned — main repo doesn't count
-  // as an agent. Used by empty state + quest advancement.
+  // as an agent. Used by the empty state.
   const agentWorktreeCount = useMemo(
     () => worktrees.filter((w) => !w.isMain).length,
     [worktrees]
@@ -624,31 +630,6 @@ function DesktopApp(): JSX.Element {
     ]
   )
   // Track which worktrees already have hooks installed so we only prompt once
-
-const setQuestStep = useCallback((next: QuestStep) => {
-    backend.setOnboardingQuest(next).catch(() => {})
-  }, [])
-
-  // Advance the quest based on how many agent worktrees exist (main excluded).
-  useEffect(() => {
-    if (questStep === 'done' || questStep === 'finale') return
-    if (questStep === 'hidden' && agentWorktreeCount >= 1) {
-      setQuestStep(agentWorktreeCount >= 2 ? 'switch-between' : 'spawn-second')
-      return
-    }
-    if (questStep === 'spawn-second' && agentWorktreeCount >= 2) {
-      setQuestStep('switch-between')
-    }
-  }, [agentWorktreeCount, questStep, setQuestStep])
-
-  // Advance the quest when the user switches between two different worktrees
-  useEffect(() => {
-    if (questStep !== 'switch-between' || !activeWorktreeId) return
-    questVisitedRef.current.add(activeWorktreeId)
-    if (questVisitedRef.current.size >= 2) {
-      setQuestStep('finale')
-    }
-  }, [activeWorktreeId, questStep, setQuestStep])
 
   // Panes + repos + worktrees are all hydrated from the main-process store
   // before App mounts. The only thing we still need to do at mount is ask
@@ -2340,11 +2321,17 @@ const setQuestStep = useCallback((next: QuestStep) => {
             onDismiss={handleDismissPendingDeletion}
           />
         )}
-        <QuestCard
-          step={questStep}
-          onDismiss={() => setQuestStep('done')}
-          onFinish={() => setQuestStep('done')}
-        />
+        {!onboardingVisible && (
+          <FirstRunTour
+            tour={tour}
+            homePath={tourHomePath}
+            onStart={async () => {
+              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+              if (result.ok) setActiveWorktreeId(result.worktreePath)
+            }}
+            onDismiss={() => void backend.tourDismiss().catch(() => {})}
+          />
+        )}
         {/* Right panel — hidden on the new-worktree screen so the form gets the full width.
             Pushed down 40px so the workspace tab bar can extend across the top, full width.
             The 40px top spacers are deliberately NOT drag regions: the tab bar's trailing

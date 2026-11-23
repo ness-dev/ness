@@ -174,7 +174,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1">
+      <div data-sidebar-scroll className="flex-1 overflow-y-auto py-1">
         <WorktreeList
           model={model}
           variant="desktop"

@@ -107,6 +107,7 @@ export type JsonClaudeAutomationSource =
   | 'pr-update'
   | 'reviewed-pr-update'
   | 'blame-ask'
+  | 'first-run-kickoff'
 
 const AUTOMATION_SOURCES: readonly string[] = [
   'ci-failure',
@@ -121,7 +122,8 @@ const AUTOMATION_SOURCES: readonly string[] = [
   'progress-report',
   'pr-update',
   'reviewed-pr-update',
-  'blame-ask'
+  'blame-ask',
+  'first-run-kickoff'
 ]
 
 /** Model-facing footer appended inside the sentinel and stripped back off on

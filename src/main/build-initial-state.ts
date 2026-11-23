@@ -1,6 +1,6 @@
 import type { AppState } from '../shared/state'
 import { initialPRs } from '../shared/state/prs'
-import { initialOnboarding } from '../shared/state/onboarding'
+import { sanitizeTour } from '../shared/state/onboarding'
 import { initialHooks } from '../shared/state/hooks'
 import { initialWorktrees } from '../shared/state/worktrees'
 import { initialTerminals } from '../shared/state/terminals'
@@ -237,10 +237,7 @@ export function buildInitialAppState(
   return {
     prs: initialPRs,
     configHealth: { ...initialConfigHealth, loadError: opts.configLoadError ?? null },
-    onboarding: {
-      ...initialOnboarding,
-      quest: config.onboarding?.quest ?? 'hidden'
-    },
+    onboarding: { tour: sanitizeTour(config.onboarding?.tour) },
     hooks: initialHooks,
     worktrees: { ...initialWorktrees, repoRoots: config.repoRoots || [] },
     terminals: initialTerminals,
