@@ -363,6 +363,7 @@ export function buildBackend(
       reqConfig('config:setPreventSleepUntil', value),
     setAutoUpdateEnabled: (enabled: boolean) => reqConfig('config:setAutoUpdateEnabled', enabled),
     setWarnBeforeQuitting: (enabled: boolean) => reqConfig('config:setWarnBeforeQuitting', enabled),
+    setSimpleFullScreen: (enabled: boolean) => reqConfig('config:setSimpleFullScreen', enabled),
     setOpenPrInBrowserTab: (enabled: boolean) => reqConfig('config:setOpenPrInBrowserTab', enabled),
     setTerminalPlainClickOpensInApp: (enabled: boolean) =>
       reqConfig('config:setTerminalPlainClickOpensInApp', enabled),

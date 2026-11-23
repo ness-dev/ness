@@ -1,8 +1,8 @@
-// EXPERIMENT: macOS "simple" (pre-Lion) full screen, so Ness fills the whole
-// display — including the strips either side of the camera notch — instead
-// of native full screen, which parks the window below the notch and blacks
-// the menu-bar strip out. Flip USE_SIMPLE_FULLSCREEN to false to get the old
-// behaviour back exactly; it's the single switch a future setting replaces.
+// macOS "simple" (pre-Lion) full screen, so Ness fills the whole display —
+// including the strips either side of the camera notch — instead of native
+// full screen, which parks the window below the notch and blacks the
+// menu-bar strip out. Governed by the `simpleFullScreen` setting (default
+// on); with it off, every path here falls through to native full screen.
 //
 // Why not BrowserWindow's `simpleFullscreen: true` option: in Electron 41 it
 // only redirects `toggleFullScreenMode:` (win.setFullScreen and the
@@ -15,7 +15,13 @@ import { screen, type BrowserWindow, type Display } from 'electron'
 import type { NotchInset } from '../shared/notch'
 import { log } from './debug'
 
-export const USE_SIMPLE_FULLSCREEN = process.platform === 'darwin'
+// Read live at each transition, so toggling the setting applies to the next
+// entry without re-wiring windows. desktop-shell supplies it (macOS only).
+let simpleEnabled: () => boolean = () => false
+
+export function configureSimpleFullScreen(isEnabled: () => boolean): void {
+  simpleEnabled = isEnabled
+}
 
 // Notched MacBooks report a ~37-38pt menu bar; every non-notched Mac is
 // 22-25pt. Anything over 30 on the built-in panel is treated as a notch.
@@ -70,12 +76,8 @@ export function isWindowFullScreen(win: BrowserWindow): boolean {
 }
 
 export function toggleWindowFullScreen(win: BrowserWindow): void {
-  if (!USE_SIMPLE_FULLSCREEN) {
+  if (win.isFullScreen() || (!win.isSimpleFullScreen() && !simpleEnabled())) {
     win.setFullScreen(!win.isFullScreen())
-    return
-  }
-  if (win.isFullScreen()) {
-    win.setFullScreen(false)
     return
   }
   if (!win.isSimpleFullScreen()) recordMenuBarHeights()
@@ -83,17 +85,11 @@ export function toggleWindowFullScreen(win: BrowserWindow): void {
   notifiers.get(win)?.()
 }
 
-/** Wires full-screen state + notch inset signals for one window, and bounces
- *  native full-screen entries (green button, AppKit menu item, fn-F) into
- *  simple full screen. `notify` fires after every transition. */
+/** Wires full-screen state + notch inset signals for one window and, while
+ *  the setting is on, bounces native full-screen entries (green button,
+ *  fn-F) into simple full screen. `notify` fires after every transition. */
 export function attachFullScreenHandling(win: BrowserWindow, notify: () => void): void {
   recordMenuBarHeights()
-  if (!USE_SIMPLE_FULLSCREEN) {
-    win.on('enter-full-screen', notify)
-    win.on('leave-full-screen', notify)
-    return
-  }
-
   notifiers.set(win, notify)
 
   // No way to cancel a native entry, so let it land, leave it, then apply
@@ -109,6 +105,10 @@ export function attachFullScreenHandling(win: BrowserWindow, notify: () => void)
   }
   win.on('enter-full-screen', () => {
     clearBounce()
+    if (!simpleEnabled() && !win.isSimpleFullScreen()) {
+      notify()
+      return
+    }
     bounceTo = !win.isSimpleFullScreen()
     bounceTimer = setTimeout(clearBounce, BOUNCE_TIMEOUT_MS)
     win.setFullScreen(false)
@@ -132,6 +132,14 @@ export function attachFullScreenHandling(win: BrowserWindow, notify: () => void)
   }
   screen.on('display-metrics-changed', onMetrics)
   win.on('closed', () => screen.off('display-metrics-changed', onMetrics))
+}
+
+/** Setting turned off: take a window out of simple full screen so it isn't
+ *  left in a mode the user just disabled. */
+export function leaveSimpleFullScreen(win: BrowserWindow): void {
+  if (!win.isSimpleFullScreen()) return
+  win.setSimpleFullScreen(false)
+  notifiers.get(win)?.()
 }
 
 export function notchInsetFor(win: BrowserWindow): NotchInset | null {

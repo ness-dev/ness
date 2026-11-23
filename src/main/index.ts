@@ -3151,6 +3151,16 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  // Persists only the off state (default-on). desktop-shell watches the
+  // slice and takes any window out of simple full screen when it's turned off.
+  transport.onRequest('config:setSimpleFullScreen', (_ctx, enabled: boolean) => {
+    if (enabled) delete config.simpleFullScreen
+    else config.simpleFullScreen = false
+    saveConfig(config)
+    store.dispatch({ type: 'settings/simpleFullScreenChanged', payload: config.simpleFullScreen !== false })
+    return true
+  })
+
   transport.onRequest('config:setOpenPrInBrowserTab', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.openPrInBrowserTab = true

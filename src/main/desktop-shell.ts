@@ -50,10 +50,11 @@ import { DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME } from '../shared/state/setting
 import { registerWindowControlHandlers } from './window-controls'
 import {
   attachFullScreenHandling,
+  configureSimpleFullScreen,
   isWindowFullScreen,
+  leaveSimpleFullScreen,
   notchInsetFor,
-  toggleWindowFullScreen,
-  USE_SIMPLE_FULLSCREEN
+  toggleWindowFullScreen
 } from './simple-fullscreen'
 import { sealAllActive } from './activity'
 import { log, getLogFilePath } from './debug'
@@ -557,12 +558,11 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
             accelerator: 'F12',
             click: () => transport.sendSignal('app:toggleSingleScreen')
           },
-          // Without simple full screen, macOS appends "Enter Full Screen"
-          // to the View menu automatically — an explicit togglefullscreen
-          // role would show up a second time. With it, AppKit's item is
-          // suppressed (registerDefaults in app.whenReady) and this one
-          // routes through toggleWindowFullScreen.
-          ...(USE_SIMPLE_FULLSCREEN
+          // macOS would append its own "Enter Full Screen" here, which goes
+          // straight to native full screen. It's suppressed (registerDefaults
+          // in app.whenReady) in favour of this one, which follows the
+          // simpleFullScreen setting via toggleWindowFullScreen.
+          ...(process.platform === 'darwin'
             ? ([
                 { type: 'separator' },
                 {
@@ -849,10 +849,11 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
         applicationVersion: app.getVersion()
       })
     }
-    if (USE_SIMPLE_FULLSCREEN) {
-      // Registration domain only (not persisted), so dropping the
-      // experiment brings AppKit's own "Enter Full Screen" item back.
+    if (process.platform === 'darwin') {
+      // Registration domain only (not persisted), so removing this brings
+      // AppKit's own "Enter Full Screen" item back.
       systemPreferences.registerDefaults({ NSFullScreenMenuItemEverywhere: false })
+      configureSimpleFullScreen(() => store.getSnapshot().state.settings.simpleFullScreen)
     }
     buildMenu()
     void runBoot()
@@ -971,11 +972,16 @@ export function startDesktopShell(deps: DesktopShellStartDeps): DesktopShellStar
   // is toggled from Settings (or anywhere). Cheap: re-derive one boolean
   // per store event and only rebuild the menu when it actually flips.
   let lastWarnBeforeQuitting = store.getSnapshot().state.settings.warnBeforeQuitting
+  let lastSimpleFullScreen = store.getSnapshot().state.settings.simpleFullScreen
   store.subscribe(() => {
-    const warn = store.getSnapshot().state.settings.warnBeforeQuitting
+    const { warnBeforeQuitting: warn, simpleFullScreen } = store.getSnapshot().state.settings
     if (warn !== lastWarnBeforeQuitting) {
       lastWarnBeforeQuitting = warn
       buildMenu()
+    }
+    if (simpleFullScreen !== lastSimpleFullScreen) {
+      lastSimpleFullScreen = simpleFullScreen
+      if (!simpleFullScreen) for (const w of BrowserWindow.getAllWindows()) leaveSimpleFullScreen(w)
     }
   })
 

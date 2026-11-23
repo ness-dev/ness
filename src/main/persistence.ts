@@ -233,6 +233,9 @@ export interface Config {
   // When false, ⌘Q quits immediately. When true/undefined (default), ⌘Q
   // must be held briefly to quit (Chrome-style "Warn Before Quitting").
   warnBeforeQuitting?: boolean
+  // macOS full screen mode. When true/undefined (default), full screen uses
+  // the whole display around the camera notch; false = native full screen.
+  simpleFullScreen?: boolean
   // When true, the Open PR action opens the PR in a Ness browser tab
   // instead of the system browser. Default is off (undefined/false).
   openPrInBrowserTab?: boolean

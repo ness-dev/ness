@@ -314,6 +314,7 @@ export function buildInitialAppState(
       hasGithubToken: opts.hasGithubToken,
       autoUpdateEnabled: config.autoUpdateEnabled !== false,
       warnBeforeQuitting: config.warnBeforeQuitting !== false,
+      simpleFullScreen: config.simpleFullScreen !== false,
       openPrInBrowserTab: config.openPrInBrowserTab === true,
       terminalPlainClickOpensInApp: config.terminalPlainClickOpensInApp === true,
       newWorktreeAdvancedOpen: config.newWorktreeAdvancedOpen === true,

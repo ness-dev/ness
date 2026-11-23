@@ -12,13 +12,11 @@ vi.mock('electron', () => ({
 }))
 vi.mock('./debug', () => ({ log: () => {} }))
 
-// USE_SIMPLE_FULLSCREEN is read at import; CI runs on Linux.
 let mod: typeof import('./simple-fullscreen')
+let enabled = true
 beforeAll(async () => {
-  const original = process.platform
-  Object.defineProperty(process, 'platform', { value: 'darwin' })
   mod = await import('./simple-fullscreen')
-  Object.defineProperty(process, 'platform', { value: original })
+  mod.configureSimpleFullScreen(() => enabled)
 })
 
 /** Mimics AppKit: native transitions report back via events, a tick later. */
@@ -52,7 +50,10 @@ function setup(): { win: FakeWindow; notify: ReturnType<typeof vi.fn> } {
 }
 
 describe('simple full screen bounce', () => {
-  beforeEach(() => vi.useFakeTimers())
+  beforeEach(() => {
+    enabled = true
+    vi.useFakeTimers()
+  })
   afterEach(() => vi.useRealTimers())
 
   it('green button: windowed → native → simple', () => {
@@ -82,6 +83,32 @@ describe('simple full screen bounce', () => {
     expect(notify).toHaveBeenCalledTimes(1)
     mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
     expect(win.simple).toBe(false)
+  })
+
+  it('with the setting off, the green button and Ctrl+Cmd+F stay native', () => {
+    enabled = false
+    const { win, notify } = setup()
+    win.clickGreenButton()
+    vi.runAllTimers()
+    expect(win.native).toBe(true)
+    expect(win.setFullScreen).not.toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledTimes(1)
+    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
+    vi.runAllTimers()
+    expect(win.native).toBe(false)
+    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
+    vi.runAllTimers()
+    expect(win.native).toBe(true)
+    expect(win.simple).toBe(false)
+  })
+
+  it('turning the setting off takes a window out of simple full screen', () => {
+    const { win, notify } = setup()
+    mod.toggleWindowFullScreen(win as unknown as BrowserWindow)
+    enabled = false
+    mod.leaveSimpleFullScreen(win as unknown as BrowserWindow)
+    expect(win.simple).toBe(false)
+    expect(notify).toHaveBeenCalledTimes(2)
   })
 
   it('a stale bounce does not fire on a later, unrelated leave', () => {

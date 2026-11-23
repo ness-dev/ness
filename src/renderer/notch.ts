@@ -1,4 +1,4 @@
-// EXPERIMENT (see src/main/simple-fullscreen.ts): while Ness is in simple full
+// See src/main/simple-fullscreen.ts: while Ness is in simple full
 // screen on a notched MacBook, the top bar runs either side of the camera
 // notch. This keeps that band clear of top-bar content. Per-window UI — each
 // window gets its own inset over a local signal — so a module store, not a
