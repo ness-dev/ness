@@ -54,13 +54,42 @@ export function computeNotchPush(
   return null
 }
 
+/** The push for a row whose tab strip should stay at `scroll`. Items
+ *  flagged `scrolls` live in the strip and their `left` is content-relative
+ *  (viewport left at scroll 0); the rest are plain viewport rects.
+ *
+ *  Pushing a strip tab widens the strip's scroll range by the push. Near the
+ *  end of the range the push the band needs can be smaller than the one that
+ *  let the strip scroll this far, so the offset would no longer fit; the
+ *  strip would clamp, the tabs would move, and the last tab would end up
+ *  partly out of reach. Instead the gap grows to keep the offset valid (never
+ *  past the previous push, which allowed it). Pushing further right never
+ *  puts anything under the band. */
+export function planNotchPush(
+  items: readonly { left: number; width: number; scrolls: boolean }[],
+  bandLeft: number,
+  bandRight: number,
+  strip: { scroll: number; naturalMaxScroll: number }
+): { index: number; px: number } | null {
+  const push = computeNotchPush(
+    items.map((it) => (it.scrolls ? { left: it.left - strip.scroll, width: it.width } : it)),
+    bandLeft,
+    bandRight
+  )
+  if (!push || !items[push.index].scrolls) return push
+  return { index: push.index, px: Math.max(push.px, strip.scroll - strip.naturalMaxScroll) }
+}
+
 /** Pushes the first top-bar item that would sit under the notch to the
  *  notch's right edge, leaving a gap (still part of the row's drag region).
  *
  *  Items are the row's direct children, except that a child marked
  *  `data-notch-flow` (the scrolling tab strip) is descended into so the gap
  *  lands between tabs. Positions are real viewport positions, re-measured on
- *  scroll, so tabs stay out of the band while the strip scrolls too. Rows
+ *  scroll, so tabs stay out of the band while the strip scrolls too. While
+ *  scrolling, the tab nearest the notch stays pinned at the band's right
+ *  edge, then jumps across once it fits entirely left of the band. That's
+ *  intended: a tab is only ever wholly on one side. Rows
  *  that aren't at the top of the window (a split pane's lower tab bar) are
  *  left alone. */
 export function useNotchAvoidance(rowRef: RefObject<HTMLElement | null>): void {
@@ -88,21 +117,33 @@ export function useNotchAvoidance(rowRef: RefObject<HTMLElement | null>): void {
         child.hasAttribute('data-notch-flow') ? (Array.from(child.children) as HTMLElement[]) : [child]
       )
 
+    // Last scrollLeft apply() left the strip at, so the scroll event our
+    // own write fires doesn't schedule another pass.
+    const settled = new WeakMap<HTMLElement, number>()
+
     const apply = (): void => {
-      // Clearing can shrink a scrolled strip enough to clamp its scrollLeft;
-      // restore it so re-applying the same push lands in the same place.
-      const scrolls = flows().map((f) => [f, f.scrollLeft] as const)
+      // Assumes at most one scrolling strip per row (the tab strip).
+      const strip = flows()[0] as HTMLElement | undefined
+      const desiredScroll = strip?.scrollLeft ?? 0
       clear()
       if (row.getBoundingClientRect().top < inset.height) {
         const left = window.innerWidth / 2 - inset.width / 2
+        // Clearing may have clamped the strip; content-relative positions
+        // don't care which offset it ended up at.
+        const measuredScroll = strip?.scrollLeft ?? 0
         const els = items()
-        const push = computeNotchPush(
+        const push = planNotchPush(
           els.map((el) => {
             const r = el.getBoundingClientRect()
-            return { left: r.left, width: r.width }
+            const scrolls = el.parentElement === strip
+            return { left: scrolls ? r.left + measuredScroll : r.left, width: r.width, scrolls }
           }),
           left,
-          left + inset.width
+          left + inset.width,
+          {
+            scroll: desiredScroll,
+            naturalMaxScroll: strip ? strip.scrollWidth - strip.clientWidth : 0
+          }
         )
         if (push) {
           const el = els[push.index]
@@ -111,7 +152,15 @@ export function useNotchAvoidance(rowRef: RefObject<HTMLElement | null>): void {
           el.style.marginLeft = `${base + push.px}px`
         }
       }
-      for (const [f, x] of scrolls) if (f.scrollLeft !== x) f.scrollLeft = x
+      // Clearing may have clamped the strip; the push now fits the offset.
+      if (strip && strip.scrollLeft !== desiredScroll) strip.scrollLeft = desiredScroll
+      if (strip) settled.set(strip, strip.scrollLeft)
+    }
+
+    const onScroll = (e: Event): void => {
+      const f = e.currentTarget as HTMLElement
+      if (settled.get(f) === f.scrollLeft) return
+      schedule()
     }
 
     let frame = 0
@@ -137,14 +186,17 @@ export function useNotchAvoidance(rowRef: RefObject<HTMLElement | null>): void {
     function observeAll(): void {
       ro.disconnect()
       mo.disconnect()
-      for (const f of scrollers) f.removeEventListener('scroll', schedule)
+      for (const f of scrollers) f.removeEventListener('scroll', onScroll)
       ro.observe(row!)
       for (const el of items()) ro.observe(el)
       mo.observe(row!, { childList: true })
       scrollers = flows()
       for (const f of scrollers) {
+        // Chromium's scroll anchoring would nudge scrollLeft to compensate
+        // for our margin changes, fighting the planned offset.
+        f.style.overflowAnchor = 'none'
         mo.observe(f, { childList: true })
-        f.addEventListener('scroll', schedule, { passive: true })
+        f.addEventListener('scroll', onScroll, { passive: true })
       }
     }
     observeAll()
@@ -153,7 +205,7 @@ export function useNotchAvoidance(rowRef: RefObject<HTMLElement | null>): void {
       cancelAnimationFrame(frame)
       ro.disconnect()
       mo.disconnect()
-      for (const f of scrollers) f.removeEventListener('scroll', schedule)
+      for (const f of scrollers) f.removeEventListener('scroll', onScroll)
       window.removeEventListener('resize', schedule)
       clear()
     }
