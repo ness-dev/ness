@@ -3564,25 +3564,30 @@ export function JsonModeChat({
             // truncated, so a long suggestion can't push the hint out of a
             // two-row composer; Tab inserts the full text anyway.
             //
-            // A mouse click on the empty box should still just focus it, so
-            // with a fine pointer only the hint is clickable. Touch has no
-            // Tab key, so there the whole suggestion is the tap target.
-            <div
-              onClick={() => {
-                acceptPromptSuggestion(promptSuggestion)
-                textareaRef.current?.focus()
-              }}
-              className="absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint flex items-start gap-1 pointer-events-none pointer-coarse:pointer-events-auto cursor-pointer"
-            >
-              <span className="min-w-0 truncate" title={promptSuggestion}>
+            // Only the hint is a tap/click target, on touch too: tapping
+            // into the empty composer to type your own reply is the most
+            // common action there, so it must still just focus the box.
+            <div className="pointer-events-none absolute inset-0 overflow-hidden px-2.5 pt-2 pb-1 text-base sm:text-sm text-faint flex items-start gap-1">
+              <span aria-hidden className="min-w-0 truncate">
                 {promptSuggestion}
               </span>
-              <span className="shrink-0 whitespace-nowrap pointer-events-auto hover:text-muted">
+              <button
+                type="button"
+                // Out of the tab order: from the textarea, Tab itself accepts.
+                tabIndex={-1}
+                aria-label="Accept suggested reply"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  acceptPromptSuggestion(promptSuggestion)
+                  textareaRef.current?.focus()
+                }}
+                className="pointer-events-auto shrink-0 whitespace-nowrap cursor-pointer hover:text-muted rounded pointer-coarse:-my-1 pointer-coarse:px-1.5 pointer-coarse:py-1 pointer-coarse:border pointer-coarse:border-border"
+              >
                 <span className="pointer-coarse:hidden">
                   (<kbd className="font-sans px-1 rounded border border-border">Tab</kbd> to accept suggestion)
                 </span>
-                <span className="hidden pointer-coarse:inline">(tap to accept suggestion)</span>
-              </span>
+                <span className="hidden pointer-coarse:inline">Tap to accept suggestion</span>
+              </button>
             </div>
           )}
           </div>

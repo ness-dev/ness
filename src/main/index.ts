@@ -530,7 +530,7 @@ const jsonClaudeManager = new JsonClaudeManager(store, {
       modelOverride
     }),
   getPromptSuggestionsEnabled: () =>
-    store.getSnapshot().state.settings.promptSuggestionsEnabled !== false,
+    store.getSnapshot().state.settings.promptSuggestionsEnabled === true,
   isComposerVisible: (sessionId) => composerVisibility.isVisible(sessionId)
 })
 const codexChatProvider = new CodexChatProvider(store, {
@@ -3282,14 +3282,14 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('config:setPromptSuggestionsEnabled', (_ctx, enabled: boolean) => {
     if (enabled) {
-      delete config.promptSuggestionsEnabled
+      config.promptSuggestionsEnabled = true
     } else {
-      config.promptSuggestionsEnabled = false
+      delete config.promptSuggestionsEnabled
     }
     saveConfig(config)
     store.dispatch({
       type: 'settings/promptSuggestionsEnabledChanged',
-      payload: config.promptSuggestionsEnabled !== false
+      payload: config.promptSuggestionsEnabled === true
     })
     return true
   })

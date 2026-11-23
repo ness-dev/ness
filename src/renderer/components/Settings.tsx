@@ -2702,7 +2702,9 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                       <div className="text-xs text-dim mt-0.5">
                         After a few turns Claude predicts your next message and
                         shows it in the empty composer; press Tab to use it.
-                        Claude chats only. Applies when a chat next starts.
+                        Claude chats only. Applies when a chat next starts. Adds
+                        a short extra generation after each turn, including in
+                        chats running in the background.
                       </div>
                     </div>
                   </label>

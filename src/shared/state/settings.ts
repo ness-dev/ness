@@ -706,7 +706,7 @@ export const initialSettings: SettingsState = {
   codexEnvVars: {},
   cursorEnvVars: {},
   harnessMcpEnabled: true,
-  promptSuggestionsEnabled: true,
+  promptSuggestionsEnabled: false,
   nameClaudeSessions: false,
   terminalFontFamily: '',
   terminalFontSize: 13,

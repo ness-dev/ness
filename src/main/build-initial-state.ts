@@ -293,7 +293,7 @@ export function buildInitialAppState(
       codexEnvVars: config.codexEnvVars || {},
       cursorEnvVars: config.cursorEnvVars || {},
       harnessMcpEnabled: config.harnessMcpEnabled !== false,
-      promptSuggestionsEnabled: config.promptSuggestionsEnabled !== false,
+      promptSuggestionsEnabled: config.promptSuggestionsEnabled === true,
       nameClaudeSessions: config.nameClaudeSessions ?? false,
       terminalFontFamily: config.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY,
       terminalFontSize: config.terminalFontSize || DEFAULT_TERMINAL_FONT_SIZE,

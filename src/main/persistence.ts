@@ -102,7 +102,9 @@ export interface Config {
   // When false, Ness won't inject `--mcp-config <path>` pointing at the
   // bundled ness-control MCP server. Default is enabled (undefined/true).
   harnessMcpEnabled?: boolean
-  // When false, Chat tabs don't pass --prompt-suggestions. Default enabled.
+  // When true, Chat tabs pass --prompt-suggestions. Opt-in: the bundled CLI
+  // can't pause suggestions yet, so with it on, background chats also pay
+  // for a suggestion generation every turn.
   promptSuggestionsEnabled?: boolean
   // Persisted workspace panes nested by repoRoot → worktreePath → panes[].
   // Two repos can have worktrees with identical paths in theory, and the

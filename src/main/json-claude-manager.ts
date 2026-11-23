@@ -146,7 +146,12 @@ export interface JsonClaudeManagerOptions {
    *  source of truth as the xterm spawn path; see buildClaudeLaunchSettings
    *  in claude-launch.ts. */
   getLaunchSettings: (worktreePath: string, modelOverride?: string) => ClaudeLaunchSettings
-  /** settings.promptSuggestionsEnabled, read at spawn time. */
+  /** settings.promptSuggestionsEnabled, read at spawn time. Opt-in for
+   *  now: the bundled CLI acknowledges set_prompt_suggestions_paused but
+   *  keeps generating, so with suggestions on, every chat (background
+   *  ones fed only by NotificationBus included) pays for one extra
+   *  generation per turn. Revisit the default once a bundled build honors
+   *  the pause; the visibility plumbing is already in place. */
   getPromptSuggestionsEnabled: () => boolean
   /** True when some client has this chat's composer on screen. Seeds the
    *  pause state of a freshly spawned process; later changes arrive via
