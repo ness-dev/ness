@@ -729,6 +729,13 @@ export async function initStore(): Promise<void> {
     getTransportFor: (backendId) => registry.getTransport(backendId)
   })
 
+  // A reload keeps this window's clientId but skips React cleanups, so
+  // chats that were on screen would otherwise stay "visible" to main and
+  // never pause their prompt suggestions. Sent before any chat mounts;
+  // requests on one transport are handled in order. (WS clients get a
+  // fresh clientId per connection, and disconnect clears the old one.)
+  void localTransport.request('jsonClaude:resetComposerVisibility')
+
   const [snapshot, id] = await Promise.all([
     localTransport.getStateSnapshot(),
     localTransport.getClientId()

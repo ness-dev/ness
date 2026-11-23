@@ -405,6 +405,7 @@ export interface ElectronAPI {
   setClaudeCommand(command: string): Promise<boolean>
   getDefaultClaudeCommand(): Promise<string>
   setHarnessMcpEnabled(enabled: boolean): Promise<boolean>
+  setPromptSuggestionsEnabled(enabled: boolean): Promise<boolean>
   setAutoApprovePermissions(enabled: boolean): Promise<boolean>
   setAutoApproveSteerInstructions(text: string): Promise<boolean>
   setClaudeTuiFullscreen(enabled: boolean): Promise<boolean>
@@ -824,6 +825,9 @@ export interface ElectronAPI {
   openJsonClaudeAuthLoginTab(
     worktreePath: string
   ): Promise<{ ok: true; tabId: string } | { ok: false; error: string }>
+  /** Reports whether this client has the chat's composer on screen, so
+   *  main can pause prompt suggestions for chats nobody is looking at. */
+  setJsonClaudeComposerVisible(id: string, visible: boolean): Promise<boolean>
   setJsonClaudePermissionMode(
     id: string,
     mode: JsonClaudePermissionMode
