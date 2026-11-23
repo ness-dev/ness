@@ -115,7 +115,6 @@ function Popout({
           style={{ top: arrowTop - 6 }}
         />
         <div className="relative bg-panel-raised border border-border-strong rounded-2xl shadow-2xl overflow-hidden">
-          <div className="brand-gradient-bg h-1" />
           <div className="p-4">
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center gap-2">
