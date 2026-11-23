@@ -18,6 +18,7 @@ export const SEMANTIC_KEYS: ReadonlySet<string> = new Set([
   'panel-raised',
   'surface',
   'surface-hover',
+  'well',
   'border',
   'border-strong',
   'fg',
@@ -36,6 +37,14 @@ export const SEMANTIC_KEYS: ReadonlySet<string> = new Set([
   'brand-mid',
   'brand-deep'
 ])
+
+/** Keys a built-in theme's "Copy JSON" export writes. `well` is left out:
+ *  for most built-ins it's only derived (`var(--color-app)` at :root), so a
+ *  probe reads the *active* theme's value, and freezing it into a custom
+ *  theme would stop it following that theme's own `app`. */
+export const EXPORTED_THEME_KEYS: ReadonlySet<string> = new Set(
+  [...SEMANTIC_KEYS].filter((k) => k !== 'well')
+)
 
 /** Theme + Nessie colour are applied together, in one pass, on purpose.
  *

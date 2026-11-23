@@ -25,7 +25,7 @@ import { AgentIcon } from './AgentIcon'
 import { LochRecordingRepos } from './LochRecordingRepos'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
-import { SEMANTIC_KEYS } from '../theme-apply'
+import { EXPORTED_THEME_KEYS } from '../theme-apply'
 import { NESS_MARK_MASK } from './NessMark'
 import { NESSIE_COLORS } from '../../shared/state/settings'
 import type { CustomTheme, UiScale } from '../../shared/state/settings'
@@ -4768,7 +4768,7 @@ function readBuiltInThemeJson(opt: ThemeOption): string {
   try {
     const cs = getComputedStyle(probe)
     const colors: Record<string, string> = {}
-    for (const key of SEMANTIC_KEYS) {
+    for (const key of EXPORTED_THEME_KEYS) {
       const v = cs.getPropertyValue(`--color-${key}`).trim()
       if (v) colors[key] = v
     }

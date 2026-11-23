@@ -24,6 +24,10 @@
   --color-panel-raised: #1f1f1f;
   --color-surface: #262626;
   --color-surface-hover: #404040;
+  /* Backdrop for the expanded project in the sidebar (which sits on
+   * --color-panel), so it reads as one unit. Recessed toward --color-app;
+   * light themes override it below. */
+  --color-well: var(--color-app);
   --color-border: #262626;
   --color-border-strong: #404040;
   --color-fg: #d4d4d4;
@@ -135,6 +139,7 @@
   --color-panel-raised: #eee8d5;
   --color-surface: #eee8d5;
   --color-surface-hover: #ded8c5;
+  --color-well: color-mix(in srgb, var(--color-panel), var(--color-fg-bright) 6%);
   --color-border: #eee8d5;
   --color-border-strong: #93a1a1;
   --color-fg: #657b83;
