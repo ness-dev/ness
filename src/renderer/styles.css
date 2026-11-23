@@ -140,13 +140,13 @@
  * background, so on paper yellow and the bright row are unreadable.
  *
  * Contrast targets, all measured against --color-app, --color-panel and
- * --color-surface: fg ≥ 5.5:1 (≥ 7:1 on the default), muted and dim
- * ≥ 4.5:1, faint ≥ 3:1. That's
+ * --color-surface: fg ≥ 7.5:1, muted ≥ 6:1, dim ≥ 4.8:1, faint ≥ 3.6:1. That's
  * stricter than the dark themes, deliberately: `text-dim` / `text-faint`
  * carry real information in ~850 places, and a light background loses
- * low-contrast greys faster than a dark one does. Status colours aim for
- * ≥ 3:1 (they mostly paint dots, icons and short labels). Syntax tokens are
- * darkened until each clears 4.5:1 on --color-panel-raised, the code-block
+ * low-contrast greys faster than a dark one does. Status and accent
+ * colours clear 3.6:1 against app and panel (they also colour diff counts
+ * and short labels). Syntax tokens are
+ * darkened until each clears 5:1 on --color-panel-raised, the code-block
  * background. Where a published palette falls short of these, its colours
  * are nudged darker along the same hue rather than replaced.
  *
@@ -156,19 +156,19 @@
 [data-theme="light"] {
   --theme-scheme: light;
   --color-app: #ffffff;
-  --color-panel: #f7f7f7;
-  --color-panel-raised: #f2f2f2;
-  --color-surface: #e8e8e8;
-  --color-surface-hover: #dcdcdc;
-  --color-well: #f0f0f0;
-  --color-border: #e5e5e5;
-  --color-border-strong: #cccccc;
+  --color-panel: #f4f4f4;
+  --color-panel-raised: #efefef;
+  --color-surface: #e4e4e4;
+  --color-surface-hover: #d8d8d8;
+  --color-well: #ececec;
+  --color-border: #dddddd;
+  --color-border-strong: #bdbdbd;
   --color-fg: #262626;
   --color-fg-bright: #0a0a0a;
   --color-muted: #525252;
-  --color-dim: #666666;
-  --color-faint: #808080;
-  --color-success: #16a34a;
+  --color-dim: #616161;
+  --color-faint: #757575;
+  --color-success: #149343;
   --color-warning: #b45309;
   --color-danger: #dc2626;
   --color-info: #2563eb;
@@ -176,12 +176,12 @@
 
   --syntax-keyword: #8b2fd6;
   --syntax-type: #1d4ed8;
-  --syntax-string: #157d3c;
-  --syntax-number: #b05109;
-  --syntax-comment: #666666;
+  --syntax-string: #147538;
+  --syntax-number: #a54c08;
+  --syntax-comment: #656565;
   --syntax-variable: #262626;
   --syntax-params: #525252;
-  --syntax-addition: #157d3c;
+  --syntax-addition: #147538;
   --syntax-deletion: #b91c1c;
 
   /* GitHub Primer's light terminal palette, except yellow: Primer's is a
@@ -213,33 +213,33 @@
 [data-theme="solarized-light"] {
   --theme-scheme: light;
   --color-app: #fdf6e3;
-  --color-panel: #f6efd9;
-  --color-panel-raised: #f0e9d2;
-  --color-surface: #eae2c9;
-  --color-surface-hover: #e0d7bc;
-  --color-well: #efe7cf;
-  --color-border: #e6dec6;
-  --color-border-strong: #c9c0a6;
-  --color-fg: #475a60;
+  --color-panel: #f2ebd6;
+  --color-panel-raised: #eae3cd;
+  --color-surface: #e2dac2;
+  --color-surface-hover: #d6cdb4;
+  --color-well: #e9e1ca;
+  --color-border: #d8d1ba;
+  --color-border-strong: #ada58f;
+  --color-fg: #334146;
   --color-fg-bright: #002b36;
-  --color-muted: #4f6369;
-  --color-dim: #55686e;
-  --color-faint: #788383;
-  --color-success: #859900;
-  --color-warning: #b58900;
+  --color-muted: #405055;
+  --color-dim: #4d5e64;
+  --color-faint: #677171;
+  --color-success: #718200;
+  --color-warning: #9a7400;
   --color-danger: #dc322f;
-  --color-info: #268bd2;
+  --color-info: #237fc0;
   --color-accent: #6c71c4;
 
-  --syntax-keyword: #585dbc;
-  --syntax-type: #1d6ba2;
-  --syntax-string: #5f6e00;
-  --syntax-number: #826200;
-  --syntax-comment: #566c73;
+  --syntax-keyword: #5155ac;
+  --syntax-type: #1b6396;
+  --syntax-string: #576500;
+  --syntax-number: #785a00;
+  --syntax-comment: #4e6268;
   --syntax-variable: #45585f;
-  --syntax-params: #4f6268;
-  --syntax-addition: #5f6e00;
-  --syntax-deletion: #c72422;
+  --syntax-params: #4e6167;
+  --syntax-addition: #576500;
+  --syntax-deletion: #b7211f;
 
   /* Schoonover's published ANSI mapping. */
   --term-black: #073642;
@@ -264,33 +264,33 @@
 [data-theme="catppuccin-latte"] {
   --theme-scheme: light;
   --color-app: #eff1f5;
-  --color-panel: #e9ecf2;
-  --color-panel-raised: #e6e9ef;
-  --color-surface: #dce0e8;
-  --color-surface-hover: #ccd0da;
-  --color-well: #e1e5ec;
-  --color-border: #d6dae3;
-  --color-border-strong: #bcc0cc;
-  --color-fg: #474a63;
+  --color-panel: #e6e8ee;
+  --color-panel-raised: #e0e3e9;
+  --color-surface: #d4d8e0;
+  --color-surface-hover: #c3c7d0;
+  --color-well: #dbdfe6;
+  --color-border: #c9cdd5;
+  --color-border-strong: #a2a5af;
+  --color-fg: #3a3c51;
   --color-fg-bright: #232634;
-  --color-muted: #5c5f77;
-  --color-dim: #5f6278;
-  --color-faint: #7b7e92;
-  --color-success: #40a02b;
-  --color-warning: #ec5d0a;
+  --color-muted: #484b5d;
+  --color-dim: #56596d;
+  --color-faint: #6a6c7e;
+  --color-success: #368825;
+  --color-warning: #cc5009;
   --color-danger: #d20f39;
   --color-info: #1e66f5;
   --color-accent: #8839ef;
 
-  --syntax-keyword: #8538ea;
-  --syntax-type: #1857d6;
-  --syntax-string: #2e761e;
-  --syntax-number: #b2450a;
-  --syntax-comment: #5f6278;
+  --syntax-keyword: #7933d5;
+  --syntax-type: #1755d1;
+  --syntax-string: #2a6c1b;
+  --syntax-number: #a23f09;
+  --syntax-comment: #5a5d72;
   --syntax-variable: #4c4f69;
-  --syntax-params: #5c5f77;
-  --syntax-addition: #2e761e;
-  --syntax-deletion: #ce0f38;
+  --syntax-params: #5a5d75;
+  --syntax-addition: #2a6c1b;
+  --syntax-deletion: #bc0e33;
 
   /* Catppuccin's published Latte terminal palette. */
   --term-black: #5c5f77;
@@ -317,32 +317,32 @@
 [data-theme="gruvbox-light"] {
   --theme-scheme: light;
   --color-app: #fbf1c7;
-  --color-panel: #f5eac0;
-  --color-panel-raised: #f2e5bc;
-  --color-surface: #ebdbb2;
-  --color-surface-hover: #e0cfa6;
-  --color-well: #efe2b8;
-  --color-border: #e8d9ae;
-  --color-border-strong: #bdae93;
+  --color-panel: #f1e6bd;
+  --color-panel-raised: #ecdfb7;
+  --color-surface: #e3d3ac;
+  --color-surface-hover: #d6c69f;
+  --color-well: #e9dcb3;
+  --color-border: #dacca4;
+  --color-border-strong: #a3967e;
   --color-fg: #3c3836;
   --color-fg-bright: #282828;
-  --color-muted: #504945;
-  --color-dim: #665c54;
-  --color-faint: #7c6f64;
+  --color-muted: #4f4844;
+  --color-dim: #60564f;
+  --color-faint: #75685e;
   --color-success: #79740e;
-  --color-warning: #b57614;
+  --color-warning: #a36a12;
   --color-danger: #9d0006;
   --color-info: #076678;
   --color-accent: #8f3f71;
 
   --syntax-keyword: #9d0006;
-  --syntax-type: #8a5a0e;
-  --syntax-string: #6c680d;
+  --syntax-type: #80530d;
+  --syntax-string: #625e0c;
   --syntax-number: #8f3f71;
-  --syntax-comment: #6f645a;
-  --syntax-variable: #076678;
+  --syntax-comment: #645a51;
+  --syntax-variable: #076577;
   --syntax-params: #504945;
-  --syntax-addition: #6c680d;
+  --syntax-addition: #625e0c;
   --syntax-deletion: #9d0006;
 
   /* gruvbox's published light terminal palette. */
@@ -371,33 +371,33 @@
 [data-theme="tokyo-night-day"] {
   --theme-scheme: light;
   --color-app: #e1e2e7;
-  --color-panel: #d9dbe3;
-  --color-panel-raised: #d0d5e3;
-  --color-surface: #c9cddc;
-  --color-surface-hover: #bcc1d4;
-  --color-well: #d0d3de;
-  --color-border: #c8cbd9;
-  --color-border-strong: #a8aecb;
-  --color-fg: #264695;
+  --color-panel: #d6d8e0;
+  --color-panel-raised: #cbd0dd;
+  --color-surface: #c2c6d4;
+  --color-surface-hover: #b4b8ca;
+  --color-well: #cbced8;
+  --color-border: #bcbfcc;
+  --color-border-strong: #9096af;
+  --color-fg: #1a2f65;
   --color-fg-bright: #1c2b5a;
-  --color-muted: #3d4a82;
-  --color-dim: #4a5382;
-  --color-faint: #68709a;
+  --color-muted: #333e6d;
+  --color-dim: #444c78;
+  --color-faint: #585f83;
   --color-success: #587539;
-  --color-warning: #8c6c3e;
-  --color-danger: #c64343;
-  --color-info: #2e7de9;
-  --color-accent: #9854f1;
+  --color-warning: #87683c;
+  --color-danger: #c04141;
+  --color-info: #286cca;
+  --color-accent: #894cd9;
 
-  --syntax-keyword: #7042b1;
-  --syntax-type: #1858b2;
-  --syntax-string: #49632f;
-  --syntax-number: #8e4900;
-  --syntax-comment: #525981;
+  --syntax-keyword: #653ca0;
+  --syntax-type: #1650a2;
+  --syntax-string: #42592a;
+  --syntax-number: #814200;
+  --syntax-comment: #4a5074;
   --syntax-variable: #264695;
-  --syntax-params: #6b3fb0;
-  --syntax-addition: #49632f;
-  --syntax-deletion: #a23535;
+  --syntax-params: #643ba5;
+  --syntax-addition: #42592a;
+  --syntax-deletion: #933030;
 
   /* tokyonight.nvim's published day terminal palette. */
   --term-black: #b4b5b9;
@@ -423,33 +423,33 @@
 [data-theme="one-light"] {
   --theme-scheme: light;
   --color-app: #fafafa;
-  --color-panel: #f0f0f1;
-  --color-panel-raised: #eaeaeb;
-  --color-surface: #e5e5e6;
-  --color-surface-hover: #dbdbdc;
-  --color-well: #e8e8e9;
-  --color-border: #dfdfe0;
-  --color-border-strong: #c5c5c8;
+  --color-panel: #ececed;
+  --color-panel-raised: #e4e4e5;
+  --color-surface: #ddddde;
+  --color-surface-hover: #d1d1d2;
+  --color-well: #e2e2e3;
+  --color-border: #d2d2d3;
+  --color-border-strong: #a9a9ac;
   --color-fg: #383a42;
   --color-fg-bright: #202227;
-  --color-muted: #50535d;
-  --color-dim: #5f626c;
-  --color-faint: #7f818a;
-  --color-success: #50a14f;
-  --color-warning: #c18401;
-  --color-danger: #e45649;
-  --color-info: #4078f2;
+  --color-muted: #4c4f59;
+  --color-dim: #5a5d67;
+  --color-faint: #6e7078;
+  --color-success: #448943;
+  --color-warning: #a47001;
+  --color-danger: #d24f43;
+  --color-info: #3e74eb;
   --color-accent: #a626a4;
 
-  --syntax-keyword: #a626a4;
-  --syntax-type: #2e62d2;
-  --syntax-string: #387537;
-  --syntax-number: #8c6001;
-  --syntax-comment: #5f626c;
-  --syntax-variable: #c0362a;
+  --syntax-keyword: #a1259f;
+  --syntax-type: #2a59bf;
+  --syntax-string: #336b32;
+  --syntax-number: #7f5701;
+  --syntax-comment: #5c5f69;
+  --syntax-variable: #af3126;
   --syntax-params: #383a42;
-  --syntax-addition: #387537;
-  --syntax-deletion: #ca1243;
+  --syntax-addition: #336b32;
+  --syntax-deletion: #bc113e;
 
   /* One Half Light — the canonical terminal port of One Light. */
   --term-black: #383a42;
