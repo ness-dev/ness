@@ -76,6 +76,8 @@ export class LochAutoRecorder {
         this.deps.log(`auto-record ${root}: no usable worktree listed, leaving it to the prompt`)
         this.setActive(root, false)
       }, this.deps.listTimeoutMs ?? 60_000)
+      // Never hold a headless shutdown open for this.
+      timer.unref?.()
       this.awaiting.set(root, timer)
       this.setActive(root, true)
     }

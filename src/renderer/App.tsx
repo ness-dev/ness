@@ -1714,7 +1714,10 @@ const setQuestStep = useCallback((next: QuestStep) => {
                   </div>
                 </div>
                 {historyOffered ? (
-                  <label className="flex items-start gap-2 ml-8 mb-3 cursor-pointer">
+                  <label
+                    className="flex items-start gap-2 ml-8 mb-3 cursor-pointer"
+                    title="Adds hooks to each new repo's worktrees (.claude/settings.local.json) and downloads loch if it isn't installed. Snapshots stay in ~/.loch; nothing is uploaded. Change it in Settings → Conversation blame."
+                  >
                     <input
                       type="checkbox"
                       checked={historyChecked}
