@@ -4,8 +4,8 @@ import type { AssignedPR } from '../shared/state/assigned-prs'
 import {
   applyProjectAccordion,
   buildWorktreeListBase,
-  homeHoldsActive,
   buildWorktreeListModel,
+  homeHoldsActive,
   mergeProjectOrder,
   planProjectDrop,
   UNIFIED_REPO_ROOT,
