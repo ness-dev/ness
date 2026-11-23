@@ -134,19 +134,82 @@ function readVar(name: string, fallback: string): string {
   return v || fallback
 }
 
+// Monaco only accepts #rrggbb / #rrggbbaa, and throws lazily (on first
+// tokenize) for anything else — leaving the editor on whatever theme it had.
+// Custom properties come back verbatim, so the CSS minifier's `#fff` for
+// `#ffffff`, or a custom theme's `rgb(...)` / `oklch(...)`, would break it.
+export function toMonacoColor(color: string, fallback: string): string {
+  if (/^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color)) return color
+  return normalizeColor(color) ?? fallback
+}
+
+// A 2D context's fillStyle round-trips any CSS colour into sRGB, serialized
+// as `#rrggbb` when opaque and `rgba(r, g, b, a)` otherwise. (A computed
+// `color` doesn't: Chromium keeps oklch()/lab()/color-mix() in their own
+// space, so their channels can't be read as RGB.) An invalid colour leaves
+// fillStyle unchanged, which the sentinel detects.
+let colorCtx: CanvasRenderingContext2D | null | undefined
+function normalizeColor(color: string): string | null {
+  if (colorCtx === undefined) colorCtx = document.createElement('canvas').getContext('2d')
+  if (!colorCtx) return null
+  const sentinel = '#010203'
+  colorCtx.fillStyle = sentinel
+  colorCtx.fillStyle = color
+  const out = String(colorCtx.fillStyle)
+  if (out === sentinel && color.trim().toLowerCase() !== sentinel) return null
+  if (/^#[0-9a-f]{6}$/i.test(out)) return out
+  const m = out.match(/^rgba?\(([^)]+)\)$/)
+  if (!m) return null
+  const [r, g, b, a = 1] = m[1].split(',').map((v) => Number(v.trim()))
+  const hex = (v: number): string => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}${a < 1 ? hex(a * 255) : ''}`
+}
+
+function readColor(name: string, fallback: string): string {
+  return toMonacoColor(readVar(name, fallback), fallback)
+}
+
+let themeObserver: MutationObserver | null = null
+
 export function defineHarnessTheme(): void {
-  const bg = readVar('--color-app', '#0b0d10')
-  const panel = readVar('--color-panel', '#12151a')
-  const fg = readVar('--color-fg', '#e6e6e6')
-  const muted = readVar('--color-muted', '#b0b0b0')
-  const faint = readVar('--color-faint', '#6b7280')
-  const border = readVar('--color-border', '#1f242c')
+  applyHarnessTheme()
+  // Monaco themes are global and static, so re-derive on every theme switch
+  // (theme-apply.ts rewrites [data-theme] and inline style on :root).
+  // Without this, a diff opened after switching kept the boot theme.
+  if (!themeObserver && typeof MutationObserver !== 'undefined') {
+    themeObserver = new MutationObserver(() => applyHarnessTheme())
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'style']
+    })
+  }
+}
+
+let lastThemeKey = ''
+
+function applyHarnessTheme(): void {
+  const bg = readColor('--color-app', '#0b0d10')
+  const panel = readColor('--color-panel', '#12151a')
+  const fg = readColor('--color-fg', '#e6e6e6')
+  const muted = readColor('--color-muted', '#b0b0b0')
+  const faint = readColor('--color-faint', '#6b7280')
+  const border = readColor('--color-border', '#1f242c')
+  const borderStrong = readColor('--color-border-strong', '#3a424d')
+  // Set by every light theme in styles.css (custom light themes inherit it
+  // from the default light selector they're layered on).
+  const light = readVar('--theme-scheme', 'dark') === 'light'
+
+  // The observer also fires for unrelated inline-style writes on :root
+  // (uiScale, brand colour); skip the redefine when nothing Monaco reads moved.
+  const key = [bg, panel, fg, muted, faint, border, borderStrong, light].join('|')
+  if (key === lastThemeKey) return
+  lastThemeKey = key
 
   monaco.editor.defineTheme('harness', {
-    base: 'vs-dark',
+    base: light ? 'vs' : 'vs-dark',
     inherit: true,
     rules: [
-      { token: '', foreground: fg.replace('#', '') }
+      { token: '', foreground: fg.slice(1, 7) } // token colours can't carry alpha
     ],
     colors: {
       'editor.background': bg,
@@ -157,20 +220,20 @@ export function defineHarnessTheme(): void {
       'editor.lineHighlightBackground': panel,
       'editor.lineHighlightBorder': '#00000000',
       'editorCursor.foreground': fg,
-      'editorWhitespace.foreground': '#2a2f38',
-      'editor.selectionBackground': '#3a4252',
-      'editor.inactiveSelectionBackground': '#2a3040',
+      'editorWhitespace.foreground': light ? borderStrong : '#2a2f38',
+      'editor.selectionBackground': light ? '#add6ff' : '#3a4252',
+      'editor.inactiveSelectionBackground': light ? '#e5ebf1' : '#2a3040',
       'editorIndentGuide.background1': border,
-      'editorIndentGuide.activeBackground1': '#3a424d',
+      'editorIndentGuide.activeBackground1': light ? borderStrong : '#3a424d',
       'editorWidget.background': panel,
       'editorWidget.border': border,
-      'scrollbarSlider.background': '#3a424d55',
-      'scrollbarSlider.hoverBackground': '#4a5260aa',
-      'scrollbarSlider.activeBackground': '#5a6270',
-      'diffEditor.insertedTextBackground': '#2ea04355',
-      'diffEditor.removedTextBackground': '#f8514955',
-      'diffEditor.insertedLineBackground': '#2ea04322',
-      'diffEditor.removedLineBackground': '#f8514922'
+      'scrollbarSlider.background': light ? '#64646433' : '#3a424d55',
+      'scrollbarSlider.hoverBackground': light ? '#64646455' : '#4a5260aa',
+      'scrollbarSlider.activeBackground': light ? '#00000055' : '#5a6270',
+      'diffEditor.insertedTextBackground': light ? '#1a7f3730' : '#2ea04355',
+      'diffEditor.removedTextBackground': light ? '#cf222e2a' : '#f8514955',
+      'diffEditor.insertedLineBackground': light ? '#1a7f3714' : '#2ea04322',
+      'diffEditor.removedLineBackground': light ? '#cf222e12' : '#f8514922'
     }
   })
   monaco.editor.setTheme('harness')

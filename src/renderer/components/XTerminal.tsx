@@ -253,8 +253,9 @@ export function markTerminalClosing(id: string): void {
 }
 
 // Read the bg/fg from CSS vars set by theme-apply.ts, then build the full
-// xterm theme object. ANSI colors stay hardcoded for now — themes only flow
-// in via --color-app / --color-fg-bright.
+// xterm theme object. ANSI colors come from the theme's `--term-*` vars when
+// it sets them (every light theme does — see styles.css); the fallbacks are
+// tuned for a dark background, which is what the dark themes still use.
 function buildTerminalTheme(
   bgVar = '--color-app'
 ): NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'] {
@@ -264,27 +265,29 @@ function buildTerminalTheme(
     rootStyle.getPropertyValue('--color-app').trim() ||
     '#0a0a0a'
   const fg = rootStyle.getPropertyValue('--color-fg-bright').trim() || '#e5e5e5'
+  const term = (name: string, fallback: string): string =>
+    rootStyle.getPropertyValue(`--term-${name}`).trim() || fallback
   return {
     background: bg,
     foreground: fg,
     cursor: fg,
-    selectionBackground: '#33415580',
-    black: bg,
-    red: '#f87171',
-    green: '#4ade80',
-    yellow: '#facc15',
-    blue: '#60a5fa',
-    magenta: '#c084fc',
-    cyan: '#22d3ee',
-    white: fg,
-    brightBlack: '#525252',
-    brightRed: '#fca5a5',
-    brightGreen: '#86efac',
-    brightYellow: '#fde68a',
-    brightBlue: '#93c5fd',
-    brightMagenta: '#d8b4fe',
-    brightCyan: '#67e8f9',
-    brightWhite: '#fafafa'
+    selectionBackground: term('selection', '#33415580'),
+    black: term('black', bg),
+    red: term('red', '#f87171'),
+    green: term('green', '#4ade80'),
+    yellow: term('yellow', '#facc15'),
+    blue: term('blue', '#60a5fa'),
+    magenta: term('magenta', '#c084fc'),
+    cyan: term('cyan', '#22d3ee'),
+    white: term('white', fg),
+    brightBlack: term('bright-black', '#525252'),
+    brightRed: term('bright-red', '#fca5a5'),
+    brightGreen: term('bright-green', '#86efac'),
+    brightYellow: term('bright-yellow', '#fde68a'),
+    brightBlue: term('bright-blue', '#93c5fd'),
+    brightMagenta: term('bright-magenta', '#d8b4fe'),
+    brightCyan: term('bright-cyan', '#67e8f9'),
+    brightWhite: term('bright-white', '#fafafa')
   }
 }
 

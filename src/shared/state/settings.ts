@@ -151,6 +151,11 @@ export interface CustomTheme {
    *  doesn't enforce which keys are present — apply just sets whichever
    *  are listed. */
   colors: Record<string, string>
+  /** Built-in theme id whose `[data-theme]` block the colours layer over,
+   *  supplying every key the theme doesn't set (plus syntax and terminal
+   *  palettes). Ignored unless it names a built-in of the same mode. Absent
+   *  ⇒ CUSTOM_THEME_BASE for the mode. */
+  base?: string
 }
 
 /** Shared empty-array reference so the initial reducer and "no themes on
@@ -163,8 +168,18 @@ export const EMPTY_CUSTOM_THEMES: CustomTheme[] = []
  *  matches the default so don't persist it" guard, and the fallback
  *  `[data-theme]` selector for partial custom themes. Kept in shared so
  *  main and renderer agree without crossing the import boundary. */
-export const DEFAULT_LIGHT_THEME = 'solarized-light'
+export const DEFAULT_LIGHT_THEME = 'light'
 export const DEFAULT_DARK_THEME = 'dark'
+
+/** Base for a custom theme that doesn't name one. Deliberately not the
+ *  per-mode default: light custom themes written before `base` existed
+ *  were tuned on top of Solarized Light (the old default), so moving the
+ *  default to 'light' must not repaint their unset keys. New themes can opt
+ *  into anything via `base` ("Copy JSON" writes it). */
+export const CUSTOM_THEME_BASE: Record<'light' | 'dark', string> = {
+  light: 'solarized-light',
+  dark: 'dark'
+}
 
 /** Default for `jsonModeTranscriptWindow`. Sized so a normal session never
  *  hits the window at all. */

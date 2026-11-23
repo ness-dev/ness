@@ -25,8 +25,11 @@
   --color-surface: #262626;
   --color-surface-hover: #404040;
   /* Backdrop for the expanded project in the sidebar (which sits on
-   * --color-panel), so it reads as one unit. Recessed toward --color-app;
-   * light themes override it below. */
+   * --color-panel), so it reads as one unit. It is --color-app in every
+   * built-in, light themes included: selected rows paint --color-surface on
+   * it, and the app colour is the end of the ramp furthest from surface.
+   * Light themes used to tint it toward surface, which squashed exactly that
+   * contrast. */
   --color-well: var(--color-app);
   --color-border: #262626;
   --color-border-strong: #404040;
@@ -133,37 +136,343 @@
   --color-accent: #6c71c4;
 }
 
+/* --- Light themes ---
+ * Every light theme sets `--theme-scheme: light` (read by monaco-setup.ts
+ * to pick the `vs` base) and its own `--term-*` ANSI palette (read by
+ * XTerminal.tsx) — the hardcoded terminal fallbacks are tuned for a dark
+ * background, so on paper yellow and the bright row are unreadable.
+ *
+ * Contrast targets, all measured against --color-app, --color-panel and
+ * --color-surface: fg ≥ 7.5:1, muted ≥ 6:1, dim ≥ 4.8:1, faint ≥ 3.6:1. That's
+ * stricter than the dark themes, deliberately: `text-dim` / `text-faint`
+ * carry real information in ~850 places, and a light background loses
+ * low-contrast greys faster than a dark one does. Status and accent
+ * colours clear 3.6:1 against app and panel (they also colour diff counts
+ * and short labels). Syntax tokens are darkened until each clears 5:1 on
+ * --color-panel-raised, the code-block background. Where a published
+ * palette falls short of these, its colours are nudged darker along the
+ * same hue rather than replaced.
+ *
+ * Surfaces mirror each theme's dark counterpart (Light ↔ Dark, Latte ↔
+ * Mocha, …): --color-surface, --color-surface-hover and the borders sit at
+ * least as far from --color-app, in L*, as they do in the dark theme, just
+ * in the other direction. That step is what makes a selected sidebar row
+ * read as selected.
+ *
+ * Custom light themes layer over the built-in named by their `base`, or
+ * over Solarized Light when they have none (see theme-apply.ts).
+ */
+[data-theme="light"] {
+  --theme-scheme: light;
+  --color-app: #ffffff;
+  --color-panel: #f4f4f4;
+  --color-panel-raised: #efefef;
+  --color-surface: #dbdbdb;
+  --color-surface-hover: #bababa;
+  --color-border: #dbdbdb;
+  --color-border-strong: #bababa;
+  --color-fg: #262626;
+  --color-fg-bright: #0a0a0a;
+  --color-muted: #4e4e4e;
+  --color-dim: #5c5c5c;
+  --color-faint: #6f6f6f;
+  --color-success: #149343;
+  --color-warning: #b45309;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+  --color-accent: #9333ea;
+
+  --syntax-keyword: #8b2fd6;
+  --syntax-type: #1d4ed8;
+  --syntax-string: #147538;
+  --syntax-number: #a54c08;
+  --syntax-comment: #656565;
+  --syntax-variable: #262626;
+  --syntax-params: #525252;
+  --syntax-addition: #147538;
+  --syntax-deletion: #b91c1c;
+
+  /* GitHub Primer's light terminal palette, except yellow: Primer's is a
+   * near-black brown that makes yellow-backed prompt segments unreadable,
+   * so it uses Primer's "attention" yellow instead. */
+  --term-black: #24292f;
+  --term-red: #cf222e;
+  --term-green: #116329;
+  --term-yellow: #9a6700;
+  --term-blue: #0969da;
+  --term-magenta: #8250df;
+  --term-cyan: #1b7c83;
+  --term-white: #6e7781;
+  --term-bright-black: #57606a;
+  --term-bright-red: #a40e26;
+  --term-bright-green: #1a7f37;
+  --term-bright-yellow: #7d4e00;
+  --term-bright-blue: #218bff;
+  --term-bright-magenta: #a475f9;
+  --term-bright-cyan: #3192aa;
+  --term-bright-white: #8c959f;
+  --term-selection: #0969da33;
+}
+
+/* Solarized keeps its signature base3/base2 paper, but body text moves from
+ * base00 (4.1:1 — under AA) to base01, the greys below it are darkened along
+ * the same blue-grey axis, and the surfaces step apart so borders, selected
+ * rows and code blocks stop collapsing into one beige. */
 [data-theme="solarized-light"] {
+  --theme-scheme: light;
   --color-app: #fdf6e3;
-  --color-panel: #f5efd7;
-  --color-panel-raised: #eee8d5;
-  --color-surface: #eee8d5;
-  --color-surface-hover: #ded8c5;
-  --color-well: color-mix(in srgb, var(--color-panel), var(--color-fg-bright) 6%);
-  --color-border: #eee8d5;
-  --color-border-strong: #93a1a1;
-  --color-fg: #657b83;
+  --color-panel: #f2ebd6;
+  --color-panel-raised: #eae3cd;
+  --color-surface: #d8d1b9;
+  --color-surface-hover: #beb59d;
+  --color-border: #d8d1ba;
+  --color-border-strong: #aca48e;
+  --color-fg: #2f3b40;
   --color-fg-bright: #002b36;
-  --color-muted: #586e75;
-  --color-dim: #93a1a1;
-  --color-faint: #a9a49a;
-  --color-success: #859900;
-  --color-warning: #b58900;
+  --color-muted: #3c4a4f;
+  --color-dim: #48585e;
+  --color-faint: #616a6a;
+  --color-success: #718200;
+  --color-warning: #9a7400;
   --color-danger: #dc322f;
-  --color-info: #268bd2;
+  --color-info: #237fc0;
   --color-accent: #6c71c4;
 
-  /* Solarized accents darkened until each clears 4.5:1 against
-   * --color-panel-raised (#eee8d5), the code-block background. */
-  --syntax-keyword: #585dbc;
-  --syntax-type: #1d6ba2;
-  --syntax-string: #5f6e00;
-  --syntax-number: #826200;
-  --syntax-comment: #566c73;
+  --syntax-keyword: #5155ac;
+  --syntax-type: #1b6396;
+  --syntax-string: #576500;
+  --syntax-number: #785a00;
+  --syntax-comment: #4e6268;
   --syntax-variable: #45585f;
-  --syntax-params: #4f6268;
-  --syntax-addition: #5f6e00;
-  --syntax-deletion: #c72422;
+  --syntax-params: #4e6167;
+  --syntax-addition: #576500;
+  --syntax-deletion: #b7211f;
+
+  /* Schoonover's published ANSI mapping. */
+  --term-black: #073642;
+  --term-red: #dc322f;
+  --term-green: #859900;
+  --term-yellow: #b58900;
+  --term-blue: #268bd2;
+  --term-magenta: #d33682;
+  --term-cyan: #2aa198;
+  --term-white: #93a1a1;
+  --term-bright-black: #002b36;
+  --term-bright-red: #cb4b16;
+  --term-bright-green: #586e75;
+  --term-bright-yellow: #657b83;
+  --term-bright-blue: #839496;
+  --term-bright-magenta: #6c71c4;
+  --term-bright-cyan: #93a1a1;
+  --term-bright-white: #586e75;
+  --term-selection: #93a1a155;
+}
+
+[data-theme="catppuccin-latte"] {
+  --theme-scheme: light;
+  --color-app: #eff1f5;
+  --color-panel: #e6e8ee;
+  --color-panel-raised: #e0e3e9;
+  --color-surface: #d2d6de;
+  --color-surface-hover: #b6bac3;
+  --color-border: #c9cdd5;
+  --color-border-strong: #a2a5af;
+  --color-fg: #393b50;
+  --color-fg-bright: #232634;
+  --color-muted: #474a5c;
+  --color-dim: #55586c;
+  --color-faint: #696b7d;
+  --color-success: #368825;
+  --color-warning: #cc5009;
+  --color-danger: #d20f39;
+  --color-info: #1e66f5;
+  --color-accent: #8839ef;
+
+  --syntax-keyword: #7933d5;
+  --syntax-type: #1755d1;
+  --syntax-string: #2a6c1b;
+  --syntax-number: #a23f09;
+  --syntax-comment: #5a5d72;
+  --syntax-variable: #4c4f69;
+  --syntax-params: #5a5d75;
+  --syntax-addition: #2a6c1b;
+  --syntax-deletion: #bc0e33;
+
+  /* Catppuccin's published Latte terminal palette. */
+  --term-black: #5c5f77;
+  --term-red: #d20f39;
+  --term-green: #40a02b;
+  --term-yellow: #df8e1d;
+  --term-blue: #1e66f5;
+  --term-magenta: #ea76cb;
+  --term-cyan: #179299;
+  --term-white: #acb0be;
+  --term-bright-black: #6c6f85;
+  --term-bright-red: #de293e;
+  --term-bright-green: #49af3d;
+  --term-bright-yellow: #eea02d;
+  --term-bright-blue: #456eff;
+  --term-bright-magenta: #fe85d8;
+  --term-bright-cyan: #2d9fa8;
+  --term-bright-white: #bcc0cc;
+  --term-selection: #7c7f9340;
+}
+
+/* Gruvbox light uses the palette's "faded" accents — the ones the original
+ * vim scheme pairs with a light background. */
+[data-theme="gruvbox-light"] {
+  --theme-scheme: light;
+  --color-app: #fbf1c7;
+  --color-panel: #f1e6bd;
+  --color-panel-raised: #ecdfb7;
+  --color-surface: #e3d3ac;
+  --color-surface-hover: #c7b791;
+  --color-border: #dacca4;
+  --color-border-strong: #a3967e;
+  --color-fg: #3c3836;
+  --color-fg-bright: #282828;
+  --color-muted: #4f4844;
+  --color-dim: #60564f;
+  --color-faint: #75685e;
+  --color-success: #79740e;
+  --color-warning: #a36a12;
+  --color-danger: #9d0006;
+  --color-info: #076678;
+  --color-accent: #8f3f71;
+
+  --syntax-keyword: #9d0006;
+  --syntax-type: #80530d;
+  --syntax-string: #625e0c;
+  --syntax-number: #8f3f71;
+  --syntax-comment: #645a51;
+  --syntax-variable: #076577;
+  --syntax-params: #504945;
+  --syntax-addition: #625e0c;
+  --syntax-deletion: #9d0006;
+
+  /* gruvbox's published light terminal palette, except black: gruvbox maps
+   * it to the background, which makes `\e[30m` "dark ink" text invisible. */
+  --term-black: #3c3836;
+  --term-red: #cc241d;
+  --term-green: #98971a;
+  --term-yellow: #d79921;
+  --term-blue: #458588;
+  --term-magenta: #b16286;
+  --term-cyan: #689d6a;
+  --term-white: #7c6f64;
+  --term-bright-black: #928374;
+  --term-bright-red: #9d0006;
+  --term-bright-green: #79740e;
+  --term-bright-yellow: #b57614;
+  --term-bright-blue: #076678;
+  --term-bright-magenta: #8f3f71;
+  --term-bright-cyan: #427b58;
+  --term-bright-white: #3c3836;
+  --term-selection: #92837440;
+}
+
+/* Tokyo Night Day (folke/tokyonight.nvim "day"). Its signature blue body
+ * text is kept; the secondary blues are darkened to stay readable on the
+ * grey-lilac background. */
+[data-theme="tokyo-night-day"] {
+  --theme-scheme: light;
+  --color-app: #e1e2e7;
+  --color-panel: #d6d8e0;
+  --color-panel-raised: #cbd0dd;
+  --color-surface: #c2c6d4;
+  --color-surface-hover: #a6aabc;
+  --color-border: #bcbfcc;
+  --color-border-strong: #9096af;
+  --color-fg: #1a2f65;
+  --color-fg-bright: #1c2b5a;
+  --color-muted: #333e6d;
+  --color-dim: #444c78;
+  --color-faint: #585f83;
+  --color-success: #587539;
+  --color-warning: #87683c;
+  --color-danger: #c04141;
+  --color-info: #286cca;
+  --color-accent: #894cd9;
+
+  --syntax-keyword: #653ca0;
+  --syntax-type: #1650a2;
+  --syntax-string: #42592a;
+  --syntax-number: #814200;
+  --syntax-comment: #4a5074;
+  --syntax-variable: #264695;
+  --syntax-params: #643ba5;
+  --syntax-addition: #42592a;
+  --syntax-deletion: #933030;
+
+  /* tokyonight.nvim's published day terminal palette. */
+  --term-black: #b4b5b9;
+  --term-red: #f52a65;
+  --term-green: #587539;
+  --term-yellow: #8c6c3e;
+  --term-blue: #2e7de9;
+  --term-magenta: #9854f1;
+  --term-cyan: #007197;
+  --term-white: #6172b0;
+  --term-bright-black: #a1a6c5;
+  --term-bright-red: #f52a65;
+  --term-bright-green: #587539;
+  --term-bright-yellow: #8c6c3e;
+  --term-bright-blue: #2e7de9;
+  --term-bright-magenta: #9854f1;
+  --term-bright-cyan: #007197;
+  --term-bright-white: #3760bf;
+  --term-selection: #99a7df55;
+}
+
+/* Atom's One Light. */
+[data-theme="one-light"] {
+  --theme-scheme: light;
+  --color-app: #fafafa;
+  --color-panel: #ececed;
+  --color-panel-raised: #e4e4e5;
+  --color-surface: #ddddde;
+  --color-surface-hover: #c1c1c2;
+  --color-border: #d2d2d3;
+  --color-border-strong: #a9a9ac;
+  --color-fg: #383a42;
+  --color-fg-bright: #202227;
+  --color-muted: #4c4f59;
+  --color-dim: #5a5d67;
+  --color-faint: #6e7078;
+  --color-success: #448943;
+  --color-warning: #a47001;
+  --color-danger: #d24f43;
+  --color-info: #3e74eb;
+  --color-accent: #a626a4;
+
+  --syntax-keyword: #a1259f;
+  --syntax-type: #2a59bf;
+  --syntax-string: #336b32;
+  --syntax-number: #7f5701;
+  --syntax-comment: #5c5f69;
+  --syntax-variable: #af3126;
+  --syntax-params: #383a42;
+  --syntax-addition: #336b32;
+  --syntax-deletion: #bc113e;
+
+  /* One Half Light — the canonical terminal port of One Light. */
+  --term-black: #383a42;
+  --term-red: #e45649;
+  --term-green: #50a14f;
+  --term-yellow: #c18401;
+  --term-blue: #0184bc;
+  --term-magenta: #a626a4;
+  --term-cyan: #0997b3;
+  --term-white: #a0a1a7;
+  --term-bright-black: #4f525e;
+  --term-bright-red: #ca1243;
+  --term-bright-green: #3a7a39;
+  --term-bright-yellow: #986801;
+  --term-bright-blue: #4078f2;
+  --term-bright-magenta: #8a1f88;
+  --term-bright-cyan: #0184bc;
+  --term-bright-white: #696c77;
+  --term-selection: #4078f230;
 }
 
 [data-theme="dracula"] {

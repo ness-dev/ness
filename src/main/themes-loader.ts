@@ -12,9 +12,11 @@
 //   - `name` (string, non-empty) is required for the picker label.
 //   - `mode` ∈ {'light','dark'} is required so we know which picker the
 //     theme belongs in.
-//   - `colors` is optional; missing keys inherit from the default of
-//     the same mode at apply time (the apply helper just sets the keys
-//     present, the rest fall through to the CSS variable defaults).
+//   - `colors` is optional; missing keys inherit from the theme's `base`
+//     built-in at apply time (the apply helper just sets the keys
+//     present, the rest fall through to that built-in's CSS variables).
+//   - `base` is optional and only checked in the renderer, which knows
+//     each built-in's mode.
 //
 // Anything malformed is logged via debug.ts and skipped, never thrown
 // — a broken theme file must never block boot. ID collisions: first
@@ -67,7 +69,8 @@ function parseTheme(id: string, raw: unknown): CustomTheme | null {
       if (typeof v === 'string' && v.length > 0) colors[k] = v
     }
   }
-  return { id, name, mode, colors }
+  const base = typeof obj.base === 'string' && obj.base ? obj.base : undefined
+  return base ? { id, name, mode, colors, base } : { id, name, mode, colors }
 }
 
 /** Read and validate every JSON file in `<userData>/themes/`. */

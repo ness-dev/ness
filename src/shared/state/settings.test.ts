@@ -29,7 +29,7 @@ describe('settingsReducer', () => {
   })
 
   it('themeLightChanged sets the light theme id', () => {
-    expect(initialSettings.themeLight).toBe('solarized-light')
+    expect(initialSettings.themeLight).toBe('light')
     const next = apply(initialSettings, {
       type: 'settings/themeLightChanged',
       payload: 'solarized-light'

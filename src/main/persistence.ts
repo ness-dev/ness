@@ -122,8 +122,8 @@ export interface Config {
   // as 'system'). Replaces the legacy single `theme` field; migration
   // splits the old value into mode + matching slot.
   themeMode?: 'light' | 'dark' | 'system'
-  // Theme id used when `themeMode` resolves to 'light'. Default
-  // 'solarized-light'.
+  // Theme id used when `themeMode` resolves to 'light'. Default 'light'
+  // (configs from before v10 are pinned to 'solarized-light' by migration).
   themeLight?: string
   // Theme id used when `themeMode` resolves to 'dark'. Default 'dark'.
   themeDark?: string
@@ -458,7 +458,12 @@ export const AVAILABLE_THEMES = [
   'one-dark',
   'solarized-dark',
   'solarized-light',
-  'cyberfunk'
+  'cyberfunk',
+  'light',
+  'catppuccin-latte',
+  'gruvbox-light',
+  'tokyo-night-day',
+  'one-light'
 ] as const
 
 /** App background hex for each theme — used for the Electron window backgroundColor
@@ -473,7 +478,12 @@ export const THEME_APP_BG: Record<string, string> = {
   'one-dark': '#282c34',
   'solarized-dark': '#002b36',
   'solarized-light': '#fdf6e3',
-  'cyberfunk': '#000000'
+  'cyberfunk': '#000000',
+  'light': '#ffffff',
+  'catppuccin-latte': '#eff1f5',
+  'gruvbox-light': '#fbf1c7',
+  'tokyo-night-day': '#e1e2e7',
+  'one-light': '#fafafa'
 }
 
 export const DEFAULT_CLAUDE_COMMAND = 'claude'
