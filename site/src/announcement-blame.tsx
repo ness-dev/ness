@@ -2,6 +2,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { BlameDemo } from './components/ConversationBlame'
+import { ImportBanner } from './components/ImportBanner'
 
 // Entry for site/announcements/conversation-blame.html. The post is
 // hand-written static HTML like the other announcements; only the pieces
@@ -14,6 +15,4 @@ function mount(id: string, node: ReactNode): void {
 }
 
 mount('blame-demo', <BlameDemo />)
-
-// TODO(import-banner): mount the homepage's import CTA banner into
-// #import-banner once the site-import-banner PR lands.
+mount('import-banner', <ImportBanner />)
