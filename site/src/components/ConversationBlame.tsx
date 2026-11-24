@@ -61,6 +61,40 @@ const POINTS = [
   }
 ]
 
+/** The file-viewer window with the blame gutter and its caption. Exported on
+ *  its own because the conversation-blame announcement post mounts it too
+ *  (site/src/announcement-blame.tsx), so the two pages show the same picture. */
+export function BlameDemo() {
+  return (
+    <div>
+      <div
+        role="img"
+        aria-label="The Ness file viewer with a coloured bar beside each line. A card hovering over lines 9 and 10 shows the session “Retry flaky asset uploads”, turn 3, the prompt that started the conversation and the turn’s own prompt, with buttons to ask that conversation about the line."
+        className="rounded-xl overflow-hidden border border-border-strong shadow-2xl shadow-black/70 bg-app font-sans"
+      >
+        <div
+          aria-hidden="true"
+          className="h-10 border-b border-border bg-panel flex items-center justify-center text-sm font-medium text-fg gap-2"
+        >
+          <span>upload.ts</span>
+          <span className="text-faint">·</span>
+          <span className="text-info">ness</span>
+        </div>
+        {/* On a phone the snippet and card are wider than the screen;
+            scroll sideways rather than shrink the text past reading. */}
+        <div className="overflow-x-auto">
+          <div className="min-w-[34rem]">
+            <BlameGutterPreview frameClassName="" />
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-ink-500 text-center mt-4">
+        The file viewer in Ness, hovering the lines turn 3 wrote.
+      </p>
+    </div>
+  )
+}
+
 export function ConversationBlame() {
   return (
     <section id="blame" className="max-w-6xl mx-auto px-6 py-14 sm:py-20">
@@ -71,32 +105,7 @@ export function ConversationBlame() {
       </SectionIntro>
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-x-12 gap-y-12 items-start">
-        <div>
-          <div
-            role="img"
-            aria-label="The Ness file viewer with a coloured bar beside each line. A card hovering over lines 9 and 10 shows the session “Retry flaky asset uploads”, turn 3, the prompt that started the conversation and the turn’s own prompt, with buttons to ask that conversation about the line."
-            className="rounded-xl overflow-hidden border border-border-strong shadow-2xl shadow-black/70 bg-app font-sans"
-          >
-            <div
-              aria-hidden="true"
-              className="h-10 border-b border-border bg-panel flex items-center justify-center text-sm font-medium text-fg gap-2"
-            >
-              <span>upload.ts</span>
-              <span className="text-faint">·</span>
-              <span className="text-info">ness</span>
-            </div>
-            {/* On a phone the snippet and card are wider than the screen;
-                scroll sideways rather than shrink the text past reading. */}
-            <div className="overflow-x-auto">
-              <div className="min-w-[34rem]">
-                <BlameGutterPreview frameClassName="" />
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-ink-500 text-center mt-4">
-            The file viewer in Ness, hovering the lines turn 3 wrote.
-          </p>
-        </div>
+        <BlameDemo />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-x-8 gap-y-7">
           {POINTS.map(({ icon: Icon, title, body }) => (
