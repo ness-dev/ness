@@ -16,6 +16,10 @@ on:
       - 'src/renderer/components/subscription-graph.css'
       - 'src/renderer/components/AgentIcon.tsx'
       - 'src/renderer/worktree-row-style.ts'
+      # Rendered by the conversation-blame section and announcement post.
+      - 'src/renderer/components/BlameGutterPreview.tsx'
+      - 'src/renderer/components/LochBlameCard.tsx'
+      - 'src/renderer/loch-colors.css'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/deploy-site.sh'
