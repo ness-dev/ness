@@ -1,7 +1,8 @@
 import { ArrowRight } from 'lucide-react'
 
 /** "Try it, your chats come with you" nudge. Shared by the homepage and
- *  announcement posts, so it sets no outer spacing or width of its own; the
+ *  announcement posts that mount site components from a Vite entry (plain
+ *  public/ HTML posts can't), so it sets no outer spacing or width; the
  *  mount point decides both. The default href is root-relative so it reaches
  *  the homepage's download section from any page. */
 export function ImportBanner({ href = '/#install', className = '' }: { href?: string; className?: string }) {
@@ -12,8 +13,8 @@ export function ImportBanner({ href = '/#install', className = '' }: { href?: st
     >
       <p className="text-sm sm:text-base text-ink-400 leading-relaxed sm:flex-1">
         <span className="text-ink-200 font-semibold">It’s never been easier to try out Ness.</span> During
-        setup it can import your recent Claude Code &amp; Codex chats automatically, so you pick up right where you
-        left off.
+        setup it finds your recent Claude Code &amp; Codex chats and offers to bring them in, so you pick up right
+        where you left off.
       </p>
       <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-semibold text-brand whitespace-nowrap">
         Try it risk free today
