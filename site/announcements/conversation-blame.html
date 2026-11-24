@@ -50,6 +50,42 @@
     .prose-custom a { color: #fbbf24; }
     .prose-custom a:hover { color: #fcd34d; }
     .demo-wrap { margin: 2rem 0 3rem; }
+
+    /* Hacker News call-to-action under the lede, same as chat-forking.html.
+       HN orange rather than Ness green: it points off-site. */
+    .hn-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.625rem;
+      margin-top: 1.75rem;
+      padding: 0.5rem 1rem 0.5rem 0.625rem;
+      border: 1px solid rgba(255, 102, 0, 0.35);
+      border-radius: 0.625rem;
+      background: rgba(255, 102, 0, 0.06);
+      color: #fb923c;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    .hn-cta:hover {
+      border-color: rgba(255, 102, 0, 0.6);
+      background: rgba(255, 102, 0, 0.12);
+      color: #fdba74;
+    }
+    .hn-cta svg { flex: none; display: block; }
+    .hn-mark {
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 0.25rem;
+      background: #ff6600;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.8125rem;
+      line-height: 1.25rem;
+      text-align: center;
+      flex: none;
+    }
   </style>
 </head>
 <body class="min-h-screen grid-bg">
@@ -107,6 +143,16 @@
       conversation and the prompt behind it. Then you can go ask that
       conversation what it was thinking.
     </p>
+    <a
+      class="hn-cta"
+      href="https://news.ycombinator.com/item?id=50632147"
+      target="_blank"
+      rel="noopener"
+    >
+      <span class="hn-mark" aria-hidden="true">Y</span>
+      Upvote on Hacker News
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><polyline points="7 7 17 7 17 17"/></svg>
+    </a>
   </section>
 
   <!-- Article -->
@@ -224,8 +270,8 @@
           sharing our agent conversations with each other. The work we do
           as software engineers is no longer the code we produce but the
           conversations, insight and attention that we give to agents.
-          We&rsquo;ll worry less and less about the code itself. When I review a peer&rsquo;s pull request, I care a lot
-          more about what they said to the agent while building it than I
+          We&rsquo;ll worry less and less about the code itself. When I
+          review a peer&rsquo;s pull request, I care a lot more about what they said to the agent while building it than I
           do about the literal code they&rsquo;re showing me they made.
           If I have feedback on the change, I should say it directly to
           the agent, not to the person who made the change (who will then
