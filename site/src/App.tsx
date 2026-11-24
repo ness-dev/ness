@@ -8,6 +8,7 @@ import { OpenSource } from './components/OpenSource'
 import { Install } from './components/Install'
 import { Footer } from './components/Footer'
 import { Highlights } from './components/Highlights'
+import { ImportBanner } from './components/ImportBanner'
 import { AgentsRunAgents } from './components/AgentsRunAgents'
 import { ConversationBlame } from './components/ConversationBlame'
 
@@ -17,6 +18,9 @@ export function App() {
       <HeaderNav />
       <Hero />
       <HeroMock />
+      <div className="max-w-6xl mx-auto px-6 pb-20">
+        <ImportBanner href="#install" />
+      </div>
       <Highlights />
       <AgentsRunAgents />
       <ConversationBlame />
