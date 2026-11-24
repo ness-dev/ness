@@ -102,6 +102,54 @@
   <!-- Releases -->
   <div class="max-w-3xl mx-auto px-6 pb-24">
 
+    <!-- v2.19.0 -->
+    <section id="v2.19.0" class="release-section py-10">
+      <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
+        <h2 class="text-3xl font-bold tracking-tight"><a href="#v2.19.0" class="release-anchor">v2.19.0<span class="anchor-icon">🔗</span></a></h2>
+        <span class="text-sm text-neutral-500">November 24, 2026</span>
+      </div>
+      <a href="https://github.com/ness-dev/ness/releases/tag/v2.19.0" class="text-sm text-amber-400/80 hover:text-amber-300 transition-colors">Download &rarr;</a>
+      <p class="text-neutral-400 mt-4 mb-4 leading-relaxed">A project-centric sidebar, conversation blame that shows which agent turn wrote each line, and a new first-run tour with import of your existing repos and conversations. Also adds a subscription graph, suggested replies in Chat, and a set of better light themes.</p>
+      <div class="note-body">
+        <h4>New features</h4>
+        <ul>
+          <li><strong>Conversation blame</strong> — see which agent turn wrote each line of code and ask it why. Powered by loch, which Ness now installs and bundles (0.3.0).</li>
+          <li><strong>Subscription graph</strong> — see every agent in a project and what it follows.</li>
+          <li><strong>Import existing work</strong> — onboarding can now bring in your existing repos, worktrees and conversations.</li>
+          <li><strong>First-run tour</strong> — the onboarding quest is replaced by a short two-popout tour.</li>
+          <li><strong>Suggested replies</strong> — Chat tabs now offer Claude's prompt suggestions.</li>
+          <li><strong>@-mention a chat</strong> — reference a specific chat from another Chat tab.</li>
+          <li><strong>Whole-screen mode on macOS</strong> — fill the screen around the camera notch with Ctrl+Cmd+Shift+F.</li>
+          <li><strong>Better light themes</strong> — a neutral Light default, four new palettes, and Solarized fixes.</li>
+          <li><strong>Run JavaScript in browser tabs</strong> — a new <code>eval_tab</code> MCP tool lets agents run JS in a tab.</li>
+          <li><strong>Project and repo tools for agents</strong> — <code>create_project</code> and <code>add_repo</code> are now available in the ness-control MCP.</li>
+        </ul>
+        <h4>Improvements</h4>
+        <ul>
+          <li>Clicking a project in the sidebar opens its main workspace, and manually adding a worktree is de-emphasized.</li>
+          <li>Drag projects in the sidebar to reorder them.</li>
+          <li>The expanded project gets its own recessed panel, and the well only sits behind the active project. Pinned projects keep main's chats.</li>
+          <li>A project's main tabs stay expanded while you're in that project.</li>
+          <li>New clients default to the sidebar split by repo.</li>
+          <li>The sidebar shows a local review icon next to the PR icon, and any working tab turns the dot green.</li>
+          <li>Chat now renders markdown in user, automated and held-notice bubbles.</li>
+          <li>Notifications for sleeping Chat tabs are now delivered instead of reporting a failed wake.</li>
+          <li>Onboarding asks about history tracking next to the status hooks.</li>
+          <li>Announcements published before your first launch are now hidden.</li>
+          <li>Experimental settings have graduated, with a new agent-reviews switch and updated defaults.</li>
+        </ul>
+        <h4>Fixes</h4>
+        <ul>
+          <li>Holding Cmd no longer turns every project into "main" in the sidebar.</li>
+          <li>Merge Locally no longer applies one worktree's merge result to another.</li>
+          <li>The Merged filter in the subscription graph now actually hides merged worktrees.</li>
+          <li>The history-tracking prompt no longer lingers in the sidebar after install.</li>
+          <li>loch now runs even when an older version is on your PATH.</li>
+          <li>Fixed titlebar clearance on full-window screens.</li>
+        </ul>
+      </div>
+    </section>
+
     <!-- v2.18.2 -->
     <section id="v2.18.2" class="release-section py-10">
       <div class="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 mb-1">
