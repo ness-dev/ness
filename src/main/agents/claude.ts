@@ -4,6 +4,7 @@ import { log } from '../debug'
 import { claudeProjectsDirFor, knownClaudeConfigDirs } from '../claude-env'
 import { makeHookCommand } from '../hooks'
 import { shellQuote } from '../shell-quote'
+import { nessAllowedToolsFlagValue } from '../../shared/ness-tool-policy'
 import type { AgentSpawnOpts } from './index'
 
 // Claude Code strips unknown fields when it normalizes settings.json,
@@ -192,7 +193,16 @@ export function extractSessionId(payload: Record<string, unknown>): string | nul
 
 export function buildSpawnArgs(opts: AgentSpawnOpts): string {
   const modelFlag = opts.model && !opts.command.includes('--model') ? ` --model ${shellQuote(opts.model)}` : ''
-  const mcpFlag = opts.mcpConfigPath ? ` --mcp-config ${shellQuote(opts.mcpConfigPath)}` : ''
+  // Terminal tabs prompt in Claude's own TUI, where Ness can't answer for
+  // its own plumbing tools, so pre-allow them on the command line. Only
+  // alongside --mcp-config (no Ness MCP, no Ness tools), and placed right
+  // before it: --allowedTools is variadic, so a trailing positional prompt
+  // would otherwise be swallowed as another tool name.
+  const allowFlag =
+    opts.mcpConfigPath && !/--allowed-?tools/i.test(opts.command)
+      ? ` --allowedTools ${shellQuote(nessAllowedToolsFlagValue())}`
+      : ''
+  const mcpFlag = opts.mcpConfigPath ? `${allowFlag} --mcp-config ${shellQuote(opts.mcpConfigPath)}` : ''
   const nameFlag = opts.sessionName ? ` --name ${shellQuote(opts.sessionName)}` : ''
   const systemPromptFlag = opts.systemPrompt ? ` --append-system-prompt ${shellQuote(opts.systemPrompt)}` : ''
   const tuiPrefix = opts.tuiFullscreen ? 'CLAUDE_CODE_NO_FLICKER=1 ' : ''

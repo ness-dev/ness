@@ -8,7 +8,7 @@ import {
   resolveScreenshotTarget,
   viewportCaptureError
 } from './browser-screenshot'
-import { normalizeBrowserUrl } from './browser-url'
+import { normalizeBrowserUrl } from '../shared/browser-url'
 import {
   evalWithTimeout,
   evalBlockedReason,
