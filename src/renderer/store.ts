@@ -505,6 +505,7 @@ export function backendStateEntryDeps(source: {
     source.state.pinned.byPath,
     source.state.aliases.byPath,
     source.state.assignedPRs.byRepo,
+    source.state.inbox,
     // selectHistoryPromptRepos
     source.state.loch,
     source.state.settings.lochBlameEnabled,

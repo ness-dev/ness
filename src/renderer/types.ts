@@ -534,6 +534,10 @@ export interface ElectronAPI {
   getAvailableEditors(): Promise<{ id: string; name: string }[]>
   snooze(path: string, wakeAt: number): Promise<boolean>
   unsnooze(path: string): Promise<boolean>
+  /** Mark a tab's latest turn read in the sidebar inbox. */
+  markInboxSeen(worktreePath: string, tabId: string): Promise<boolean>
+  /** Mark the worktree's current PR event (by fingerprint) seen. */
+  markInboxPrSeen(worktreePath: string, fingerprint: string): Promise<boolean>
   pinWorktree(path: string): Promise<boolean>
   unpinWorktree(path: string): Promise<boolean>
   setSnoozeDefaultDays(days: number): Promise<boolean>

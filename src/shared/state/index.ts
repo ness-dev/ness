@@ -164,6 +164,12 @@ import {
   type NotificationsEvent,
   type NotificationsState
 } from './notifications'
+import {
+  initialInbox,
+  inboxReducer,
+  type InboxEvent,
+  type InboxState
+} from './inbox'
 
 export type { SettingsState, SettingsEvent }
 export type { UpdaterState, UpdaterEvent, UpdaterStatus } from './updater'
@@ -282,6 +288,7 @@ export type {
 } from './subscriptions'
 export type { OriginsState, OriginsEvent, WorktreeOrigin } from './origins'
 export type { NotificationsState, NotificationsEvent, PendingNotice } from './notifications'
+export type { InboxState, InboxEvent, InboxTurn, InboxTurnKind } from './inbox'
 export type {
   PermissionsState,
   PermissionsEvent,
@@ -317,6 +324,7 @@ export interface AppState {
   subscriptions: SubscriptionsState
   origins: OriginsState
   notifications: NotificationsState
+  inbox: InboxState
 }
 
 export type StateEvent =
@@ -346,6 +354,7 @@ export type StateEvent =
   | SubscriptionsEvent
   | OriginsEvent
   | NotificationsEvent
+  | InboxEvent
 
 export const initialState: AppState = {
   settings: initialSettings,
@@ -374,7 +383,8 @@ export const initialState: AppState = {
   reviews: initialReviews,
   subscriptions: initialSubscriptions,
   origins: initialOrigins,
-  notifications: initialNotifications
+  notifications: initialNotifications,
+  inbox: initialInbox
 }
 
 export function rootReducer(state: AppState, event: StateEvent): AppState {
@@ -519,6 +529,9 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       notifications: notificationsReducer(state.notifications, event as NotificationsEvent)
     }
   }
+  if (event.type.startsWith('inbox/')) {
+    return { ...state, inbox: inboxReducer(state.inbox, event as InboxEvent) }
+  }
   // configHealth has no events — it's seeded at construction only (see
   // config-health.ts), so there's no reducer branch. The field flows through
   // unchanged via the `...state` spreads above.
@@ -579,7 +592,8 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     reviews: { ...initialState.reviews, ...state.reviews },
     subscriptions: { ...initialState.subscriptions, ...state.subscriptions },
     origins: { ...initialState.origins, ...state.origins },
-    notifications: { ...initialState.notifications, ...state.notifications }
+    notifications: { ...initialState.notifications, ...state.notifications },
+    inbox: { ...initialState.inbox, ...state.inbox }
   }
 }
 

@@ -87,6 +87,13 @@ export interface MergedWorktreeData {
   pendingBackendId: Record<string, string>
   /** Pane trees, merged. Keyed by worktree path like the slice itself. */
   panes: AppState['terminals']['panes']
+  /** Inbox maps, merged flat — tab-keyed ones for the same reason the
+   *  terminal maps are (see below); `inboxPrSeen` is path-keyed and
+   *  shares the worktree-path collision caveat in the module header. */
+  inboxTurns: AppState['inbox']['turns']
+  inboxSeenAt: AppState['inbox']['seenAt']
+  inboxStatusSince: AppState['inbox']['statusSince']
+  inboxPrSeen: AppState['inbox']['prSeen']
 }
 
 /** Single-host view is the SAME pipeline restricted to the active
@@ -148,7 +155,11 @@ export function mergeBackendStates(
     repoRemotes: {},
     backendMeta: {},
     pendingBackendId: {},
-    panes: {}
+    panes: {},
+    inboxTurns: {},
+    inboxSeenAt: {},
+    inboxStatusSince: {},
+    inboxPrSeen: {}
   }
 
   for (const entry of selectVisibleBackends(entries, opts.viewMode, opts.activeId)) {
@@ -190,6 +201,11 @@ export function mergeBackendStates(
     Object.assign(merged.pinnedPaths, state.pinned.byPath)
     Object.assign(merged.aliases, state.aliases.byPath)
     Object.assign(merged.assignedPRsByRepo, state.assignedPRs.byRepo)
+    // `?? {}` because a remote on an older server has no inbox slice.
+    Object.assign(merged.inboxTurns, state.inbox?.turns ?? {})
+    Object.assign(merged.inboxSeenAt, state.inbox?.seenAt ?? {})
+    Object.assign(merged.inboxStatusSince, state.inbox?.statusSince ?? {})
+    Object.assign(merged.inboxPrSeen, state.inbox?.prSeen ?? {})
   }
 
   return merged

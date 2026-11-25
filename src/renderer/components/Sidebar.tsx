@@ -5,6 +5,10 @@ import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
 import { WorktreeList } from './WorktreeList'
 import { BackendChipStrip } from './BackendChipStrip'
 import { BottomIconStrip } from './BottomIconStrip'
+import { InboxView } from './InboxView'
+import type { InboxItem, InboxModel } from '../inbox-model'
+
+export type SidebarView = 'projects' | 'inbox'
 
 /** The desktop shell around the shared worktree list: fixed-width panel,
  *  header controls, backend chip strip and bottom icon strip. The list
@@ -56,6 +60,10 @@ interface SidebarProps {
   editingAliasPath: string | null
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
+  view: SidebarView
+  onViewChange: (view: SidebarView) => void
+  inboxModel: InboxModel
+  onOpenInboxItem: (item: InboxItem) => void
 }
 
 export function Sidebar({
@@ -101,8 +109,13 @@ export function Sidebar({
   onCollapseSidebar,
   editingAliasPath,
   onStartAliasEdit,
-  onEndAliasEdit
+  onEndAliasEdit,
+  view,
+  onViewChange,
+  inboxModel,
+  onOpenInboxItem
 }: SidebarProps): JSX.Element {
+  const needsYouCount = inboxModel.needsYou.length
   return (
     <div className="shrink-0 bg-panel flex flex-col h-full" style={{ width }}>
       {/* Sidebar header */}
@@ -116,6 +129,26 @@ export function Sidebar({
             <PanelLeftClose className="icon-xs" />
           </button>
         </Tooltip>
+        <div className="flex items-center rounded-md bg-surface p-0.5 text-xs" role="tablist">
+          {(['projects', 'inbox'] as const).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => onViewChange(v)}
+              className={`px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors ${
+                view === v ? 'bg-panel text-fg-bright' : 'text-dim hover:text-fg'
+              }`}
+            >
+              {v === 'projects' ? 'Projects' : 'Inbox'}
+              {v === 'inbox' && needsYouCount > 0 && (
+                <span className="rounded-full bg-accent/30 text-fg-bright px-1.5 leading-tight">
+                  {needsYouCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
         <div className="ml-auto flex items-center gap-1">
           {/* Deliberately one icon among many: most worktrees get started by
               asking a Lead, so the manual path stays available but quiet. */}
@@ -175,6 +208,14 @@ export function Sidebar({
       </div>
 
       <div data-sidebar-scroll className="flex-1 overflow-y-auto py-1">
+        {view === 'inbox' ? (
+          <InboxView
+            model={inboxModel}
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeTabId}
+            onOpen={onOpenInboxItem}
+          />
+        ) : (
         <WorktreeList
           model={model}
           variant="desktop"
@@ -204,6 +245,7 @@ export function Sidebar({
           onOpenHistoryTracking={onOpenHistoryTracking}
           onDismissHistoryPrompt={onDismissHistoryPrompt}
         />
+        )}
       </div>
 
       {/* Backend chip strip — multi-backend UX (Tier 1). Auto-hides
