@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import {
   NESS_ASK_TOOLS,
   NESS_AUTO_ALLOWED_TOOLS,
-  isAutoAllowedNessTool,
+  isAutoAllowedNessCall,
+  isSafeAgentUrl,
   nessAllowedToolsFlagValue,
   nessControlToolName
 } from './ness-tool-policy'
@@ -24,19 +25,19 @@ describe('ness tool policy', () => {
   })
 
   it('auto-allows plumbing tools under the current and legacy server names', () => {
-    expect(isAutoAllowedNessTool('mcp__ness-control__report_progress')).toBe(true)
-    expect(isAutoAllowedNessTool('mcp__ness-control__set_tab_name')).toBe(true)
-    expect(isAutoAllowedNessTool('mcp__harness-control__list_worktrees')).toBe(true)
+    expect(isAutoAllowedNessCall('mcp__ness-control__report_progress', {})).toBe(true)
+    expect(isAutoAllowedNessCall('mcp__ness-control__set_tab_name', {})).toBe(true)
+    expect(isAutoAllowedNessCall('mcp__harness-control__list_worktrees', {})).toBe(true)
   })
 
   it('keeps asking for tools that run arbitrary code', () => {
-    expect(isAutoAllowedNessTool('mcp__ness-control__eval_tab')).toBe(false)
-    expect(isAutoAllowedNessTool('mcp__ness-control__create_shell')).toBe(false)
+    expect(isAutoAllowedNessCall('mcp__ness-control__eval_tab', {})).toBe(false)
+    expect(isAutoAllowedNessCall('mcp__ness-control__create_shell', {})).toBe(false)
   })
 
   it('ignores other servers and built-ins', () => {
-    expect(isAutoAllowedNessTool('mcp__other__report_progress')).toBe(false)
-    expect(isAutoAllowedNessTool('Bash')).toBe(false)
+    expect(isAutoAllowedNessCall('mcp__other__report_progress', {})).toBe(false)
+    expect(isAutoAllowedNessCall('Bash', {})).toBe(false)
     expect(nessControlToolName('Bash')).toBeNull()
   })
 
@@ -45,5 +46,37 @@ describe('ness tool policy', () => {
     expect(value.split(',')).toContain('mcp__ness-control__report_progress')
     expect(value).not.toContain('eval_tab')
     expect(value).not.toContain('create_shell')
+  })
+
+  it('leaves URL-gated tools out of --allowedTools, since the flag cannot see the url', () => {
+    const value = nessAllowedToolsFlagValue()
+    expect(value).not.toContain('navigate_tab')
+    expect(value).not.toContain('create_browser_tab')
+  })
+
+  it('auto-allows navigation only to loopback http(s) and about:blank', () => {
+    const nav = (url: string): boolean =>
+      isAutoAllowedNessCall('mcp__ness-control__navigate_tab', { tab_id: 't', url })
+    expect(nav('localhost:5173')).toBe(true)
+    expect(nav('http://127.0.0.1:3000/health')).toBe(true)
+    expect(nav('https://app.localhost/')).toBe(true)
+    expect(nav('http://[::1]:8080')).toBe(true)
+    expect(nav('about:blank')).toBe(true)
+
+    expect(nav('file:///Users/me/.ssh/id_rsa')).toBe(false)
+    expect(nav('https://example.com/?q=secret')).toBe(false)
+    expect(nav('github.com')).toBe(false)
+    expect(nav('javascript:alert(1)')).toBe(false)
+    expect(nav('data:text/html,hi')).toBe(false)
+    expect(nav('http://localhost.evil.com/')).toBe(false)
+    expect(isAutoAllowedNessCall('mcp__ness-control__navigate_tab', { tab_id: 't' })).toBe(false)
+  })
+
+  it('auto-allows create_browser_tab with no url, gates it with one', () => {
+    const create = 'mcp__ness-control__create_browser_tab'
+    expect(isAutoAllowedNessCall(create, {})).toBe(true)
+    expect(isAutoAllowedNessCall(create, { url: 'localhost:3000' })).toBe(true)
+    expect(isAutoAllowedNessCall(create, { url: 'file:///etc/passwd' })).toBe(false)
+    expect(isSafeAgentUrl('')).toBe(false)
   })
 })

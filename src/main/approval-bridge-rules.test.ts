@@ -140,6 +140,31 @@ describe('ApprovalBridge — Ness tools', () => {
       h.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-2']?.toolName
     ).toBe('mcp__ness-control__create_shell')
   })
+
+  it('allows navigation to a local dev server', async () => {
+    const h = await harness([])
+    const res = await h.send({
+      id: 'req-ness-3',
+      tool_name: 'mcp__ness-control__navigate_tab',
+      input: { tab_id: 't1', url: 'localhost:5173' },
+      tool_use_id: 'tu-ness-3'
+    })
+    expect((res as { result: { behavior: string } }).result.behavior).toBe('allow')
+  })
+
+  it('still asks before navigating a tab to a file: URL', async () => {
+    const h = await harness([])
+    const res = await h.send({
+      id: 'req-ness-4',
+      tool_name: 'mcp__ness-control__navigate_tab',
+      input: { tab_id: 't1', url: 'file:///Users/me/.ssh/id_rsa' },
+      tool_use_id: 'tu-ness-4'
+    })
+    expect(res).toBeNull()
+    expect(
+      h.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-4']?.toolName
+    ).toBe('mcp__ness-control__navigate_tab')
+  })
 })
 
 describe('ApprovalBridge — persistent allowlist', () => {

@@ -140,12 +140,13 @@ export function checkDenyList(
   // inside relative-looking strings) and tolerate /tmp (frequent and
   // ephemeral).
   //
-  // Only fields that hold paths are scanned. Scanning the whole input sent
-  // every prose field with a URL route in it ("curl /health" in a Bash
-  // description, "/health is added" in a progress message) to the human.
+  // Prose fields are skipped: scanning them sent every URL route in a
+  // sentence ("curl /health" in a Bash description, "/health is added" in a
+  // progress message) to the human. Everything else is scanned, including
+  // unknown keys, so an unfamiliar MCP schema fails closed.
   const home = homedir()
   const absPathRe = /(^|["\s'])(\/[A-Za-z][^\s"']*)/g
-  const pathText = pathBearingStrings(toolName, input).join('\n')
+  const pathText = pathBearingStrings(input).join('\n')
   let m: RegExpExecArray | null
   while ((m = absPathRe.exec(pathText)) !== null) {
     const p = m[2]
@@ -159,27 +160,27 @@ export function checkDenyList(
   return null
 }
 
-// Keys whose string values are (or may be) filesystem paths across the
-// built-in file tools and typical MCP servers: file_path, notebook_path,
-// path, cwd, directory, dir, filename, …
-const PATH_KEY_RE = /path|file|dir|cwd|folder/i
+// Keys whose values are free text written for a human or a model, not
+// locations. Matched against the whole key, case-insensitively.
+const PROSE_KEY_RE =
+  /^(?:description|message|messages|prompt|initial_?prompt|system_?prompt|body|content|text|title|summary|briefing|query|question|reason|comment|note|notes|explanation|caption|label|subject|instructions?)$/i
 
-/** The parts of a tool input that can name a filesystem location: a Bash
- *  command, plus top-level string (or string-array) fields with a path-ish
- *  key. Public for tests. */
-export function pathBearingStrings(
-  toolName: string,
-  input: Record<string, unknown>
-): string[] {
+/** Every string in a tool input that could name a filesystem location:
+ *  all string values, nested objects and arrays included, except those
+ *  under a prose key. Public for tests. */
+export function pathBearingStrings(input: unknown): string[] {
   const out: string[] = []
-  if (toolName === 'Bash' && typeof input['command'] === 'string') out.push(input['command'])
-  for (const [key, value] of Object.entries(input)) {
-    if (!PATH_KEY_RE.test(key)) continue
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 20) return
     if (typeof value === 'string') out.push(value)
-    else if (Array.isArray(value)) {
-      for (const v of value) if (typeof v === 'string') out.push(v)
+    else if (Array.isArray(value)) for (const v of value) visit(v, depth + 1)
+    else if (value && typeof value === 'object') {
+      for (const [key, v] of Object.entries(value)) {
+        if (!PROSE_KEY_RE.test(key)) visit(v, depth + 1)
+      }
     }
   }
+  visit(input, 0)
   return out
 }
 

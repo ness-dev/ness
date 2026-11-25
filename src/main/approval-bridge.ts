@@ -35,7 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { isAutoAllowedNessTool } from '../shared/ness-tool-policy'
+import { isAutoAllowedNessCall } from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -399,7 +399,7 @@ export class ApprovalBridge {
     // a human; see shared/ness-tool-policy.ts for what's excluded and why.
     // No approvalSessionAllowed dispatch either: these calls fire every
     // turn, and an "auto-allowed" chip on each would be noise.
-    if (isAutoAllowedNessTool(basePayload.toolName)) {
+    if (isAutoAllowedNessCall(basePayload.toolName, basePayload.input)) {
       respond({ behavior: 'allow', updatedInput: basePayload.input })
       log(
         'approval-bridge',
