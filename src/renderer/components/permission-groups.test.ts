@@ -111,22 +111,40 @@ describe('groupPermissionRules', () => {
       ['vimm', 5],
       ['godot', 3],
       ['curl', 2],
-      ['kubectl', 2]
+      ['kubectl', 2],
+      ['Other', 2]
     ])
-    // Singletons stay loose.
-    expect(shell.loose.map((r) => r.id)).toEqual([
-      'Bash',
+    expect(shell.subgroups.map((s) => !!s.program)).toEqual([true, true, true, true, false])
+    // One-off commands go in "Other"; only the bare grant stays loose.
+    expect(shell.subgroups.at(-1)!.rules.map((r) => r.id)).toEqual([
       'Bash(chmod +x /tmp/vimm/search.sh)',
       'Bash(gh run:*)'
     ])
+    expect(shell.loose.map((r) => r.id)).toEqual(['Bash'])
   })
 
-  it('orders shell rows: any command, then programs, then one-offs', () => {
+  it('orders shell rows: any command, then programs, then Other', () => {
     const shell = byKey.get('shell')!
     const ids = shell.rules.map((r) => r.id)
     expect(ids[0]).toBe('Bash')
     expect(ids.slice(-2)).toEqual(['Bash(chmod +x /tmp/vimm/search.sh)', 'Bash(gh run:*)'])
     expect(commandHead(shell.rules[1].ruleContent)).toBe('vimm')
+  })
+
+  it('sub-groups dead MCP grants by reason, with live ones under Other', () => {
+    const ness = byKey.get('mcp:ness')!
+    expect(ness.loose).toEqual([])
+    expect(ness.subgroups.map((s) => [s.label, s.rules.map((r) => r.toolName)])).toEqual([
+      ['Old server name', ['mcp__harness-control__list_worktrees']],
+      ['Built in', ['mcp__ness-control__report_progress']],
+      ['Other', ['mcp__ness-control__eval_tab']]
+    ])
+  })
+
+  it('leaves groups with nothing to sub-group flat', () => {
+    const notion = byKey.get('mcp:notion')!
+    expect(notion.subgroups).toEqual([])
+    expect(notion.loose).toHaveLength(2)
   })
 
   it('merges both Ness server names into one group', () => {

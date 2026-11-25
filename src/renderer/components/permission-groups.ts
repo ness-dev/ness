@@ -21,8 +21,10 @@ export type RuleGroupKind = 'shell' | 'files' | 'web' | 'mcp' | 'other'
 
 export interface RuleSubgroup {
   key: string
-  /** The program, e.g. `vimm`. */
+  /** The program (`vimm`), the reason a set of grants is dead, or "Other". */
   label: string
+  /** A program name, rendered monospace. */
+  program?: boolean
   rules: StoredPermissionRule[]
 }
 
@@ -34,9 +36,12 @@ export interface RuleGroup {
   server?: string
   /** Every rule in the group, in display order. */
   rules: StoredPermissionRule[]
-  /** Shell only: programs with two or more grants. */
+  /** Shell: programs with two or more grants. Any group: grants that do
+   *  nothing, by reason. Once a group has any, its leftovers go in a final
+   *  "Other" subgroup so no row sits ungrouped beside them. */
   subgroups: RuleSubgroup[]
-  /** Rules not in a subgroup, in display order. */
+  /** Rules not in a subgroup: everything when there are no subgroups,
+   *  otherwise only a bare "any command" grant, which leads the group. */
   loose: StoredPermissionRule[]
 }
 
@@ -125,25 +130,39 @@ export function groupPermissionRules(rules: StoredPermissionRule[]): RuleGroup[]
 
   for (const group of groups.values()) {
     group.rules.sort(group.kind === 'shell' || group.kind === 'files' || group.kind === 'web' ? byContent : (a, b) => ruleKey(a).localeCompare(ruleKey(b)))
-    if (group.kind !== 'shell') {
-      group.loose = group.rules
+    const grouped = new Set<StoredPermissionRule>()
+    const take = (key: string, label: string, rules: StoredPermissionRule[], program?: boolean): void => {
+      group.subgroups.push({ key: `${group.key}:${key}`, label, rules, ...(program ? { program } : {}) })
+      for (const r of rules) grouped.add(r)
+    }
+
+    if (group.kind === 'shell') {
+      const byHead = new Map<string, StoredPermissionRule[]>()
+      for (const rule of group.rules) {
+        const head = commandHead(rule.ruleContent)
+        if (head === null) continue
+        byHead.set(head, [...(byHead.get(head) ?? []), rule])
+      }
+      const programs = [...byHead].filter(([, r]) => r.length >= 2)
+      programs.sort(([a, ar], [b, br]) => br.length - ar.length || a.localeCompare(b))
+      for (const [head, headRules] of programs) take(head, head, headRules, true)
+    }
+
+    const oldName = group.rules.filter((r) => !grouped.has(r) && redundancy(r) === 'old-name')
+    const builtIn = group.rules.filter((r) => !grouped.has(r) && redundancy(r) === 'built-in')
+    if (oldName.length > 0) take('old-name', 'Old server name', oldName)
+    if (builtIn.length > 0) take('built-in', 'Built in', builtIn)
+
+    // A bare grant stays at the top of its group; it's the widest one.
+    const rest = group.rules.filter((r) => !grouped.has(r))
+    if (group.subgroups.length === 0) {
+      group.loose = rest
       continue
     }
-    const byHead = new Map<string, StoredPermissionRule[]>()
-    for (const rule of group.rules) {
-      const head = commandHead(rule.ruleContent)
-      if (head === null) continue
-      byHead.set(head, [...(byHead.get(head) ?? []), rule])
-    }
-    const grouped = new Set<StoredPermissionRule>()
-    for (const [head, headRules] of byHead) {
-      if (headRules.length < 2) continue
-      group.subgroups.push({ key: `shell:${head}`, label: head, rules: headRules })
-      for (const r of headRules) grouped.add(r)
-    }
-    group.subgroups.sort((a, b) => b.rules.length - a.rules.length || a.label.localeCompare(b.label))
-    group.loose = group.rules.filter((r) => !grouped.has(r))
-    group.rules = shellDisplayOrder(group.loose, group.subgroups)
+    group.loose = group.kind === 'shell' ? rest.filter((r) => !r.ruleContent) : []
+    const other = rest.filter((r) => !group.loose.includes(r))
+    if (other.length > 0) take('other', 'Other', other)
+    group.rules = [...group.loose, ...group.subgroups.flatMap((sub) => sub.rules)]
   }
 
   return [...groups.values()].sort(
@@ -152,19 +171,6 @@ export function groupPermissionRules(rules: StoredPermissionRule[]): RuleGroup[]
       b.rules.length - a.rules.length ||
       a.label.localeCompare(b.label)
   )
-}
-
-/** The order shell rows render in: a bare "any command" grant first (it's
- *  the widest), then the program subgroups, then the one-off commands. */
-export function shellDisplayOrder(
-  loose: StoredPermissionRule[],
-  subgroups: RuleSubgroup[]
-): StoredPermissionRule[] {
-  return [
-    ...loose.filter((r) => !r.ruleContent),
-    ...subgroups.flatMap((s) => s.rules),
-    ...loose.filter((r) => r.ruleContent)
-  ]
 }
 
 const LEGACY_NESS_PREFIX = 'mcp__harness-control__'
@@ -202,13 +208,11 @@ export function filterGroups(
     const keep = (r: StoredPermissionRule): boolean =>
       groupHit || ruleKey(r).toLowerCase().includes(q) || rowLabel(r).toLowerCase().includes(q)
     const subgroups = group.subgroups
-      .map((s) => ({ ...s, rules: s.label.includes(q) ? s.rules : s.rules.filter(keep) }))
+      .map((s) => ({ ...s, rules: s.label.toLowerCase().includes(q) ? s.rules : s.rules.filter(keep) }))
       .filter((s) => s.rules.length > 0)
     const loose = group.loose.filter(keep)
     if (loose.length === 0 && subgroups.length === 0) continue
-    const rules =
-      group.kind === 'shell' ? shellDisplayOrder(loose, subgroups) : [...loose, ...subgroups.flatMap((s) => s.rules)]
-    out.push({ ...group, loose, subgroups, rules })
+    out.push({ ...group, loose, subgroups, rules: [...loose, ...subgroups.flatMap((s) => s.rules)] })
   }
   return out
 }

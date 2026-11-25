@@ -324,7 +324,7 @@ export function PermissionRulesList({
                           onToggle={() => toggle(sub.key)}
                           icon={null}
                           label={sub.label}
-                          mono
+                          mono={sub.program}
                           count={sub.rules.length}
                           indent={1}
                           removeAll={removeAll(sub.key, sub.rules.map((r) => r.id))}
