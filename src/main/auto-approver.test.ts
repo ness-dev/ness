@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { homedir } from 'os'
-import { checkDenyList, parseDecision, buildPrompt } from './auto-approver'
+import { checkDenyList, parseDecision, buildPrompt, pathBearingStrings } from './auto-approver'
 
 const HOME = homedir()
 
@@ -117,6 +117,27 @@ describe('checkDenyList', () => {
     expect(
       checkDenyList('mcp__other__notify', { message: '/health is added; run /review next' })
     ).toBeNull()
+  })
+
+  it('still catches absolute paths in non-path-named and nested fields', () => {
+    expect(checkDenyList('Glob', { pattern: '/etc/**/*.conf' })).toMatch(/outside home: \/etc/)
+    expect(checkDenyList('Grep', { pattern: 'x', glob: '/var/log/*.log' })).toMatch(/outside home/)
+    expect(checkDenyList('mcp__fs__copy', { source: '/etc/hosts', dest: 'out' })).toMatch(/outside home/)
+    expect(checkDenyList('mcp__fs__copy', { source: 'in', dest: '/usr/local/x' })).toMatch(/outside home/)
+    expect(checkDenyList('mcp__x__run', { options: { path: '/etc' } })).toMatch(/outside home/)
+    expect(checkDenyList('mcp__x__exec', { args: ['-c', '/opt/thing'] })).toMatch(/outside home/)
+    expect(checkDenyList('Monitor', { command: 'tail -f /var/log/system.log' })).toMatch(/outside home/)
+  })
+
+  it('pathBearingStrings walks nested values and skips prose keys', () => {
+    expect(
+      pathBearingStrings({
+        command: 'ls',
+        description: 'curl /health',
+        options: { path: '/etc', note: '/skip' },
+        list: [{ target: '/a' }, '/b']
+      })
+    ).toEqual(['ls', '/etc', '/a', '/b'])
   })
 
   it('allows /tmp paths through to the reviewer', () => {
