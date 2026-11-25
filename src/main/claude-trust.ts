@@ -36,7 +36,13 @@ async function acquireLock(lockPath: string, waitMs: number): Promise<boolean> {
     try {
       const st = await fs.stat(lockPath)
       if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
-        await fs.rmdir(lockPath).catch(() => {})
+        // Re-check right before removing, as proper-lockfile does: if
+        // another contender broke the same stale lock and took a fresh one
+        // in between, its mtime has moved and we must not delete it. A
+        // sub-millisecond window between this stat and the rmdir remains;
+        // a lock stale for 10 s is already rare, so that's accepted.
+        const again = await fs.stat(lockPath)
+        if (again.mtimeMs === st.mtimeMs) await fs.rmdir(lockPath).catch(() => {})
         continue
       }
     } catch {
@@ -67,12 +73,19 @@ export async function trustClaudeProject(
     log('claude-trust', `could not lock ${configPath}; leaving ${key} untrusted`)
     return false
   }
+  let tmp: string | null = null
   try {
+    // Write through a symlinked config (stow, chezmoi, a synced folder)
+    // to its real target: renaming onto the link itself would replace it
+    // with a regular file and silently detach it. The lock stays at the
+    // unresolved path, since that's the one Claude locks.
+    let target: string
     let raw: string
     let mode: number
     try {
-      raw = await fs.readFile(configPath, 'utf-8')
-      mode = (await fs.stat(configPath)).mode & 0o777
+      target = await fs.realpath(configPath)
+      raw = await fs.readFile(target, 'utf-8')
+      mode = (await fs.stat(target)).mode & 0o777
     } catch {
       return false
     }
@@ -87,15 +100,17 @@ export async function trustClaudeProject(
     const projects = config.projects && typeof config.projects === 'object' ? config.projects : {}
     if (projects[key]?.hasTrustDialogAccepted === true) return true
     config.projects = { ...projects, [key]: { ...(projects[key] ?? {}), hasTrustDialogAccepted: true } }
-    const tmp = join(dirname(configPath), `.claude.json.ness-${process.pid}-${Date.now()}`)
+    tmp = join(dirname(target), `.claude.json.ness-${process.pid}-${Date.now()}`)
     await fs.writeFile(tmp, JSON.stringify(config, null, 2), { mode })
-    await fs.rename(tmp, configPath)
-    log('claude-trust', `trusted ${key} in ${configPath}`)
+    await fs.rename(tmp, target)
+    tmp = null
+    log('claude-trust', `trusted ${key} in ${target}`)
     return true
   } catch (err) {
     log('claude-trust', `failed to trust ${key}`, err instanceof Error ? err.message : String(err))
     return false
   } finally {
+    if (tmp) await fs.unlink(tmp).catch(() => {})
     await fs.rmdir(lockPath).catch(() => {})
   }
 }

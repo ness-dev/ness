@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, promises as fsPromises, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -117,6 +117,35 @@ describe('trustClaudeProject', () => {
     setTimeout(() => rmSync(`${configPath}.lock`, { recursive: true }), 100)
     expect(await trustClaudeProject(configPath, project, { lockWaitMs: 2_000 })).toBe(true)
     expect(readConfig().projects?.[project]?.hasTrustDialogAccepted).toBe(true)
+  })
+
+  it('writes through a symlinked config to its target, keeping the link', async () => {
+    const realDir = join(dir, 'dotfiles')
+    mkdirSync(realDir)
+    const real = join(realDir, 'claude.json')
+    writeFileSync(real, JSON.stringify({ numStartups: 3 }))
+    symlinkSync(real, configPath)
+    expect(await trustClaudeProject(configPath, project)).toBe(true)
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true)
+    const config = JSON.parse(readFileSync(real, 'utf-8'))
+    expect(config.numStartups).toBe(3)
+    expect(config.projects[project].hasTrustDialogAccepted).toBe(true)
+    // No temp file left beside either the link or the target.
+    expect(readdirSync(dir).filter((f) => f.includes('.ness-'))).toEqual([])
+    expect(readdirSync(realDir)).toEqual(['claude.json'])
+  })
+
+  it('removes its temp file when the rename fails', async () => {
+    writeConfig({ numStartups: 1 })
+    const spy = vi.spyOn(fsPromises, 'rename').mockRejectedValueOnce(new Error('EXDEV'))
+    try {
+      expect(await trustClaudeProject(configPath, project)).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(readdirSync(dir).filter((f) => f.startsWith('.claude.json.'))).toEqual([])
+    expect(readConfig().projects).toBeUndefined()
+    expect(existsSync(`${configPath}.lock`)).toBe(false)
   })
 
   it('returns false for a path that does not exist', async () => {
