@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   NESS_ASK_TOOLS,
   NESS_AUTO_ALLOWED_TOOLS,
+  isAlwaysAutoAllowedNessTool,
   isAutoAllowedNessCall,
   isSafeAgentUrl,
   nessAllowedToolsFlagValue,
@@ -78,5 +79,15 @@ describe('ness tool policy', () => {
     expect(isAutoAllowedNessCall(create, { url: 'localhost:3000' })).toBe(true)
     expect(isAutoAllowedNessCall(create, { url: 'file:///etc/passwd' })).toBe(false)
     expect(isSafeAgentUrl('')).toBe(false)
+  })
+
+  it('counts only input-independent tools as always auto-allowed', () => {
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__report_progress')).toBe(true)
+    expect(isAlwaysAutoAllowedNessTool('mcp__harness-control__list_worktrees')).toBe(true)
+    // URL-gated: a grant still allows arbitrary URLs, so it isn't redundant.
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__navigate_tab')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__create_browser_tab')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__eval_tab')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('Bash')).toBe(false)
   })
 })

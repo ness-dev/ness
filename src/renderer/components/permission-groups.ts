@@ -11,7 +11,7 @@
 // filter state.
 
 import { ruleKey, type StoredPermissionRule } from '../../shared/permission-match'
-import { isAutoAllowedNessTool } from '../../shared/ness-tool-policy'
+import { isAlwaysAutoAllowedNessTool } from '../../shared/ness-tool-policy'
 import { getMcpServerDisplay, parseMcpToolName } from './json-mode-cards/tool-display'
 
 /** At or below this many grants the list renders flat, as before. */
@@ -169,12 +169,15 @@ export function shellDisplayOrder(
 
 const LEGACY_NESS_PREFIX = 'mcp__harness-control__'
 
-/** Why a grant does nothing: its tool is a Ness tool that's now allowed
- *  without asking, or it names Ness's MCP server by its pre-rename name,
- *  which no session registers any more, so it can never match. */
+/** Why a grant does nothing: its tool is a Ness tool that's allowed without
+ *  asking whatever its input, or it names Ness's MCP server by its
+ *  pre-rename name. Grants match on the exact tool name and no session
+ *  registers `harness-control` any more, so those can never match, even
+ *  for the URL-gated browser tools a `ness-control` grant would still
+ *  widen. */
 export function redundancy(rule: StoredPermissionRule): 'built-in' | 'old-name' | null {
   if (rule.toolName.startsWith(LEGACY_NESS_PREFIX)) return 'old-name'
-  if (isAutoAllowedNessTool(rule.toolName)) return 'built-in'
+  if (isAlwaysAutoAllowedNessTool(rule.toolName)) return 'built-in'
   return null
 }
 

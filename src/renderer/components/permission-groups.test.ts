@@ -164,6 +164,14 @@ describe('redundantRules', () => {
     expect(redundancy(rule('mcp__ness-control__eval_tab'))).toBeNull()
     expect(redundancy(rule('Bash', 'ls:*'))).toBeNull()
   })
+
+  it('keeps live grants for the URL-gated browser tools', () => {
+    // Without the grant, a non-loopback URL prompts; with it, it doesn't.
+    expect(redundancy(rule('mcp__ness-control__navigate_tab'))).toBeNull()
+    expect(redundancy(rule('mcp__ness-control__create_browser_tab'))).toBeNull()
+    // Under the old server name they can't match any call, so they're dead.
+    expect(redundancy(rule('mcp__harness-control__navigate_tab'))).toBe('old-name')
+  })
 })
 
 describe('filterGroups', () => {

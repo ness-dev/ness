@@ -133,6 +133,14 @@ export function isAutoAllowedNessCall(toolName: string, input: Record<string, un
   return typeof url === 'string' && isSafeAgentUrl(url)
 }
 
+/** True for a ness-control tool that's auto-allowed whatever its input,
+ *  so a saved grant for it adds nothing. False for the URL-gated tools:
+ *  a grant for those still lets an agent load arbitrary URLs. */
+export function isAlwaysAutoAllowedNessTool(toolName: string): boolean {
+  const bare = nessControlToolName(toolName)
+  return bare !== null && AUTO_ALLOWED.has(bare) && !URL_GATED_TOOLS.has(bare)
+}
+
 /** Value for Claude's `--allowedTools`, for terminal tabs where Claude
  *  prompts in its own TUI and Ness never sees the request. The flag can't
  *  look at inputs, so the URL-gated tools are left out and prompt there. */
