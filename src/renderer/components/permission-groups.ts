@@ -173,8 +173,8 @@ const LEGACY_NESS_PREFIX = 'mcp__harness-control__'
  *  asking whatever its input, or it names Ness's MCP server by its
  *  pre-rename name. Grants match on the exact tool name and no session
  *  registers `harness-control` any more, so those can never match, even
- *  for the URL-gated browser tools a `ness-control` grant would still
- *  widen. */
+ *  for the input-gated tools (browser navigation, create_worktree) that a
+ *  `ness-control` grant would still widen. */
 export function redundancy(rule: StoredPermissionRule): 'built-in' | 'old-name' | null {
   if (rule.toolName.startsWith(LEGACY_NESS_PREFIX)) return 'old-name'
   if (isAlwaysAutoAllowedNessTool(rule.toolName)) return 'built-in'

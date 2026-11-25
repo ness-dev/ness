@@ -12,7 +12,9 @@
 // What is deliberately trusted, and what isn't:
 // - ASK holds tools that run arbitrary code: create_shell runs any command
 //   through a login shell (as dangerous as Bash), and eval_tab runs any
-//   script with the tab's cookies and logged-in sessions.
+//   script with the tab's cookies and logged-in sessions. add_repo is there
+//   too: registering a clone trusts its .ness.json, whose setupCommand
+//   create_worktree would then run.
 // - Browser driving (click_tab, type_tab, get_tab_dom, …) is trusted because
 //   it acts on whatever page the tab is already on. Getting a tab onto a
 //   page is the part that isn't: a file: URL plus get_tab_dom reads any
@@ -20,8 +22,17 @@
 //   that WebFetch would prompt for. So navigate_tab and create_browser_tab
 //   are only auto-allowed for loopback http(s) dev servers and about:blank
 //   (see URL_GATED_TOOLS). Everything else goes down the normal path.
+//   This narrows those channels; it doesn't close them. Loopback also
+//   covers any other local service (Jupyter, a DB admin UI, CUPS, a Docker
+//   or Ollama API), and a loopback page can still send the tab off-host via
+//   a click_tab on an external link or a server redirect. Gating every
+//   click would undo the point, so don't treat this as a hard boundary.
+// - create_worktree runs the repo's setup script (.ness.json setupCommand,
+//   else the global one), and an agent that can Write could have put
+//   `curl … | sh` there. So it is only auto-allowed when the caller can
+//   tell that no script would run (see NessCallContext), and asks otherwise.
 // - create_worktree and send_message start or message other agents with
-//   text the calling agent wrote. They stay auto-allowed because
+//   text the calling agent wrote. They are auto-allowed because
 //   orchestration is the point of them (onboarding's Getting Started flow
 //   calls create_worktree). The trade-off: a session is only as careful as
 //   the loosest tab it can start or message. The receiving agent's own
@@ -32,9 +43,6 @@
 import { normalizeBrowserUrl } from './browser-url'
 
 const NESS_CONTROL_PREFIX = 'mcp__ness-control__'
-// Sessions and transcripts from before the rename may still name the
-// server this way.
-const LEGACY_NESS_CONTROL_PREFIX = 'mcp__harness-control__'
 
 export const NESS_AUTO_ALLOWED_TOOLS: readonly string[] = [
   // Worktrees, repos and naming
@@ -42,7 +50,6 @@ export const NESS_AUTO_ALLOWED_TOOLS: readonly string[] = [
   'list_worktrees',
   'list_repos',
   'create_project',
-  'add_repo',
   'set_worktree_alias',
   'rename_worktree',
   'clear_worktree_alias',
@@ -85,12 +92,16 @@ export const NESS_AUTO_ALLOWED_TOOLS: readonly string[] = [
   'kill_shell'
 ]
 
-export const NESS_ASK_TOOLS: readonly string[] = ['eval_tab', 'create_shell']
+export const NESS_ASK_TOOLS: readonly string[] = ['eval_tab', 'create_shell', 'add_repo']
 
 const AUTO_ALLOWED = new Set(NESS_AUTO_ALLOWED_TOOLS)
 
 // Auto-allowed only when the URL they'd load passes isSafeAgentUrl.
 const URL_GATED_TOOLS = new Set(['navigate_tab', 'create_browser_tab'])
+// Auto-allowed only for some inputs (see isAutoAllowedNessCall). Anything
+// that can't see the input — the terminal-tab --allowedTools flag, the
+// Settings redundant-grant check — must treat these as asking.
+const INPUT_GATED_TOOLS = new Set([...URL_GATED_TOOLS, 'create_worktree'])
 
 const LOOPBACK_HOST_RE = /^(?:localhost|[^.]+(?:\.[^.]+)*\.localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i
 
@@ -111,21 +122,33 @@ export function isSafeAgentUrl(raw: string): boolean {
   return LOOPBACK_HOST_RE.test(url.hostname)
 }
 
-/** The bare tool name for a ness-control tool under either server name, or
- *  null for anything else. */
+export interface NessCallContext {
+  /** The setup command create_worktree would run for `repoRoot` (undefined
+   *  means the caller's own repo): '' when none, null when it can't be
+   *  determined. Absent means unknown, so create_worktree asks. */
+  setupCommandFor?: (repoRoot: string | undefined) => string | null
+}
+
+/** The bare tool name for a ness-control tool, or null for anything else. */
 export function nessControlToolName(toolName: string): string | null {
   if (toolName.startsWith(NESS_CONTROL_PREFIX)) return toolName.slice(NESS_CONTROL_PREFIX.length)
-  if (toolName.startsWith(LEGACY_NESS_CONTROL_PREFIX)) {
-    return toolName.slice(LEGACY_NESS_CONTROL_PREFIX.length)
-  }
   return null
 }
 
-/** True for a ness-control call that never needs approval, under either
- *  server name. Input-aware: the URL-gated tools are judged by their url. */
-export function isAutoAllowedNessCall(toolName: string, input: Record<string, unknown>): boolean {
+/** True for a ness-control call that never needs approval. Input-aware:
+ *  the URL-gated tools are judged by their url, create_worktree by whether
+ *  a setup script would run. */
+export function isAutoAllowedNessCall(
+  toolName: string,
+  input: Record<string, unknown>,
+  ctx: NessCallContext = {}
+): boolean {
   const bare = nessControlToolName(toolName)
   if (bare === null || !AUTO_ALLOWED.has(bare)) return false
+  if (bare === 'create_worktree') {
+    const repoRoot = typeof input['repoRoot'] === 'string' ? input['repoRoot'] : undefined
+    return ctx.setupCommandFor?.(repoRoot) === ''
+  }
   if (!URL_GATED_TOOLS.has(bare)) return true
   const url = input['url']
   // create_browser_tab with no url opens about:blank.
@@ -134,18 +157,19 @@ export function isAutoAllowedNessCall(toolName: string, input: Record<string, un
 }
 
 /** True for a ness-control tool that's auto-allowed whatever its input,
- *  so a saved grant for it adds nothing. False for the URL-gated tools:
- *  a grant for those still lets an agent load arbitrary URLs. */
+ *  so a saved grant for it adds nothing. False for the input-gated tools:
+ *  a grant for those still lets an agent load arbitrary URLs or create a
+ *  worktree that runs a setup script. */
 export function isAlwaysAutoAllowedNessTool(toolName: string): boolean {
   const bare = nessControlToolName(toolName)
-  return bare !== null && AUTO_ALLOWED.has(bare) && !URL_GATED_TOOLS.has(bare)
+  return bare !== null && AUTO_ALLOWED.has(bare) && !INPUT_GATED_TOOLS.has(bare)
 }
 
 /** Value for Claude's `--allowedTools`, for terminal tabs where Claude
  *  prompts in its own TUI and Ness never sees the request. The flag can't
- *  look at inputs, so the URL-gated tools are left out and prompt there. */
+ *  look at inputs, so the input-gated tools are left out and prompt there. */
 export function nessAllowedToolsFlagValue(): string {
-  return NESS_AUTO_ALLOWED_TOOLS.filter((t) => !URL_GATED_TOOLS.has(t))
+  return NESS_AUTO_ALLOWED_TOOLS.filter((t) => !INPUT_GATED_TOOLS.has(t))
     .map((t) => `${NESS_CONTROL_PREFIX}${t}`)
     .join(',')
 }

@@ -466,6 +466,11 @@ export class WorktreesFSM {
     })
   }
 
+  /** The setup command a new worktree in `repoRoot` would run; '' for none. */
+  setupCommandFor(repoRoot: string): string {
+    return this.resolveSetupCmd(repoRoot)
+  }
+
   private resolveSetupCmd(repoRoot: string): string {
     const repoCfg = loadRepoConfig(repoRoot)
     return repoCfg.setupCommand || this.opts.getWorktreeSetupCmd() || ''
