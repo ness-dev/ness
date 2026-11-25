@@ -1,10 +1,12 @@
-// Spike UI, modelled on the web client's mobile layout (MobileApp.tsx):
-// a top bar with the worktree switcher + that worktree's chat tabs, the
-// chat filling the rest, and a full-screen worktree sheet. Several
-// backends can be enabled at once; the sheet lists each one's repos.
-// No Expo Router — the spike proves the data path, not the nav shell.
+// Port of the web client's mobile shell (src/renderer/components/
+// MobileApp.tsx). Kept structurally parallel to it on purpose — selection
+// fallback, rising-edge wake, add-tab and convert-menu behaviour all mirror
+// that file, so read the two side by side when changing either. The
+// worktree list itself comes from the renderer's own pure model code via
+// src/fleet.ts, across every enabled backend.
 import { StatusBar } from 'expo-status-bar'
-import { useEffect, useMemo, useState } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,28 +17,32 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View
 } from 'react-native'
-import { Asterisk, ChevronDown, Plus } from 'lucide-react-native'
+import { ChevronDown, FileDiff, FileText, Globe, Loader2, Plus, SquareTerminal } from 'lucide-react-native'
 import { parseConnectionUrl } from '../src/shared/transport/parse-connection-url'
-import type { TerminalTab } from '../src/shared/state/terminals'
+import { supportsChat } from '../src/shared/agent-registry'
+import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
+import { randomUUID } from '../src/renderer/uuid'
 import { useBackends } from './src/backends'
-import { NessClient, chatTabsOf, useConn, useNess } from './src/ness'
+import { Fleet, useFleetEntries, useMerged } from './src/fleet'
+import { useNess, type NessClient } from './src/ness'
 import { STATUS_DOT, c, fs } from './src/theme'
+import { AgentIcon } from './src/components/AgentIcon'
 import { ChatView } from './src/components/ChatView'
-import { WorktreeSheet, type Selection } from './src/components/WorktreeSheet'
+import { WorktreePicker } from './src/components/WorktreePicker'
 import { BackendsSheet } from './src/components/BackendsSheet'
+import { Spin } from './src/components/Spin'
 
 export default function App() {
   const backends = useBackends()
-  const [selection, setSelection] = useState<Selection | null>(null)
-  const [tabByPath, setTabByPath] = useState<Record<string, string>>({})
-  const [sheet, setSheet] = useState<'worktrees' | 'backends' | null>(null)
+  const fleet = useMemo(() => new Fleet(), [])
+  // In an effect, not during render: setClients notifies subscribers.
+  useEffect(() => fleet.setClients(backends.clients), [fleet, backends.clients])
+  const [showBackends, setShowBackends] = useState(false)
 
-  // Deep-link pairing: <scheme>://pair?url=<connection link>. In Expo Go
-  // that's exp://<metro>/--/pair?url=…; a production app would register
-  // ness:// so the desktop QR could open it straight from the system
-  // camera.
+  // Deep-link pairing: <scheme>://pair?url=<connection link>.
   useEffect(() => {
     const handle = (link: string | null | undefined) => {
       const m = link && /[?&]url=([^&]+)/.exec(link)
@@ -49,13 +55,6 @@ export default function App() {
     return () => sub.remove()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  const client = backends.clients.find((cl) => cl.id === selection?.backendId) ?? null
-
-  // Drop a selection whose backend was disabled or removed.
-  useEffect(() => {
-    if (selection && backends.loaded && !client) setSelection(null)
-  }, [selection, client, backends.loaded])
 
   if (!backends.loaded) {
     return (
@@ -71,35 +70,10 @@ export default function App() {
       </Shell>
     )
   }
-
-  const tabKey = client && selection ? `${client.id}:${selection.path}` : ''
   return (
     <Shell>
-      {client && selection ? (
-        <WorktreeView
-          key={tabKey}
-          client={client}
-          path={selection.path}
-          tabId={tabByPath[tabKey]}
-          onTab={(id) => setTabByPath((p) => ({ ...p, [tabKey]: id }))}
-          onOpenSheet={() => setSheet('worktrees')}
-        />
-      ) : (
-        <AutoSelect clients={backends.clients} onSelect={setSelection} onOpenSheet={() => setSheet('worktrees')} />
-      )}
-      {sheet === 'worktrees' && (
-        <WorktreeSheet
-          clients={backends.clients}
-          selected={selection}
-          onSelect={(sel) => {
-            setSelection(sel)
-            setSheet(null)
-          }}
-          onClose={() => setSheet(null)}
-          onOpenBackends={() => setSheet('backends')}
-        />
-      )}
-      {sheet === 'backends' && <BackendsSheet backends={backends} onClose={() => setSheet('worktrees')} />}
+      <MobileApp fleet={fleet} onOpenBackends={() => setShowBackends(true)} />
+      {showBackends && <BackendsSheet backends={backends} onClose={() => setShowBackends(false)} />}
     </Shell>
   )
 }
@@ -115,189 +89,383 @@ function Shell({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** First screen after launch: open the worktree with the most recent live
- *  chat on the first enabled backend. */
-function AutoSelect({
-  clients,
-  onSelect,
-  onOpenSheet
-}: {
-  clients: NessClient[]
-  onSelect: (s: Selection) => void
-  onOpenSheet: () => void
-}) {
-  const first = clients[0]
-  if (!first) {
-    return (
-      <Centered>
-        <Text style={s.muted}>All backends are disabled.</Text>
-        <Pressable onPress={onOpenSheet}>
-          <Text style={{ color: c.accent, fontSize: fs.sm }}>Open worktrees</Text>
-        </Pressable>
-      </Centered>
-    )
-  }
-  return <AutoSelectFor client={first} onSelect={onSelect} />
+const K_ACTIVE = 'ness.mobile.activeWorktree'
+const K_TABS = 'ness.mobile.selectedTabs'
+
+function pickInitialTab(tabs: TerminalTab[]): string | null {
+  return tabs.find((t) => t.type === 'agent')?.id ?? tabs.find((t) => t.type === 'shell')?.id ?? tabs[0]?.id ?? null
 }
 
-function AutoSelectFor({ client, onSelect }: { client: NessClient; onSelect: (s: Selection) => void }) {
-  const conn = useConn(client)
+function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: () => void }) {
+  const merged = useMerged(fleet)
+  const worktrees = merged.flatWorktrees
+  const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(null)
+  // Mobile's own per-worktree tab focus, independent of desktop panes.
+  const [selectedTabByWorktree, setSelectedTabByWorktree] = useState<Record<string, string>>({})
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; x: number; y: number } | null>(null)
+  const windowWidth = useWindowDimensions().width
+
+  // Usability deviation from the web (which starts at worktrees[0] on every
+  // load): a phone app is relaunched constantly, so restore the last
+  // worktree + per-worktree tab focus. Still per-client UI state.
+  const restored = useRef<{ wt: string | null; tabs: Record<string, string> } | null>(null)
+  const [restoreDone, setRestoreDone] = useState(false)
   useEffect(() => {
-    if (!conn.hasSnapshot) return
-    const st = client.getState()
-    const withChat = st.worktrees.list
-      .filter((w) => chatTabsOf(st, w.path).some((t) => st.jsonClaude.sessions[t.id]))
-      .sort((a, b) => (st.terminals.lastActive[b.path] ?? 0) - (st.terminals.lastActive[a.path] ?? 0))
-    const pick = withChat[0] ?? st.worktrees.list.find((w) => w.isMain) ?? st.worktrees.list[0]
-    if (pick) onSelect({ backendId: client.id, path: pick.path })
-  }, [conn.hasSnapshot, client, onSelect])
-  return (
-    <Centered>
-      <ActivityIndicator color={c.muted} />
-      <Text style={s.muted}>
-        {conn.error ? `${client.label}: ${conn.error} — retrying` : `Connecting to ${client.label}…`}
-      </Text>
-    </Centered>
+    void AsyncStorage.multiGet([K_ACTIVE, K_TABS]).then((pairs) => {
+      const m = Object.fromEntries(pairs)
+      let tabs: Record<string, string> = {}
+      try {
+        tabs = m[K_TABS] ? JSON.parse(m[K_TABS]) : {}
+      } catch {
+        // ignore corrupt entry
+      }
+      restored.current = { wt: m[K_ACTIVE] ?? null, tabs }
+      setSelectedTabByWorktree((prev) => ({ ...tabs, ...prev }))
+      setRestoreDone(true)
+    })
+  }, [])
+  // Backends snapshot at different times: don't fall back to
+  // worktrees[0] while the saved worktree's host may still be connecting
+  // (that would also overwrite the saved choice). Capped so an offline
+  // host can't hold the first screen hostage.
+  const allSnapshotted = useFleetEntries(fleet).length === fleet.getClients().length
+  const [waitedEnough, setWaitedEnough] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setWaitedEnough(true), 3000)
+    return () => clearTimeout(t)
+  }, [])
+  useEffect(() => {
+    if (activeWorktreeId && worktrees.some((w) => w.path === activeWorktreeId)) return
+    if (worktrees.length === 0 || !restoreDone) return
+    const saved = restored.current?.wt
+    if (saved && worktrees.some((w) => w.path === saved)) setActiveWorktreeId(saved)
+    else if (!saved || allSnapshotted || waitedEnough) setActiveWorktreeId(worktrees[0].path)
+  }, [activeWorktreeId, worktrees, restoreDone, allSnapshotted, waitedEnough])
+  useEffect(() => {
+    if (activeWorktreeId) void AsyncStorage.setItem(K_ACTIVE, activeWorktreeId)
+  }, [activeWorktreeId])
+  useEffect(() => {
+    if (Object.keys(selectedTabByWorktree).length) void AsyncStorage.setItem(K_TABS, JSON.stringify(selectedTabByWorktree))
+  }, [selectedTabByWorktree])
+
+  const activeWorktree = useMemo(
+    () => worktrees.find((w) => w.path === activeWorktreeId) ?? null,
+    [worktrees, activeWorktreeId]
   )
-}
+  const client = activeWorktree ? fleet.client(merged.pathBackendId[activeWorktree.path]) ?? null : null
 
-function WorktreeView({
-  client,
-  path,
-  tabId,
-  onTab,
-  onOpenSheet
-}: {
-  client: NessClient
-  path: string
-  tabId: string | undefined
-  onTab: (id: string) => void
-  onOpenSheet: () => void
-}) {
-  const wt = useNess(client, (st) => st.worktrees.list.find((w) => w.path === path))
-  const pane = useNess(client, (st) => st.terminals.panes[path])
-  const sessions = useNess(client, (st) => st.jsonClaude.sessions)
-  const conn = useConn(client)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const tabs = useMemo(() => chatTabsOf(client.getState(), path), [client, path, pane])
+  useEffect(() => {
+    if (activeWorktree && client) void client.req('panes:ensureInitialized', activeWorktree.path)
+  }, [activeWorktree?.path, client])
 
-  // Default tab: a live session beats an exited or slept one.
-  const active =
-    tabs.find((t) => t.id === tabId) ??
-    tabs.find((t) => sessions[t.id] && sessions[t.id].state !== 'exited') ??
-    tabs[0]
+  // Once per backend as it joins, like MobileApp's mount effect.
+  const refreshed = useRef(new Set<string>())
+  const clients = fleet.getClients()
+  useEffect(() => {
+    for (const cl of clients) {
+      if (refreshed.current.has(cl.id) || !cl.getConn().hasSnapshot) continue
+      refreshed.current.add(cl.id)
+      void cl.req('worktrees:refreshList')
+      void cl.req('prs:refreshAllIfStale')
+    }
+  })
 
-  const newChat = () => void client.addChatTab(path).then(onTab)
-  const repo = (wt?.repoRoot ?? path).split('/').pop() ?? ''
+  const tabs = activeWorktree ? merged.tabsByWorktree[activeWorktree.path] ?? [] : []
+
+  const selectedTabId = useMemo(() => {
+    if (!activeWorktree) return null
+    const claimed = selectedTabByWorktree[activeWorktree.path]
+    if (claimed && tabs.some((t) => t.id === claimed)) return claimed
+    return pickInitialTab(tabs)
+  }, [activeWorktree, selectedTabByWorktree, tabs])
+  const selectedTab = tabs.find((t) => t.id === selectedTabId) ?? null
+
+  // Rising-edge wake, mirroring MobileApp: PanesFSM hydrates persisted
+  // chat/shell tabs asleep, so a tab first opened from the phone would
+  // otherwise render blank. Only on selection change, so a tab slept from
+  // another client stays slept.
+  const prevSelectedTabRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSelectedTabRef.current
+    prevSelectedTabRef.current = selectedTabId
+    if (prev === selectedTabId || !activeWorktree || !selectedTab || !client) return
+    if (selectedTab.type !== 'json-claude' && selectedTab.type !== 'shell') return
+    if ((selectedTab.mode ?? 'awake') !== 'asleep') return
+    void client.req('panes:wakeTab', activeWorktree.path, selectedTab.id)
+  }, [activeWorktree, selectedTab, selectedTabId, client])
+
+  // <scheme>://open?wt=<worktree path>&tab=<tab id> — jump straight to a
+  // chat. What a push notification for an approval will deep-link to.
+  useEffect(() => {
+    const handle = (link: string | null | undefined) => {
+      if (!link || !/\/open\?/.test(link)) return
+      const q = new URLSearchParams(link.slice(link.indexOf('?') + 1))
+      const wt = q.get('wt')
+      const tab = q.get('tab')
+      if (!wt) return
+      setActiveWorktreeId(wt)
+      if (tab) setSelectedTabByWorktree((prev) => ({ ...prev, [wt]: tab }))
+      setPickerOpen(false)
+    }
+    void Linking.getInitialURL().then(handle)
+    const sub = Linking.addEventListener('url', (e) => handle(e.url))
+    return () => sub.remove()
+  }, [])
+
+  const handleSelectWorktree = useCallback((wtPath: string) => {
+    setActiveWorktreeId(wtPath)
+    setPickerOpen(false)
+  }, [])
+
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      if (!activeWorktree) return
+      setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: tabId }))
+      setPickerOpen(false)
+    },
+    [activeWorktree]
+  )
+
+  const handleAddChat = useCallback(() => {
+    if (!activeWorktree || !client) return
+    const wtPath = activeWorktree.path
+    const tree = merged.panes[wtPath]
+    const paneId = tree ? firstLeafId(tree) : undefined
+    // One UUID as both tab id and session id, same as useTabHandlers.
+    const sessionId = randomUUID()
+    const tab: TerminalTab = { id: sessionId, type: 'json-claude', label: 'Chat', sessionId }
+    void client.req('panes:addTab', wtPath, tab, paneId)
+    setSelectedTabByWorktree((prev) => ({ ...prev, [wtPath]: tab.id }))
+    setPickerOpen(false)
+  }, [activeWorktree, client, merged.panes])
+
+  const handleConvertTabType = useCallback(
+    (tabId: string, newType: 'agent' | 'json-claude') => {
+      if (activeWorktree && client) void client.req('panes:convertTabType', activeWorktree.path, tabId, newType)
+    },
+    [activeWorktree, client]
+  )
+
+  const label = activeWorktree
+    ? merged.aliases[activeWorktree.path] ?? (activeWorktree.branch || activeWorktree.path.split('/').pop())
+    : null
+
   return (
     <View style={{ flex: 1 }}>
-      <View style={s.topBar}>
-        <Pressable onPress={onOpenSheet} style={s.wtButton}>
-          <View style={{ minWidth: 0, flexShrink: 1 }}>
-            <Text style={s.wtRepo} numberOfLines={1}>
-              {repo}
-            </Text>
-            <Text style={s.wtBranch} numberOfLines={1}>
-              {wt?.isMain ? 'main' : wt?.branch ?? path.split('/').pop()}
-            </Text>
-          </View>
-          <ChevronDown color={c.dim} size={14} />
-          {!conn.connected && <View style={[s.tabDot, { backgroundColor: c.danger }]} />}
+      <View style={s.header}>
+        <Pressable
+          onPress={() => setPickerOpen((v) => !v)}
+          style={({ pressed }) => [s.pickerBtn, (pickerOpen || pressed) && { backgroundColor: c.surface }]}
+          accessibilityRole="button"
+          accessibilityLabel="Switch worktree"
+        >
+          {activeWorktree ? (
+            <>
+              <View style={{ minWidth: 0, flexShrink: 1 }}>
+                <Text style={s.repoLabel} numberOfLines={1}>
+                  {activeWorktree.repoRoot.split('/').pop()}
+                </Text>
+                <Text style={s.branchLabel} numberOfLines={1}>
+                  {label}
+                </Text>
+              </View>
+              <ChevronDown color={c.dim} size={14} style={{ transform: [{ rotate: pickerOpen ? '180deg' : '0deg' }] }} />
+            </>
+          ) : (
+            <Text style={{ color: c.fg, fontSize: fs.sm }}>Select a worktree</Text>
+          )}
         </Pressable>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'stretch' }}>
-          {tabs.map((t) => (
-            <ChatTab key={t.id} client={client} tab={t} active={t.id === active?.id} onPress={() => onTab(t.id)} />
-          ))}
-          <Pressable style={s.addTab} hitSlop={6} onPress={newChat} accessibilityLabel="New chat">
-            <Plus color={c.dim} size={16} />
-          </Pressable>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'stretch' }}>
+          {client &&
+            tabs.map((tab) => {
+              const convertible = (tab.type === 'agent' && supportsChat(tab.agentKind)) || tab.type === 'json-claude'
+              return (
+                <TabChip
+                  key={tab.id}
+                  client={client}
+                  tab={tab}
+                  active={tab.id === selectedTabId}
+                  onSelect={() => handleSelectTab(tab.id)}
+                  // With the picker open, a tap on the active tab means
+                  // "dismiss the picker", so no convert menu.
+                  onOpenMenu={convertible && !pickerOpen ? (pos) => setConvertMenu({ tab, ...pos }) : undefined}
+                />
+              )
+            })}
+          {activeWorktree && (
+            <Pressable onPress={handleAddChat} style={({ pressed }) => [s.addBtn, pressed && { backgroundColor: c.panelRaised }]} accessibilityLabel="New chat">
+              <AgentIcon kind="claude" size={12} />
+              <Plus color={c.dim} size={10} />
+            </Pressable>
+          )}
         </ScrollView>
       </View>
-      {active ? (
-        <ChatView key={active.id} client={client} sessionId={active.id} worktreePath={path} />
-      ) : (
-        <Centered>
-          <Text style={s.muted}>No chat tab in this worktree.</Text>
-          <Text style={[s.muted, { color: c.faint, textAlign: 'center', paddingHorizontal: 32 }]}>
-            Terminal tabs stream raw PTY output, which the mobile client doesn't render.
-          </Text>
-          <Pressable style={s.newChatBtn} onPress={newChat}>
-            <Plus color="#fff" size={14} />
-            <Text style={{ color: '#fff', fontSize: fs.xs, fontWeight: '500' }}>New chat</Text>
+
+      <View style={{ flex: 1 }}>
+        {activeWorktree && client && selectedTab && selectedTab.type === 'json-claude' && (
+          <ChatView
+            key={`${client.id}:${selectedTab.id}`}
+            client={client}
+            sessionId={selectedTab.id}
+            worktreePath={activeWorktree.path}
+            mode={selectedTab.mode ?? 'awake'}
+          />
+        )}
+        {activeWorktree && selectedTab && (selectedTab.type === 'agent' || selectedTab.type === 'shell') && (
+          <Empty message={`${selectedTab.customLabel ?? selectedTab.label} — terminal tabs aren't in the app yet`} />
+        )}
+        {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell'].includes(selectedTab.type) && (
+          <NonRunnablePlaceholder tab={selectedTab} />
+        )}
+        {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
+        {!activeWorktree && worktrees.length === 0 && <Empty message={fleet.getEntries().length ? 'No worktrees yet.' : 'Connecting…'} />}
+
+        {convertMenu && (
+          <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
+            <View style={[s.menu, { left: Math.max(4, Math.min(convertMenu.x, windowWidth - 232)), top: 0 }]}>
+              <Pressable
+                style={({ pressed }) => [s.menuItem, pressed && { backgroundColor: c.panel }]}
+                onPress={() => {
+                  const { tab } = convertMenu
+                  setConvertMenu(null)
+                  handleConvertTabType(tab.id, tab.type === 'agent' ? 'json-claude' : 'agent')
+                }}
+              >
+                <Text style={{ color: c.fgBright, fontSize: fs.xs }}>
+                  {convertMenu.tab.type === 'agent' ? 'Switch to Chat mode' : 'Switch to Terminal mode'}
+                </Text>
+              </Pressable>
+            </View>
           </Pressable>
-        </Centered>
-      )}
+        )}
+        {pickerOpen && (
+          <WorktreePicker
+            fleet={fleet}
+            merged={merged}
+            activeWorktreeId={activeWorktreeId}
+            onSelect={handleSelectWorktree}
+            onClose={() => setPickerOpen(false)}
+            onOpenBackends={onOpenBackends}
+          />
+        )}
+      </View>
     </View>
   )
 }
 
-function ChatTab({
+function firstLeafId(tree: import('../src/shared/state/terminals').PaneNode): string {
+  return tree.type === 'leaf' ? tree.id : firstLeafId(tree.children[0])
+}
+
+function TabChip({
   client,
   tab,
   active,
-  onPress
+  onSelect,
+  onOpenMenu
 }: {
   client: NessClient
   tab: TerminalTab
   active: boolean
-  onPress: () => void
+  onSelect: () => void
+  /** Tap the active tab → convert menu (mobile's right-click). */
+  onOpenMenu?: (pos: { x: number; y: number }) => void
 }) {
-  const status = useNess(client, (st) => st.terminals.statuses[tab.id] ?? 'idle')
+  const ref = useRef<React.ComponentRef<typeof View>>(null)
   return (
-    <Pressable onPress={onPress} style={[s.tab, active && s.tabActive]}>
-      <Asterisk color="#d97757" size={14} strokeWidth={3} />
-      <View style={[s.tabDot, { backgroundColor: STATUS_DOT[status] }]} />
+    <Pressable
+      ref={ref}
+      onPress={() => {
+        if (active && onOpenMenu) {
+          ref.current?.measureInWindow((x: number, y: number) => onOpenMenu({ x, y }))
+          return
+        }
+        onSelect()
+      }}
+      style={[s.tab, active && s.tabActive]}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+    >
+      <TabIcon client={client} tab={tab} />
       <Text style={[s.tabText, active && { color: c.fgBright }]} numberOfLines={1}>
-        {tab.customLabel || tab.label}
+        {tab.customLabel ?? tab.label}
       </Text>
     </Pressable>
   )
 }
 
-function Centered({ children }: { children: React.ReactNode }) {
-  return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>{children}</View>
+function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
+  const status = useNess(client, (st) => (st.terminals.statuses[tab.id] ?? 'idle') as PtyStatus)
+  const shellActive = useNess(client, (st) => !!st.terminals.shellActivity[tab.id]?.active)
+  if (tab.type === 'agent' || tab.type === 'json-claude') {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <AgentIcon kind={tab.agentKind ?? 'claude'} size={12} />
+        {/* Same as the web: agent tabs show their status, chat tabs a
+            fixed accent dot (their state lives in the composer). */}
+        <View style={[s.dot, { backgroundColor: tab.type === 'agent' ? STATUS_DOT[status] : c.accent }]} />
+      </View>
+    )
+  }
+  if (tab.type === 'shell') return shellActive ? <Spin><Loader2 color={c.fgBright} size={12} /></Spin> : <SquareTerminal color={c.dim} size={12} />
+  if (tab.type === 'diff') return <FileDiff color={c.dim} size={12} />
+  if (tab.type === 'file') return <FileText color={c.dim} size={12} />
+  if (tab.type === 'browser') return <Globe color={c.dim} size={12} />
+  return null
+}
+
+function NonRunnablePlaceholder({ tab }: { tab: TerminalTab }) {
+  const label = tab.type === 'diff' ? 'Diff view' : tab.type === 'file' ? 'File view' : tab.type === 'browser' ? 'Browser tab' : 'This tab'
+  return (
+    <View style={s.empty}>
+      <Text style={{ color: c.fgBright, fontSize: fs.sm }}>{label} — desktop only</Text>
+      <Text style={{ color: c.dim, fontSize: fs.xs }}>{tab.customLabel ?? tab.label}</Text>
+      {tab.type === 'browser' && tab.url && (
+        <Pressable onPress={() => void Linking.openURL(tab.url!)} hitSlop={10}>
+          <Text style={{ color: c.accent, fontSize: fs.xs, textDecorationLine: 'underline' }}>Open URL in browser</Text>
+        </Pressable>
+      )}
+    </View>
+  )
+}
+
+function Empty({ message }: { message: string }) {
+  return (
+    <View style={s.empty}>
+      <Text style={{ color: c.dim, fontSize: fs.sm, textAlign: 'center' }}>{message}</Text>
+    </View>
+  )
 }
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.app },
-  muted: { color: c.muted, fontSize: fs.xs },
-  topBar: {
-    height: 44,
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.panel
-  },
-  wtButton: {
+  header: { height: 44, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
+  pickerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    maxWidth: 180,
+    maxWidth: '45%',
     borderRightWidth: 1,
     borderColor: c.border
   },
-  wtRepo: { color: c.dim, fontSize: fs.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
-  wtBranch: { color: c.fgBright, fontSize: fs.xs, fontWeight: '500' },
-  tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    borderBottomWidth: 2,
-    borderColor: 'transparent'
-  },
+  repoLabel: { color: c.dim, fontSize: fs.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  branchLabel: { color: c.fgBright, fontSize: fs.xs, fontWeight: '500' },
+  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, borderBottomWidth: 2, borderColor: 'transparent' },
   tabActive: { borderColor: c.muted, backgroundColor: c.app },
-  tabText: { color: c.dim, fontSize: fs.xs, maxWidth: 120 },
-  tabDot: { width: 6, height: 6, borderRadius: 3 },
-  addTab: { paddingHorizontal: 12, justifyContent: 'center' },
-  newChatBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: c.accent,
+  tabText: { color: c.dim, fontSize: fs.xs, maxWidth: 140 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 12, minWidth: 44, justifyContent: 'center' },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 24 },
+  menu: {
+    position: 'absolute',
+    minWidth: 224,
+    backgroundColor: c.panelRaised,
+    borderWidth: 1,
+    borderColor: c.borderStrong,
     borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 6
-  }
+    paddingVertical: 4
+  },
+  menuItem: { paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }
 })

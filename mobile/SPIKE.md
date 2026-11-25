@@ -196,47 +196,160 @@ Node probe (`ws`) on the same wire:
 - Reconnect re-snapshots every time (the existing transport design). With
   mobile radio flapping that's 60KB per reconnect, which is acceptable.
 
-## 7. Looking like Ness, with several backends
+## 7. Parity with the web client's mobile view
 
-The UI is a port of the web client's mobile layout (`MobileApp.tsx`):
+The app is a port of the web client's phone layout (`MobileApp.tsx`,
+`WorktreeList variant="touch"`, `JsonModeChat.tsx`). To keep behaviour
+identical by construction, it **imports the renderer's pure model code**,
+not just `src/shared`:
 
-- **Top bar:** the worktree switcher (repo name, branch) and that
-  worktree's chat tabs with status dots, plus a `+` for a new chat
-  (`panes:addTab` then `jsonClaude:start`).
-- **Worktree sheet:** a project card per repo, then the sidebar's groups
-  (Open PRs / Active / …) from the shared `groupWorktrees()`. Rows show the
-  status dot, PR icon, age, `+adds −dels` and a `#PR` pill.
-- **Chat:** finished turns fold into "Worked for 28s · 3 tools" (a
-  simplified `foldFinishedTurns`). The live turn shows tool lines and a
-  "Working · Ns" row. User bubbles use `accent/10`, and the approval card
-  copies `JsonClaudeApprovalCard`.
-- **Composer:** state dot, permission-mode pill and Send, plus Stop while
-  busy.
+| Reused as-is from `src/renderer` | Drives |
+|---|---|
+| `merge-backend-states.ts` (`getMergedWorktrees`) | multi-backend merge, including one section per repo across hosts |
+| `worktree-list-model.ts` (`buildWorktreeListBase`, `applyProjectAccordion`) | project rows, groups, accordion, archive tail, pending rows |
+| `worktree-row-style.ts`, `pending-tool.ts` | status/PR colours, the pending-tool line |
+| `json-mode-cards/grouping.ts`, `turn-collapse.ts`, `tool-timeline.ts`, `tool-display.ts`, `automation-label.ts` | sub-agent nesting, turn folding, tool group labels, tool icons, labels and intents |
+| `fuzzy.ts`, `uuid.ts` | slash/model popover, new-chat ids |
 
-Colours and sizes come from the web client's computed `--color-*`
-variables (`mobile/src/theme.ts`). Icons are `lucide-react-native`, the RN
-sibling of the desktop's `lucide-react`.
+How that works:
 
-Two small helpers, `formatTurnDuration` and `formatWorktreeAge`, are
-*copied* from `src/renderer`, because Metro only watches `src/shared`.
-Moving them (and the turn-folding model) into `src/shared` is the first
-refactor for a real app.
+- **Metro.** It watches all of `../src`. A `resolveRequest` guard resolves
+  every package import made from `../src` against `mobile/node_modules`,
+  so the Electron app's React can never load. A check confirmed the
+  bundle has a single React.
+- **Icon shims.** `tool-display` imports `lucide-react` and `react-icons/si`.
+  Metro serves those as `src/shims/*`: lucide-react-native (same icon
+  names), plus a brand-icon stand-in. `src/tw.ts` maps the desktop's
+  `className="icon-sm text-danger animate-pulse"` to RN props. The two
+  desktop icons that draw raw `<svg>` fall back to a wrench via an error
+  boundary.
+- **One desktop refactor.** `automationLabel` moved out of
+  `JsonModeChat.tsx` into its own module, so both clients import it.
 
-**Multiple backends.** The app keeps a saved list (`ness.backends` in
-secure-store), each entry with an enable switch, and runs one `NessClient`
-(transport plus store) per enabled backend. The desktop's `BackendsRegistry`
-is the same shape. The worktree sheet lists every backend's repos, tagged
-with the backend label when more than one is enabled. Re-pairing the same
-host, for example after a token rotate, replaces the saved entry.
+**Ported behaviour.** Each item mirrors the named file.
 
-This was verified on Expo web against two `harness-server`s at once: this
-repo, and a throwaway repo labelled "Build box". The test switched between
-them, started a new chat on the second, and allowed two tool calls there.
-The same build renders in Expo Go on iOS.
+- **Shell** (`MobileApp`):
+  - All tab types appear, with the web's icons.
+  - The first tab picked is agent, then shell, then the first tab.
+  - Selecting a tab wakes it on the rising edge (`panes:wakeTab`).
+  - `panes:ensureInitialized` runs on worktree change.
+  - `worktrees:refreshList` and `prs:refreshAllIfStale` run once per backend.
+  - The New chat tab is `{id = sessionId = uuid}`.
+  - Tapping the active tab opens "Switch to Chat/Terminal mode"
+    (`panes:convertTabType`).
+  - Diff, file and browser tabs show desktop-only placeholders.
+- **Picker** (`WorktreeList` touch):
+  - The header has unified/split, refresh (`prs:refreshAll`) and close,
+    plus a Backends button.
+  - Rows show the status dot (pulsing), shell spinner, pin, PR icon with
+    review dot, agent-review icon, alias, stale badge, and the subtitle:
+    detail prefs from settings, age, diff, milestone, PR pill.
+  - The "…" sheet offers Alias/Rename, Clear Alias, Pin/Unpin, and
+    Snooze/Wake (`settings.snoozeDefaultDays`).
+  - Inline alias editing goes through `aliases:set`.
+  - Group and tail collapse and project keep-open use the same storage
+    keys as the web.
+- **Chat** (`JsonModeChat`):
+  - Start only when awake and no session exists. History is fetched once.
+  - `setComposerVisible` tracks app foreground.
+  - The first keystroke wakes a slept tab. `touchLastActive` is
+    debounced to 5s.
+  - Pipeline: `buildChildrenMap`, then the results map, then a
+    150-entry window ("Show N earlier" / "Show all"), then `renderEntries`,
+    `foldFinishedTurns`, and `groupConsecutiveToolRows`.
+  - Cards: Bash, Edit, MultiEdit (unified diff with gutters via `diff`),
+    Write, Read, Grep, Glob, TodoWrite, Task (nested sub-agent
+    transcript), and Generic (parsed/raw args).
+  - Other entries: thinking, compact, exit/restart, auth, agent-error,
+    rate-limit, held notices, automated turns, queued bubbles with cancel.
+- **Approval card** (`JsonClaudeApprovalCard`):
+  - Allow once.
+  - Allow `<tool>` this session (the permission-mode flip for edits).
+  - Allow with edits.
+  - Always allow… with the pattern ladder.
+  - Deny with reason and interrupt.
+  - Auto-approver status, and Edit guidance with Save & re-review.
+  - AskUserQuestion goes to the question card.
+- **Composer:**
+  - State dot.
+  - Permission pill that cycles mid-turn.
+  - interrupt, and interrupt & send.
+  - Send, which snaps the transcript to the bottom.
+  - `/` popover with the two-stage `/model` picker.
+  - The auto-allow strip with clear.
+  - Density follows `settings.jsonModeChatDensity`.
 
-Unlike the desktop, it doesn't merge the same repo across backends into one
-section (`worktree-list-model.ts` does that by origin URL). That would be a
-straightforward port if wanted.
+**Deliberate differences, for a phone:**
+
+- **Selection is remembered.** Last worktree and per-worktree tab are
+  restored across launches. The web starts at `worktrees[0]` every time.
+  The restore waits for every backend's snapshot (capped at 3s), so a
+  slow host can't overwrite the saved choice.
+- **Composer text.** No hotkey hints. The placeholder is "Message
+  Claude", and Return inserts a newline unless send-on-Enter is on.
+- **Origin badge.** Shown on rows only when more than one backend is
+  enabled.
+- **Larger tap targets.**
+  - Every button and row in the picker is at least 44×44pt (audited).
+  - Chat rows keep the web's density but get `hitSlop` to roughly 44pt.
+  - Approval buttons are 44pt.
+  - The composer buttons are 36pt.
+- **Two new deep links:** `<scheme>://pair?url=…` and
+  `<scheme>://open?wt=…&tab=…`. The second is also what an approval push
+  notification would open.
+
+**Fixed while porting** (the desktop fix is committed separately):
+
+- **Auto-sleep fix (desktop).** `panes:wakeTab` now counts as activity.
+  Previously, opening an idle chat from any phone woke it, and the next
+  auto-sleep sweep (within 60s) slept it again, because nothing touches
+  `lastActive` until a keystroke.
+- **Modal replaced.** react-native-web's `Modal` failed to reopen after a
+  close and kept a focus trap. The sheet and menu are now in-tree overlays.
+- **Composer focus.** Focus returns to the input after a popover pick.
+
+**Not ported yet:**
+
+- **Terminal tabs.** Deferred to its own worktree, as agreed.
+- **New worktree screen and the details panel.** The details panel is PR
+  status, merge, commits and cost: about 1,750 lines of desktop UI.
+- **Composer extras.** @-mentions, image attachments, prompt suggestions,
+  and the drag-to-resize handle.
+- **Transcript extras.** Find-in-chat (no on-screen trigger on the web
+  either) and rewind/fork (right-click only on the web; long-press would
+  be the phone equivalent).
+- **Brand icons.** They show as a plug icon.
+- **Markdown.** Rendering is minimal: no tables, and no syntax
+  highlighting.
+
+**Tested:**
+
+- **Expo web**, at 393×852 against two `harness-server`s, covered all of
+  the above:
+  - picker accordion, the pin/alias/unpin round trip, and restore across
+    reloads;
+  - wake on keystroke, history, tool grouping, every approval mode
+    (Allow once executed for real), permission pill, slash and model
+    popovers, streaming, and interrupt.
+- **Performance on web:** 0 long tasks (main-thread blocks over 50ms)
+  across 40s of a streamed 700-word markdown answer, on desktop CPU.
+- **iOS simulator (Expo Go, Hermes):** the shell and a chat render
+  identically, including the svg and lucide icons through the shim, and
+  the deep link works.
+
+**Not tested:**
+
+- Native *interactions*: the simulator can't take synthetic taps with
+  this Xcode.
+- The queued-message path (the turn finished before the follow-up
+  arrived).
+- The jump-to-bottom pill: the hidden test tab never runs `scrollTo`.
+- On-device Hermes performance.
+- Android at runtime.
+
+**Bundle:** the Hermes bundle is 4.6MB, up from 1.6MB, mostly the whole
+lucide icon set behind the shim. A babel import-rewrite to per-icon
+modules would recover most of it.
 
 ## Recommended architecture to productionise
 
@@ -244,6 +357,9 @@ straightforward port if wanted.
   `tsc` plus `expo export` for `mobile/`.
 - Move the mobile store into a small `src/shared/client-store.ts` that both
   the renderer and mobile use, instead of duplicating it.
+- Keep the renderer's model layer DOM-free (it mostly is). The one coupling
+  that forced shims is `tool-display.ts` owning icon components; splitting
+  labels from icons would remove the `lucide-react` shim.
 - Navigation: switch to Expo Router (the spike uses state-switched screens
   in one file).
 - Transcript rendering: build an RN markdown renderer plus tool-call

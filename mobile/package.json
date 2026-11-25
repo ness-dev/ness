@@ -4,6 +4,8 @@
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "diff": "^9.0.0",
     "expo": "~58.0.26",
     "expo-camera": "~58.0.14",
     "expo-secure-store": "~58.0.3",

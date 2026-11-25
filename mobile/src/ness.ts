@@ -75,35 +75,16 @@ export class NessClient {
     for (const l of this.listeners) l()
   }
 
-  // ── requests the mobile UI needs (channel names from build-backend.ts) ──
-  fetchEntries(sessionId: string): Promise<unknown> {
-    return this.transport.request('jsonClaude:getEntries', sessionId)
+  /** Same request the web client's build-backend.ts `req(...)` sends.
+   *  Rejections are logged, not thrown: a fire-and-forget UI tap on a
+   *  dropped connection shouldn't become an unhandled promise. */
+  req<T = unknown>(channel: string, ...args: unknown[]): Promise<T> {
+    const p = this.transport.request(channel, ...args) as Promise<T>
+    p.catch((e: unknown) => console.warn(`[ness] ${channel} failed`, e)) // eslint-disable-line no-console
+    return p
   }
-  startSession(sessionId: string, cwd: string): Promise<unknown> {
-    return this.transport.request('jsonClaude:start', sessionId, cwd)
-  }
-  sendMessage(sessionId: string, text: string): void {
-    this.transport.send('jsonClaude:send', sessionId, text)
-  }
-  interrupt(sessionId: string): Promise<unknown> {
-    return this.transport.request('jsonClaude:interrupt', sessionId)
-  }
-  async addChatTab(worktreePath: string): Promise<string> {
-    // Claude Code rejects non-UUID session ids, and a json-claude tab's id
-    // *is* its session id.
-    const id = uuid()
-    const tab: TerminalTab = { id, type: 'json-claude', label: 'Chat', mode: 'awake' }
-    await this.transport.request('panes:addTab', worktreePath, tab)
-    await this.startSession(id, worktreePath)
-    return id
-  }
-  resolveApproval(requestId: string, allow: boolean, input: Record<string, unknown>): Promise<unknown> {
-    return this.transport.request(
-      'jsonClaude:resolveApproval',
-      requestId,
-      // Claude Code's validator requires updatedInput on allow; echo it.
-      allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'Denied from mobile' }
-    )
+  sig(channel: string, ...args: unknown[]): void {
+    this.transport.send(channel, ...args)
   }
 }
 
@@ -133,12 +114,4 @@ export function rollupStatus(state: AppState, worktreePath: string): PtyStatus {
     if (s && ROLLUP_STATUS_RANK[s] > ROLLUP_STATUS_RANK[best]) best = s
   }
   return best
-}
-
-function uuid(): string {
-  // Hermes has no crypto.randomUUID; a v4-shaped id is all Claude checks.
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
-    const r = (Math.random() * 16) | 0
-    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
 }

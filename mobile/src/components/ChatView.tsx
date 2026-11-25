@@ -1,446 +1,471 @@
-// Port of the web client's json-mode chat (JsonModeChat.tsx) at the level
-// a phone needs: user bubbles, finished turns folded into "Worked for …",
-// the live turn shown in full, approval cards, and the composer with its
-// state dot + permission-mode pill.
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
-import { ChevronRight, RotateCcw, Square } from 'lucide-react-native'
-import type {
-  JsonClaudeChatEntry,
-  JsonClaudeMessageBlock,
-  JsonClaudePendingApproval,
-  JsonClaudeSession
-} from '../../../src/shared/state/json-claude'
-import { NessClient, useNess } from '../ness'
-import { alpha, c, fs, mono } from '../theme'
+// Port of renderer/components/JsonModeChat.tsx for the phone. Read them
+// side by side: lifecycle, the transcript pipeline (buildChildrenMap →
+// results map → tail window → renderEntries → foldFinishedTurns →
+// groupConsecutiveToolRows) and the composer rules follow that file, and
+// the pure steps are imported from it rather than re-implemented.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AppState as RNAppState, FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
+import { ChevronDown, Loader2, X } from 'lucide-react-native'
+import type { JsonClaudeChatEntry, JsonClaudePendingApproval, JsonClaudeSession } from '../../../src/shared/state/json-claude'
+import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../../src/shared/state/settings'
+import { buildChildrenMap, isSubAgentToolName } from '../../../src/renderer/components/json-mode-cards/grouping'
+import { foldFinishedTurns, getEditedPaths, type TurnSummary } from '../../../src/renderer/components/json-mode-cards/turn-collapse'
+import { getToolIntent } from '../../../src/renderer/components/json-mode-cards/tool-display'
+import type { NessClient } from '../ness'
+import { useNess } from '../ness'
+import { alpha, c } from '../theme'
 import { Markdown } from './Markdown'
+import { Spin } from './Spin'
+import {
+  AuthCard,
+  AutomatedTurnCard,
+  CompactCard,
+  ExitCard,
+  HeldNoticesCard,
+  NoticeCard,
+  SimpleDangerCard,
+  ThinkingCard,
+  ToolCardChrome,
+  ToolGroup,
+  TurnGroup,
+  UserBubble,
+  dispatchToolCard,
+  type GroupRow,
+  type ToolResultView
+} from '../chat/cards'
+import { ApprovalSlot } from '../chat/ApprovalCard'
+import { Composer } from '../chat/Composer'
+import { DENSITY, DensityContext } from '../chat/density'
 
-type Item =
-  | { kind: 'user'; key: string; entry: JsonClaudeChatEntry }
-  | { kind: 'fold'; key: string; label: string; work: JsonClaudeChatEntry[]; hasError: boolean }
-  | { kind: 'assistant'; key: string; entry: JsonClaudeChatEntry; blocks: JsonClaudeMessageBlock[] }
-  | { kind: 'error'; key: string; entry: JsonClaudeChatEntry }
-  | { kind: 'approval'; key: string; approval: JsonClaudePendingApproval }
+interface RenderedRow extends GroupRow {
+  entryId?: string
+  type: 'text' | 'tool'
+  timestamp?: number
+  isTurnStart?: boolean
+  isTurnError?: boolean
+  editedPaths?: string[]
+  coveredEntryIds?: string[]
+}
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+interface Ctx {
+  results: Map<string, ToolResultView>
+  resultEntryIds: Map<string, string>
+  children: Map<string, JsonClaudeChatEntry[]>
+  approvalCard: (toolUseId: string | undefined) => ReactNode
+  pendingToolUseIds: Set<string>
+  session: JsonClaudeSession
+  onCancelQueued: (entryId: string) => void
+  onRestart: () => void
+  onSignIn: () => void
+}
+
+function renderEntries(entries: JsonClaudeChatEntry[], ctx: Ctx): RenderedRow[] {
+  const rows: RenderedRow[] = []
+  for (const entry of entries) {
+    if (entry.kind === 'user' && entry.heldNotices && entry.heldNotices.length > 0) {
+      rows.push({ key: `${entry.entryId}-held`, entryId: entry.entryId, type: 'text', node: <HeldNoticesCard notices={entry.heldNotices as never} /> })
+    }
+    if (entry.kind === 'user' && entry.automation) {
+      rows.push({
+        key: entry.entryId,
+        entryId: entry.entryId,
+        type: 'text',
+        isTurnStart: !entry.isQueued,
+        node: (
+          <AutomatedTurnCard
+            source={entry.automation}
+            from={entry.automationFrom}
+            text={entry.text ?? ''}
+            queued={!!entry.isQueued}
+            onCancel={() => ctx.onCancelQueued(entry.entryId)}
+          />
+        )
+      })
+      continue
+    }
+    if (entry.kind === 'user') {
+      rows.push({
+        key: entry.entryId,
+        entryId: entry.entryId,
+        type: 'text',
+        isTurnStart: !entry.isQueued,
+        node: <UserBubble text={entry.text ?? ''} queued={!!entry.isQueued} onCancel={() => ctx.onCancelQueued(entry.entryId)} />
+      })
+      continue
+    }
+    if (entry.kind === 'compact') {
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'tool', node: <CompactCard trigger={entry.compactTrigger} pre={entry.compactPreTokens} post={entry.compactPostTokens} /> })
+      continue
+    }
+    if (entry.kind === 'error' && (entry.errorKind === 'subprocess-exit' || entry.errorKind === 'spawn-failed')) {
+      const msg = entry.errorMessage ?? (entry.errorKind === 'spawn-failed' ? "Couldn't launch Claude" : 'Session ended unexpectedly')
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'text', isTurnError: true, node: <ExitCard message={msg} isExited={ctx.session.state === 'exited'} onRestart={ctx.onRestart} /> })
+      continue
+    }
+    if (entry.kind === 'error' && entry.errorKind === 'auth-failure') {
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'tool', isTurnError: true, node: <AuthCard message={entry.errorMessage} onSignIn={ctx.onSignIn} onRetry={ctx.onRestart} /> })
+      continue
+    }
+    if (entry.kind === 'system' && entry.errorKind === 'rate-limit-warning') {
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'tool', node: <NoticeCard title={entry.errorMessage ?? 'Approaching rate limit'} /> })
+      continue
+    }
+    if (entry.kind === 'error' && entry.errorKind === 'agent-error') {
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'tool', isTurnError: true, node: <SimpleDangerCard title="Turn failed" detail={entry.errorMessage ?? 'The agent reported an error'} /> })
+      continue
+    }
+    if (entry.kind === 'error' && entry.errorKind === 'rate-limit-error') {
+      rows.push({ key: entry.entryId, entryId: entry.entryId, type: 'tool', isTurnError: true, node: <SimpleDangerCard title="Rate limit reached" detail={entry.errorMessage ?? 'Send a new message once the limit resets.'} /> })
+      continue
+    }
+    if (entry.kind === 'assistant' && entry.blocks) {
+      for (const [i, block] of entry.blocks.entries()) {
+        if (block.type === 'thinking') {
+          rows.push({ key: `${entry.entryId}-th-${i}`, entryId: entry.entryId, type: 'tool', isThinking: true, node: <ThinkingCard text={block.text || ''} isPartial={!!entry.isPartial} /> })
+        } else if (block.type === 'text' && (block.text || entry.isPartial)) {
+          rows.push({ key: `${entry.entryId}-t`, entryId: entry.entryId, type: 'text', node: <AssistantText text={block.text || ''} streaming={!!entry.isPartial} /> })
+        } else if (block.type === 'tool_use') {
+          const result = block.id ? ctx.results.get(block.id) : undefined
+          const placeholder = entry.isPartial && (!block.input || Object.keys(block.input).length === 0)
+          let subAgentBody: ReactNode = null
+          let subAgentChildCount = 0
+          let descendantPending = false
+          const resultEntryId = block.id ? ctx.resultEntryIds.get(block.id) : undefined
+          const covered = resultEntryId ? [resultEntryId] : []
+          if (isSubAgentToolName(block.name) && block.id) {
+            const kids = ctx.children.get(block.id) ?? []
+            subAgentChildCount = kids.length
+            if (kids.length > 0) {
+              const childRows = renderEntries(kids, ctx)
+              descendantPending = childRows.some((r) => r.hasPendingApproval)
+              for (const k of kids) covered.push(k.entryId)
+              for (const r of childRows) covered.push(...(r.coveredEntryIds ?? []))
+              subAgentBody = <Grouped items={groupConsecutiveToolRows(childRows)} />
+            }
+          }
+          rows.push({
+            key: `${entry.entryId}-${block.id || 'tu'}`,
+            entryId: entry.entryId,
+            type: 'tool',
+            toolName: block.name,
+            toolIntent: getToolIntent(block) ?? undefined,
+            hasError: !!result?.isError,
+            images: result?.images,
+            editedPaths: getEditedPaths(block.name, block.input),
+            ...(covered.length > 0 ? { coveredEntryIds: covered } : {}),
+            hasPendingApproval: (!!block.id && ctx.pendingToolUseIds.has(block.id)) || descendantPending,
+            node: (
+              <>
+                {placeholder ? (
+                  <ToolCardChrome name={block.name || 'tool'} subtitle="preparing call…">
+                    <Text style={{ color: c.muted, fontSize: 12, fontStyle: 'italic', padding: 8 }}>waiting for input</Text>
+                  </ToolCardChrome>
+                ) : (
+                  dispatchToolCard({
+                    block,
+                    result,
+                    autoApproved: block.id ? ctx.session.autoApprovedDecisions[block.id] : undefined,
+                    sessionAllowed: block.id ? ctx.session.sessionAllowedDecisions[block.id] : undefined,
+                    subAgentBody,
+                    subAgentChildCount,
+                    subAgentDescendantHasPendingApproval: descendantPending,
+                    backgroundAgent: block.id ? ctx.session.backgroundAgents?.[block.id] : undefined
+                  })
+                )}
+                {ctx.approvalCard(block.id)}
+              </>
+            )
+          })
+        }
+      }
+    }
+  }
+  const ts = new Map(entries.map((e) => [e.entryId, e.timestamp]))
+  for (const r of rows) if (r.entryId) r.timestamp = ts.get(r.entryId)
+  return rows
+}
+
+interface GroupedItem {
+  kind: 'single' | 'group'
+  key: string
+  rows: RenderedRow[]
+}
+type DisplayItem = GroupedItem | { kind: 'turn'; key: string; rows: RenderedRow[]; summary: TurnSummary; items: GroupedItem[] }
+
+function groupConsecutiveToolRows(rows: RenderedRow[]): GroupedItem[] {
+  const out: GroupedItem[] = []
+  let buf: RenderedRow[] = []
+  const flush = () => {
+    if (buf.length === 0) return
+    out.push(buf.length === 1 ? { kind: 'single', key: buf[0].key, rows: buf } : { kind: 'group', key: `group-${buf[0].key}`, rows: buf })
+    buf = []
+  }
+  for (const r of rows) {
+    if (r.type === 'tool') buf.push(r)
+    else {
+      flush()
+      out.push({ kind: 'single', key: r.key, rows: [r] })
+    }
+  }
+  flush()
+  return out
+}
+
+function Grouped({ items }: { items: GroupedItem[] }) {
+  return (
+    <View style={{ gap: 4 }}>
+      {items.map((it) => (
+        <GroupedNode key={it.key} item={it} />
+      ))}
+    </View>
+  )
+}
+
+function GroupedNode({ item }: { item: GroupedItem }) {
+  return item.kind === 'group' ? <ToolGroup rows={item.rows} /> : <>{item.rows[0].node}</>
+}
+
+function AssistantText({ text, streaming }: { text: string; streaming: boolean }) {
+  const d = DENSITY.compact
+  return (
+    <View>
+      <Markdown text={text} size={d.body} />
+      {streaming && <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />}
+    </View>
+  )
+}
+
+// ── the view ───────────────────────────────────────────────────────────
 
 export function ChatView({
   client,
   sessionId,
-  worktreePath
+  worktreePath,
+  mode
 }: {
   client: NessClient
   sessionId: string
   worktreePath: string
+  mode: 'awake' | 'asleep'
 }) {
   const session = useNess(client, (s) => s.jsonClaude.sessions[sessionId])
-  const approvals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
+  const allApprovals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
+  const settings = useNess(client, (s) => s.settings)
+  const density = DENSITY[settings.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact']
 
-  // Wire snapshots strip entries; fetch once per session.
+  // Lifecycle (JsonModeChat.tsx:1864-1881): start only an awake tab with
+  // no session at all (an exited one waits for Restart); fetch history
+  // once per session.
+  const sessionExists = !!session
+  useEffect(() => {
+    if (mode === 'awake' && !sessionExists) void client.req('jsonClaude:start', sessionId, worktreePath)
+  }, [client, sessionId, worktreePath, mode, sessionExists])
   const fetched = useRef(new Set<string>())
   useEffect(() => {
-    if (!session || session.entriesHydrated || fetched.current.has(sessionId)) return
+    if (!sessionExists || fetched.current.has(sessionId)) return
     fetched.current.add(sessionId)
-    void client.fetchEntries(sessionId)
-  }, [client, sessionId, session])
+    void client.req('jsonClaude:getEntries', sessionId)
+  }, [client, sessionId, sessionExists])
 
-  const mine = useMemo(
-    () => Object.values(approvals).filter((a) => a.sessionId === sessionId),
-    [approvals, sessionId]
+  // setComposerVisible: tells main someone is looking (gates attention
+  // notifications). App backgrounding counts as hidden, like
+  // document.visibilityState on the web.
+  useEffect(() => {
+    if (mode === 'asleep') return
+    let visible = RNAppState.currentState === 'active'
+    if (visible) void client.req('jsonClaude:setComposerVisible', sessionId, true)
+    const sub = RNAppState.addEventListener('change', (st) => {
+      const next = st === 'active'
+      if (next === visible) return
+      visible = next
+      void client.req('jsonClaude:setComposerVisible', sessionId, next)
+    })
+    return () => {
+      sub.remove()
+      if (visible) void client.req('jsonClaude:setComposerVisible', sessionId, false)
+    }
+  }, [client, sessionId, mode])
+
+  const approvals = useMemo(
+    () => Object.values(allApprovals).filter((a) => a.sessionId === sessionId),
+    [allApprovals, sessionId]
   )
-  const items = useMemo(() => buildItems(session, mine), [session, mine])
+  const approvalByToolUseId = useMemo(() => {
+    const m = new Map<string, JsonClaudePendingApproval>()
+    for (const a of approvals) if (a.toolUseId) m.set(a.toolUseId, a)
+    return m
+  }, [approvals])
+  const pendingToolUseIds = useMemo(() => new Set(approvalByToolUseId.keys()), [approvalByToolUseId])
+
+  const windowSetting = settings.jsonModeTranscriptWindow ?? DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW
+  const [windowSize, setWindowSize] = useState(windowSetting <= 0 ? Infinity : windowSetting)
+
+  const restart = useCallback(() => {
+    void (async () => {
+      await client.req('jsonClaude:kill', sessionId)
+      await client.req('jsonClaude:start', sessionId, worktreePath)
+    })()
+  }, [client, sessionId, worktreePath])
+
+  const entries = session?.entries
+  const { rows, hidden, renderedToolUseIds } = useMemo(() => {
+    if (!session || !entries) return { rows: [] as RenderedRow[], hidden: 0, renderedToolUseIds: new Set<string>() }
+    const { topLevelEntries, childrenByParentToolUseId } = buildChildrenMap(entries)
+    const results = new Map<string, ToolResultView>()
+    const resultEntryIds = new Map<string, string>()
+    for (const e of entries) {
+      if (e.kind !== 'tool_result' || !e.blocks) continue
+      for (const b of e.blocks) {
+        if (b.type === 'tool_result' && b.toolUseId) {
+          resultEntryIds.set(b.toolUseId, e.entryId)
+          results.set(b.toolUseId, { content: b.content || '', isError: !!b.isError, ...(b.images?.length ? { images: b.images } : {}) })
+        }
+      }
+    }
+    const renderable = topLevelEntries.filter((e) => e.kind !== 'tool_result')
+    const start = Math.max(0, renderable.length - windowSize)
+    const seen = new Set<string>()
+    const out = renderEntries(start === 0 ? renderable : renderable.slice(start), {
+      results,
+      resultEntryIds,
+      children: childrenByParentToolUseId,
+      pendingToolUseIds,
+      session,
+      approvalCard: (id) => {
+        if (!id) return null
+        const a = approvalByToolUseId.get(id)
+        if (!a) return null
+        seen.add(id)
+        return <ApprovalSlot approval={a} client={client} session={session} />
+      },
+      onCancelQueued: (entryId) => client.sig('jsonClaude:cancelQueued', sessionId, entryId),
+      onRestart: restart,
+      onSignIn: () => void client.req('jsonClaude:openAuthLoginTab', worktreePath)
+    })
+    return { rows: out, hidden: start, renderedToolUseIds: seen }
+    // session identity changes per event; the deps below are what the
+    // pipeline actually reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, windowSize, approvalByToolUseId, pendingToolUseIds, session?.state, session?.autoApprovedDecisions, session?.sessionAllowedDecisions, session?.backgroundAgents, client, sessionId, worktreePath, restart])
+
+  const busy = !!session?.busy
+  const turnStartedAt = session?.turnStartedAt
+  const items = useMemo<DisplayItem[]>(() => {
+    if (!settings.collapseFinishedTurns) return groupConsecutiveToolRows(rows)
+    return foldFinishedTurns(rows, { busy, turnStartedAt }).flatMap((it): DisplayItem[] =>
+      it.kind === 'rows'
+        ? groupConsecutiveToolRows(it.rows)
+        : [{ kind: 'turn', key: it.key, rows: it.rows, summary: it.summary, items: groupConsecutiveToolRows(it.rows) }]
+    )
+  }, [rows, settings.collapseFinishedTurns, busy, turnStartedAt])
+
+  // Approvals whose tool_use isn't on screen yet render at the bottom.
+  const orphans = approvals.filter((a) => !a.toolUseId || !renderedToolUseIds.has(a.toolUseId))
+
+  const lastEntry = entries?.[entries.length - 1]
+  const lastBlock = lastEntry?.blocks?.[lastEntry.blocks.length - 1]
+  const streamingVisible = lastEntry?.kind === 'assistant' && lastEntry.isPartial && (lastBlock?.type === 'text' || lastBlock?.type === 'tool_use')
+  const showWorking = busy && !streamingVisible
+
+  // Inverted list: index 0 is the bottom. Offset 0 = stuck to bottom.
+  const listRef = useRef<FlatList<DisplayItem>>(null)
+  const [awayFromBottom, setAway] = useState(false)
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setAway(e.nativeEvent.contentOffset.y > 32)
+  }, [])
+  const reversed = useMemo(() => [...items].reverse(), [items])
+
+  const sessionApprovals = session?.sessionToolApprovals ?? []
 
   return (
-    <View style={{ flex: 1 }}>
-      {!session ? (
-        <View style={s.empty}>
-          <Text style={s.muted}>This chat is asleep.</Text>
-          <SmallButton label="Wake session" onPress={() => void client.startSession(sessionId, worktreePath)} />
-        </View>
-      ) : (
+    <DensityContext.Provider value={density}>
+      <View style={{ flex: 1 }}>
         <FlatList
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, gap: 14 }}
-          data={[...items].reverse()}
+          ref={listRef}
+          data={reversed}
           inverted
           keyExtractor={(i) => i.key}
-          renderItem={({ item }) => <Row item={item} client={client} sessionId={sessionId} worktreePath={worktreePath} />}
-          ListHeaderComponent={session.busy ? <Working since={session.turnStartedAt} /> : undefined}
+          renderItem={({ item }) => <DisplayRow item={item} />}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}
+          onScroll={onScroll}
+          scrollEventThrottle={64}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          // Long transcripts: render the tail first, mount the rest lazily.
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={9}
+          ListHeaderComponent={
+            <View style={{ gap: 6 }}>
+              {orphans.map((a) => (
+                <ApprovalSlot key={a.requestId} approval={a} client={client} session={session} />
+              ))}
+              {showWorking && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+                  <Spin>
+                    <Loader2 color={c.muted} size={12} />
+                  </Spin>
+                  <Text style={{ color: c.muted, fontSize: density.chrome }}>thinking…</Text>
+                </View>
+              )}
+            </View>
+          }
+          ListFooterComponent={
+            hidden > 0 ? (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, paddingVertical: 8 }}>
+                <Pressable hitSlop={12} onPress={() => setWindowSize((w) => w + (windowSetting > 0 ? windowSetting : 150))}>
+                  <Text style={{ color: c.accent, fontSize: density.chrome }}>
+                    Show {Math.min(hidden, windowSetting > 0 ? windowSetting : 150)} earlier message{hidden === 1 ? '' : 's'}
+                  </Text>
+                </Pressable>
+                <Pressable hitSlop={12} onPress={() => setWindowSize(Infinity)}>
+                  <Text style={{ color: c.muted, fontSize: density.chrome }}>Show all ({hidden + rows.length})</Text>
+                </Pressable>
+              </View>
+            ) : undefined
+          }
         />
-      )}
-      <Composer client={client} session={session} sessionId={sessionId} />
-    </View>
-  )
-}
-
-// ── Turn folding ────────────────────────────────────────────────────────
-// Simplified foldFinishedTurns (json-mode-cards/turn-collapse.ts): a turn
-// is everything after a user message. Finished turns collapse their work
-// into one line above the final answer; the live turn stays expanded.
-
-function buildItems(session: JsonClaudeSession | undefined, approvals: JsonClaudePendingApproval[]): Item[] {
-  if (!session) return []
-  const entries = session.entries.filter((e) => !e.parentToolUseId && !e.isPartial)
-  const out: Item[] = []
-  let turn: JsonClaudeChatEntry[] = []
-  let turnStart: JsonClaudeChatEntry | null = null
-
-  const flush = (live: boolean) => {
-    if (turn.length === 0) return
-    const assistants = turn.filter((e) => e.kind === 'assistant')
-    const last = assistants[assistants.length - 1]
-    const finalText = last?.blocks?.filter((b) => b.type === 'text' && b.text?.trim()) ?? []
-    const toolUses = turn.flatMap((e) => (e.blocks ?? []).filter((b) => b.type === 'tool_use'))
-    if (!live && toolUses.length > 0 && finalText.length > 0) {
-      const work = turn.filter((e) => e !== last)
-      const edited = new Set(
-        toolUses.filter((b) => EDIT_TOOLS.has(b.name ?? '')).map((b) => String(b.input?.file_path ?? ''))
-      )
-      const end = turn[turn.length - 1].timestamp
-      const parts = [
-        turnStart ? `Worked for ${formatTurnDuration(end - turnStart.timestamp)}` : 'Worked',
-        `${toolUses.length} tool${toolUses.length === 1 ? '' : 's'}`
-      ]
-      if (edited.size > 0) parts.push(`${edited.size} file${edited.size === 1 ? '' : 's'} edited`)
-      out.push({
-        kind: 'fold',
-        key: `fold-${turn[0].entryId}`,
-        label: parts.join(' · '),
-        work,
-        hasError: turn.some((e) => e.kind === 'error' || e.blocks?.some((b) => b.isError))
-      })
-      out.push({ kind: 'assistant', key: last.entryId, entry: last, blocks: finalText })
-    } else {
-      for (const e of turn) pushEntry(out, e)
-    }
-    turn = []
-  }
-
-  for (const e of entries) {
-    if (e.kind === 'user') {
-      flush(false)
-      turnStart = e
-      out.push({ kind: 'user', key: e.entryId, entry: e })
-    } else {
-      turn.push(e)
-    }
-  }
-  flush(session.busy)
-  for (const a of approvals) out.push({ kind: 'approval', key: a.requestId, approval: a })
-  return out
-}
-
-function pushEntry(out: Item[], e: JsonClaudeChatEntry): void {
-  if (e.kind === 'error') out.push({ kind: 'error', key: e.entryId, entry: e })
-  else if (e.kind === 'assistant') out.push({ kind: 'assistant', key: e.entryId, entry: e, blocks: e.blocks ?? [] })
-}
-
-// Copy of turn-collapse.ts's formatTurnDuration — that file lives under
-// src/renderer, which Metro doesn't watch.
-function formatTurnDuration(ms: number): string {
-  const s = Math.max(1, Math.round(ms / 1000))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) {
-    const rem = s % 60
-    return rem === 0 ? `${m}m` : `${m}m ${rem}s`
-  }
-  const h = Math.floor(m / 60)
-  const remM = m % 60
-  return remM === 0 ? `${h}h` : `${h}h ${remM}m`
-}
-
-// ── Rows ────────────────────────────────────────────────────────────────
-
-function Row({
-  item,
-  client,
-  sessionId,
-  worktreePath
-}: {
-  item: Item
-  client: NessClient
-  sessionId: string
-  worktreePath: string
-}) {
-  switch (item.kind) {
-    case 'user':
-      return (
-        <View style={s.userBubble}>
-          <Text style={s.body}>{item.entry.text}</Text>
-        </View>
-      )
-    case 'fold':
-      return <Fold label={item.label} work={item.work} hasError={item.hasError} />
-    case 'assistant':
-      return <AssistantBlocks blocks={item.blocks} />
-    case 'error':
-      return <ErrorCard entry={item.entry} onRestart={() => void client.startSession(sessionId, worktreePath)} />
-    case 'approval':
-      return <ApprovalCard approval={item.approval} client={client} />
-  }
-}
-
-function AssistantBlocks({ blocks }: { blocks: JsonClaudeMessageBlock[] }) {
-  return (
-    <View style={{ gap: 10 }}>
-      {blocks.map((b, i) => {
-        if (b.type === 'text' && b.text?.trim()) return <Markdown key={i} text={b.text} />
-        if (b.type === 'tool_use') return <ToolLine key={i} block={b} />
-        return null
-      })}
-    </View>
-  )
-}
-
-function ToolLine({ block }: { block: JsonClaudeMessageBlock }) {
-  return (
-    <View style={s.toolLine}>
-      <Text style={s.toolName}>{block.name}</Text>
-      <Text style={s.toolArg} numberOfLines={1}>
-        {summarizeInput(block.input)}
-      </Text>
-    </View>
-  )
-}
-
-function Fold({ label, work, hasError }: { label: string; work: JsonClaudeChatEntry[]; hasError: boolean }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <View>
-      <Pressable onPress={() => setOpen(!open)} style={s.foldRow} hitSlop={6}>
-        <ChevronRight color={c.muted} size={14} style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }} />
-        <Text style={s.foldLabel}>{label}</Text>
-        {hasError && <Text style={s.foldError}>ERROR</Text>}
-      </Pressable>
-      {open && (
-        <View style={s.foldBody}>
-          {work.map((e) =>
-            e.kind === 'assistant' ? <AssistantBlocks key={e.entryId} blocks={e.blocks ?? []} /> : null
-          )}
-        </View>
-      )}
-    </View>
-  )
-}
-
-function ErrorCard({ entry, onRestart }: { entry: JsonClaudeChatEntry; onRestart: () => void }) {
-  const ended = entry.errorKind === 'subprocess-exit'
-  return (
-    <View style={s.dangerCard}>
-      <View style={s.dangerHead}>
-        <RotateCcw color={c.danger} size={14} />
-        <Text style={[s.monoLabel, { color: c.danger, fontWeight: '700' }]}>{ended ? 'Session ended' : 'Error'}</Text>
-        <Text style={s.muted}>{entry.errorMessage}</Text>
+        {awayFromBottom && (
+          <Pressable
+            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            accessibilityLabel="Jump to bottom"
+            style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.accent, borderRadius: 999, paddingHorizontal: 12, minHeight: 36 }}
+          >
+            <ChevronDown color="#fff" size={14} />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '500' }}>Jump to bottom</Text>
+          </Pressable>
+        )}
       </View>
-      {ended && (
-        <View style={{ padding: 12, paddingTop: 0 }}>
-          <Pressable onPress={onRestart} style={s.restartBtn}>
-            <RotateCcw color={c.danger} size={12} />
-            <Text style={{ color: c.danger, fontSize: fs.xs }}>Restart session</Text>
+      {sessionApprovals.length > 0 && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 4, borderTopWidth: 1, borderColor: c.border, backgroundColor: alpha(c.success, 0.05) }}>
+          <Text style={{ color: c.muted, fontSize: 11 }}>auto-allowing:</Text>
+          <Text style={{ color: c.fg, fontSize: 11, flex: 1, fontFamily: 'Menlo' }} numberOfLines={1}>
+            {sessionApprovals.join(', ')}
+          </Text>
+          <Pressable hitSlop={14} accessibilityLabel="Stop auto-allowing" onPress={() => void client.req('jsonClaude:clearSessionToolApprovals', sessionId)}>
+            <X color={c.muted} size={14} />
           </Pressable>
         </View>
       )}
-    </View>
+      <Composer
+        client={client}
+        session={session}
+        sessionId={sessionId}
+        worktreePath={worktreePath}
+        mode={mode}
+        onSent={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })}
+      />
+    </DensityContext.Provider>
   )
 }
 
-function ApprovalCard({ approval, client }: { approval: JsonClaudePendingApproval; client: NessClient }) {
-  const [busy, setBusy] = useState(false)
-  const act = (allow: boolean) => {
-    setBusy(true)
-    client.resolveApproval(approval.requestId, allow, approval.input).finally(() => setBusy(false))
+function DisplayRow({ item }: { item: DisplayItem }) {
+  if (item.kind === 'turn') {
+    return (
+      <TurnGroup summary={item.summary} hasError={item.rows.some((r) => r.hasError)}>
+        <Grouped items={item.items} />
+      </TurnGroup>
+    )
   }
-  return (
-    <View style={s.approvalCard}>
-      <View style={s.approvalHead}>
-        <Text style={s.approvalTitle}>NEEDS APPROVAL</Text>
-        <Text style={[s.monoLabel, { color: c.fgBright, flex: 1 }]} numberOfLines={1}>
-          {approval.toolName}
-        </Text>
-      </View>
-      {approval.autoReview?.state === 'pending' && (
-        <Text style={[s.muted, s.approvalStrip]}>Asking auto-approver…</Text>
-      )}
-      {approval.autoReview?.state === 'finished' && approval.autoReview.decision === 'ask' && (
-        <Text style={[s.muted, s.approvalStrip]}>
-          <Text style={{ fontWeight: '600' }}>Auto-approver: </Text>
-          {approval.autoReview.reason || 'deferred'}
-        </Text>
-      )}
-      <View style={{ padding: 12, gap: 10 }}>
-        <View style={s.cmdBox}>
-          <Text style={s.cmdText}>{summarizeInput(approval.input, 600)}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <SmallButton label="Allow" onPress={() => act(true)} disabled={busy} primary />
-          <SmallButton label="Deny" onPress={() => act(false)} disabled={busy} />
-        </View>
-      </View>
-    </View>
-  )
+  return <GroupedNode item={item} />
 }
-
-function Working({ since }: { since?: number }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 1000)
-    return () => clearInterval(t)
-  }, [])
-  const secs = since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : null
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <View style={[s.dot, { backgroundColor: c.accent }]} />
-      <Text style={s.muted}>Working{secs !== null ? ` · ${formatTurnDuration(secs * 1000)}` : '…'}</Text>
-    </View>
-  )
-}
-
-// ── Composer ────────────────────────────────────────────────────────────
-
-const MODE_STYLE: Record<string, { label: string; color: string }> = {
-  acceptEdits: { label: 'accept edits', color: c.success },
-  plan: { label: 'plan', color: c.accent },
-  auto: { label: 'auto', color: c.warning },
-  default: { label: 'ask every time', color: c.muted }
-}
-
-function Composer({
-  client,
-  session,
-  sessionId
-}: {
-  client: NessClient
-  session: JsonClaudeSession | undefined
-  sessionId: string
-}) {
-  const [draft, setDraft] = useState('')
-  const [focused, setFocused] = useState(false)
-  const state = session?.state ?? 'asleep'
-  const stateDot =
-    state === 'running' ? c.success : state === 'connecting' ? c.warning : state === 'exited' ? c.danger : c.faint
-  const mode = MODE_STYLE[session?.permissionMode ?? 'default'] ?? MODE_STYLE.default
-  const canSend = !!session && state !== 'exited' && draft.trim().length > 0
-
-  const send = () => {
-    if (!canSend) return
-    client.sendMessage(sessionId, draft.trim())
-    setDraft('')
-  }
-
-  return (
-    <View style={s.composerWrap}>
-      <View style={[s.composer, focused && { borderColor: c.accent }]}>
-        <TextInput
-          style={s.composerInput}
-          multiline
-          placeholder="Message Claude"
-          placeholderTextColor={c.dim}
-          value={draft}
-          onChangeText={setDraft}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
-        <View style={s.composerBar}>
-          <View style={[s.dot, { backgroundColor: stateDot }]} />
-          <Text style={s.muted}>{state}</Text>
-          <View style={[s.pill, { backgroundColor: alpha(mode.color === c.muted ? c.surface : mode.color, mode.color === c.muted ? 1 : 0.15), borderColor: mode.color === c.muted ? c.border : alpha(mode.color, 0.3) }]}>
-            <Text style={{ color: mode.color, fontSize: fs.xs }}>{mode.label}</Text>
-          </View>
-          <View style={{ flex: 1 }} />
-          {session?.busy ? (
-            <Pressable onPress={() => void client.interrupt(sessionId)} style={[s.sendBtn, { backgroundColor: c.surface }]}>
-              <Square color={c.fg} size={10} fill={c.fg} />
-              <Text style={[s.sendText, { color: c.fg }]}>Stop</Text>
-            </Pressable>
-          ) : null}
-          <Pressable onPress={send} disabled={!canSend} style={[s.sendBtn, !canSend && { opacity: 0.4 }]}>
-            <Text style={s.sendText}>Send</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  )
-}
-
-function SmallButton(props: { label: string; onPress: () => void; disabled?: boolean; primary?: boolean }) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={props.disabled}
-      style={[
-        s.smallBtn,
-        props.primary ? { backgroundColor: c.accent, borderColor: c.accent } : null,
-        props.disabled && { opacity: 0.4 }
-      ]}
-    >
-      <Text style={{ color: props.primary ? '#fff' : c.fg, fontSize: fs.xs, fontWeight: '500' }}>{props.label}</Text>
-    </Pressable>
-  )
-}
-
-function summarizeInput(input: Record<string, unknown> | undefined, max = 160): string {
-  if (!input) return ''
-  const v = input.command ?? input.file_path ?? input.pattern ?? input.url ?? input.description
-  return (typeof v === 'string' ? v : JSON.stringify(input)).slice(0, max)
-}
-
-const s = StyleSheet.create({
-  body: { color: c.fg, fontSize: fs.sm, lineHeight: 21 },
-  muted: { color: c.muted, fontSize: fs.xs },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  userBubble: {
-    alignSelf: 'flex-end',
-    maxWidth: '80%',
-    backgroundColor: alpha(c.accent, 0.1),
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10
-  },
-  foldRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  foldLabel: { color: c.muted, fontSize: fs.xs },
-  foldError: { color: alpha(c.danger, 0.8), fontSize: 10, letterSpacing: 0.5 },
-  foldBody: { marginTop: 10, marginLeft: 6, paddingLeft: 12, borderLeftWidth: 1, borderColor: c.border, gap: 10 },
-  toolLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  toolName: { color: c.fgBright, fontSize: fs.xs, fontWeight: '600' },
-  toolArg: { color: c.muted, fontSize: fs.xs, fontFamily: mono, flex: 1 },
-  monoLabel: { fontFamily: mono, fontSize: fs.xs },
-  dangerCard: { borderWidth: 1, borderColor: alpha(c.danger, 0.4), backgroundColor: alpha(c.danger, 0.05), borderRadius: 6 },
-  dangerHead: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12 },
-  restartBtn: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: alpha(c.danger, 0.4),
-    backgroundColor: alpha(c.danger, 0.1),
-    borderRadius: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5
-  },
-  approvalCard: { borderWidth: 1, borderColor: alpha(c.danger, 0.4), backgroundColor: alpha(c.danger, 0.05), borderRadius: 6, overflow: 'hidden' },
-  approvalHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: alpha(c.danger, 0.1),
-    borderBottomWidth: 1,
-    borderColor: alpha(c.danger, 0.3)
-  },
-  approvalTitle: { color: c.danger, fontSize: fs.xs, fontWeight: '600', letterSpacing: 0.6 },
-  approvalStrip: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderColor: alpha(c.danger, 0.2) },
-  cmdBox: { backgroundColor: c.app, borderRadius: 4, borderWidth: 1, borderColor: c.border, padding: 8 },
-  cmdText: { fontFamily: mono, fontSize: fs.xs, color: c.fgBright },
-  smallBtn: { borderWidth: 1, borderColor: c.border, backgroundColor: c.panel, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 6 },
-  composerWrap: { borderTopWidth: 1, borderColor: c.border, padding: 12, backgroundColor: c.app },
-  composer: { borderWidth: 1, borderColor: c.border, backgroundColor: c.panel, borderRadius: 6 },
-  composerInput: { color: c.fg, fontSize: fs.sm, minHeight: 44, maxHeight: 140, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
-  composerBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingBottom: 8 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  pill: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  sendBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.accent, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 3 },
-  sendText: { color: '#fff', fontSize: fs.xs, fontWeight: '500' }
-})
