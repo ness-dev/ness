@@ -304,7 +304,6 @@ Do not change any code — you share this checkout with the author.`
  *  hamburger buttons are never in this map — the former is unhidable, the
  *  latter is the hamburger itself. */
 export type BottomIconKey =
-  | 'commandCenter'
   | 'newProject'
   | 'addRepo'
   | 'activity'
@@ -318,7 +317,6 @@ export type BottomIconKey =
 /** All bottom-icon keys in default render order. Consumers iterate this and
  *  filter out anything present-and-true in `hiddenBottomIcons`. */
 export const BOTTOM_ICON_KEYS: readonly BottomIconKey[] = [
-  'commandCenter',
   'newProject',
   'addRepo',
   'activity',
