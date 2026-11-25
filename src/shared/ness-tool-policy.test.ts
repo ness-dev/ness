@@ -99,14 +99,15 @@ describe('ness tool policy', () => {
     expect(isAlwaysAutoAllowedNessTool('Bash')).toBe(false)
   })
 
-  it('auto-allows create_worktree only when no setup script would run', () => {
+  it('auto-allows create_worktree only when no repo setup script would run', () => {
     const cw = 'mcp__ness-control__create_worktree'
     const seen: (string | undefined)[] = []
     const ctx = (cmd: string | null) => ({
-      setupCommandFor: (root: string | undefined) => {
+      repoSetupCommandFor: (root: string | undefined) => {
         seen.push(root)
         return cmd
-      }
+      },
+      isOpenRepo: (root: string) => root === '/r'
     })
     expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx(''))).toBe(true)
     expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/r' }, ctx(''))).toBe(true)
@@ -115,5 +116,20 @@ describe('ness tool policy', () => {
     expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx(null))).toBe(false)
     expect(isAutoAllowedNessCall(cw, { branchName: 'b' })).toBe(false)
     expect(nessAllowedToolsFlagValue()).not.toContain('create_worktree')
+  })
+
+  it('asks for create_worktree on a PR checkout', () => {
+    const ctx = { repoSetupCommandFor: () => '', isOpenRepo: () => true }
+    const cw = 'mcp__ness-control__create_worktree'
+    expect(isAutoAllowedNessCall(cw, { prNumber: 123 }, ctx)).toBe(false)
+    expect(isAutoAllowedNessCall(cw, { prNumber: 123, repoRoot: '/r' }, ctx)).toBe(false)
+  })
+
+  it('asks for create_worktree in a repo that is not open in Ness', () => {
+    const cw = 'mcp__ness-control__create_worktree'
+    const ctx = { repoSetupCommandFor: () => '', isOpenRepo: (root: string) => root === '/r' }
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/Users/me/Downloads/clone' }, ctx)).toBe(false)
+    // Without an isOpenRepo answer, a named repoRoot can't be vetted.
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/r' }, { repoSetupCommandFor: () => '' })).toBe(false)
   })
 })
