@@ -56,12 +56,14 @@ import { ChatStartGate } from './chat-start-gate'
 import { createSingleFlight } from '../shared/single-flight'
 import { isWithinRoots, ownedPathsOnly } from './own-paths'
 import {
+  claudeGlobalConfigPathFor,
   knownClaudeConfigDirs,
   onShellEnvCaptured,
   resolveShellEnv,
   setExplicitClaudeConfigDirSource,
   warmShellEnv
 } from './claude-env'
+import { trustClaudeProject } from './claude-trust'
 import { parseCliFlags, USAGE, type CliFlags } from './cli-args'
 import { PlaywrightBrowserManager } from './browser-manager-playwright'
 import type { BrowserManagerLike } from './browser-manager-types'
@@ -1350,8 +1352,11 @@ const worktreesFSM = new WorktreesFSM(store, {
   getRepoRoots: () => config.repoRoots || [],
   getWorktreeSetupCmd: () => config.worktreeSetupCommand || '',
   getWorktreeBaseMode: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
-  onWorktreeCreated: async ({ createdPath, initialPrompt, teleportSessionId, agentKind, model, forkSource, baseRef }) => {
+  onWorktreeCreated: async ({ createdPath, repoRoot, initialPrompt, teleportSessionId, agentKind, model, forkSource, baseRef }) => {
     void prPoller.refreshAll()
+    // Before the first tab spawns, so a terminal tab never opens on
+    // Claude's trust prompt for a folder Ness just made. See claude-trust.ts.
+    await trustClaudeProject(claudeGlobalConfigPathFor(createdPath, repoRoot), createdPath)
     const kickoff = await resolveForkedKickoff({ createdPath, initialPrompt, forkSource, baseRef })
     panesFSM.ensureInitialized(createdPath, {
       initialPrompt: kickoff.initialPrompt,

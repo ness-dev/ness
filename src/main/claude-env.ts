@@ -245,6 +245,19 @@ export function claudeConfigDirFor(cwd: string): string {
   return env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : defaultClaudeConfigDir()
 }
 
+/** Claude's global config file (trust, onboarding, per-project state) for
+ *  sessions started in `cwd`. Unlike the Claude home, it sits beside the
+ *  home rather than inside it by default: `~/.claude.json`, but
+ *  `$CLAUDE_CONFIG_DIR/.claude.json` once that's set. `fallbackCwd` is
+ *  consulted when nothing is cached for `cwd` yet (a brand-new worktree
+ *  shares its repo's env in every realistic setup). Cache read only. */
+export function claudeGlobalConfigPathFor(cwd: string, fallbackCwd?: string): string {
+  const env =
+    cachedShellEnv(cwd) ?? (fallbackCwd ? cachedShellEnv(fallbackCwd) : null) ?? process.env
+  const dir = explicitConfigDir() || env.CLAUDE_CONFIG_DIR
+  return dir ? join(resolve(dir), '.claude.json') : join(homedir(), '.claude.json')
+}
+
 /** The directory name Claude Code files a cwd's transcripts under: every
  *  non-alphanumeric character becomes '-'. Lossy, so never try to reverse
  *  it — read the `cwd` field off a transcript line instead. */
