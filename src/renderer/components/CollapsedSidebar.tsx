@@ -20,7 +20,6 @@ interface CollapsedSidebarProps {
   onNewWorktree: () => void
   onOpenCleanup: () => void
   onOpenTaskList: () => void
-  onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenActivity: () => void
   /** Opens the subscription graph; a repo root scopes it to that project. */
@@ -38,7 +37,6 @@ export function CollapsedSidebar({
   onNewWorktree,
   onOpenCleanup,
   onOpenTaskList,
-  onOpenCommandCenter,
   onOpenNewProject,
   onOpenActivity,
   onOpenSubscriptionGraph,
@@ -170,7 +168,6 @@ export function CollapsedSidebar({
 
       <BottomIconStrip
         orientation="vertical"
-        onOpenCommandCenter={onOpenCommandCenter}
         onOpenNewProject={onOpenNewProject}
         onAddRepo={onAddRepo}
         onOpenActivity={onOpenActivity}

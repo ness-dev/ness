@@ -4,7 +4,6 @@ import { pickActiveAnnouncement } from '../shared/announcement-pick'
 import { LOCAL_BACKEND_ID, useAppState, useLocalAppState, useActiveBackend, useAllBackendStatesSelector, selectHistoryPromptRepos, useSettings, usePrs, useOnboarding, useHooks, useWorktrees, useTerminals, usePanes, useLastActive, useUpdater, useRepoConfigs, useAnnouncements, useAssignedPRs, useConfigLoadError, useAliasForWorktree } from './store'
 import { getBackendFor } from './backend'
 import { useGlobalBackend, useBackendForWorktree } from './backend-routing'
-import { useTailLineBuffer } from './hooks/useTailLineBuffer'
 import { useTabHandlers } from './hooks/useTabHandlers'
 import { useHotkeyHandlers } from './hooks/useHotkeyHandlers'
 import { useWorktreeHandlers } from './hooks/useWorktreeHandlers'
@@ -49,7 +48,6 @@ import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
 // Lazy: React Flow + ELK are only needed once someone opens the graph.
 const SubscriptionGraphView = lazy(() => import('./components/SubscriptionGraphView'))
-import { CommandCenter } from './components/CommandCenter'
 import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
 import { HotkeyCheatsheet } from './components/HotkeyCheatsheet'
@@ -272,7 +270,7 @@ function DesktopApp(): JSX.Element {
   // the worktree's identity, not a convenience.
   // DERIVED, never stored. Every path that changes the selected worktree
   // would otherwise have to remember to update a stored copy, and six of
-  // them didn't: hotkey cycling (x2), Command Center, Command Palette,
+  // them didn't: hotkey cycling (x2), the old Command Center, Command Palette,
   // "go to main", and the stale-focus reset. Each left the chrome reading
   // a different backend than the one hosting the open worktree.
   //
@@ -454,7 +452,6 @@ function DesktopApp(): JSX.Element {
     return onOpenForkIntoWorktree((source) => {
       setShowActivity(false)
       setShowCleanup(false)
-      setShowCommandCenter(false)
       setNewWorktreeRepo(worktreeRepoByPath[source.worktreePath])
       setNewWorktreeForkSource(source)
       setShowNewWorktree(true)
@@ -463,7 +460,6 @@ function DesktopApp(): JSX.Element {
   const handleOpenAssignedPR = useCallback((repoRoot: string, prNumber: number) => {
     setShowActivity(false)
     setShowCleanup(false)
-    setShowCommandCenter(false)
     setNewWorktreeRepo(repoRoot)
     setNewWorktreeInitialPRNumber(prNumber)
     setShowNewWorktree(true)
@@ -479,7 +475,6 @@ function DesktopApp(): JSX.Element {
   const [showCleanup, setShowCleanup] = useState(false)
   /** Repo the subscription graph is showing, or null when it's closed. */
   const [graphRepo, setGraphRepo] = useState<string | null>(null)
-  const [showCommandCenter, setShowCommandCenter] = useState(false)
   const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [commandPaletteMode, setCommandPaletteMode] = useState<'root' | 'files'>('root')
@@ -558,10 +553,6 @@ function DesktopApp(): JSX.Element {
         window.setTimeout(() => setWorkScanned(true), Math.max(0, remaining))
       })
   }, [onboardingVisible, previewOnboarding, backend])
-  // Only subscribe to the PTY stream when CommandCenter is open. Without
-  // this gate, a chatty PTY pegs the renderer with re-renders for output
-  // nobody is currently looking at.
-  const tailLines = useTailLineBuffer(showCommandCenter)
   const settings = useSettings()
   const { hasGithubToken: hasGithubPat, githubAuthSource, nameClaudeSessions, defaultAgent } = settings
   // Apply the persisted UI scale to the root html element so every
@@ -1018,7 +1009,6 @@ function DesktopApp(): JSX.Element {
           setShowActivity(false)
           setShowCleanup(false)
           setGraphRepo(null)
-          setShowCommandCenter(false)
           setShowTaskList(false)
         }
       )
@@ -1044,7 +1034,6 @@ function DesktopApp(): JSX.Element {
       setShowNewWorktree(false)
       setShowActivity(false)
       setShowCleanup(false)
-      setShowCommandCenter(false)
       setShowTaskList(false)
       setGraphRepo(repo)
     },
@@ -1062,8 +1051,8 @@ function DesktopApp(): JSX.Element {
   const handleCloseSubscriptionGraph = useCallback(() => setGraphRepo(null), [])
   // Any other full-content view replaces the graph.
   useEffect(() => {
-    if (showNewWorktree || showActivity || showCleanup || showCommandCenter) setGraphRepo(null)
-  }, [showNewWorktree, showActivity, showCleanup, showCommandCenter])
+    if (showNewWorktree || showActivity || showCleanup) setGraphRepo(null)
+  }, [showNewWorktree, showActivity, showCleanup])
 
   // Hoisted for RightColumn's memo, so the sidebar's optimistic highlight
   // render doesn't re-render the whole right column with unchanged data.
@@ -1103,7 +1092,6 @@ function DesktopApp(): JSX.Element {
     !showNewWorktree &&
     !showActivity &&
     !showCleanup && graphRepo === null &&
-    !showCommandCenter &&
     reportIssueState === null &&
     !!activeWorktreeId &&
     !isPendingId(activeWorktreeId) &&
@@ -1198,7 +1186,6 @@ function DesktopApp(): JSX.Element {
     setRightColumnHidden,
     setSingleScreenMode,
     setShowNewWorktree,
-    setShowCommandCenter,
     setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
@@ -1244,7 +1231,7 @@ function DesktopApp(): JSX.Element {
   }, [backend, hotkeyActions])
 
   // Per-worktree aggregates come from the shared list model so the sidebar,
-  // command center and command palette can't disagree about a status.
+  // task list and command palette can't disagree about a status.
   const worktreeStatuses = worktreeListModel.statusByPath
   const worktreePendingTools = worktreeListModel.pendingToolByPath
 
@@ -1852,7 +1839,7 @@ function DesktopApp(): JSX.Element {
       return !!tree && getLeaves(tree).some((l) => l.tabs.length > 0)
     })()
   const inContentOverlay =
-    showNewWorktree || showActivity || showCleanup || graphRepo !== null || showCommandCenter || reportIssueState !== null
+    showNewWorktree || showActivity || showCleanup || graphRepo !== null || reportIssueState !== null
   const activeIsPending =
     isPendingId(activeWorktreeId) && pendingWorktrees.some((p) => p.id === activeWorktreeId)
   const activeIsDeleting = !!activeWorktreeId && !!pendingDeletionByPath[activeWorktreeId]
@@ -2070,12 +2057,6 @@ function DesktopApp(): JSX.Element {
             onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenCleanup={() => setShowCleanup(true)}
             onOpenTaskList={() => setShowTaskList(true)}
-            onOpenCommandCenter={() => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(true)
-            }}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenMyWeek={() => setShowMyWeek(true)}
             width={effectiveSidebarWidth}
@@ -2099,12 +2080,6 @@ function DesktopApp(): JSX.Element {
             }}
             onOpenCleanup={() => setShowCleanup(true)}
             onOpenTaskList={() => setShowTaskList(true)}
-            onOpenCommandCenter={() => {
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setShowCommandCenter(true)
-            }}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenActivity={() => setShowActivity(true)}
             onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
@@ -2134,7 +2109,7 @@ function DesktopApp(): JSX.Element {
           const everOpened = openedWorktrees.has(mountKey)
           const isSelected = wt.path === activeWorktreeId && backendId === selectedBackendId
           if (!eagerMount && !everOpened && !isSelected) return null
-          const isVisible = !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
+          const isVisible = !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && isSelected && !pendingDeletionByPath[wt.path]
           return (
             <div
               key={`${backendId}\u0000${wt.path}`}
@@ -2184,7 +2159,7 @@ function DesktopApp(): JSX.Element {
                     singleScreenMode || sidebarVisible ? 0 : 48
                   }
                   topBarTrailingExtendPx={
-                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null
+                    !singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null
                       ? rightColumnHidden
                         ? 48
                         : rightPanelWidth + 1
@@ -2264,27 +2239,6 @@ function DesktopApp(): JSX.Element {
             </BackendScope>
           </div>
         )}
-        {showCommandCenter && (
-          <CommandCenter
-            model={worktreeListModel}
-            lastActive={lastActive}
-            tailLines={tailLines}
-            terminalTabs={terminalTabs}
-            unifiedRepos={unifiedRepos}
-            onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
-            onClose={() => setShowCommandCenter(false)}
-            onSelect={(path) => {
-              setShowCommandCenter(false)
-              setShowTaskList(false)
-              setShowNewWorktree(false)
-              setShowActivity(false)
-              setShowCleanup(false)
-              setGraphRepo(null)
-              setActiveWorktreeId(path)
-            }}
-            onToggleGroup={toggleGroup}
-          />
-        )}
         {showCenterFallback && (
           <div className="flex-1 min-w-0 flex flex-col">
             <div
@@ -2306,7 +2260,7 @@ function DesktopApp(): JSX.Element {
             </div>
           </div>
         )}
-        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && isPendingId(activeWorktreeId) && (() => {
           const pending = pendingWorktrees.find((p) => p.id === activeWorktreeId)
           if (!pending) return null
           return (
@@ -2318,7 +2272,7 @@ function DesktopApp(): JSX.Element {
             />
           )
         })()}
-        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
+        {!showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && activeWorktreeId && pendingDeletionByPath[activeWorktreeId] && (
           <DeletingWorktreeScreen
             deletion={pendingDeletionByPath[activeWorktreeId]}
             onDismiss={handleDismissPendingDeletion}
@@ -2342,10 +2296,10 @@ function DesktopApp(): JSX.Element {
             out. macOS app-region rects are union/diff'd in DOM order (last wins per pixel), so a
             `drag-region` here — rendered after the tab bar — would re-mark the tab pixels as
             draggable and swallow clicks on tabs that overflow above the right column. */}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && !rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><ResizeHandle onDelta={handleRightPanelResize} /></div></div>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && !rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && !rightColumnHidden && (
           <BackendScope backendId={selectedBackendId}><div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><RightColumn
             width={rightPanelWidth}
             activeWorktreeId={activeWorktreeId}
@@ -2370,7 +2324,7 @@ function DesktopApp(): JSX.Element {
             onBuildCustomTool={handleBuildCustomTool}
           /></div></div></BackendScope>
         )}
-        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && !showCommandCenter && reportIssueState === null && rightColumnHidden && (
+        {!singleScreenMode && !showNewWorktree && !showActivity && !showCleanup && graphRepo === null && reportIssueState === null && rightColumnHidden && (
           <div className="shrink-0 flex flex-col"><div className="h-10 shrink-0" /><div className="flex-1 min-h-0 flex"><CollapsedRightPanel
             worktreePath={activeWorktreeId}
             onExpand={() => setRightColumnHidden(false)}
@@ -2423,7 +2377,6 @@ function DesktopApp(): JSX.Element {
           setShowActivity(false)
           setShowCleanup(false)
           setGraphRepo(null)
-          setShowCommandCenter(false)
           setActiveWorktreeId(path)
         }}
         onAction={(action) => {

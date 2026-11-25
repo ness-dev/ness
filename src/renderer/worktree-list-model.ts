@@ -135,7 +135,7 @@ export interface WorktreeRepoSectionModel {
    *  Selection-independent, so it lives in the base build. */
   worstStatus: PtyStatus
   /** Every worktree grouped by status, main included. Overview surfaces
-   *  (command center, task list) render this; the sidebar renders the
+   *  (task list) render this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
   groups: WorktreeListGroupModel[]
   /** Main worktrees, pulled out of the groups. One per repo, primary host
@@ -154,7 +154,7 @@ export interface WorktreeListModel {
   showRepoHeaders: boolean
   showRepoLabels: boolean
   /** Per-worktree-path aggregates, exposed so callers that need the raw maps
-   *  (command center, command palette, hotkeys) share this derivation instead
+   *  (command palette, hotkeys) share this derivation instead
    *  of recomputing their own. */
   statusByPath: Record<string, PtyStatus>
   pendingToolByPath: Record<string, PendingTool | null>
