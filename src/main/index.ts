@@ -495,7 +495,15 @@ const approvalBridge = new ApprovalBridge(store, {
   isAutoApproveEnabled: () =>
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
-    store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
+    store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
+  setupCommandFor: (sessionId, repoRoot) => {
+    const state = store.getSnapshot().state
+    const sessionPath = state.jsonClaude.sessions[sessionId]?.worktreePath
+    const root =
+      repoRoot ?? state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
+    // Constructed below; an approval can't arrive before boot finishes.
+    return root ? worktreesFSM.setupCommandFor(root) : null
+  }
 })
 const composerVisibility = new ComposerVisibility()
 const jsonClaudeManager = new JsonClaudeManager(store, {
