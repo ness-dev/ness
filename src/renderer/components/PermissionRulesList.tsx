@@ -105,18 +105,22 @@ function PermissionRuleRow({
   )
 }
 
-/** "Remove all" that needs a second click, so a stray click on a group
- *  header's button can't wipe forty grants. */
+/** "Remove all" that needs a second click, so a stray click can't wipe
+ *  forty grants (or, for the list-wide one, every grant). */
 function RemoveAllButton({
   count,
   armed,
   onArm,
-  onConfirm
+  onConfirm,
+  label = 'Remove all',
+  className = 'shrink-0 ml-auto'
 }: {
   count: number
   armed: boolean
   onArm: () => void
   onConfirm: () => void
+  label?: string
+  className?: string
 }): JSX.Element {
   return (
     <button
@@ -125,11 +129,11 @@ function RemoveAllButton({
         if (armed) onConfirm()
         else onArm()
       }}
-      className={`text-xs shrink-0 cursor-pointer ml-auto ${
+      className={`text-xs cursor-pointer ${className} ${
         armed ? 'text-danger font-medium' : 'text-dim hover:text-danger'
       }`}
     >
-      {armed ? `Remove ${count}?` : 'Remove all'}
+      {armed ? `Remove ${count}?` : label}
     </button>
   )
 }
@@ -353,12 +357,17 @@ export function PermissionRulesList({
           })}
       </div>
 
-      <button
-        onClick={onClear}
-        className="text-xs text-dim hover:text-danger mt-2 cursor-pointer"
-      >
-        Remove all {rules.length}
-      </button>
+      <RemoveAllButton
+        count={rules.length}
+        armed={armedKey === '*'}
+        onArm={() => setArmedKey('*')}
+        onConfirm={() => {
+          setArmedKey(null)
+          onClear()
+        }}
+        label={`Remove all ${rules.length}`}
+        className="mt-2"
+      />
     </>
   )
 }

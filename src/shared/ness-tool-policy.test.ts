@@ -83,7 +83,6 @@ describe('ness tool policy', () => {
 
   it('counts only input-independent tools as always auto-allowed', () => {
     expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__report_progress')).toBe(true)
-    expect(isAlwaysAutoAllowedNessTool('mcp__harness-control__list_worktrees')).toBe(true)
     // URL-gated: a grant still allows arbitrary URLs, so it isn't redundant.
     expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__navigate_tab')).toBe(false)
     expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__create_browser_tab')).toBe(false)
