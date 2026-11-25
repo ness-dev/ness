@@ -112,6 +112,36 @@ function tick(ms = 50): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+describe('ApprovalBridge — Ness tools', () => {
+  it('allows Ness plumbing with no grant and no card', async () => {
+    const h = await harness([])
+    const res = await h.send({
+      id: 'req-ness-1',
+      tool_name: 'mcp__ness-control__report_progress',
+      input: { message: '/health is added and checked with curl' },
+      tool_use_id: 'tu-ness-1'
+    })
+    expect((res as { result: { behavior: string } }).result.behavior).toBe('allow')
+    expect(
+      Object.keys(h.store.getSnapshot().state.jsonClaude.pendingApprovals)
+    ).toHaveLength(0)
+  })
+
+  it('still asks for Ness tools that run arbitrary code', async () => {
+    const h = await harness([])
+    const res = await h.send({
+      id: 'req-ness-2',
+      tool_name: 'mcp__ness-control__create_shell',
+      input: { command: 'npm run dev' },
+      tool_use_id: 'tu-ness-2'
+    })
+    expect(res).toBeNull()
+    expect(
+      h.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-2']?.toolName
+    ).toBe('mcp__ness-control__create_shell')
+  })
+})
+
 describe('ApprovalBridge — persistent allowlist', () => {
   it('allows a matching call without surfacing a card', async () => {
     const h = await harness([rule('Bash', 'git status:*')])

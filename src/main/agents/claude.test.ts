@@ -70,6 +70,21 @@ describe('buildSpawnArgs', () => {
     expect(result).toContain("'\\''")
   })
 
+  it('pre-allows Ness tools right before --mcp-config when Ness MCP is injected', () => {
+    const result = buildSpawnArgs({ ...base, mcpConfigPath: '/cfg.json', initialPrompt: 'go' })
+    expect(result).toMatch(/--allowedTools '[^']*mcp__ness-control__report_progress[^']*' --mcp-config/)
+    expect(result).not.toContain('create_shell')
+    expect(result.endsWith("'go'")).toBe(true)
+  })
+
+  it('leaves --allowedTools off without Ness MCP or when the user already set it', () => {
+    expect(buildSpawnArgs({ ...base })).not.toContain('--allowedTools')
+    expect(
+      buildSpawnArgs({ ...base, command: 'claude --allowedTools Read', mcpConfigPath: '/cfg.json' })
+        .match(/--allowedTools/g)
+    ).toHaveLength(1)
+  })
+
   const sessionPath = (cwd: string, id: string): string =>
     join(homedir(), '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`)
 

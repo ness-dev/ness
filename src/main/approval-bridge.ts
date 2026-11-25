@@ -35,6 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
+import { isAutoAllowedNessTool } from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -393,6 +394,19 @@ export class ApprovalBridge {
     // response itself, so it must always reach a human — see
     // QUESTION_TOOL_NAME. Bail out above both auto-resolve paths.
     const isQuestion = basePayload.toolName === QUESTION_TOOL_NAME
+
+    // Ness's own plumbing (report_progress, set_tab_name, …) never reaches
+    // a human; see shared/ness-tool-policy.ts for what's excluded and why.
+    // No approvalSessionAllowed dispatch either: these calls fire every
+    // turn, and an "auto-allowed" chip on each would be noise.
+    if (isAutoAllowedNessTool(basePayload.toolName)) {
+      respond({ behavior: 'allow', updatedInput: basePayload.input })
+      log(
+        'approval-bridge',
+        `ness-tool-allowed session=${basePayload.sessionId} id=${basePayload.requestId} tool=${basePayload.toolName}`
+      )
+      return
+    }
 
     // Two explicit-user-grant paths, both checked before the LLM
     // auto-reviewer because a grant the user made by hand is cheaper and
