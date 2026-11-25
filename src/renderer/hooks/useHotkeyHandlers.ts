@@ -444,7 +444,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       setRightColumnHidden,
       setSingleScreenMode,
       setShowNewWorktree,
-        setShowTaskList,
+      setShowTaskList,
       setShowCommandPalette,
       setCommandPaletteMode,
       setShowPerfMonitor,
