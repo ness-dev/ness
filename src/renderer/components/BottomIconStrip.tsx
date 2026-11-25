@@ -12,7 +12,6 @@ import {
   Check,
   ChevronUp,
   ChevronDown,
-  LayoutGrid,
   FilePlus,
   FolderOpen,
   BarChart3,
@@ -37,7 +36,6 @@ import {
 } from '../../shared/state/settings'
 
 const LABELS: Record<BottomIconKey, string> = {
-  commandCenter: 'Command Center',
   newProject: 'New project',
   addRepo: 'Add repository',
   activity: 'Activity',
@@ -50,7 +48,6 @@ const LABELS: Record<BottomIconKey, string> = {
 }
 
 const MENU_ICONS: Record<BottomIconKey, LucideIcon> = {
-  commandCenter: LayoutGrid,
   newProject: FilePlus,
   addRepo: FolderOpen,
   activity: BarChart3,
@@ -64,7 +61,6 @@ const MENU_ICONS: Record<BottomIconKey, LucideIcon> = {
 
 export interface BottomIconStripProps {
   orientation: 'horizontal' | 'vertical'
-  onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onAddRepo: () => void
   onOpenActivity: () => void
@@ -137,8 +133,6 @@ export function BottomIconStrip(props: BottomIconStripProps): JSX.Element {
 
   const handlerFor = (key: BottomIconKey): (() => void) | null => {
     switch (key) {
-      case 'commandCenter':
-        return props.onOpenCommandCenter
       case 'newProject':
         return props.onOpenNewProject
       case 'addRepo':
@@ -169,15 +163,13 @@ export function BottomIconStrip(props: BottomIconStripProps): JSX.Element {
     const Icon = MENU_ICONS[key]
     // PreventSleep is a self-contained component (owns its own popover).
     if (key === 'preventSleep') return <PreventSleepStatusIcon />
-    // Wire hotkey-action tooltips for the two icons that have hotkeys.
+    // Wire hotkey-action tooltips for the icons that have hotkeys.
     const action =
-      key === 'commandCenter'
-        ? ('toggleCommandCenter' as const)
-        : key === 'hotkeys'
-          ? ('hotkeyCheatsheet' as const)
-          : key === 'settings'
-            ? ('openSettings' as const)
-            : undefined
+      key === 'hotkeys'
+        ? ('hotkeyCheatsheet' as const)
+        : key === 'settings'
+          ? ('openSettings' as const)
+          : undefined
     return (
       <Tooltip label={label} side={tooltipSide} action={action}>
         <button

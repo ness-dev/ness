@@ -1077,9 +1077,9 @@ describe('settingsReducer', () => {
   it('bottomIconOrderChanged replaces the render order', () => {
     const reordered = apply(initialSettings, {
       type: 'settings/bottomIconOrderChanged',
-      payload: ['settings', 'commandCenter', 'newProject']
+      payload: ['settings', 'activity', 'newProject']
     })
-    expect(reordered.bottomIconOrder).toEqual(['settings', 'commandCenter', 'newProject'])
+    expect(reordered.bottomIconOrder).toEqual(['settings', 'activity', 'newProject'])
   })
 
   it('sidebarProjectOrderChanged replaces the project order', () => {
