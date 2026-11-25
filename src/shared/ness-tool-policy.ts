@@ -27,10 +27,15 @@
 //   or Ollama API), and a loopback page can still send the tab off-host via
 //   a click_tab on an external link or a server redirect. Gating every
 //   click would undo the point, so don't treat this as a hard boundary.
-// - create_worktree runs the repo's setup script (.ness.json setupCommand,
-//   else the global one), and an agent that can Write could have put
-//   `curl … | sh` there. So it is only auto-allowed when the caller can
-//   tell that no script would run (see NessCallContext), and asks otherwise.
+// - create_worktree can run code the user hasn't vetted, three ways:
+//   the repo's committed .ness.json setupCommand (an agent that can Write
+//   could have put `curl … | sh` there), a prNumber checkout (a fork's
+//   .claude/settings.json hooks and .mcp.json load in the new session),
+//   and an explicit repoRoot that isn't open in Ness (the same as add_repo,
+//   which asks). It is auto-allowed only with no prNumber, a repoRoot that
+//   is omitted or already open, and no repo setupCommand; otherwise it asks.
+//   The global setup command from Settings isn't gated: the user typed it,
+//   and gating it would prompt on every worktree for anyone who set one.
 // - create_worktree and send_message start or message other agents with
 //   text the calling agent wrote. They are auto-allowed because
 //   orchestration is the point of them (onboarding's Getting Started flow
@@ -119,10 +124,13 @@ export function isSafeAgentUrl(raw: string): boolean {
 }
 
 export interface NessCallContext {
-  /** The setup command create_worktree would run for `repoRoot` (undefined
+  /** The repo's own (.ness.json) setup command for `repoRoot` (undefined
    *  means the caller's own repo): '' when none, null when it can't be
    *  determined. Absent means unknown, so create_worktree asks. */
-  setupCommandFor?: (repoRoot: string | undefined) => string | null
+  repoSetupCommandFor?: (repoRoot: string | undefined) => string | null
+  /** True when `repoRoot` is a repo already open in Ness. Absent means
+   *  unknown, so a create_worktree naming a repoRoot asks. */
+  isOpenRepo?: (repoRoot: string) => boolean
 }
 
 /** The bare tool name for a ness-control tool, or null for anything else. */
@@ -142,8 +150,12 @@ export function isAutoAllowedNessCall(
   const bare = nessControlToolName(toolName)
   if (bare === null || !AUTO_ALLOWED.has(bare)) return false
   if (bare === 'create_worktree') {
-    const repoRoot = typeof input['repoRoot'] === 'string' ? input['repoRoot'] : undefined
-    return ctx.setupCommandFor?.(repoRoot) === ''
+    if (input['prNumber'] !== undefined && input['prNumber'] !== null) return false
+    const rawRoot = input['repoRoot']
+    if (rawRoot !== undefined && typeof rawRoot !== 'string') return false
+    const repoRoot = rawRoot === undefined || rawRoot === '' ? undefined : rawRoot
+    if (repoRoot !== undefined && ctx.isOpenRepo?.(repoRoot) !== true) return false
+    return ctx.repoSetupCommandFor?.(repoRoot) === ''
   }
   if (!URL_GATED_TOOLS.has(bare)) return true
   const url = input['url']

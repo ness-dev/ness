@@ -85,10 +85,12 @@ export interface ApprovalBridgeDeps {
    *  Appended to the reviewer's policy prompt as project-specific
    *  guidance. Empty string when unset. */
   getAutoApproveSteerInstructions: () => string
-  /** The setup command an MCP create_worktree from this session would run
-   *  (repoRoot undefined = the session's own repo): '' for none, null when
-   *  unknown. Lets create_worktree skip approval only when no script runs. */
-  setupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+  /** The repo's own (.ness.json) setup command an MCP create_worktree from
+   *  this session would run (repoRoot undefined = the session's own repo):
+   *  '' for none, null when unknown. */
+  repoSetupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+  /** True when `repoRoot` is a repo already open in Ness. */
+  isOpenRepo?: (repoRoot: string) => boolean
 }
 
 export class ApprovalBridge {
@@ -403,12 +405,13 @@ export class ApprovalBridge {
     // a human; see shared/ness-tool-policy.ts for what's excluded and why.
     // No approvalSessionAllowed dispatch either: these calls fire every
     // turn, and an "auto-allowed" chip on each would be noise.
-    const setupCommandFor = this.deps?.setupCommandFor
+    const repoSetupCommandFor = this.deps?.repoSetupCommandFor
     if (
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
-        setupCommandFor: setupCommandFor
-          ? (repoRoot) => setupCommandFor(basePayload.sessionId, repoRoot)
-          : undefined
+        repoSetupCommandFor: repoSetupCommandFor
+          ? (repoRoot) => repoSetupCommandFor(basePayload.sessionId, repoRoot)
+          : undefined,
+        isOpenRepo: this.deps?.isOpenRepo
       })
     ) {
       respond({ behavior: 'allow', updatedInput: basePayload.input })

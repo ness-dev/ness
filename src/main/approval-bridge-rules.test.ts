@@ -60,7 +60,7 @@ interface Harness {
  *  decided a human should see it (no response within the grace window). */
 async function harness(
   rules: StoredPermissionRule[],
-  setupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+  repoSetupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
 ): Promise<Harness> {
   const store = new TestStore()
   store.dispatch({ type: 'permissions/loaded', payload: { rules } })
@@ -70,7 +70,8 @@ async function harness(
     // Haiku reviewer — this suite is only about the rule path.
     isAutoApproveEnabled: () => false,
     getAutoApproveSteerInstructions: () => '',
-    setupCommandFor
+    repoSetupCommandFor,
+    isOpenRepo: (root) => root === '/repo'
   })
   openBridges.push(bridge)
   const sessionId = randomUUID()
@@ -177,6 +178,31 @@ describe('ApprovalBridge — Ness tools', () => {
     expect(
       scripted.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-6']?.toolName
     ).toBe('mcp__ness-control__create_worktree')
+  })
+
+  it('asks for create_worktree on a PR checkout or an unopened repo', async () => {
+    const h = await harness([], () => '')
+    const pr = await h.send({
+      id: 'req-ness-7',
+      tool_name: 'mcp__ness-control__create_worktree',
+      input: { prNumber: 123 },
+      tool_use_id: 'tu-ness-7'
+    })
+    expect(pr).toBeNull()
+    const foreign = await h.send({
+      id: 'req-ness-8',
+      tool_name: 'mcp__ness-control__create_worktree',
+      input: { branchName: 'x', repoRoot: '/elsewhere' },
+      tool_use_id: 'tu-ness-8'
+    })
+    expect(foreign).toBeNull()
+    const open = await h.send({
+      id: 'req-ness-9',
+      tool_name: 'mcp__ness-control__create_worktree',
+      input: { branchName: 'x', repoRoot: '/repo' },
+      tool_use_id: 'tu-ness-9'
+    })
+    expect((open as { result: { behavior: string } }).result.behavior).toBe('allow')
   })
 
   it('still asks before navigating a tab to a file: URL', async () => {
