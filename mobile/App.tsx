@@ -1,447 +1,303 @@
-// Spike UI: pair → worktree list → one chat. Deliberately a single file
-// with state-switched screens (no Expo Router) — the point is to prove
-// the data path, not the navigation shell.
+// Spike UI, modelled on the web client's mobile layout (MobileApp.tsx):
+// a top bar with the worktree switcher + that worktree's chat tabs, the
+// chat filling the rest, and a full-screen worktree sheet. Several
+// backends can be enabled at once; the sheet lists each one's repos.
+// No Expo Router — the spike proves the data path, not the nav shell.
 import { StatusBar } from 'expo-status-bar'
-import { CameraView, useCameraPermissions } from 'expo-camera'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View
 } from 'react-native'
+import { Asterisk, ChevronDown, Plus } from 'lucide-react-native'
 import { parseConnectionUrl } from '../src/shared/transport/parse-connection-url'
-import type { JsonClaudeChatEntry, JsonClaudePendingApproval } from '../src/shared/state/json-claude'
-import type { PtyStatus } from '../src/shared/state/terminals'
-import { NessClient, rollupStatus, tabsOf, useConnected, useNess } from './src/ness'
-import { clearConnection, loadConnection, saveConnection, type SavedConnection } from './src/storage'
-
-const STATUS_COLOR: Record<PtyStatus, string> = {
-  idle: '#555',
-  waiting: '#3b82f6',
-  processing: '#eab308',
-  'needs-approval': '#ef4444'
-}
+import type { TerminalTab } from '../src/shared/state/terminals'
+import { useBackends } from './src/backends'
+import { NessClient, chatTabsOf, useConn, useNess } from './src/ness'
+import { STATUS_DOT, c, fs } from './src/theme'
+import { ChatView } from './src/components/ChatView'
+import { WorktreeSheet, type Selection } from './src/components/WorktreeSheet'
+import { BackendsSheet } from './src/components/BackendsSheet'
 
 export default function App() {
-  const [conn, setConn] = useState<SavedConnection | null | undefined>(undefined)
-  useEffect(() => {
-    void loadConnection().then(setConn)
-  }, [])
+  const backends = useBackends()
+  const [selection, setSelection] = useState<Selection | null>(null)
+  const [tabByPath, setTabByPath] = useState<Record<string, string>>({})
+  const [sheet, setSheet] = useState<'worktrees' | 'backends' | null>(null)
 
   // Deep-link pairing: <scheme>://pair?url=<connection link>. In Expo Go
   // that's exp://<metro>/--/pair?url=…; a production app would register
   // ness:// so the desktop QR could open it straight from the system
-  // camera, no in-app scanner needed.
+  // camera.
   useEffect(() => {
     const handle = (link: string | null | undefined) => {
-      if (!link) return
-      const m = /[?&]url=([^&]+)/.exec(link)
+      const m = link && /[?&]url=([^&]+)/.exec(link)
       if (!m) return
       const r = parseConnectionUrl(decodeURIComponent(m[1]))
-      if (!r.ok) return
-      const c = { wsUrl: r.parsed.wsUrl, token: r.parsed.token }
-      void saveConnection(c)
-      setConn(c)
+      if (r.ok) backends.add({ wsUrl: r.parsed.wsUrl, token: r.parsed.token })
     }
     void Linking.getInitialURL().then(handle)
     const sub = Linking.addEventListener('url', (e) => handle(e.url))
     return () => sub.remove()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (conn === undefined) return <Centered><ActivityIndicator /></Centered>
-  if (!conn) {
+  const client = backends.clients.find((cl) => cl.id === selection?.backendId) ?? null
+
+  // Drop a selection whose backend was disabled or removed.
+  useEffect(() => {
+    if (selection && backends.loaded && !client) setSelection(null)
+  }, [selection, client, backends.loaded])
+
+  if (!backends.loaded) {
     return (
-      <PairScreen
-        onPaired={(c) => {
-          void saveConnection(c)
-          setConn(c)
-        }}
-      />
+      <Shell>
+        <ActivityIndicator color={c.muted} style={{ flex: 1 }} />
+      </Shell>
     )
   }
-  return (
-    <Connected
-      conn={conn}
-      onForget={() => {
-        void clearConnection()
-        setConn(null)
-      }}
-    />
-  )
-}
-
-// ── Pairing ────────────────────────────────────────────────────────────
-
-function PairScreen({ onPaired }: { onPaired: (c: SavedConnection) => void }) {
-  const [text, setText] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [permission, requestPermission] = useCameraPermissions()
-  const handled = useRef(false)
-
-  // Same parser the desktop "Add Backend" modal uses, so the Settings QR
-  // (http://<lan-ip>:<port>/?token=…) and a pasted link both work.
-  function tryPair(raw: string): void {
-    const r = parseConnectionUrl(raw)
-    if (!r.ok) {
-      setError(r.error)
-      return
-    }
-    onPaired({ wsUrl: r.parsed.wsUrl, token: r.parsed.token })
+  if (backends.saved.length === 0) {
+    return (
+      <Shell>
+        <BackendsSheet backends={backends} />
+      </Shell>
+    )
   }
 
+  const tabKey = client && selection ? `${client.id}:${selection.path}` : ''
   return (
-    <Screen title="Pair with Ness">
-      <Text style={styles.muted}>
-        Scan the QR in Ness → Settings → Web & mobile, or paste the link.
-      </Text>
-      {scanning ? (
-        <View style={styles.camera}>
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={({ data }) => {
-              if (handled.current) return
-              handled.current = true
-              setScanning(false)
-              tryPair(data)
-            }}
-          />
-        </View>
+    <Shell>
+      {client && selection ? (
+        <WorktreeView
+          key={tabKey}
+          client={client}
+          path={selection.path}
+          tabId={tabByPath[tabKey]}
+          onTab={(id) => setTabByPath((p) => ({ ...p, [tabKey]: id }))}
+          onOpenSheet={() => setSheet('worktrees')}
+        />
       ) : (
-        <Button
-          label="Scan QR code"
-          onPress={async () => {
-            const p = permission?.granted ? permission : await requestPermission()
-            if (!p.granted) {
-              setError('Camera permission denied')
-              return
-            }
-            handled.current = false
-            setScanning(true)
+        <AutoSelect clients={backends.clients} onSelect={setSelection} onOpenSheet={() => setSheet('worktrees')} />
+      )}
+      {sheet === 'worktrees' && (
+        <WorktreeSheet
+          clients={backends.clients}
+          selected={selection}
+          onSelect={(sel) => {
+            setSelection(sel)
+            setSheet(null)
           }}
+          onClose={() => setSheet(null)}
+          onOpenBackends={() => setSheet('backends')}
         />
       )}
-      <TextInput
-        style={styles.input}
-        placeholder="http://192.168.1.10:37291/?token=…"
-        placeholderTextColor="#666"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={text}
-        onChangeText={setText}
-        onSubmitEditing={() => tryPair(text)}
-      />
-      <Button label="Connect" onPress={() => tryPair(text)} />
-      {error && <Text style={styles.error}>{error}</Text>}
-    </Screen>
+      {sheet === 'backends' && <BackendsSheet backends={backends} onClose={() => setSheet('worktrees')} />}
+    </Shell>
   )
 }
 
-// ── Connected shell ────────────────────────────────────────────────────
-
-function Connected({ conn, onForget }: { conn: SavedConnection; onForget: () => void }) {
-  const client = useMemo(() => new NessClient(conn.wsUrl, conn.token), [conn])
-  const [chat, setChat] = useState<{ sessionId: string; worktreePath: string } | null>(null)
-
-  useEffect(() => {
-    client.connect().catch(() => {
-      // transport retries on its own; the header shows the state
-    })
-    return () => client.close()
-  }, [client])
-
-  const connected = useConnected(client)
-  const snapshotLoaded = useNess(client, (s) => s.worktrees.list.length > 0 || s.worktrees.repoRoots.length > 0)
-
-  if (!snapshotLoaded) {
-    return (
-      <Screen title="Connecting…" right={<Link label="Forget" onPress={onForget} />}>
-        {!connected && <Text style={styles.muted}>{client.getLastError() ?? 'Opening socket'} — retrying</Text>}
-        <ActivityIndicator style={{ marginTop: 24 }} />
-      </Screen>
-    )
-  }
-  if (chat) return <ChatScreen client={client} {...chat} onBack={() => setChat(null)} />
-  return <WorktreesScreen client={client} connected={connected} onForget={onForget} onOpenChat={setChat} />
-}
-
-// ── Worktree list ──────────────────────────────────────────────────────
-
-function WorktreesScreen({
-  client,
-  connected,
-  onForget,
-  onOpenChat
-}: {
-  client: NessClient
-  connected: boolean
-  onForget: () => void
-  onOpenChat: (c: { sessionId: string; worktreePath: string }) => void
-}) {
-  // Select the three inputs separately so the list only re-renders when
-  // one of them changes identity (reducers preserve references).
-  const list = useNess(client, (s) => s.worktrees.list)
-  const panes = useNess(client, (s) => s.terminals.panes)
-  const statuses = useNess(client, (s) => s.terminals.statuses)
-  const approvals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
-
-  const rows = useMemo(() => {
-    const state = client.getState()
-    return list
-      .filter((w) => !w.prunable)
-      .map((w) => {
-        // A worktree can hold several chat tabs; prefer one whose session
-        // is alive so the row opens something useful.
-        const chats = tabsOf(panes[w.path]).filter((t) => t.type === 'json-claude')
-        const live = (id: string) => {
-          const s = state.jsonClaude.sessions[id]
-          return s && s.state !== 'exited'
-        }
-        const chatTab = chats.find((t) => live(t.id)) ?? chats[0]
-        return { wt: w, status: rollupStatus(state, w.path), chatTab }
-      })
-      .sort((a, b) => (state.terminals.lastActive[b.wt.path] ?? 0) - (state.terminals.lastActive[a.wt.path] ?? 0))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, panes, statuses])
-
-  const pendingCount = Object.keys(approvals).length
-
+function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <Screen
-      title="Worktrees"
-      subtitle={`${connected ? '● live' : '○ reconnecting'} · ${pendingCount} approval${pendingCount === 1 ? '' : 's'} · snapshot ${(client.stats.snapshotBytes / 1024).toFixed(0)}KB, ${client.stats.events} events / ${(client.stats.eventBytes / 1024).toFixed(0)}KB`}
-      right={<Link label="Forget" onPress={onForget} />}
-    >
-      <FlatList
-        data={rows}
-        keyExtractor={(r) => r.wt.path}
-        renderItem={({ item }) => (
-          <Pressable
-            style={styles.row}
-            disabled={!item.chatTab}
-            onPress={() => item.chatTab && onOpenChat({ sessionId: item.chatTab.id, worktreePath: item.wt.path })}
-          >
-            <View style={[styles.dot, { backgroundColor: STATUS_COLOR[item.status] }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>
-                {item.wt.branch || '(detached)'}
-              </Text>
-              <Text style={styles.muted} numberOfLines={1}>
-                {item.wt.repoRoot.split('/').pop()} · {item.status}
-                {item.chatTab ? '' : ' · no chat tab'}
-              </Text>
-            </View>
-            {item.chatTab && <Text style={styles.muted}>›</Text>}
-          </Pressable>
-        )}
-      />
-    </Screen>
-  )
-}
-
-// ── Chat ───────────────────────────────────────────────────────────────
-
-function ChatScreen({
-  client,
-  sessionId,
-  worktreePath,
-  onBack
-}: {
-  client: NessClient
-  sessionId: string
-  worktreePath: string
-  onBack: () => void
-}) {
-  const session = useNess(client, (s) => s.jsonClaude.sessions[sessionId])
-  const approvals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
-  const [draft, setDraft] = useState('')
-
-  // Wire snapshots strip entries; fetch them once (server dispatches
-  // jsonClaude/entriesSeeded, which our reducer applies).
-  useEffect(() => {
-    if (session && !session.entriesHydrated) void client.fetchEntries(sessionId)
-  }, [client, sessionId, !!session])
-
-  const mine = Object.values(approvals).filter((a) => a.sessionId === sessionId)
-  const entries = (session?.entries ?? []).filter((e) => !e.parentToolUseId)
-
-  return (
-    <Screen
-      title={worktreePath.split('/').pop() ?? 'Chat'}
-      subtitle={session ? `${session.state}${session.busy ? ' · working' : ''}` : 'asleep'}
-      left={<Link label="‹ Back" onPress={onBack} />}
-    >
-      {!session && (
-        <Button label="Wake session" onPress={() => void client.startSession(sessionId, worktreePath)} />
-      )}
-      <FlatList
-        style={{ flex: 1 }}
-        data={[...entries].reverse()}
-        inverted
-        keyExtractor={(e) => e.entryId}
-        renderItem={({ item }) => <Entry entry={item} />}
-      />
-      {mine.map((a) => (
-        <ApprovalCard key={a.requestId} approval={a} client={client} />
-      ))}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.composer}>
-          <TextInput
-            style={[styles.input, { flex: 1, marginTop: 0 }]}
-            placeholder={session ? 'Message Claude…' : 'Wake the session first'}
-            placeholderTextColor="#666"
-            editable={!!session}
-            value={draft}
-            onChangeText={setDraft}
-            onSubmitEditing={() => {
-              if (!draft.trim()) return
-              client.sendMessage(sessionId, draft.trim())
-              setDraft('')
-            }}
-          />
-          <Button
-            label="Send"
-            onPress={() => {
-              if (!draft.trim() || !session) return
-              client.sendMessage(sessionId, draft.trim())
-              setDraft('')
-            }}
-          />
-        </View>
-      </KeyboardAvoidingView>
-    </Screen>
-  )
-}
-
-function Entry({ entry }: { entry: JsonClaudeChatEntry }) {
-  if (entry.kind === 'user') {
-    return (
-      <View style={[styles.bubble, styles.userBubble]}>
-        <Text style={styles.text}>{entry.text}</Text>
-      </View>
-    )
-  }
-  if (entry.kind === 'error') {
-    return <Text style={styles.error}>{entry.errorMessage ?? 'error'}</Text>
-  }
-  if (entry.kind !== 'assistant') return null
-  return (
-    <View style={styles.bubble}>
-      {(entry.blocks ?? []).map((b, i) => {
-        if (b.type === 'text') return <Text key={i} style={styles.text}>{b.text}</Text>
-        if (b.type === 'tool_use')
-          return (
-            <Text key={i} style={styles.tool} numberOfLines={2}>
-              ⚙ {b.name} {summarizeInput(b.input)}
-            </Text>
-          )
-        return null
-      })}
-    </View>
-  )
-}
-
-function ApprovalCard({ approval, client }: { approval: JsonClaudePendingApproval; client: NessClient }) {
-  const [busy, setBusy] = useState(false)
-  const act = (allow: boolean) => {
-    setBusy(true)
-    client.resolveApproval(approval.requestId, allow, approval.input).finally(() => setBusy(false))
-  }
-  return (
-    <View style={styles.approval}>
-      <Text style={styles.rowTitle}>Allow {approval.toolName}?</Text>
-      <Text style={styles.tool} numberOfLines={4}>{summarizeInput(approval.input)}</Text>
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-        <Button label="Allow" onPress={() => act(true)} disabled={busy} />
-        <Button label="Deny" onPress={() => act(false)} disabled={busy} kind="danger" />
-      </View>
-    </View>
-  )
-}
-
-function summarizeInput(input: Record<string, unknown> | undefined): string {
-  if (!input) return ''
-  const v = input.command ?? input.file_path ?? input.pattern ?? input.url
-  return typeof v === 'string' ? v : JSON.stringify(input).slice(0, 160)
-}
-
-// ── Tiny UI kit ────────────────────────────────────────────────────────
-
-function Screen(props: {
-  title: string
-  subtitle?: string
-  left?: React.ReactNode
-  right?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView style={s.screen}>
       <StatusBar style="light" />
-      <View style={styles.header}>
-        {props.left}
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title} numberOfLines={1}>{props.title}</Text>
-          {props.subtitle && <Text style={styles.muted} numberOfLines={1}>{props.subtitle}</Text>}
-        </View>
-        {props.right}
-      </View>
-      <View style={styles.body}>{props.children}</View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {children}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }
 
+/** First screen after launch: open the worktree with the most recent live
+ *  chat on the first enabled backend. */
+function AutoSelect({
+  clients,
+  onSelect,
+  onOpenSheet
+}: {
+  clients: NessClient[]
+  onSelect: (s: Selection) => void
+  onOpenSheet: () => void
+}) {
+  const first = clients[0]
+  if (!first) {
+    return (
+      <Centered>
+        <Text style={s.muted}>All backends are disabled.</Text>
+        <Pressable onPress={onOpenSheet}>
+          <Text style={{ color: c.accent, fontSize: fs.sm }}>Open worktrees</Text>
+        </Pressable>
+      </Centered>
+    )
+  }
+  return <AutoSelectFor client={first} onSelect={onSelect} />
+}
+
+function AutoSelectFor({ client, onSelect }: { client: NessClient; onSelect: (s: Selection) => void }) {
+  const conn = useConn(client)
+  useEffect(() => {
+    if (!conn.hasSnapshot) return
+    const st = client.getState()
+    const withChat = st.worktrees.list
+      .filter((w) => chatTabsOf(st, w.path).some((t) => st.jsonClaude.sessions[t.id]))
+      .sort((a, b) => (st.terminals.lastActive[b.path] ?? 0) - (st.terminals.lastActive[a.path] ?? 0))
+    const pick = withChat[0] ?? st.worktrees.list.find((w) => w.isMain) ?? st.worktrees.list[0]
+    if (pick) onSelect({ backendId: client.id, path: pick.path })
+  }, [conn.hasSnapshot, client, onSelect])
+  return (
+    <Centered>
+      <ActivityIndicator color={c.muted} />
+      <Text style={s.muted}>
+        {conn.error ? `${client.label}: ${conn.error} — retrying` : `Connecting to ${client.label}…`}
+      </Text>
+    </Centered>
+  )
+}
+
+function WorktreeView({
+  client,
+  path,
+  tabId,
+  onTab,
+  onOpenSheet
+}: {
+  client: NessClient
+  path: string
+  tabId: string | undefined
+  onTab: (id: string) => void
+  onOpenSheet: () => void
+}) {
+  const wt = useNess(client, (st) => st.worktrees.list.find((w) => w.path === path))
+  const pane = useNess(client, (st) => st.terminals.panes[path])
+  const sessions = useNess(client, (st) => st.jsonClaude.sessions)
+  const conn = useConn(client)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tabs = useMemo(() => chatTabsOf(client.getState(), path), [client, path, pane])
+
+  // Default tab: a live session beats an exited or slept one.
+  const active =
+    tabs.find((t) => t.id === tabId) ??
+    tabs.find((t) => sessions[t.id] && sessions[t.id].state !== 'exited') ??
+    tabs[0]
+
+  const newChat = () => void client.addChatTab(path).then(onTab)
+  const repo = (wt?.repoRoot ?? path).split('/').pop() ?? ''
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={s.topBar}>
+        <Pressable onPress={onOpenSheet} style={s.wtButton}>
+          <View style={{ minWidth: 0, flexShrink: 1 }}>
+            <Text style={s.wtRepo} numberOfLines={1}>
+              {repo}
+            </Text>
+            <Text style={s.wtBranch} numberOfLines={1}>
+              {wt?.isMain ? 'main' : wt?.branch ?? path.split('/').pop()}
+            </Text>
+          </View>
+          <ChevronDown color={c.dim} size={14} />
+          {!conn.connected && <View style={[s.tabDot, { backgroundColor: c.danger }]} />}
+        </Pressable>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'stretch' }}>
+          {tabs.map((t) => (
+            <ChatTab key={t.id} client={client} tab={t} active={t.id === active?.id} onPress={() => onTab(t.id)} />
+          ))}
+          <Pressable style={s.addTab} hitSlop={6} onPress={newChat} accessibilityLabel="New chat">
+            <Plus color={c.dim} size={16} />
+          </Pressable>
+        </ScrollView>
+      </View>
+      {active ? (
+        <ChatView key={active.id} client={client} sessionId={active.id} worktreePath={path} />
+      ) : (
+        <Centered>
+          <Text style={s.muted}>No chat tab in this worktree.</Text>
+          <Text style={[s.muted, { color: c.faint, textAlign: 'center', paddingHorizontal: 32 }]}>
+            Terminal tabs stream raw PTY output, which the mobile client doesn't render.
+          </Text>
+          <Pressable style={s.newChatBtn} onPress={newChat}>
+            <Plus color="#fff" size={14} />
+            <Text style={{ color: '#fff', fontSize: fs.xs, fontWeight: '500' }}>New chat</Text>
+          </Pressable>
+        </Centered>
+      )}
+    </View>
+  )
+}
+
+function ChatTab({
+  client,
+  tab,
+  active,
+  onPress
+}: {
+  client: NessClient
+  tab: TerminalTab
+  active: boolean
+  onPress: () => void
+}) {
+  const status = useNess(client, (st) => st.terminals.statuses[tab.id] ?? 'idle')
+  return (
+    <Pressable onPress={onPress} style={[s.tab, active && s.tabActive]}>
+      <Asterisk color="#d97757" size={14} strokeWidth={3} />
+      <View style={[s.tabDot, { backgroundColor: STATUS_DOT[status] }]} />
+      <Text style={[s.tabText, active && { color: c.fgBright }]} numberOfLines={1}>
+        {tab.customLabel || tab.label}
+      </Text>
+    </Pressable>
+  )
+}
+
 function Centered({ children }: { children: React.ReactNode }) {
-  return <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>{children}</View>
+  return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>{children}</View>
 }
 
-function Button(props: { label: string; onPress: () => void; disabled?: boolean; kind?: 'danger' }) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={props.disabled}
-      style={[styles.button, props.kind === 'danger' && { backgroundColor: '#7f1d1d' }, props.disabled && { opacity: 0.5 }]}
-    >
-      <Text style={styles.buttonText}>{props.label}</Text>
-    </Pressable>
-  )
-}
-
-function Link({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} hitSlop={12}>
-      <Text style={styles.link}>{label}</Text>
-    </Pressable>
-  )
-}
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#111' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: 1, borderColor: '#222' },
-  body: { flex: 1, padding: 12 },
-  title: { color: '#fff', fontSize: 20, fontWeight: '600' },
-  muted: { color: '#888', fontSize: 13 },
-  text: { color: '#eee', fontSize: 15, lineHeight: 21 },
-  tool: { color: '#a78bfa', fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: 12, marginTop: 4 },
-  error: { color: '#f87171', marginTop: 8 },
-  link: { color: '#60a5fa', fontSize: 15 },
-  input: { borderWidth: 1, borderColor: '#333', borderRadius: 8, color: '#fff', padding: 12, marginTop: 12, fontSize: 15 },
-  button: { backgroundColor: '#2563eb', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, marginTop: 12, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  camera: { height: 300, borderRadius: 12, overflow: 'hidden', marginTop: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderColor: '#1c1c1c' },
-  rowTitle: { color: '#fff', fontSize: 15, fontWeight: '500' },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  bubble: { padding: 10, borderRadius: 10, backgroundColor: '#1a1a1a', marginVertical: 4 },
-  userBubble: { backgroundColor: '#1e3a8a', alignSelf: 'flex-end', maxWidth: '85%' },
-  approval: { borderWidth: 1, borderColor: '#ef4444', borderRadius: 10, padding: 12, marginVertical: 8, backgroundColor: '#1f1111' },
-  composer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.app },
+  muted: { color: c.muted, fontSize: fs.xs },
+  topBar: {
+    height: 44,
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderColor: c.border,
+    backgroundColor: c.panel
+  },
+  wtButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    maxWidth: 180,
+    borderRightWidth: 1,
+    borderColor: c.border
+  },
+  wtRepo: { color: c.dim, fontSize: fs.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  wtBranch: { color: c.fgBright, fontSize: fs.xs, fontWeight: '500' },
+  tab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    borderBottomWidth: 2,
+    borderColor: 'transparent'
+  },
+  tabActive: { borderColor: c.muted, backgroundColor: c.app },
+  tabText: { color: c.dim, fontSize: fs.xs, maxWidth: 120 },
+  tabDot: { width: 6, height: 6, borderRadius: 3 },
+  addTab: { paddingHorizontal: 12, justifyContent: 'center' },
+  newChatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: c.accent,
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  }
 })

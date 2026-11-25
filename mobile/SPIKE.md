@@ -196,6 +196,48 @@ Node probe (`ws`) on the same wire:
 - Reconnect re-snapshots every time (the existing transport design). With
   mobile radio flapping that's 60KB per reconnect, which is acceptable.
 
+## 7. Looking like Ness, with several backends
+
+The UI is a port of the web client's mobile layout (`MobileApp.tsx`):
+
+- **Top bar:** the worktree switcher (repo name, branch) and that
+  worktree's chat tabs with status dots, plus a `+` for a new chat
+  (`panes:addTab` then `jsonClaude:start`).
+- **Worktree sheet:** a project card per repo, then the sidebar's groups
+  (Open PRs / Active / …) from the shared `groupWorktrees()`. Rows show the
+  status dot, PR icon, age, `+adds −dels` and a `#PR` pill.
+- **Chat:** finished turns fold into "Worked for 28s · 3 tools" (a
+  simplified `foldFinishedTurns`). The live turn shows tool lines and a
+  "Working · Ns" row. User bubbles use `accent/10`, and the approval card
+  copies `JsonClaudeApprovalCard`.
+- **Composer:** state dot, permission-mode pill and Send, plus Stop while
+  busy.
+
+Colours and sizes come from the web client's computed `--color-*`
+variables (`mobile/src/theme.ts`). Icons are `lucide-react-native`, the RN
+sibling of the desktop's `lucide-react`.
+
+Two small helpers, `formatTurnDuration` and `formatWorktreeAge`, are
+*copied* from `src/renderer`, because Metro only watches `src/shared`.
+Moving them (and the turn-folding model) into `src/shared` is the first
+refactor for a real app.
+
+**Multiple backends.** The app keeps a saved list (`ness.backends` in
+secure-store), each entry with an enable switch, and runs one `NessClient`
+(transport plus store) per enabled backend. The desktop's `BackendsRegistry`
+is the same shape. The worktree sheet lists every backend's repos, tagged
+with the backend label when more than one is enabled. Re-pairing the same
+host, for example after a token rotate, replaces the saved entry.
+
+This was verified on Expo web against two `harness-server`s at once: this
+repo, and a throwaway repo labelled "Build box". The test switched between
+them, started a new chat on the second, and allowed two tool calls there.
+The same build renders in Expo Go on iOS.
+
+Unlike the desktop, it doesn't merge the same repo across backends into one
+section (`worktree-list-model.ts` does that by origin URL). That would be a
+straightforward port if wanted.
+
 ## Recommended architecture to productionise
 
 - **Keep** importing `src/shared` directly. Enforce RN-safety in CI with
