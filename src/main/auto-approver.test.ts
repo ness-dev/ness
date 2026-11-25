@@ -101,6 +101,24 @@ describe('checkDenyList', () => {
     ).toMatch(/outside home/)
   })
 
+  it('still catches absolute paths in a Bash command', () => {
+    expect(checkDenyList('Bash', { command: 'cat /etc/hosts' })).toMatch(/outside home/)
+  })
+
+  it('ignores URL routes and slash words in prose fields', () => {
+    // Regression: both of these used to read as "absolute path outside
+    // home: /health" and bypass the reviewer.
+    expect(
+      checkDenyList('Bash', {
+        command: 'curl -si localhost:3000/health',
+        description: 'Start server, curl /health and /, stop it'
+      })
+    ).toBeNull()
+    expect(
+      checkDenyList('mcp__other__notify', { message: '/health is added; run /review next' })
+    ).toBeNull()
+  })
+
   it('allows /tmp paths through to the reviewer', () => {
     expect(checkDenyList('Bash', { command: 'ls /tmp/foo' })).toBeNull()
   })

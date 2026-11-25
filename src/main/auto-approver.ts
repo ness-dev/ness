@@ -139,10 +139,15 @@ export function checkDenyList(
   // gets routed to the human. Skip / itself (very common as a separator
   // inside relative-looking strings) and tolerate /tmp (frequent and
   // ephemeral).
+  //
+  // Only fields that hold paths are scanned. Scanning the whole input sent
+  // every prose field with a URL route in it ("curl /health" in a Bash
+  // description, "/health is added" in a progress message) to the human.
   const home = homedir()
   const absPathRe = /(^|["\s'])(\/[A-Za-z][^\s"']*)/g
+  const pathText = pathBearingStrings(toolName, input).join('\n')
   let m: RegExpExecArray | null
-  while ((m = absPathRe.exec(inputStr)) !== null) {
+  while ((m = absPathRe.exec(pathText)) !== null) {
     const p = m[2]
     if (p.startsWith(home)) continue
     if (p.startsWith('/tmp/') || p === '/tmp') continue
@@ -152,6 +157,30 @@ export function checkDenyList(
     return `input references absolute path outside home: ${p}`
   }
   return null
+}
+
+// Keys whose string values are (or may be) filesystem paths across the
+// built-in file tools and typical MCP servers: file_path, notebook_path,
+// path, cwd, directory, dir, filename, …
+const PATH_KEY_RE = /path|file|dir|cwd|folder/i
+
+/** The parts of a tool input that can name a filesystem location: a Bash
+ *  command, plus top-level string (or string-array) fields with a path-ish
+ *  key. Public for tests. */
+export function pathBearingStrings(
+  toolName: string,
+  input: Record<string, unknown>
+): string[] {
+  const out: string[] = []
+  if (toolName === 'Bash' && typeof input['command'] === 'string') out.push(input['command'])
+  for (const [key, value] of Object.entries(input)) {
+    if (!PATH_KEY_RE.test(key)) continue
+    if (typeof value === 'string') out.push(value)
+    else if (Array.isArray(value)) {
+      for (const v of value) if (typeof v === 'string') out.push(v)
+    }
+  }
+  return out
 }
 
 function safeStringify(v: unknown): string {
