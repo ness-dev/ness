@@ -519,6 +519,18 @@ hard dependency on `gh`.
 - **Hooks consent** — first time a user activates a worktree, we show a
   banner asking permission to install the hooks. We never write to user
   files without that consent.
+- **Worktrees are pre-trusted in Claude's global config.** Claude records
+  folder trust per exact path (`projects[<realpath>].hasTrustDialogAccepted`
+  in `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`), and a worktree
+  counts as its own folder, so trusting the main repo doesn't cover it. Every
+  new worktree's first terminal tab used to open on the trust prompt.
+  `onWorktreeCreated` awaits `trustClaudeProject` (`src/main/claude-trust.ts`)
+  before the first tab spawns. Every running `claude` rewrites that file, so
+  the write takes Claude's own `proper-lockfile` lock (`<file>.lock` dir),
+  re-reads under it, and renames a temp file into place. Anything unexpected
+  (missing or unparseable config, lock held past 3 s) leaves the file
+  untouched, so the worst case is the old prompt. Codex trust
+  (`~/.codex/config.toml`) isn't handled yet.
 - **Login shell wrapping** — the PtyManager spawns `/bin/zsh -ilc <command>`
   instead of running the command directly, so the user's full PATH is loaded
   (homebrew binaries, nvm, etc.).
