@@ -194,7 +194,9 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
               why: '',
               since: statusSince
             })
-          } else if (status === 'waiting' && turn && unread) {
+          } else if (turn && unread) {
+            // 'idle' included: a restart puts chat tabs to sleep with no
+            // status, and an unread reply is still unread.
             const section = turn.kind === 'question' ? 'question' : 'done'
             buckets[section].push({ ...base, section, why: turn.text, since: turn.endedAt })
           } else {

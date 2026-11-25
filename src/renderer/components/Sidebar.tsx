@@ -129,26 +129,6 @@ export function Sidebar({
             <PanelLeftClose className="icon-xs" />
           </button>
         </Tooltip>
-        <div className="flex items-center rounded-md bg-surface p-0.5 text-xs" role="tablist">
-          {(['projects', 'inbox'] as const).map((v) => (
-            <button
-              key={v}
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => onViewChange(v)}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors ${
-                view === v ? 'bg-panel text-fg-bright' : 'text-dim hover:text-fg'
-              }`}
-            >
-              {v === 'projects' ? 'Projects' : 'Inbox'}
-              {v === 'inbox' && needsYouCount > 0 && (
-                <span className="rounded-full bg-accent/30 text-fg-bright px-1.5 leading-tight">
-                  {needsYouCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
         <div className="ml-auto flex items-center gap-1">
           {/* Deliberately one icon among many: most worktrees get started by
               asking a Lead, so the manual path stays available but quiet. */}
@@ -207,6 +187,29 @@ export function Sidebar({
         </div>
       </div>
 
+      {/* Its own row: at the default 224px width the header icons
+          already fill the line above. */}
+      <div className="mx-3 mb-1 shrink-0 flex items-center rounded-md bg-surface p-0.5 text-xs" role="tablist">
+        {(['projects', 'inbox'] as const).map((v) => (
+          <button
+            key={v}
+            role="tab"
+            aria-selected={view === v}
+            onClick={() => onViewChange(v)}
+            className={`flex-1 justify-center px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors ${
+              view === v ? 'bg-panel text-fg-bright' : 'text-dim hover:text-fg'
+            }`}
+          >
+            {v === 'projects' ? 'Projects' : 'Inbox'}
+            {v === 'inbox' && needsYouCount > 0 && (
+              <span className="rounded-full bg-accent/30 text-fg-bright px-1.5 leading-tight">
+                {needsYouCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       <div data-sidebar-scroll className="flex-1 overflow-y-auto py-1">
         {view === 'inbox' ? (
           <InboxView
@@ -216,35 +219,35 @@ export function Sidebar({
             onOpen={onOpenInboxItem}
           />
         ) : (
-        <WorktreeList
-          model={model}
-          variant="desktop"
-          activeWorktreeId={activeWorktreeId}
-          activeTabId={activeTabId}
-          snoozeDefaultDays={snoozeDefaultDays}
-          agentCount={agentCount}
-          editingAliasPath={editingAliasPath}
-          onStartAliasEdit={onStartAliasEdit}
-          onEndAliasEdit={onEndAliasEdit}
-          onSelectWorktree={onSelectWorktree}
-          pathBackendId={pathBackendId}
-          originByPath={originByPath}
-          onSelectTab={onSelectTab}
-          onCloseTab={onCloseTab}
-          onToggleGroup={onToggleGroup}
-          onTogglePinnedOpen={onTogglePinnedOpen}
-          onNewWorktree={onNewWorktree}
-          onDismissPendingWorktree={onDismissPendingWorktree}
-          onContinueWorktree={onContinueWorktree}
-          onDeleteWorktree={onDeleteWorktree}
-          onPruneWorktrees={onPruneWorktrees}
-          onRemoveRepo={onRemoveRepo}
-          onOpenGraph={onOpenSubscriptionGraph}
-          onOpenAssignedPR={onOpenAssignedPR}
-          historyPromptRepos={historyPromptRepos}
-          onOpenHistoryTracking={onOpenHistoryTracking}
-          onDismissHistoryPrompt={onDismissHistoryPrompt}
-        />
+          <WorktreeList
+            model={model}
+            variant="desktop"
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeTabId}
+            snoozeDefaultDays={snoozeDefaultDays}
+            agentCount={agentCount}
+            editingAliasPath={editingAliasPath}
+            onStartAliasEdit={onStartAliasEdit}
+            onEndAliasEdit={onEndAliasEdit}
+            onSelectWorktree={onSelectWorktree}
+            pathBackendId={pathBackendId}
+            originByPath={originByPath}
+            onSelectTab={onSelectTab}
+            onCloseTab={onCloseTab}
+            onToggleGroup={onToggleGroup}
+            onTogglePinnedOpen={onTogglePinnedOpen}
+            onNewWorktree={onNewWorktree}
+            onDismissPendingWorktree={onDismissPendingWorktree}
+            onContinueWorktree={onContinueWorktree}
+            onDeleteWorktree={onDeleteWorktree}
+            onPruneWorktrees={onPruneWorktrees}
+            onRemoveRepo={onRemoveRepo}
+            onOpenGraph={onOpenSubscriptionGraph}
+            onOpenAssignedPR={onOpenAssignedPR}
+            historyPromptRepos={historyPromptRepos}
+            onOpenHistoryTracking={onOpenHistoryTracking}
+            onDismissHistoryPrompt={onDismissHistoryPrompt}
+          />
         )}
       </div>
 

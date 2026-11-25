@@ -100,7 +100,9 @@ export function InboxView({
                     <span className="min-w-0 flex-1 flex flex-col">
                       <span className="flex items-baseline gap-1 text-xs min-w-0">
                         <span className="truncate">
-                          <span className="text-faint">{item.repoName} · </span>
+                          {item.worktreeLabel !== item.repoName && (
+                            <span className="text-faint">{item.repoName} · </span>
+                          )}
                           <span>{item.worktreeLabel}</span>
                           {item.tabLabel && (
                             <span className="text-faint"> · {item.tabLabel}</span>
@@ -110,7 +112,7 @@ export function InboxView({
                       </span>
                       {item.why && (
                         <span
-                          className={`text-xs truncate ${
+                          className={`text-xs line-clamp-2 break-words ${
                             item.section === 'seen' ? 'text-faint' : 'text-fg'
                           }`}
                           title={item.why}

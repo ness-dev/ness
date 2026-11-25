@@ -101,6 +101,13 @@ describe('buildInboxModel', () => {
     expect(keysOf(seen, 'pr')).toEqual([])
   })
 
+  it('keeps an unread turn in its section after a restart leaves the tab asleep', () => {
+    const base = input()
+    const { d: _d, ...statuses } = base.statuses
+    void _d
+    expect(keysOf(buildInboxModel({ ...base, statuses }), 'done')).toEqual(['d'])
+  })
+
   it('jump skips the tab already focused', () => {
     const m = buildInboxModel(input())
     expect(nextInboxItem(m, null)?.key).toBe('a')
