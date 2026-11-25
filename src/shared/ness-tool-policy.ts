@@ -20,6 +20,11 @@
 //   that WebFetch would prompt for. So navigate_tab and create_browser_tab
 //   are only auto-allowed for loopback http(s) dev servers and about:blank
 //   (see URL_GATED_TOOLS). Everything else goes down the normal path.
+//   This narrows those channels; it doesn't close them. Loopback also
+//   covers any other local service (Jupyter, a DB admin UI, CUPS, a Docker
+//   or Ollama API), and a loopback page can still send the tab off-host via
+//   a click_tab on an external link or a server redirect. Gating every
+//   click would undo the point, so don't treat this as a hard boundary.
 // - create_worktree and send_message start or message other agents with
 //   text the calling agent wrote. They stay auto-allowed because
 //   orchestration is the point of them (onboarding's Getting Started flow
