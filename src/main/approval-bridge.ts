@@ -515,9 +515,6 @@ export class ApprovalBridge {
         : { state: 'pending' }
     }
 
-    // Would this call have gone through with its setup command approved?
-    // Then the command is the only thing the user is being asked about,
-    // so the card shows it and allowing remembers it.
     // Any create_worktree card shows the repo setup command that Allow
     // would run, whatever else it's asking about (a PR checkout or an
     // unopened clone runs it too). Remembering it is narrower: only when
