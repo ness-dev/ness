@@ -41,7 +41,11 @@ export function BackendsSheet({ backends, onClose }: { backends: Backends; onClo
               trackColor={{ true: c.accent, false: c.surface }}
               thumbColor="#fff"
             />
-            <Pressable onPress={() => backends.remove(b.id)} hitSlop={8}>
+            <Pressable
+              onPress={() => backends.remove(b.id)}
+              accessibilityLabel={`Remove ${b.label}`}
+              style={({ pressed }) => ({ width: 44, height: 44, marginRight: -10, alignItems: 'center', justifyContent: 'center', borderRadius: 6, backgroundColor: pressed ? c.surface : 'transparent' })}
+            >
               <Trash2 color={c.dim} size={16} />
             </Pressable>
           </View>
@@ -174,11 +178,11 @@ function AddBackend({
       <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
         {onCancel && (
           <Pressable style={s.btn} onPress={onCancel}>
-            <Text style={{ color: c.fg, fontSize: fs.xs }}>Cancel</Text>
+            <Text style={{ color: c.fg, fontSize: fs.sm }}>Cancel</Text>
           </Pressable>
         )}
         <Pressable style={[s.btn, { backgroundColor: c.accent, borderColor: c.accent }]} onPress={() => submit(link)}>
-          <Text style={{ color: '#fff', fontSize: fs.xs, fontWeight: '500' }}>Connect</Text>
+          <Text style={{ color: '#fff', fontSize: fs.sm, fontWeight: '600' }}>Connect</Text>
         </Pressable>
       </View>
     </View>
@@ -211,13 +215,13 @@ const s = StyleSheet.create({
   url: { color: c.dim, fontSize: 11, fontFamily: mono, marginTop: 2 },
   status: { color: c.muted, fontSize: 11, marginTop: 2 },
   help: { color: c.muted, fontSize: fs.xs, lineHeight: 17 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12 },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, minHeight: 48 },
   scanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 10,
+    minHeight: 44,
     borderRadius: 6,
     backgroundColor: alpha(c.accent, 0.15),
     borderWidth: 1,
@@ -231,8 +235,9 @@ const s = StyleSheet.create({
     borderRadius: 6,
     color: c.fg,
     paddingHorizontal: 10,
-    paddingVertical: 9,
-    fontSize: fs.sm
+    minHeight: 44,
+    fontSize: 16
   },
-  btn: { borderWidth: 1, borderColor: c.border, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 6 }
+  // 44pt: the thumb-sized minimum used everywhere else in the app.
+  btn: { borderWidth: 1, borderColor: c.border, borderRadius: 6, paddingHorizontal: 18, minHeight: 44, minWidth: 88, alignItems: 'center', justifyContent: 'center' }
 })
