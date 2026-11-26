@@ -66,6 +66,10 @@ interface PendingResponse {
    *  approval card after the user edits steering guidance) can rebuild
    *  the prompt without crossing slice boundaries. */
   payload: JsonClaudePendingApproval
+  /** Set when this create_worktree asked only because of the repo's setup
+   *  command; allowing it remembers that command. Snapshotted at request
+   *  time so an edit to .ness.json while the card is open isn't approved. */
+  approvesSetup?: { repoRoot: string; command: string }
 }
 
 interface SessionEntry {
@@ -86,9 +90,16 @@ export interface ApprovalBridgeDeps {
    *  guidance. Empty string when unset. */
   getAutoApproveSteerInstructions: () => string
   /** The repo's own (.ness.json) setup command an MCP create_worktree from
-   *  this session would run (repoRoot undefined = the session's own repo):
-   *  '' for none, null when unknown. */
-  repoSetupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+   *  this session would run, with the repo it resolved to (repoRoot
+   *  undefined = the session's own repo). command is '' for none; null
+   *  when the repo can't be resolved. */
+  repoSetupFor?: (
+    sessionId: string,
+    repoRoot: string | undefined
+  ) => { repoRoot: string; command: string } | null
+  /** The user allowed a create_worktree whose only reason to ask was this
+   *  repo setup command. The host records and persists it. */
+  onSetupCommandApproved?: (repoRoot: string, command: string) => void
   /** True when `repoRoot` is a repo already open in Ness. */
   isOpenRepo?: (repoRoot: string) => boolean
 }
@@ -244,6 +255,10 @@ export class ApprovalBridge {
       type: 'jsonClaude/approvalResolved',
       payload: { requestId }
     })
+    if (result.behavior === 'allow' && pending.approvesSetup) {
+      const { repoRoot, command } = pending.approvesSetup
+      this.deps?.onSetupCommandApproved?.(repoRoot, command)
+    }
     return true
   }
 
@@ -405,13 +420,25 @@ export class ApprovalBridge {
     // a human; see shared/ness-tool-policy.ts for what's excluded and why.
     // No approvalSessionAllowed dispatch either: these calls fire every
     // turn, and an "auto-allowed" chip on each would be noise.
-    const repoSetupCommandFor = this.deps?.repoSetupCommandFor
+    const repoSetupFor = this.deps?.repoSetupFor
+    let setup: { repoRoot: string; command: string } | null = null
+    const nessCtx = {
+      repoSetupCommandFor: repoSetupFor
+        ? (repoRoot: string | undefined): string | null => {
+            setup = repoSetupFor(basePayload.sessionId, repoRoot)
+            return setup?.command ?? null
+          }
+        : undefined,
+      isOpenRepo: this.deps?.isOpenRepo
+    }
+    const approved = this.store.getSnapshot().state.permissions.approvedSetupCommands
     if (
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
-        repoSetupCommandFor: repoSetupCommandFor
-          ? (repoRoot) => repoSetupCommandFor(basePayload.sessionId, repoRoot)
-          : undefined,
-        isOpenRepo: this.deps?.isOpenRepo
+        ...nessCtx,
+        isSetupCommandApproved: () => {
+          const s = setup as { repoRoot: string; command: string } | null
+          return s !== null && approved[s.repoRoot] === s.command
+        }
       })
     ) {
       respond({ behavior: 'allow', updatedInput: basePayload.input })
@@ -476,11 +503,24 @@ export class ApprovalBridge {
     }
 
     const payload: JsonClaudePendingApproval = { ...basePayload, autoReview }
+    // Would this call have gone through with its setup command approved?
+    // Then the command is the only thing the user is being asked about.
+    const pendingSetup = setup as { repoRoot: string; command: string } | null
+    const approvesSetup =
+      pendingSetup &&
+      pendingSetup.command !== '' &&
+      isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
+        ...nessCtx,
+        isSetupCommandApproved: () => true
+      })
+        ? pendingSetup
+        : undefined
     this.pendingResponses.set(payload.requestId, {
       respond,
       socket,
       sessionId: payload.sessionId,
-      payload
+      payload,
+      ...(approvesSetup ? { approvesSetup } : {})
     })
     this.store.dispatch({ type: 'jsonClaude/approvalRequested', payload })
     log(

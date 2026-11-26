@@ -24,10 +24,16 @@ export interface PermissionsState {
   /** Insertion-ordered. The matcher short-circuits on the first hit, so
    *  order is observable only in which rule gets attributed in the log. */
   rules: StoredPermissionRule[]
+  /** repoRoot → the .ness.json setupCommand the user last allowed an
+   *  agent's create_worktree to run there. While the repo's command still
+   *  equals this, create_worktree runs without asking; once it changes, the
+   *  next one asks again. See shared/ness-tool-policy.ts. */
+  approvedSetupCommands: Record<string, string>
 }
 
 export const initialPermissions: PermissionsState = {
-  rules: []
+  rules: [],
+  approvedSetupCommands: {}
 }
 
 export type PermissionsEvent =
@@ -35,6 +41,8 @@ export type PermissionsEvent =
   | { type: 'permissions/granted'; payload: { rule: StoredPermissionRule } }
   | { type: 'permissions/revoked'; payload: { id: string } }
   | { type: 'permissions/cleared' }
+  | { type: 'permissions/setupCommandApproved'; payload: { repoRoot: string; command: string } }
+  | { type: 'permissions/setupCommandForgotten'; payload: { repoRoot: string } }
 
 export function permissionsReducer(
   state: PermissionsState,
@@ -62,8 +70,26 @@ export function permissionsReducer(
       }
     }
     case 'permissions/cleared':
-      if (state.rules.length === 0) return state
-      return { ...state, rules: [] }
+      // Clearing every grant also forgets approved setup commands: both are
+      // "run this without asking me".
+      if (state.rules.length === 0 && Object.keys(state.approvedSetupCommands).length === 0) {
+        return state
+      }
+      return { rules: [], approvedSetupCommands: {} }
+    case 'permissions/setupCommandApproved': {
+      const { repoRoot, command } = event.payload
+      if (state.approvedSetupCommands[repoRoot] === command) return state
+      return {
+        ...state,
+        approvedSetupCommands: { ...state.approvedSetupCommands, [repoRoot]: command }
+      }
+    }
+    case 'permissions/setupCommandForgotten': {
+      if (!(event.payload.repoRoot in state.approvedSetupCommands)) return state
+      const { [event.payload.repoRoot]: _dropped, ...rest } = state.approvedSetupCommands
+      void _dropped
+      return { ...state, approvedSetupCommands: rest }
+    }
     default: {
       const _exhaustive: never = event
       void _exhaustive

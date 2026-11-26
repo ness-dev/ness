@@ -496,12 +496,18 @@ const approvalBridge = new ApprovalBridge(store, {
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
     store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
-  repoSetupCommandFor: (sessionId, repoRoot) => {
+  repoSetupFor: (sessionId, repoRoot) => {
     const state = store.getSnapshot().state
     const sessionPath = state.jsonClaude.sessions[sessionId]?.worktreePath
     const root =
-      repoRoot ?? state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
-    return root ? loadRepoConfig(root).setupCommand?.trim() || '' : null
+      repoRoot?.replace(/\/+$/, '') ??
+      state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
+    if (!root) return null
+    return { repoRoot: root, command: loadRepoConfig(root).setupCommand?.trim() || '' }
+  },
+  onSetupCommandApproved: (repoRoot, command) => {
+    store.dispatch({ type: 'permissions/setupCommandApproved', payload: { repoRoot, command } })
+    persistPermissionRules()
   },
   isOpenRepo: (repoRoot) => {
     const want = repoRoot.replace(/\/+$/, '')
@@ -1598,7 +1604,9 @@ function grantPermissionRules(rules: PermissionRule[], grantedFrom?: string): nu
 }
 
 function persistPermissionRules(): void {
-  config.permissionRules = store.getSnapshot().state.permissions.rules
+  const { rules, approvedSetupCommands } = store.getSnapshot().state.permissions
+  config.permissionRules = rules
+  config.approvedSetupCommands = approvedSetupCommands
   saveConfig(config)
 }
 
@@ -3361,6 +3369,13 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('permissions:clear', (): boolean => {
     store.dispatch({ type: 'permissions/cleared' })
+    persistPermissionRules()
+    return true
+  })
+
+  transport.onRequest('permissions:forgetSetupCommand', (_ctx, repoRoot: string): boolean => {
+    if (typeof repoRoot !== 'string' || !repoRoot) return false
+    store.dispatch({ type: 'permissions/setupCommandForgotten', payload: { repoRoot } })
     persistPermissionRules()
     return true
   })

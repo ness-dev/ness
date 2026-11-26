@@ -103,6 +103,18 @@ describe('ness tool policy', () => {
     expect(nessAllowedToolsFlagValue()).not.toContain('create_worktree')
   })
 
+  it('auto-allows create_worktree when the repo setup command is the approved one', () => {
+    const cw = 'mcp__ness-control__create_worktree'
+    const ctx = (approved: string) => ({
+      repoSetupCommandFor: () => 'npm install',
+      isSetupCommandApproved: (_root: string | undefined, cmd: string) => cmd === approved
+    })
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx('npm install'))).toBe(true)
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx('npm ci'))).toBe(false)
+    // Approval never overrides the PR-checkout gate.
+    expect(isAutoAllowedNessCall(cw, { prNumber: 1 }, ctx('npm install'))).toBe(false)
+  })
+
   it('asks for create_worktree on a PR checkout', () => {
     const ctx = { repoSetupCommandFor: () => '', isOpenRepo: () => true }
     const cw = 'mcp__ness-control__create_worktree'
