@@ -250,4 +250,10 @@ describe('resolveHotkeys', () => {
     expect(resolved).toEqual(DEFAULT_HOTKEYS)
     expect('toggleCommandCenter' in resolved).toBe(false)
   })
+
+  it('ignores a persisted override for the removed task list toggle', () => {
+    const resolved = resolveHotkeys({ toggleTaskList: 'Cmd+Shift+L', commandPalette: 'Cmd+J' })
+    expect('toggleTaskList' in resolved).toBe(false)
+    expect(resolved.commandPalette).toEqual(parseBinding('Cmd+J'))
+  })
 })

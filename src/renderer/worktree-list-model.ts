@@ -134,8 +134,8 @@ export interface WorktreeRepoSectionModel {
    *  shows this so an agent waiting on you elsewhere still surfaces.
    *  Selection-independent, so it lives in the base build. */
   worstStatus: PtyStatus
-  /** Every worktree grouped by status, main included. Overview surfaces
-   *  (task list) render this; the sidebar renders the
+  /** Every worktree grouped by status, main included. Whole-list
+   *  consumers (hotkey navigation) read this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
   groups: WorktreeListGroupModel[]
   /** Main worktrees, pulled out of the groups. One per repo, primary host
@@ -151,7 +151,6 @@ export interface WorktreeRepoSectionModel {
 
 export interface WorktreeListModel {
   sections: WorktreeRepoSectionModel[]
-  showRepoHeaders: boolean
   showRepoLabels: boolean
   /** Per-worktree-path aggregates, exposed so callers that need the raw maps
    *  (command palette, hotkeys) share this derivation instead
@@ -300,7 +299,6 @@ export function buildWorktreeListBase(
   for (const d of pendingDeletions) deletingPaths.add(d.path)
 
   const unified = unifiedRepos && repoRoots.length > 1
-  const showRepoHeaders = repoRoots.length > 1 && !unified
   const showRepoLabels = repoRoots.length > 1 && unified
 
   // Bucket worktrees by repo, preserving the user's repo order. Unified mode
@@ -545,7 +543,6 @@ export function buildWorktreeListBase(
 
   return {
     sections,
-    showRepoHeaders,
     showRepoLabels,
     statusByPath,
     pendingToolByPath,
