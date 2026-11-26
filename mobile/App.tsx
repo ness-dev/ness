@@ -17,6 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useColorScheme,
   useWindowDimensions,
   View
 } from 'react-native'
@@ -29,7 +30,7 @@ import { useBackends } from './src/backends'
 import { consumeLaunchUrl } from './src/launchUrl'
 import { Fleet, useFleetEntries, useMerged } from './src/fleet'
 import { useNess, type NessClient } from './src/ness'
-import { STATUS_DOT, c, fs } from './src/theme'
+import { STATUS_DOT, applyTheme, c, fs, getThemeMode, themeKey, themed } from './src/theme'
 import { AgentIcon } from './src/components/AgentIcon'
 import { ChatView } from './src/components/ChatView'
 import { WorktreePicker } from './src/components/WorktreePicker'
@@ -54,6 +55,7 @@ function App() {
   // In an effect, not during render: setClients notifies subscribers.
   useEffect(() => fleet.setClients(backends.clients), [fleet, backends.clients])
   const [showBackends, setShowBackends] = useState(false)
+  const theme = useThemeFromSettings(fleet)
 
   // Deep-link pairing: <scheme>://pair?url=<connection link>.
   useEffect(() => {
@@ -71,24 +73,48 @@ function App() {
 
   if (!backends.loaded) {
     return (
-      <Shell>
+      <Shell key={theme}>
         <ActivityIndicator color={c.muted} style={{ flex: 1 }} />
       </Shell>
     )
   }
   if (backends.saved.length === 0) {
     return (
-      <Shell>
+      <Shell key={theme}>
         <BackendsSheet backends={backends} />
       </Shell>
     )
   }
   return (
-    <Shell>
+    <Shell key={theme}>
       <MobileApp fleet={fleet} onOpenBackends={() => setShowBackends(true)} />
       {showBackends && <BackendsSheet backends={backends} onClose={() => setShowBackends(false)} />}
     </Shell>
   )
+}
+
+// Ness's colour theme is a client-owned setting; the phone follows the
+// first connected backend's (normally the user's own desktop), with
+// 'system' resolved against the phone's appearance. The palette is applied
+// during render, before anything below reads `c`, and the returned key
+// remounts the UI subtree so every component and themed() style picks up
+// the new colours. Backend connections live above it and stay up.
+function useThemeFromSettings(fleet: Fleet): string {
+  const entries = useFleetEntries(fleet)
+  const settings = entries[0]?.state.settings
+  const systemScheme = useColorScheme()
+  return useMemo(() => {
+    const inputs = {
+      themeMode: settings?.themeMode ?? 'dark',
+      themeLight: settings?.themeLight ?? '',
+      themeDark: settings?.themeDark ?? '',
+      customThemes: settings?.customThemes ?? [],
+      nessieColor: settings?.nessieColor ?? '',
+      systemScheme
+    }
+    applyTheme(inputs)
+    return themeKey(inputs)
+  }, [settings, systemScheme])
 }
 
 // keyboard-controller's KeyboardAvoidingView animates frame-by-frame with
@@ -103,7 +129,7 @@ function App() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-      <StatusBar style="light" />
+      <StatusBar style={getThemeMode() === 'light' ? 'dark' : 'light'} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {children}
       </KeyboardAvoidingView>
@@ -546,7 +572,7 @@ function Empty({ message }: { message: string }) {
   )
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.app },
   // 45 = 44pt tap height + the 1px bottom border.
   header: { height: 45, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
@@ -578,4 +604,4 @@ const s = StyleSheet.create({
     paddingVertical: 4
   },
   menuItem: { paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }
-})
+}))

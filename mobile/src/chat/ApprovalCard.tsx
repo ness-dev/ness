@@ -13,7 +13,7 @@ import { buildQuestionResult, parseQuestions, type QuestionAnswer } from '../../
 import { formatPendingTool } from '../../../src/renderer/pending-tool'
 import { extractArgs, getToolDisplay, prettyToolName } from '../../../src/renderer/components/json-mode-cards/tool-display'
 import type { NessClient } from '../ness'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, getThemeMode } from '../theme'
 import { Spin } from '../components/Spin'
 import { Loader2 } from 'lucide-react-native'
 import { ToolIcon } from './cards'
@@ -368,6 +368,7 @@ function Code({ text }: { text: string }) {
 function Field({ value, onChange, placeholder, multiline, mono: isMono }: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; mono?: boolean }) {
   return (
     <TextInput
+      keyboardAppearance={getThemeMode()}
       value={value}
       onChangeText={onChange}
       placeholder={placeholder}

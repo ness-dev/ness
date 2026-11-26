@@ -3,7 +3,7 @@
 // Lets renderer modules that hand out icon components (tool-display's
 // registry, row-style helpers) be reused unchanged: the className they
 // pass still means the same size and colour here.
-import { alpha, c } from './theme'
+import { alpha, c, themed, themeVersion } from './theme'
 
 const ICON: Record<string, number> = {
   'icon-2xs': 10,
@@ -14,7 +14,7 @@ const ICON: Record<string, number> = {
   'icon-xl': 32
 }
 
-const TOKENS: Record<string, string> = {
+const TOKENS: Record<string, string> = themed(() => ({
   fg: c.fg,
   'fg-bright': c.fgBright,
   muted: c.muted,
@@ -37,12 +37,12 @@ const TOKENS: Record<string, string> = {
   'fuchsia-400': '#e879f9',
   'pink-400': '#f472b6',
   'slate-400': '#94a3b8'
-}
+}))
 
 /** Resolve `text-accent`, `bg-teal-400/60`, `text-danger/80` → a colour. */
 export function tokenColor(cls: string, prefix: 'text' | 'bg'): string | undefined {
   const m = new RegExp(`^${prefix}-([a-z0-9-]+?)(?:/(\\d+))?$`).exec(cls)
-  if (!m || !(m[1] in TOKENS)) return undefined
+  if (!m || TOKENS[m[1]] === undefined) return undefined
   const hex = TOKENS[m[1]]
   return m[2] ? alpha(hex, Number(m[2]) / 100) : hex
 }
@@ -55,9 +55,15 @@ export interface TwResult {
   pulse: boolean
 }
 
+// Keyed per theme: the colours resolve against the active palette.
 const cache = new Map<string, TwResult>()
+let cacheVersion = -1
 
 export function tw(className: string | undefined): TwResult {
+  if (cacheVersion !== themeVersion()) {
+    cache.clear()
+    cacheVersion = themeVersion()
+  }
   const key = className ?? ''
   const hit = cache.get(key)
   if (hit) return hit

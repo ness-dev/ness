@@ -8,7 +8,7 @@ import { RefreshCw, TriangleAlert } from 'lucide-react-native'
 import type { ToolRunResult, ToolSpec } from '../../../src/shared/tools'
 import { toolPanelKey } from '../../../src/shared/state/repo-configs'
 import { Spin } from '../components/Spin'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, themed } from '../theme'
 import { PanelAction, RightPanel } from './RightPanel'
 import { useWatchedQuery } from './useWatchedQuery'
 import type { PanelProps } from './types'
@@ -250,14 +250,14 @@ function soleLink(nodes: Inline[]): string | null {
   return meaningful.length === 1 && meaningful[0].t === 'link' ? meaningful[0].href : null
 }
 
-const SECTION = {
+const SECTION = themed(() => ({
   paddingHorizontal: 12,
   paddingVertical: 6,
   minHeight: 32,
   justifyContent: 'center' as const,
   backgroundColor: alpha(c.panelRaised, 0.5)
-}
-const SECTION_TEXT = { fontSize: fs.xs, fontWeight: '500' as const, color: c.dim, textTransform: 'uppercase' as const, letterSpacing: 0.6 }
+}))
+const SECTION_TEXT = themed(() => ({ fontSize: fs.xs, fontWeight: '500' as const, color: c.dim, textTransform: 'uppercase' as const, letterSpacing: 0.6 }))
 
 function SidebarMarkdown({
   markdown,

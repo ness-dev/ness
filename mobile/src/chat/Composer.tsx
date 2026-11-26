@@ -13,15 +13,15 @@ import { CLAUDE_MODELS, getAgentInfo, getChatCapabilities } from '../../../src/s
 import { fuzzyMatch } from '../../../src/renderer/fuzzy'
 import type { NessClient } from '../ness'
 import { useNess } from '../ness'
-import { alpha, c, fs } from '../theme'
+import { alpha, c, fs, themed, getThemeMode } from '../theme'
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const
-const MODE_STYLE: Record<string, { label: string; color: string | null }> = {
+const MODE_STYLE: Record<string, { label: string; color: string | null }> = themed(() => ({
   default: { label: 'ask every time', color: null },
   acceptEdits: { label: 'accept edits', color: c.success },
   plan: { label: 'plan', color: c.accent },
   auto: { label: 'auto', color: c.warning }
-}
+}))
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   clear: 'Reset the conversation context',
   compact: 'Summarize and compact prior messages',
@@ -198,6 +198,7 @@ export function Composer({
       <View style={{ padding: 12 }}>
         <View style={{ borderWidth: 1, borderColor: focused ? c.accent : c.border, backgroundColor: c.panel, borderRadius: 6 }}>
           <TextInput
+            keyboardAppearance={getThemeMode()}
             ref={inputRef}
             style={{
               color: c.fg,

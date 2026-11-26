@@ -9,7 +9,7 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { FileText, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
 import { buildTree, sortChildren, type TreeNode } from '../../../src/renderer/file-tree'
-import { c, fs, mono } from '../theme'
+import { c, fs, mono, themed, getThemeMode } from '../theme'
 import { PanelAction, RightPanel } from './RightPanel'
 import {
   AtButton,
@@ -174,6 +174,7 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
     <RightPanel id="all-files" title="All Files" actions={actions} defaultCollapsed>
       <View style={{ padding: 8, borderBottomWidth: 1, borderColor: c.border }}>
         <TextInput
+          keyboardAppearance={getThemeMode()}
           value={filter}
           onChangeText={setFilter}
           placeholder="Filter files..."
@@ -220,7 +221,7 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
   )
 }
 
-const emptyText = { padding: 12, fontSize: fs.xs, color: c.faint }
+const emptyText = themed(() => ({ padding: 12, fontSize: fs.xs, color: c.faint }))
 
 const FileRow = memo(function FileRow({
   name,

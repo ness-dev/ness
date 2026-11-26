@@ -42,7 +42,7 @@ interface Row {
 
 // Tool-result rows: `bg-danger` on the desktop (it used to be the
 // non-existent `bg-error`, which rendered colourless).
-const NO_COLOR = c.danger
+
 
 function buildRows(snapshot: ContextSnapshot): Row[] {
   const k = snapshot.categories
@@ -72,7 +72,7 @@ function buildRows(snapshot: ContextSnapshot): Row[] {
     }
   ]
   for (const [name, tokens] of Object.entries(k.toolResults)) {
-    rows.push({ label: shortToolName(name), tokens, color: NO_COLOR, title: name })
+    rows.push({ label: shortToolName(name), tokens, color: c.danger, title: name })
   }
   return rows
 }

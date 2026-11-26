@@ -57,12 +57,11 @@ type DesktopIcon = (p: { className?: string }) => ReactNode
 // versions throws "View config getter callback for component `path`" — the
 // IconBoundary below only catches that after dev's LogBox has already
 // taken over the screen.
-const BRAND = '#4ade80' // --color-brand
 function RnNessIcon({ className }: { className?: string }) {
   const size = tw(className).size ?? 12
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
-      <G transform="translate(12,12) scale(0.42) translate(-32.2,-24.2)" fill={BRAND}>
+      <G transform="translate(12,12) scale(0.42) translate(-32.2,-24.2)" fill={c.brand}>
         {NESS_MARK_PATHS.map((d) => (
           <Path key={d} d={d} />
         ))}

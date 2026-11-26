@@ -39,7 +39,7 @@ import type {
   MergePRResult
 } from '../../../src/renderer/types'
 import { useNess, type NessClient } from '../ness'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, themed } from '../theme'
 import { Spin } from '../components/Spin'
 import { PanelAction, RightPanel } from './RightPanel'
 import type { PanelProps } from './types'
@@ -516,7 +516,7 @@ function firstLine(summary: string | undefined): string {
 }
 
 const STATE_LABELS: Record<string, string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' }
-const STATE_PILL_COLORS: Record<string, string> = { open: c.success, draft: c.warning, merged: c.accent, closed: c.danger }
+const STATE_PILL_COLORS: Record<string, string> = themed(() => ({ open: c.success, draft: c.warning, merged: c.accent, closed: c.danger }))
 
 /** Copied from PRStatusPanel.tsx (GitHub's label-foreground rule). */
 function labelTextColor(hex: string): string {
@@ -563,16 +563,16 @@ function milestoneDisplay(pr: Pick<PRStatus, 'hasMilestones' | 'milestone'>): Mi
   return pr.milestone ? 'pill' : 'placeholder'
 }
 
-const CHECK_ICONS: Record<CheckStatus['state'], { symbol: string; color: string }> = {
+const CHECK_ICONS: Record<CheckStatus['state'], { symbol: string; color: string }> = themed(() => ({
   success: { symbol: '✓', color: c.success },
   failure: { symbol: '✗', color: c.danger },
   error: { symbol: '!', color: c.danger },
   pending: { symbol: '○', color: c.warning },
   neutral: { symbol: '-', color: c.dim },
   skipped: { symbol: '-', color: c.dim }
-}
+}))
 
-const OVERALL_COLORS: Record<string, string> = { success: c.success, failure: c.danger, pending: c.warning, none: c.dim }
+const OVERALL_COLORS: Record<string, string> = themed(() => ({ success: c.success, failure: c.danger, pending: c.warning, none: c.dim }))
 
 const CHECK_STATE_PRIORITY: Record<CheckStatus['state'], number> = {
   failure: 0,
@@ -596,20 +596,20 @@ function sortChecksForDisplay(checks: CheckStatus[]): CheckStatus[] {
   })
 }
 
-const REVIEW_DECISION_LABELS: Record<PRStatus['reviewDecision'], { text: string; color: string }> = {
+const REVIEW_DECISION_LABELS: Record<PRStatus['reviewDecision'], { text: string; color: string }> = themed(() => ({
   approved: { text: 'Approved', color: c.success },
   changes_requested: { text: 'Changes requested', color: c.warning },
   review_required: { text: 'Review pending', color: c.faint },
   none: { text: '', color: c.faint }
-}
+}))
 
-const REVIEW_STATE_ICONS: Record<PRReview['state'], { symbol: string; color: string }> = {
+const REVIEW_STATE_ICONS: Record<PRReview['state'], { symbol: string; color: string }> = themed(() => ({
   APPROVED: { symbol: '✓', color: c.success },
   CHANGES_REQUESTED: { symbol: '●', color: c.warning },
   COMMENTED: { symbol: '○', color: c.faint },
   DISMISSED: { symbol: '-', color: c.dim },
   PENDING: { symbol: '○', color: c.dim }
-}
+}))
 
 function ReviewSummary({
   reviews,

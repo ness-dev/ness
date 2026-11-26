@@ -6,7 +6,7 @@
 // single line breaks instead of reflowing them into one paragraph).
 import { memo, type ReactElement } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { c, mono } from '../theme'
+import { c, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
 import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../src/shared/chat-image-src'
 
@@ -159,8 +159,8 @@ function Inline({ text }: { text: string }) {
   )
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   code: { fontFamily: mono, fontSize: 12.6, backgroundColor: c.panelRaised, color: c.fg },
   codeBlock: { backgroundColor: c.panel, borderWidth: 1, borderColor: c.border, borderRadius: 6 },
   codeBlockText: { fontFamily: mono, fontSize: 12, lineHeight: 18, color: c.fg }
-})
+}))

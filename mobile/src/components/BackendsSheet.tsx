@@ -8,7 +8,7 @@ import { Plus, QrCode, Trash2, X } from 'lucide-react-native'
 import { parseConnectionUrl } from '../../../src/shared/transport/parse-connection-url'
 import type { Backends } from '../backends'
 import { NessClient, useConn, useNess } from '../ness'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
 
 export function BackendsSheet({ backends, onClose }: { backends: Backends; onClose?: () => void }) {
   const [adding, setAdding] = useState(backends.saved.length === 0)
@@ -185,6 +185,7 @@ function AddBackend({
         </Pressable>
       )}
       <TextInput
+        keyboardAppearance={getThemeMode()}
         style={s.input}
         placeholder="http://192.168.1.10:37291/?token=…"
         placeholderTextColor={c.faint}
@@ -198,6 +199,7 @@ function AddBackend({
         onSubmitEditing={() => submit(link)}
       />
       <TextInput
+        keyboardAppearance={getThemeMode()}
         style={s.input}
         placeholder="Label (optional, e.g. Laptop)"
         placeholderTextColor={c.faint}
@@ -221,7 +223,7 @@ function AddBackend({
   )
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   // Above the worktree picker (z 30) and the panels sheet (z 40): Fabric
   // flattens the unstyled wrappers between them, so all three end up
   // competing in one stacking context.
@@ -275,4 +277,4 @@ const s = StyleSheet.create({
   },
   // 44pt: the thumb-sized minimum used everywhere else in the app.
   btn: { borderWidth: 1, borderColor: c.border, borderRadius: 6, paddingHorizontal: 18, minHeight: 44, minWidth: 88, alignItems: 'center', justifyContent: 'center' }
-})
+}))

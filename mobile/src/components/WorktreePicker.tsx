@@ -43,17 +43,17 @@ import type { PendingWorktree } from '../../../src/shared/state/worktrees'
 import type { AssignedPR } from '../../../src/shared/state/assigned-prs'
 import { Fleet, useFleetEntries, useListModel } from '../fleet'
 import { useCollapse, type CollapseState } from '../collapse'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
 
-const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = {
+const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
   idle: { color: c.faint, pulse: false },
   processing: { color: c.success, pulse: true },
   waiting: { color: c.warning, pulse: false },
   'needs-approval': { color: c.danger, pulse: true },
   merged: { color: c.accent, pulse: false }
-}
+}))
 
 const REPO_BG = ['teal-400', 'cyan-400', 'sky-400', 'blue-400', 'indigo-400', 'violet-400', 'purple-400', 'fuchsia-400', 'pink-400', 'slate-400']
 function hash(s: string): number {
@@ -638,6 +638,7 @@ function AliasEditor({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {
   }
   return (
     <TextInput
+      keyboardAppearance={getThemeMode()}
       autoFocus
       selectTextOnFocus
       value={value}
@@ -759,7 +760,7 @@ function IconBtn({ label, onPress, disabled, children }: { label: string; onPres
   )
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   sheet: { ...(StyleSheet.absoluteFill as object), backgroundColor: c.app, zIndex: 30 },
   head: { flexDirection: 'row', alignItems: 'center', paddingLeft: 12, paddingRight: 4, borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
   headTitle: { flex: 1, color: c.dim, fontSize: fs.xs, fontWeight: '600', letterSpacing: 1.2 },
@@ -777,4 +778,4 @@ const s = StyleSheet.create({
   prPill: { flexShrink: 0, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, backgroundColor: c.panel, borderWidth: 1, borderColor: c.borderStrong },
   actionSheet: { backgroundColor: c.panel, borderTopWidth: 1, borderColor: c.borderStrong, borderTopLeftRadius: 12, borderTopRightRadius: 12 },
   actionItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 48, borderBottomWidth: 1, borderColor: c.border }
-})
+}))

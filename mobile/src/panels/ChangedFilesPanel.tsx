@@ -14,7 +14,7 @@ import type { ChangedFile } from '../../../src/renderer/types'
 import { buildTree, sortChildren as sortByName, type FileListView, type TreeNode } from '../../../src/renderer/file-tree'
 import { destOf } from '../../../src/shared/git-paths'
 import type { NessClient } from '../ness'
-import { alpha, c, fs, mono } from '../theme'
+import { alpha, c, fs, mono, themed } from '../theme'
 import { PanelAction, RightPanel } from './RightPanel'
 import { useWatchedQuery } from './useWatchedQuery'
 import type { PanelProps } from './types'
@@ -34,13 +34,13 @@ export const STATUS_LABEL: Record<ChangedFile['status'], string> = {
   renamed: 'R',
   untracked: 'U'
 }
-export const STATUS_COLOR: Record<ChangedFile['status'], string> = {
+export const STATUS_COLOR: Record<ChangedFile['status'], string> = themed(() => ({
   added: c.success,
   modified: c.warning,
   deleted: c.danger,
   renamed: c.info,
   untracked: c.dim
-}
+}))
 
 // Port of hooks/changed-files-request.ts: in-flight-only dedup so this panel
 // ('changedFiles') and useChangedFilesSet ('branchChangedFiles') don't ask the
@@ -405,13 +405,13 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
   )
 }
 
-const sectionText = {
+const sectionText = themed(() => ({
   fontSize: fs.xs,
   fontWeight: '500' as const,
   color: c.dim,
   textTransform: 'uppercase' as const,
   letterSpacing: 0.6
-}
+}))
 
 function FileRow({
   file,

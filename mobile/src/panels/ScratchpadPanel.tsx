@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { TextInput } from 'react-native'
 import { useNess } from '../ness'
-import { c, fs } from '../theme'
+import { c, fs, getThemeMode } from '../theme'
 import { RightPanel } from './RightPanel'
 import type { PanelProps } from './types'
 
@@ -73,6 +73,7 @@ export function ScratchpadPanel({ client, worktreePath }: PanelProps) {
   return (
     <RightPanel id="scratchpad" title="Scratchpad">
       <TextInput
+        keyboardAppearance={getThemeMode()}
         accessibilityLabel="Scratchpad"
         multiline
         textAlignVertical="top"
