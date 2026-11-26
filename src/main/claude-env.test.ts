@@ -171,6 +171,48 @@ describe('claudeConfigDirFor', () => {
   })
 })
 
+describe('claudeGlobalConfigPathFor', () => {
+  it('defaults to ~/.claude.json, beside the home rather than inside it', async () => {
+    const { claudeGlobalConfigPathFor } = await import('./claude-env')
+    expect(claudeGlobalConfigPathFor('/some/worktree')).toBe(join(homedir(), '.claude.json'))
+  })
+
+  it('falls back to Ness’s own CLAUDE_CONFIG_DIR when nothing is cached', async () => {
+    const { claudeGlobalConfigPathFor } = await import('./claude-env')
+    process.env.CLAUDE_CONFIG_DIR = '/launcher/home'
+    expect(claudeGlobalConfigPathFor('/some/worktree', '/some/repo')).toBe('/launcher/home/.claude.json')
+  })
+
+  it('prefers the cwd’s capture, then the fallback cwd’s, over Ness’s env', async () => {
+    const { claudeGlobalConfigPathFor, resolveShellEnv } = await import('./claude-env')
+    process.env.CLAUDE_CONFIG_DIR = '/launcher/home'
+    const repo = join(tmpRoot, 'gcfg-repo')
+    const wt = join(tmpRoot, 'gcfg-wt')
+    mkdirSync(repo, { recursive: true })
+    mkdirSync(wt, { recursive: true })
+
+    currentShell = fakeShell('gcfg-repo-shell', `printf '${BEGIN}CLAUDE_CONFIG_DIR=/home/u/.claude-repo\\0${END}'`)
+    await resolveShellEnv(repo)
+    // Fresh worktree, nothing cached for it yet: borrows the repo's answer.
+    expect(claudeGlobalConfigPathFor(wt, repo)).toBe('/home/u/.claude-repo/.claude.json')
+
+    currentShell = fakeShell('gcfg-wt-shell', `printf '${BEGIN}PATH=/usr/bin\\0${END}'`)
+    await resolveShellEnv(wt)
+    // The worktree's own capture wins, and it sets no CLAUDE_CONFIG_DIR.
+    expect(claudeGlobalConfigPathFor(wt, repo)).toBe(join(homedir(), '.claude.json'))
+  })
+
+  it('lets the settings override win over every capture', async () => {
+    const { claudeGlobalConfigPathFor, resolveShellEnv, setExplicitClaudeConfigDirSource } = await import(
+      './claude-env'
+    )
+    currentShell = fakeShell('gcfg-oss-shell', `printf '${BEGIN}CLAUDE_CONFIG_DIR=/home/u/.claude-oss\\0${END}'`)
+    await resolveShellEnv(tmpRoot)
+    setExplicitClaudeConfigDirSource(() => '/explicit/home')
+    expect(claudeGlobalConfigPathFor(tmpRoot)).toBe('/explicit/home/.claude.json')
+  })
+})
+
 describe('resolveShellEnv caching', () => {
   it('dedups concurrent probes and keeps the last good capture over a failed refresh', async () => {
     const { resolveShellEnv, warmShellEnv, cachedShellEnv } = await import('./claude-env')
