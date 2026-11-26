@@ -195,11 +195,6 @@ export interface Config {
   // Sidebar project drag order as section scope keys (see
   // SettingsState.sidebarProjectOrder). Absent until the user reorders.
   sidebarProjectOrder?: string[]
-  // Branches merged by the since-removed "Merge Locally" action, keyed by
-  // branch name. Value is the branch-tip SHA at merge time — if the branch
-  // later advances past this SHA, the flag is considered stale and pruned.
-  // Nothing adds entries any more; the map is read only so worktrees merged
-  // that way keep grouping under Merged / Closed until they're removed.
   // Shell command to run after a worktree is created. Runs via login shell
    // with cwd=worktree and env vars HARNESS_WORKTREE_PATH, HARNESS_BRANCH,
    // HARNESS_REPO_ROOT. Failures are logged but don't block creation.
@@ -207,6 +202,11 @@ export interface Config {
   // Shell command to run before a worktree is removed. Same execution model
    // as setup. Failures are logged but don't block removal.
   worktreeTeardownCommand?: string
+  // Branches merged by the since-removed "Merge Locally" action, keyed by
+  // branch name. Value is the branch-tip SHA at merge time — if the branch
+  // later advances past this SHA, the flag is considered stale and pruned.
+  // Nothing adds entries any more; the map is read only so worktrees merged
+  // that way keep grouping under Merged / Closed until they're removed.
   locallyMerged?: Record<string, string>
   // When true, pass --name "repo/branch" to Claude so sessions are named by
   // their worktree rather than auto-summarized. Also sets the name visible
