@@ -8,10 +8,11 @@ import { memo, type ReactElement } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { c, mono } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
+import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../src/shared/chat-image-src'
 
 // `![alt](src)` — local paths are fetched from the backend, like the web's
 // MarkdownImage (jsonClaude:readAttachmentImage).
-const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g
 
 interface Props {
   text: string
@@ -93,9 +94,26 @@ export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, 
       if (images.length) {
         blocks.push(
           <View key={`${key}-img`} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {images.map((m, k) => (
-              <ChatImage key={k} path={m[2]} alt={m[1]} height={160} maxWidth={320} />
-            ))}
+            {images.map((m, k) => {
+              // Same resolution + sizing rules as the desktop (shared
+              // chat-image-src): `#w=300` / `|400` / `"=400x300"` are size
+              // hints, not part of the path; an alt/title spec outranks a
+              // fragment.
+              const alt = parseImageAlt(m[1])
+              const title = parseImageTitle(m[3])
+              const local = resolveLocalImageSrc(m[2])
+              const size = alt.size ?? title.size ?? local?.size ?? null
+              return (
+                <ChatImage
+                  key={k}
+                  path={local ? local.path : m[2]}
+                  mediaType={local?.mediaType}
+                  alt={alt.alt}
+                  size={size ?? undefined}
+                  fit
+                />
+              )
+            })}
           </View>
         )
       }

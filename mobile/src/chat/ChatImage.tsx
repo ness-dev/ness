@@ -3,10 +3,13 @@
 // they're fetched through `jsonClaude:readAttachmentImage` (base64) and
 // shown as a data URI. Remote http(s) URLs load directly. Tap opens a
 // full-screen view; tap again to close (same as the web thumb).
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+
+const noopSubscribe = () => () => {}
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native'
 import { ImageOff, X } from 'lucide-react-native'
 import type { NessClient } from '../ness'
+import type { ImageSizeHint } from '../../../src/shared/chat-image-src'
 import { c } from '../theme'
 
 /** The chat's backend, so deep components (Markdown) can fetch images. */
@@ -16,7 +19,7 @@ export const ChatClientContext = createContext<NessClient | null>(null)
 // through a screenshot-heavy transcript doesn't refetch everything.
 const LIMIT = 60
 const cache = new Map<string, string | null>()
-const inflight = new Map<string, Promise<string | null>>()
+const inflight = new Map<string, Promise<string | null | undefined>>()
 
 function mediaTypeFor(path: string, given?: string): string {
   if (given) return given
@@ -24,7 +27,12 @@ function mediaTypeFor(path: string, given?: string): string {
   return ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/png'
 }
 
-function load(client: NessClient, path: string, mediaType?: string): Promise<string | null> {
+/** `undefined` = the request failed (socket not up yet, dropped, timed
+ *  out) — transient, so NOT cached: caching it left an image stuck on
+ *  "unavailable" until the chat was reopened. `null` = the backend
+ *  answered and there's no such image (missing / too big) — that's final. */
+const FAILED = undefined
+function load(client: NessClient, path: string, mediaType?: string): Promise<string | null | undefined> {
   if (/^https?:\/\//.test(path) || path.startsWith('data:')) return Promise.resolve(path)
   const key = `${client.id}:${path}`
   if (cache.has(key)) return Promise.resolve(cache.get(key) ?? null)
@@ -32,14 +40,16 @@ function load(client: NessClient, path: string, mediaType?: string): Promise<str
   if (!p) {
     p = client
       .req<string | null>('jsonClaude:readAttachmentImage', path)
-      .then((b64) => (b64 ? `data:${mediaTypeFor(path, mediaType)};base64,${b64}` : null))
-      .catch(() => null)
-      .then((uri) => {
-        inflight.delete(key)
-        cache.set(key, uri)
-        while (cache.size > LIMIT) cache.delete(cache.keys().next().value as string)
-        return uri
-      })
+      .then(
+        (b64) => {
+          const uri = b64 ? `data:${mediaTypeFor(path, mediaType)};base64,${b64}` : null
+          cache.set(key, uri)
+          while (cache.size > LIMIT) cache.delete(cache.keys().next().value as string)
+          return uri
+        },
+        () => FAILED
+      )
+      .finally(() => inflight.delete(key))
     inflight.set(key, p)
   }
   return p
@@ -50,15 +60,27 @@ export function ChatImage({
   mediaType,
   height = 96,
   maxWidth = 160,
-  alt
+  alt,
+  size,
+  fit
 }: {
   path: string
   mediaType?: string
   height?: number
   maxWidth?: number
   alt?: string
+  /** Markdown size hint (px / % of the column / height). */
+  size?: ImageSizeHint
+  /** Inline markdown image: size to the column (or the hint) at the
+   *  image's own aspect ratio, instead of a fixed-height thumbnail. */
+  fit?: boolean
 }) {
   const client = useContext(ChatClientContext)
+  // Re-run the load when the backend (re)connects.
+  const connected = useSyncExternalStore(
+    client?.subscribe ?? noopSubscribe,
+    () => client?.getConn().connected ?? false
+  )
   const [uri, setUri] = useState<string | null | undefined>(undefined)
   const [aspect, setAspect] = useState(4 / 3)
   const [open, setOpen] = useState(false)
@@ -70,21 +92,43 @@ export function ChatImage({
       setUri(/^(https?:|data:)/.test(path) ? path : null)
       return
     }
+    if (!connected) return // retried by this effect when the socket is back
     let alive = true
-    void load(client, path, mediaType).then((u) => alive && setUri(u))
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const attempt = (left: number) =>
+      void load(client, path, mediaType).then((u) => {
+        if (!alive) return
+        if (u !== FAILED) setUri(u)
+        else if (left > 0) retry = setTimeout(() => attempt(left - 1), 2000)
+        else setUri(null)
+      })
+    attempt(2)
     return () => {
       alive = false
+      if (retry) clearTimeout(retry)
     }
-  }, [client, path, mediaType])
+  }, [client, path, mediaType, connected])
 
   useEffect(() => {
     if (uri) Image.getSize(uri, (w, h) => h > 0 && setAspect(w / h), () => {})
   }, [uri])
 
-  const width = Math.min(maxWidth, Math.round(height * aspect))
+  // The chat column is the screen minus the transcript's 16pt gutters.
+  const column = win.width - 32
+  let width: number
+  let h: number
+  if (fit) {
+    const hinted = size?.widthPercent ? (column * size.widthPercent) / 100 : size?.width
+    width = Math.min(column, hinted ?? column)
+    h = size?.height ?? Math.round(width / aspect)
+    if (size?.height && !hinted) width = Math.min(column, Math.round(size.height * aspect))
+  } else {
+    width = Math.min(maxWidth, Math.round(height * aspect))
+    h = height
+  }
   if (uri === undefined) {
     return (
-      <View style={{ width, height, borderRadius: 6, backgroundColor: c.panelRaised, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width, height: h, borderRadius: 6, backgroundColor: c.panelRaised, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={c.dim} size="small" />
       </View>
     )
@@ -93,7 +137,7 @@ export function ChatImage({
     return (
       <View
         accessibilityLabel={`Image unavailable: ${alt ?? path}`}
-        style={{ width, height, borderRadius: 6, backgroundColor: c.panelRaised, alignItems: 'center', justifyContent: 'center', gap: 4, padding: 6 }}
+        style={{ width, height: h, borderRadius: 6, backgroundColor: c.panelRaised, alignItems: 'center', justifyContent: 'center', gap: 4, padding: 6 }}
       >
         <ImageOff color={c.dim} size={16} />
         <Text style={{ color: c.dim, fontSize: 10 }} numberOfLines={2}>
@@ -105,7 +149,7 @@ export function ChatImage({
   return (
     <>
       <Pressable onPress={() => setOpen(true)} accessibilityRole="imagebutton" accessibilityLabel={alt ? `Open image: ${alt}` : 'Open image'}>
-        <Image source={{ uri }} style={{ width, height, borderRadius: 6, backgroundColor: c.panelRaised }} resizeMode="cover" />
+        <Image source={{ uri }} style={{ width, height: h, borderRadius: 6, backgroundColor: c.panelRaised }} resizeMode={fit ? 'contain' : 'cover'} />
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)} supportedOrientations={['portrait', 'landscape']}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' }} onPress={() => setOpen(false)} accessibilityLabel="Close image">
