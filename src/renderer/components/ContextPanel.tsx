@@ -66,7 +66,7 @@ function BarRow({ row, used }: { row: Row; used: number }): JSX.Element {
       <span className="text-faint tabular-nums w-8 text-right shrink-0">
         {pct >= 1 ? `${Math.round(pct)}%` : '<1%'}
       </span>
-      <span className="text-text tabular-nums w-12 text-right shrink-0">
+      <span className="text-fg tabular-nums w-12 text-right shrink-0">
         {formatTokens(row.tokens)}
       </span>
     </div>
@@ -111,7 +111,7 @@ function buildRows(snapshot: ContextSnapshot): Row[] {
     }
   ]
   for (const [name, tokens] of Object.entries(c.toolResults)) {
-    rows.push({ label: shortToolName(name), tokens, color: 'bg-error', title: name })
+    rows.push({ label: shortToolName(name), tokens, color: 'bg-danger', title: name })
   }
   return rows
 }
@@ -180,7 +180,7 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
           {/* Pinned: the headline stays readable while the list scrolls. */}
           <div className="shrink-0 px-3 pt-2 pb-2 flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-base font-medium text-text tabular-nums">
+              <span className="text-base font-medium text-fg tabular-nums">
                 {Math.round(pct)}%
               </span>
               <span className="text-xs text-faint tabular-nums">
@@ -236,7 +236,7 @@ export function ContextPanel({ focusedTabId }: ContextPanelProps): JSX.Element |
             {snapshot.discoverableTools.length > 0 && (
               <div className="flex flex-col gap-1">
                 <button
-                  className="text-xs text-faint hover:text-text text-left"
+                  className="text-xs text-faint hover:text-fg text-left"
                   onClick={() => setShowDiscoverable((v) => !v)}
                   title="Tools the agent can pull in on demand. Their schemas are not in the window until used."
                 >

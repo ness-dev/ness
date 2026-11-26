@@ -15,7 +15,9 @@ type Mode = 'working' | 'branch'
 
 interface ChangedFilesPanelProps {
   worktreePath: string | null
-  onOpenDiff: (filePath: string, staged: boolean, mode: Mode) => void
+  /** Absent on the phone web client, which can't show a diff tab: rows
+   *  then don't open anything (send-to-agent still works). */
+  onOpenDiff?: (filePath: string, staged: boolean, mode: Mode) => void
   onSendToAgent?: (text: string) => void
   onOpenReview?: () => void
 }
@@ -126,7 +128,7 @@ export function ChangedFilesPanel({ worktreePath, onOpenDiff, onSendToAgent, onO
                   files={stagedFiles}
                   view={uncommittedView}
                   worktreePath={worktreePath}
-                  onOpen={(file) => onOpenDiff(file.path, true, 'working')}
+                  onOpen={(file) => onOpenDiff?.(file.path, true, 'working')}
                   onSendToAgent={onSendToAgent}
                 />
                 {unstagedFiles.length > 0 && (
@@ -138,7 +140,7 @@ export function ChangedFilesPanel({ worktreePath, onOpenDiff, onSendToAgent, onO
                   files={unstagedFiles}
                   view={uncommittedView}
                   worktreePath={worktreePath}
-                  onOpen={(file) => onOpenDiff(file.path, false, 'working')}
+                  onOpen={(file) => onOpenDiff?.(file.path, false, 'working')}
                   onSendToAgent={onSendToAgent}
                 />
               </>
@@ -156,7 +158,7 @@ export function ChangedFilesPanel({ worktreePath, onOpenDiff, onSendToAgent, onO
                 files={branchFiles}
                 view={committedView}
                 worktreePath={worktreePath}
-                onOpen={(file) => onOpenDiff(file.path, false, 'branch')}
+                onOpen={(file) => onOpenDiff?.(file.path, false, 'branch')}
                 onSendToAgent={onSendToAgent}
               />
             )}

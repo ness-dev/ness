@@ -27,7 +27,7 @@ export function LinuxWindowControls(): JSX.Element | null {
           type="button"
           aria-label="Close"
           onClick={() => backend.windowClose()}
-          className={`${button} hover:!bg-error/20 hover:!text-error`}
+          className={`${button} hover:!bg-danger/20 hover:!text-danger`}
         >
           <X strokeWidth={2.25} className="icon-xs" />
         </button>
