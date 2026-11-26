@@ -1281,7 +1281,6 @@ function DesktopApp(): JSX.Element {
     </div>
   ) : null
 
-
   const repoPickerOverlay = (
     <RemoteFilePicker
       isOpen={repoPickerOpen}

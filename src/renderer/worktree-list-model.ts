@@ -151,7 +151,6 @@ export interface WorktreeRepoSectionModel {
 
 export interface WorktreeListModel {
   sections: WorktreeRepoSectionModel[]
-  showRepoHeaders: boolean
   showRepoLabels: boolean
   /** Per-worktree-path aggregates, exposed so callers that need the raw maps
    *  (command palette, hotkeys) share this derivation instead
@@ -300,7 +299,6 @@ export function buildWorktreeListBase(
   for (const d of pendingDeletions) deletingPaths.add(d.path)
 
   const unified = unifiedRepos && repoRoots.length > 1
-  const showRepoHeaders = repoRoots.length > 1 && !unified
   const showRepoLabels = repoRoots.length > 1 && unified
 
   // Bucket worktrees by repo, preserving the user's repo order. Unified mode
@@ -545,7 +543,6 @@ export function buildWorktreeListBase(
 
   return {
     sections,
-    showRepoHeaders,
     showRepoLabels,
     statusByPath,
     pendingToolByPath,
