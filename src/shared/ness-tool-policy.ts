@@ -36,7 +36,11 @@
 //   is omitted or already open, and no repo setupCommand (or the one the
 //   user last allowed for that repo, see isSetupCommandApproved); otherwise
 //   it asks. Allowing one of those prompts remembers that repo's command,
-//   so only a changed command asks again. The global setup command from Settings isn't gated: the user typed it,
+//   so only a changed command asks again. Known gap: the card shows the
+//   command as it was when the card opened, but worktree creation re-reads
+//   .ness.json after Allow, so an edit made while the card is open runs
+//   once unseen (the next call then asks, since it differs from the
+//   remembered one). The global setup command from Settings isn't gated: the user typed it,
 //   and gating it would prompt on every worktree for anyone who set one.
 // - create_worktree and send_message start or message other agents with
 //   text the calling agent wrote. They are auto-allowed because

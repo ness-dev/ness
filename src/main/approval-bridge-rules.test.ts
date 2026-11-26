@@ -229,17 +229,37 @@ describe('ApprovalBridge — Ness tools', () => {
     )
   })
 
-  it('leaves setupCommand off cards that ask for another reason', async () => {
+  it('shows the setup command on a PR-checkout card but does not remember it', async () => {
     const h = await harness([], () => 'npm install')
-    await h.send({
-      id: 'sc-pr',
-      tool_name: 'mcp__ness-control__create_worktree',
-      input: { prNumber: 3 },
-      tool_use_id: 'tu-sc-pr'
-    })
+    expect(
+      await h.send({
+        id: 'sc-pr',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { prNumber: 3 },
+        tool_use_id: 'tu-sc-pr'
+      })
+    ).toBeNull()
     const card = h.store.getSnapshot().state.jsonClaude.pendingApprovals['sc-pr']
-    expect(card).toBeDefined()
-    expect(card?.setupCommand).toBeUndefined()
+    expect(card?.setupCommand).toBe('npm install')
+    h.bridge.resolveApproval('sc-pr', { behavior: 'allow' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({})
+  })
+
+  it('shows the setup command for a repo that is not open in Ness', async () => {
+    const h = await harness([], () => 'make bootstrap')
+    expect(
+      await h.send({
+        id: 'sc-clone',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { branchName: 'x', repoRoot: '/Users/me/Downloads/clone' },
+        tool_use_id: 'tu-sc-clone'
+      })
+    ).toBeNull()
+    expect(
+      h.store.getSnapshot().state.jsonClaude.pendingApprovals['sc-clone']?.setupCommand
+    ).toBe('make bootstrap')
+    h.bridge.resolveApproval('sc-clone', { behavior: 'allow' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({})
   })
 
   it('a saved create_worktree grant does not skip its input checks', async () => {

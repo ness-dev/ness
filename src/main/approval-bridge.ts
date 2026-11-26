@@ -35,7 +35,11 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { isAutoAllowedNessCall, nessGrantsMayAnswer } from '../shared/ness-tool-policy'
+import {
+  isAutoAllowedNessCall,
+  nessControlToolName,
+  nessGrantsMayAnswer
+} from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -514,21 +518,27 @@ export class ApprovalBridge {
     // Would this call have gone through with its setup command approved?
     // Then the command is the only thing the user is being asked about,
     // so the card shows it and allowing remembers it.
-    let approvesSetup: { repoRoot: string; command: string } | undefined
-    if (
+    // Any create_worktree card shows the repo setup command that Allow
+    // would run, whatever else it's asking about (a PR checkout or an
+    // unopened clone runs it too). Remembering it is narrower: only when
+    // the command was the sole reason to ask.
+    let shownSetup: { repoRoot: string; command: string } | null = null
+    if (nessControlToolName(basePayload.toolName) === 'create_worktree') {
+      const rawRoot = basePayload.input['repoRoot']
+      shownSetup = setupFor(typeof rawRoot === 'string' && rawRoot ? rawRoot : undefined)
+    }
+    const approvesSetup =
+      shownSetup?.command &&
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
         ...nessCtx,
         isSetupCommandApproved: () => true
       })
-    ) {
-      const rawRoot = basePayload.input['repoRoot']
-      const resolved = setupFor(typeof rawRoot === 'string' && rawRoot ? rawRoot : undefined)
-      if (resolved && resolved.command) approvesSetup = resolved
-    }
+        ? shownSetup
+        : undefined
     const payload: JsonClaudePendingApproval = {
       ...basePayload,
       autoReview,
-      ...(approvesSetup ? { setupCommand: approvesSetup.command } : {})
+      ...(shownSetup?.command ? { setupCommand: shownSetup.command } : {})
     }
     this.pendingResponses.set(payload.requestId, {
       respond,
