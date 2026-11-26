@@ -8,7 +8,8 @@ import {
   useRepoConfigs,
   useRepoConfigFilename,
   useHooks,
-  usePermissionRules
+  usePermissionRules,
+  useApprovedSetupCommands
 } from '../store'
 import { useBackend } from '../backend'
 import type { ReviewAgentChoice } from '../../shared/state/settings'
@@ -20,7 +21,7 @@ import { Tooltip } from './Tooltip'
 import { HotkeyBadge } from './HotkeyBadge'
 import { AGENT_REGISTRY, agentDisplayName, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '../../shared/agent-registry'
 import { AgentIcon } from './AgentIcon'
-import { PermissionRulesList } from './PermissionRulesList'
+import { ApprovedSetupCommandsList, PermissionRulesList } from './PermissionRulesList'
 import { LochRecordingRepos } from './LochRecordingRepos'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
@@ -360,6 +361,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
   // re-renders Settings whenever any client updates any of them.
   const settings = useSettings()
   const permissionRules = usePermissionRules()
+  const approvedSetupCommands = useApprovedSetupCommands()
   const {
     themeMode,
     themeLight,
@@ -2725,6 +2727,10 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     onRevoke={(id) => { void backend.revokePermission(id) }}
                     onRevokeMany={(ids) => { void backend.revokePermissions(ids) }}
                     onClear={() => { void backend.clearPermissions() }}
+                  />
+                  <ApprovedSetupCommandsList
+                    commands={approvedSetupCommands}
+                    onForget={(repoRoot) => { void backend.forgetSetupCommand(repoRoot) }}
                   />
                 </div>
               </div>
