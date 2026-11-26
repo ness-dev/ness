@@ -467,6 +467,7 @@ export interface ElectronAPI {
   revokePermission(id: string): Promise<boolean>
   revokePermissions(ids: string[]): Promise<boolean>
   clearPermissions(): Promise<boolean>
+  forgetSetupCommand(repoRoot: string): Promise<boolean>
   setNewWorktreeAdvancedOpen(open: boolean): Promise<boolean>
   setStarterTasksDismissed(dismissed: boolean): Promise<boolean>
   setHarnessSystemPromptEnabled(enabled: boolean): Promise<boolean>

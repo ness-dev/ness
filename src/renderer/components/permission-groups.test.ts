@@ -196,12 +196,16 @@ describe('redundantRules', () => {
     // Without the grant, a non-loopback URL prompts; with it, it doesn't.
     expect(redundancy(rule('mcp__ness-control__navigate_tab'))).toBeNull()
     expect(redundancy(rule('mcp__ness-control__create_browser_tab'))).toBeNull()
-    // Same for create_worktree (a grant skips the setup-script check) and
-    // add_repo (always asks without one).
-    expect(redundancy(rule('mcp__ness-control__create_worktree'))).toBeNull()
+    // add_repo always asks without one.
     expect(redundancy(rule('mcp__ness-control__add_repo'))).toBeNull()
     // Under the old server name they can't match any call, so they're dead.
     expect(redundancy(rule('mcp__harness-control__navigate_tab'))).toBe('old-name')
+  })
+})
+
+describe('redundancy for create_worktree', () => {
+  it('flags create_worktree grants, which Ness ignores', () => {
+    expect(redundancy(rule('mcp__ness-control__create_worktree'))).toBe('input-checked')
   })
 })
 
