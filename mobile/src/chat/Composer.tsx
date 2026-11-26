@@ -6,7 +6,7 @@
 // and Return inserts a newline unless the user turned on send-on-Enter,
 // matching the web's default.
 import { useMemo, useRef, useState } from 'react'
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { Square } from 'lucide-react-native'
 import type { JsonClaudeSession } from '../../../src/shared/state/json-claude'
 import { CLAUDE_MODELS, getAgentInfo, getChatCapabilities } from '../../../src/shared/agent-registry'
@@ -87,6 +87,20 @@ export function Composer({
     }
   }
 
+  // Collapse the composer once a message is away: dropping the keyboard
+  // brings the box back to the bottom edge and the transcript into view.
+  // Slash-popover picks that only change the draft don't come through here.
+  const afterSend = () => {
+    // Blur the field itself (not just Keyboard.dismiss) and do it after
+    // the cleared draft has rendered, so the re-render can't leave focus —
+    // and the keyboard — on the composer.
+    requestAnimationFrame(() => {
+      inputRef.current?.blur()
+      Keyboard.dismiss()
+    })
+    onSent?.()
+  }
+
   const sendText = (text: string) => {
     const trimmed = text.trim()
     if (!trimmed || exited) return false
@@ -97,7 +111,7 @@ export function Composer({
       client.sig('jsonClaude:send', sessionId, trimmed)
     }
     setDraft('')
-    onSent?.()
+    afterSend()
     return true
   }
 
@@ -237,7 +251,7 @@ export function Composer({
                   if (draft.trim()) {
                     void client.req('jsonClaude:interruptAndSend', sessionId, draft.trim(), [])
                     setDraft('')
-                    onSent?.()
+                    afterSend()
                   } else {
                     void client.req('jsonClaude:interrupt', sessionId)
                   }
