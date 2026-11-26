@@ -22,6 +22,7 @@ function input(over: Partial<InboxModelInput> = {}): InboxModelInput {
     worktrees: [wt('/w1', 'feat-x')],
     panes: { '/w1': { type: 'leaf', id: 'p1', tabs, activeTabId: 'a' } },
     statuses: { a: 'needs-approval', b: 'needs-approval', c: 'waiting', d: 'waiting', e: 'processing', f: 'waiting' },
+    statusSince: { a: 20 },
     pendingTools: {
       a: { name: 'Bash', input: { command: 'rm -rf build' } },
       b: { name: 'AskUserQuestion', input: { questions: [{ question: 'Which DB?', options: [] }] } }
@@ -36,7 +37,6 @@ function input(over: Partial<InboxModelInput> = {}): InboxModelInput {
         f: { worktreePath: '/w1', endedAt: 30, kind: 'finished', text: 'Old news' }
       },
       seenAt: { f: 31 },
-      statusSince: { a: { status: 'needs-approval', since: 20 } },
       prSeen: {}
     },
     ...over
@@ -79,6 +79,16 @@ describe('buildInboxModel', () => {
       }
     })
     expect(keysOf(m, 'done')).toEqual(['b', 'd', 'a'])
+  })
+
+  it('keeps good-news PR events out of needs-you', () => {
+    const pr = {
+      number: 8, state: 'merged', checks: [], checksOverall: 'success', reviews: [], reviewDecision: 'none'
+    } as unknown as PRStatus
+    const m = buildInboxModel(input({ prStatuses: { '/w1': pr } }))
+    expect(keysOf(m, 'pr')).toEqual([])
+    expect(keysOf(m, 'prInfo')).toEqual(['pr:/w1'])
+    expect(m.needsYou.some((i) => i.key === 'pr:/w1')).toBe(false)
   })
 
   it('surfaces a PR event until its fingerprint is seen', () => {

@@ -92,7 +92,7 @@ describe('InboxDeriver', () => {
     new InboxDeriver(store).start()
     status(store, 'c1', 'waiting')
     expect(store.getSnapshot().state.inbox.turns.c1).toBeUndefined()
-    expect(store.getSnapshot().state.inbox.statusSince.c1?.status).toBe('waiting')
+    expect(store.getSnapshot().state.terminals.statuses.c1).toBe('waiting')
   })
 
   it('fills a terminal Claude turn in from the Stop hook transcript', async () => {
@@ -155,6 +155,77 @@ describe('InboxDeriver', () => {
       payload: { worktreePath: WT, panes: paneWith([{ id: 's1', type: 'shell', label: 'Shell' }]) }
     })
     expect(store.getSnapshot().state.inbox.turns.c1).toBeUndefined()
+  })
+})
+
+describe('InboxDeriver edge cases', () => {
+  it('a slow transcript read never overwrites a newer turn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'inbox-deriver-'))
+    const transcript = join(dir, 's.jsonl')
+    writeFileSync(
+      transcript,
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Stale first turn' }] } }) + '\n'
+    )
+    const store = new Store({
+      ...initialState,
+      terminals: {
+        ...initialState.terminals,
+        panes: { [WT]: paneWith([{ id: 'a1', type: 'agent', label: 'Claude' }]) }
+      }
+    })
+    new InboxDeriver(store).start()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(1000)
+      status(store, 'a1', 'processing')
+      for (const l of stopListeners) l({ terminalId: 'a1', sessionId: 's', transcriptPath: transcript, ts: 0 })
+      status(store, 'a1', 'waiting') // read #1 starts
+      vi.setSystemTime(2000)
+      status(store, 'a1', 'processing')
+      status(store, 'a1', 'waiting') // no Stop path this time → no read
+    } finally {
+      vi.useRealTimers()
+    }
+    await new Promise((r) => setTimeout(r, 50))
+    const turn = store.getSnapshot().state.inbox.turns.a1
+    expect(turn.endedAt).toBe(2000)
+    expect(turn.text).toBe('')
+  })
+
+  it('seeds a PR read mark on first sight, so existing events stay quiet', () => {
+    const store = new Store(initialState)
+    new InboxDeriver(store).start()
+    const pr = {
+      number: 3, state: 'open', headSha: 'a', checks: [], checksOverall: 'failure',
+      hasConflict: false, reviews: [], reviewDecision: 'none'
+    } as never
+    store.dispatch({ type: 'prs/statusChanged', payload: { path: WT, status: pr } })
+    expect(store.getSnapshot().state.inbox.prSeen[WT]).toBe('ci:3:a')
+    // A later event on the same worktree is new, so it is NOT reseeded.
+    store.dispatch({
+      type: 'prs/statusChanged',
+      payload: { path: WT, status: { ...(pr as object), headSha: 'b' } as never }
+    })
+    expect(store.getSnapshot().state.inbox.prSeen[WT]).toBe('ci:3:a')
+  })
+
+  it('prunes records for worktrees gone from the list and from disk', () => {
+    const gonePath = '/definitely/not/here/wt'
+    const store = new Store({
+      ...initialState,
+      inbox: {
+        turns: { t1: { worktreePath: gonePath, endedAt: 1, kind: 'finished', text: '' } },
+        seenAt: { t1: 2 },
+        prSeen: { [gonePath]: 'x', [tmpdir()]: 'y' }
+      }
+    })
+    new InboxDeriver(store).start()
+    store.dispatch({ type: 'worktrees/listChanged', payload: [] })
+    const inbox = store.getSnapshot().state.inbox
+    expect(inbox.turns).toEqual({})
+    expect(inbox.seenAt).toEqual({})
+    // Still on disk (e.g. a repo whose listing failed) — kept.
+    expect(inbox.prSeen).toEqual({ [tmpdir()]: 'y' })
   })
 })
 

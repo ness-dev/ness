@@ -497,6 +497,7 @@ export function backendStateEntryDeps(source: {
     source.state.worktrees.repoRemotes,
     source.state.terminals.panes,
     source.state.terminals.statuses,
+    source.state.terminals.statusSince,
     source.state.terminals.pendingTools,
     source.state.terminals.shellActivity,
     source.state.prs.byPath,

@@ -43,29 +43,23 @@ describe('inboxReducer', () => {
     ).toBe(s1)
   })
 
-  it('inbox/statusSince keeps the first timestamp while the status holds', () => {
-    const s1 = inboxReducer(initialInbox, {
-      type: 'inbox/statusSince',
-      payload: { tabId: 't1', status: 'needs-approval', since: 10 }
-    })
-    const s2 = inboxReducer(s1, {
-      type: 'inbox/statusSince',
-      payload: { tabId: 't1', status: 'needs-approval', since: 20 }
-    })
-    expect(s2).toBe(s1)
-    const s3 = inboxReducer(s2, { type: 'inbox/statusSince', payload: { tabId: 't1', status: 'waiting', since: 30 } })
-    expect(s3.statusSince.t1).toEqual({ status: 'waiting', since: 30 })
-  })
-
   it('inbox/tabsForgotten drops every record for the tabs and no-ops on unknown ids', () => {
     let s = inboxReducer(initialInbox, { type: 'inbox/turnEnded', payload: { tabId: 't1', turn: turn() } })
     s = inboxReducer(s, { type: 'inbox/turnEnded', payload: { tabId: 't2', turn: turn() } })
     s = inboxReducer(s, { type: 'inbox/seen', payload: { tabId: 't1', ts: 5 } })
-    s = inboxReducer(s, { type: 'inbox/statusSince', payload: { tabId: 't1', status: 'idle', since: 1 } })
     const next = inboxReducer(s, { type: 'inbox/tabsForgotten', payload: { tabIds: ['t1'] } })
     expect(Object.keys(next.turns)).toEqual(['t2'])
     expect(next.seenAt).toEqual({})
-    expect(next.statusSince).toEqual({})
     expect(inboxReducer(next, { type: 'inbox/tabsForgotten', payload: { tabIds: ['nope'] } })).toBe(next)
+  })
+
+  it('inbox/worktreesForgotten drops PR read marks and no-ops on unknown paths', () => {
+    const s1 = inboxReducer(initialInbox, {
+      type: 'inbox/prSeen',
+      payload: { worktreePath: '/wt/a', fingerprint: 'x' }
+    })
+    const s2 = inboxReducer(s1, { type: 'inbox/worktreesForgotten', payload: { paths: ['/wt/a'] } })
+    expect(s2.prSeen).toEqual({})
+    expect(inboxReducer(s2, { type: 'inbox/worktreesForgotten', payload: { paths: ['/wt/a'] } })).toBe(s2)
   })
 })

@@ -19,6 +19,7 @@
 // transitions are deduped against a per-tab cache, so a streaming chat
 // costs nothing here (CLAUDE.md anti-patterns #1 and #2).
 
+import { existsSync } from 'fs'
 import { open } from 'fs/promises'
 import type { Store } from './store'
 import type { AppState, StateEvent } from '../shared/state'
@@ -30,6 +31,7 @@ import {
   type TerminalTab
 } from '../shared/state/terminals'
 import { classifyTurnText } from '../shared/inbox-turn'
+import { prEventFor } from '../shared/inbox-pr'
 import type { InboxTurn } from '../shared/state/inbox'
 import { onStopEvent } from './hooks'
 import { log } from './debug'
@@ -131,6 +133,16 @@ export class InboxDeriver {
       case 'terminals/panesForWorktreeCleared':
         this.forgetClosedTabs(event.payload)
         return
+      case 'worktrees/listChanged':
+        this.forgetRemovedWorktrees()
+        return
+      case 'prs/statusChanged':
+        this.seedPrSeen([event.payload.path])
+        return
+      case 'prs/bulkStatusChanged':
+      case 'prs/mergedChanged':
+        this.seedPrSeen(Object.keys(event.payload))
+        return
     }
   }
 
@@ -139,10 +151,6 @@ export class InboxDeriver {
     if (prev === status) return
     this.lastStatus.set(tabId, status)
     const now = Date.now()
-    this.store.dispatch({
-      type: 'inbox/statusSince',
-      payload: { tabId, status, since: now }
-    })
     // `prev === undefined` is a status replayed at boot or on respawn, not
     // a turn that just ended — the persisted turn already covers it.
     if (status !== 'waiting' || prev === undefined || prev === 'idle') return
@@ -156,7 +164,10 @@ export class InboxDeriver {
       this.record(tabId, worktreePath, now, this.chatText(state, tabId))
       return
     }
+    // Consumed once: a later Stop without a transcript path must not
+    // re-read this session's file for a different turn.
     const transcript = this.transcriptByTab.get(tabId)
+    this.transcriptByTab.delete(tabId)
     if (!transcript || !isClaudeBackedTab(tab)) {
       this.record(tabId, worktreePath, now, '')
       return
@@ -209,6 +220,45 @@ export class InboxDeriver {
       if (tab) return { worktreePath, tab }
     }
     return null
+  }
+
+  /** First sight of a worktree's PR state marks whatever it currently
+   *  shows as already seen, so turning the inbox on (or adding a repo)
+   *  doesn't light the bell for a backlog of old merges and red builds.
+   *  Only events that arrive after this count. Scoped to the paths the
+   *  event names; worktrees that already have a mark are left alone. */
+  private seedPrSeen(paths: string[]): void {
+    const state = this.store.getSnapshot().state
+    for (const path of paths) {
+      if (path in state.inbox.prSeen) continue
+      const ev = prEventFor(state.prs.byPath[path], !!state.prs.mergedByPath[path])
+      this.store.dispatch({
+        type: 'inbox/prSeen',
+        payload: { worktreePath: path, fingerprint: ev?.fingerprint ?? '' }
+      })
+    }
+  }
+
+  /** Drop records for worktrees that are gone: missing from the list AND
+   *  from disk. The disk check matters twice over — it catches worktrees
+   *  removed while Ness wasn't running (no panes event ever fires for
+   *  those), and it keeps a repo whose `git worktree list` failed
+   *  transiently from losing its read marks. Runs on listChanged, which
+   *  is deduped upstream and rare, so the pass over every record is fine. */
+  private forgetRemovedWorktrees(): void {
+    const state = this.store.getSnapshot().state
+    const live = new Set(state.worktrees.list.map((w) => w.path))
+    const gone = (path: string): boolean => !live.has(path) && !existsSync(path)
+    const tabIds = Object.entries(state.inbox.turns)
+      .filter(([, t]) => gone(t.worktreePath))
+      .map(([id]) => id)
+    if (tabIds.length > 0) {
+      this.store.dispatch({ type: 'inbox/tabsForgotten', payload: { tabIds } })
+    }
+    const paths = Object.keys(state.inbox.prSeen).filter(gone)
+    if (paths.length > 0) {
+      this.store.dispatch({ type: 'inbox/worktreesForgotten', payload: { paths } })
+    }
   }
 
   /** Drop inbox records for tabs closed in this one worktree. */

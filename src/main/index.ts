@@ -954,10 +954,8 @@ jsonClaudeStatusDeriver.start()
 const inboxDeriver = new InboxDeriver(store)
 inboxDeriver.start()
 
-// statusSince is skipped: it's rewritten on every status flip and means
-// nothing after a restart.
 store.subscribe((event) => {
-  if (!event.type.startsWith('inbox/') || event.type === 'inbox/statusSince') return
+  if (!event.type.startsWith('inbox/')) return
   const { turns, seenAt, prSeen } = store.getSnapshot().state.inbox
   config.inbox = { turns, seenAt, prSeen }
   saveConfig(config)

@@ -13,12 +13,16 @@ import type { InboxState } from '../shared/state/inbox'
 import { QUESTION_TOOL_NAME } from '../shared/state/json-claude'
 import { tabLabel } from '../shared/agent-tabs'
 import { formatPendingTool } from './pending-tool'
+import { BLOCKING_PR_EVENTS, prEventFor, type PrEventKind } from '../shared/inbox-pr'
+
+export { prEventFor, type PrEventKind }
 
 export type InboxSectionKey =
   | 'approval'
   | 'question'
   | 'done'
   | 'pr'
+  | 'prInfo'
   | 'working'
   | 'seen'
 
@@ -33,7 +37,8 @@ export const INBOX_SECTIONS: ReadonlyArray<{
   { key: 'approval', label: 'Needs approval', collapsedByDefault: false, needsYou: true },
   { key: 'question', label: 'Asked you something', collapsedByDefault: false, needsYou: true },
   { key: 'done', label: 'Done, unread', collapsedByDefault: false, needsYou: true },
-  { key: 'pr', label: 'PR events', collapsedByDefault: false, needsYou: true },
+  { key: 'pr', label: 'PR needs you', collapsedByDefault: false, needsYou: true },
+  { key: 'prInfo', label: 'PR updates', collapsedByDefault: false, needsYou: false },
   { key: 'working', label: 'Working', collapsedByDefault: true, needsYou: false },
   { key: 'seen', label: 'Seen / idle', collapsedByDefault: true, needsYou: false }
 ]
@@ -77,56 +82,12 @@ export interface InboxModelInput {
   worktrees: Worktree[]
   panes: Record<string, PaneNode>
   statuses: Record<string, PtyStatus>
+  statusSince: Record<string, number>
   pendingTools: Record<string, PendingTool | null>
   prStatuses: Record<string, PRStatus | null>
   mergedPaths: Record<string, boolean>
   aliases: Record<string, string>
-  inbox: Pick<InboxState, 'turns' | 'seenAt' | 'statusSince' | 'prSeen'>
-}
-
-export type PrEventKind = 'merged' | 'ci-failed' | 'conflict' | 'changes-requested' | 'ready'
-
-/** The single most actionable thing about a worktree's PR, or null.
- *  The fingerprint changes when the event is genuinely new (new head
- *  commit, new review), which is what makes a seen event come back. */
-export function prEventFor(
-  pr: PRStatus | null | undefined,
-  locallyMerged: boolean
-): { kind: PrEventKind; why: string; fingerprint: string } | null {
-  if (!pr) return null
-  if (pr.state === 'merged' || locallyMerged) {
-    return { kind: 'merged', why: `PR #${pr.number} merged`, fingerprint: `merged:${pr.number}` }
-  }
-  if (pr.state === 'closed') return null
-  const sha = pr.headSha ?? ''
-  if (pr.checksOverall === 'failure') {
-    const failing = pr.checks
-      .filter((c) => c.state === 'failure' || c.state === 'error')
-      .map((c) => c.name)
-    const names = failing.slice(0, 2).join(', ') + (failing.length > 2 ? ` +${failing.length - 2}` : '')
-    return {
-      kind: 'ci-failed',
-      why: names ? `CI failed: ${names}` : 'CI failed',
-      fingerprint: `ci:${pr.number}:${sha}`
-    }
-  }
-  if (pr.hasConflict) {
-    return { kind: 'conflict', why: 'Merge conflict with base', fingerprint: `conflict:${pr.number}:${sha}` }
-  }
-  if (pr.reviewDecision === 'changes_requested') {
-    const latest = [...pr.reviews]
-      .filter((r) => r.state === 'CHANGES_REQUESTED')
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0]
-    return {
-      kind: 'changes-requested',
-      why: latest ? `Changes requested by ${latest.user}` : 'Changes requested',
-      fingerprint: `changes:${pr.number}:${latest?.submittedAt ?? sha}`
-    }
-  }
-  if (pr.reviewDecision === 'approved' && pr.checksOverall === 'success' && pr.state === 'open') {
-    return { kind: 'ready', why: 'Approved and green, ready to merge', fingerprint: `ready:${pr.number}:${sha}` }
-  }
-  return null
+  inbox: InboxState
 }
 
 function repoNameOf(repoRoot: string): string {
@@ -145,6 +106,7 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
     question: [],
     done: [],
     pr: [],
+    prInfo: [],
     working: [],
     seen: []
   }
@@ -163,8 +125,7 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
           if (!isAgentTab(tab)) continue
           if (!firstAgent) firstAgent = { tab, paneId: leaf.id }
           const status = input.statuses[tab.id] ?? 'idle'
-          const statusSince =
-            inbox.statusSince[tab.id]?.status === status ? inbox.statusSince[tab.id].since : 0
+          const statusSince = input.statusSince[tab.id] ?? 0
           const turn = inbox.turns[tab.id]
           const unread = !!turn && turn.endedAt > (inbox.seenAt[tab.id] ?? 0)
           const base = {
@@ -213,9 +174,10 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
 
     const ev = prEventFor(input.prStatuses[wt.path], !!input.mergedPaths[wt.path])
     if (ev && inbox.prSeen[wt.path] !== ev.fingerprint) {
-      buckets.pr.push({
+      const section = BLOCKING_PR_EVENTS.has(ev.kind) ? 'pr' : 'prInfo'
+      buckets[section].push({
         key: `pr:${wt.path}`,
-        section: 'pr',
+        section,
         worktreePath: wt.path,
         // Opening a PR event lands on the worktree's first agent tab, so
         // you're one keystroke from telling it to fix the failure.
@@ -254,5 +216,5 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
 /** The item the jump hotkey opens: the top needs-you item that isn't the
  *  tab you're already looking at, so repeated presses walk the list. */
 export function nextInboxItem(model: InboxModel, focusedTabId: string | null): InboxItem | null {
-  return model.needsYou.find((i) => i.section === 'pr' || i.tabId !== focusedTabId) ?? null
+  return model.needsYou.find((i) => i.prFingerprint !== undefined || i.tabId !== focusedTabId) ?? null
 }

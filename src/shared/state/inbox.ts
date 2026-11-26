@@ -12,13 +12,13 @@
 //     after that is unread. Shared state, so clearing it on the desktop
 //     also clears it on the phone.
 //
-// `statusSince` records when each tab entered its current status, so the
-// needs-you sections can sort oldest-first; terminals.statuses carries no
-// timestamp. `prSeen` holds the fingerprint of the PR event the user last
-// saw per worktree, so a new event (a fresh CI failure on a new commit)
-// resurfaces without anything having to be "unseen".
-
-import type { PtyStatus } from './terminals'
+// When each tab entered its current status lives on the terminals slice
+// (`terminals.statusSince`), beside the status it describes.
+//
+// `prSeen` holds the fingerprint of the PR event the user last saw per
+// worktree, so a new event (a fresh CI failure on a new commit) resurfaces
+// without anything having to be "unseen". Main seeds it on first sight of
+// a worktree's PR, so only events that arrive later ever light the bell.
 
 export type InboxTurnKind = 'question' | 'finished'
 
@@ -36,9 +36,6 @@ export interface InboxState {
   turns: Record<string, InboxTurn>
   /** Tab id → epoch ms the user last viewed it. */
   seenAt: Record<string, number>
-  /** Tab id → epoch ms its status last changed value. Not persisted:
-   *  statuses themselves don't survive a restart. */
-  statusSince: Record<string, { status: PtyStatus; since: number }>
   /** Worktree path → fingerprint of the PR event last seen there. */
   prSeen: Record<string, string>
 }
@@ -47,17 +44,14 @@ export type InboxEvent =
   | { type: 'inbox/turnEnded'; payload: { tabId: string; turn: InboxTurn } }
   | { type: 'inbox/seen'; payload: { tabId: string; ts: number } }
   | { type: 'inbox/prSeen'; payload: { worktreePath: string; fingerprint: string } }
-  | {
-      type: 'inbox/statusSince'
-      payload: { tabId: string; status: PtyStatus; since: number }
-    }
   /** Drop every record for tabs that no longer exist. */
   | { type: 'inbox/tabsForgotten'; payload: { tabIds: string[] } }
+  /** Drop PR read marks for worktrees that no longer exist. */
+  | { type: 'inbox/worktreesForgotten'; payload: { paths: string[] } }
 
 export const initialInbox: InboxState = {
   turns: {},
   seenAt: {},
-  statusSince: {},
   prSeen: {}
 }
 
@@ -106,27 +100,16 @@ export function inboxReducer(state: InboxState, event: InboxEvent): InboxState {
       if (state.prSeen[worktreePath] === fingerprint) return state
       return { ...state, prSeen: { ...state.prSeen, [worktreePath]: fingerprint } }
     }
-    case 'inbox/statusSince': {
-      const { tabId, status, since } = event.payload
-      if (state.statusSince[tabId]?.status === status) return state
-      return {
-        ...state,
-        statusSince: { ...state.statusSince, [tabId]: { status, since } }
-      }
-    }
     case 'inbox/tabsForgotten': {
       const { tabIds } = event.payload
       const turns = omitKeys(state.turns, tabIds)
       const seenAt = omitKeys(state.seenAt, tabIds)
-      const statusSince = omitKeys(state.statusSince, tabIds)
-      if (
-        turns === state.turns &&
-        seenAt === state.seenAt &&
-        statusSince === state.statusSince
-      ) {
-        return state
-      }
-      return { ...state, turns, seenAt, statusSince }
+      if (turns === state.turns && seenAt === state.seenAt) return state
+      return { ...state, turns, seenAt }
+    }
+    case 'inbox/worktreesForgotten': {
+      const prSeen = omitKeys(state.prSeen, event.payload.paths)
+      return prSeen === state.prSeen ? state : { ...state, prSeen }
     }
     default: {
       const _exhaustive: never = event

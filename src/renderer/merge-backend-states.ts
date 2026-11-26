@@ -87,12 +87,10 @@ export interface MergedWorktreeData {
   pendingBackendId: Record<string, string>
   /** Pane trees, merged. Keyed by worktree path like the slice itself. */
   panes: AppState['terminals']['panes']
-  /** Inbox maps, merged flat — tab-keyed ones for the same reason the
-   *  terminal maps are (see below); `inboxPrSeen` is path-keyed and
-   *  shares the worktree-path collision caveat in the module header. */
+  /** When each terminal entered its current status (inbox sort key). */
   inboxTurns: AppState['inbox']['turns']
   inboxSeenAt: AppState['inbox']['seenAt']
-  inboxStatusSince: AppState['inbox']['statusSince']
+  statusSince: AppState['terminals']['statusSince']
   inboxPrSeen: AppState['inbox']['prSeen']
 }
 
@@ -158,7 +156,7 @@ export function mergeBackendStates(
     panes: {},
     inboxTurns: {},
     inboxSeenAt: {},
-    inboxStatusSince: {},
+    statusSince: {},
     inboxPrSeen: {}
   }
 
@@ -190,6 +188,7 @@ export function mergeBackendStates(
     // so cross-backend collision isn't a practical concern the way
     // identical worktree paths are.
     Object.assign(merged.statuses, state.terminals.statuses)
+    Object.assign(merged.statusSince, state.terminals.statusSince ?? {})
     Object.assign(merged.pendingTools, state.terminals.pendingTools)
     Object.assign(merged.shellActivity, state.terminals.shellActivity)
     Object.assign(merged.panes, state.terminals.panes)
@@ -204,7 +203,6 @@ export function mergeBackendStates(
     // `?? {}` because a remote on an older server has no inbox slice.
     Object.assign(merged.inboxTurns, state.inbox?.turns ?? {})
     Object.assign(merged.inboxSeenAt, state.inbox?.seenAt ?? {})
-    Object.assign(merged.inboxStatusSince, state.inbox?.statusSince ?? {})
     Object.assign(merged.inboxPrSeen, state.inbox?.prSeen ?? {})
   }
 

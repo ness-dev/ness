@@ -275,7 +275,6 @@ export function buildInitialAppState(
     notifications: initialNotifications,
     inbox: config.inbox
       ? {
-          ...initialInbox,
           turns: { ...config.inbox.turns },
           seenAt: { ...config.inbox.seenAt },
           prSeen: { ...config.inbox.prSeen }

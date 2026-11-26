@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, GitPullRequest, Inbox } from 'lucide-react'
 import type { InboxItem, InboxModel, InboxSectionKey } from '../inbox-model'
 
@@ -11,6 +11,7 @@ const DOT: Record<InboxSectionKey, string> = {
   question: 'bg-accent',
   done: 'bg-warning',
   pr: '',
+  prInfo: '',
   working: 'bg-success animate-pulse',
   seen: 'bg-faint'
 }
@@ -47,7 +48,13 @@ export function InboxView({
 }): JSX.Element {
   // Per-client UI fold state, like the Projects view's group collapse.
   const [open, setOpen] = useState<Partial<Record<InboxSectionKey, boolean>>>({})
-  const now = Date.now()
+  // Ages are minute-granular; re-render on a slow clock so they don't
+  // freeze between store events.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
   const nonEmpty = model.sections.filter((s) => s.items.length > 0)
 
   return (
@@ -79,7 +86,7 @@ export function InboxView({
               section.items.map((item) => {
                 const active =
                   item.worktreePath === activeWorktreeId &&
-                  item.section !== 'pr' &&
+                  item.prFingerprint === undefined &&
                   item.tabId === activeTabId
                 return (
                   <button
@@ -90,7 +97,7 @@ export function InboxView({
                       active ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
                     }`}
                   >
-                    {item.section === 'pr' ? (
+                    {item.prFingerprint !== undefined ? (
                       <GitPullRequest
                         className={`icon-xs shrink-0 mt-0.5 ${item.prKind ? PR_COLOR[item.prKind] : ''}`}
                       />

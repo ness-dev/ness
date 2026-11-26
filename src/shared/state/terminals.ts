@@ -250,6 +250,11 @@ export interface TerminalSession {
 export interface TerminalsState {
   /** PTY status per terminal id. */
   statuses: Record<string, PtyStatus>
+  /** Epoch ms each terminal entered its current status — when the value
+   *  last *changed*, not when it was last reported. The inbox sorts its
+   *  needs-you rows oldest-first by this. Absent when the dispatcher
+   *  didn't stamp `at`. */
+  statusSince: Record<string, number>
   /** Only meaningful when status is 'needs-approval'; null otherwise. */
   pendingTools: Record<string, PendingTool | null>
   /** Per-terminal foreground-process indicator for shell tabs. */
@@ -274,7 +279,14 @@ export interface TerminalsState {
 export type TerminalsEvent =
   | {
       type: 'terminals/statusChanged'
-      payload: { id: string; status: PtyStatus; pendingTool: PendingTool | null }
+      payload: {
+        id: string
+        status: PtyStatus
+        pendingTool: PendingTool | null
+        /** Epoch ms, stamped by the dispatcher so the reducer stays pure.
+         *  Recorded into `statusSince` only when the status changes. */
+        at?: number
+      }
     }
   | {
       type: 'terminals/shellActivityChanged'
@@ -385,6 +397,7 @@ export type TerminalsEvent =
 
 export const initialTerminals: TerminalsState = {
   statuses: {},
+  statusSince: {},
   pendingTools: {},
   shellActivity: {},
   progress: {},
@@ -399,13 +412,18 @@ export function terminalsReducer(
 ): TerminalsState {
   switch (event.type) {
     case 'terminals/statusChanged': {
-      const { id, status, pendingTool } = event.payload
+      const { id, status, pendingTool, at } = event.payload
       // pendingTool only matters when the status is needs-approval; null it
       // otherwise so the renderer doesn't flash stale approval UI.
       const nextPending = status === 'needs-approval' ? pendingTool : null
+      const changed = state.statuses[id] !== status
       return {
         ...state,
         statuses: { ...state.statuses, [id]: status },
+        statusSince:
+          changed && at !== undefined
+            ? { ...state.statusSince, [id]: at }
+            : state.statusSince,
         pendingTools: { ...state.pendingTools, [id]: nextPending }
       }
     }
@@ -440,6 +458,7 @@ export function terminalsReducer(
       const id = event.payload
       if (
         !(id in state.statuses) &&
+        !(id in state.statusSince) &&
         !(id in state.pendingTools) &&
         !(id in state.shellActivity) &&
         !(id in state.progress) &&
@@ -448,6 +467,8 @@ export function terminalsReducer(
         return state
       }
       const { [id]: _s, ...restStatuses } = state.statuses
+      const { [id]: _since, ...restSince } = state.statusSince
+      void _since
       const { [id]: _p, ...restPending } = state.pendingTools
       const { [id]: _a, ...restActivity } = state.shellActivity
       const { [id]: _pg, ...restProgress } = state.progress
@@ -460,6 +481,7 @@ export function terminalsReducer(
       return {
         ...state,
         statuses: restStatuses,
+        statusSince: restSince,
         pendingTools: restPending,
         shellActivity: restActivity,
         progress: restProgress,

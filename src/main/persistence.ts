@@ -383,10 +383,8 @@ export interface Config {
   // Snoozed worktrees keyed by absolute path. Wakes when wakeAt is reached
   // or when the worktree's effective state transitions to 'processing'.
   snooze?: Record<string, SnoozeEntry>
-  /** Inbox turn summaries + read marks (see shared/state/inbox.ts).
-   *  `statusSince` is deliberately absent — statuses don't survive a
-   *  restart, so neither does when they started. */
-  inbox?: Pick<InboxState, 'turns' | 'seenAt' | 'prSeen'>
+  /** Inbox turn summaries + read marks (see shared/state/inbox.ts). */
+  inbox?: InboxState
   /** Worktree paths the user has pinned to the top of the sidebar. */
   pinned?: Record<string, true>
   // Default duration (days) for plain-click snooze. Min 1, default 7.

@@ -21,7 +21,7 @@ import { applyTheme, effectiveAppBg } from './theme-apply'
 import { getBackend } from './backend'
 import { HotkeysProvider, Tooltip } from './components/Tooltip'
 import { Sidebar, type SidebarView } from './components/Sidebar'
-import { buildInboxModel, nextInboxItem, type InboxItem } from './inbox-model'
+import { buildInboxModel, nextInboxItem, prEventFor, type InboxItem } from './inbox-model'
 import { showToast } from './toast'
 import { ResizeHandle } from './components/ResizeHandle'
 import { AppTitleSegment } from './components/AppTitleSegment'
@@ -1039,6 +1039,7 @@ function DesktopApp(): JSX.Element {
         worktrees: mergedData.flatWorktrees,
         panes: mergedData.panes,
         statuses: mergedData.statuses,
+        statusSince: mergedData.statusSince,
         pendingTools: mergedData.pendingTools,
         prStatuses: mergedData.prStatuses,
         mergedPaths: mergedData.mergedPaths,
@@ -1046,7 +1047,6 @@ function DesktopApp(): JSX.Element {
         inbox: {
           turns: mergedData.inboxTurns,
           seenAt: mergedData.inboxSeenAt,
-          statusSince: mergedData.inboxStatusSince,
           prSeen: mergedData.inboxPrSeen
         }
       }),
@@ -1065,11 +1065,17 @@ function DesktopApp(): JSX.Element {
   const jumpToNextInboxItem = useCallback(() => {
     const next = nextInboxItem(inboxModel, focusedTabId)
     if (next) handleOpenInboxItem(next)
+    else if (inboxModel.needsYou.length > 0) showToast("You're on the only thing that needs you", undefined, 'inbox-jump')
     else showToast('Nothing needs you right now', undefined, 'inbox-jump')
   }, [inboxModel, focusedTabId, handleOpenInboxItem])
   // Looking at a tab reads it. Only while this window has focus: a turn
   // that finishes in a backgrounded window is exactly what the inbox is
   // for. Re-runs when the focused tab's turn ends while you watch it.
+  // Known gap: keyboard focus inside an embedded browser tab
+  // (WebContentsView) makes document.hasFocus() false, so a turn that
+  // ends beside a focused browser split stays unread until the window
+  // next fires 'focus'. Don't drop the early return below — it's also
+  // what keeps this from calling an older remote that lacks the method.
   const focusedTurnEndedAt = activeWorktreeId && focusedTabId
     ? (mergedData.inboxTurns[focusedTabId]?.endedAt ?? 0)
     : 0
@@ -1085,6 +1091,23 @@ function DesktopApp(): JSX.Element {
     window.addEventListener('focus', mark)
     return () => window.removeEventListener('focus', mark)
   }, [activeWorktreeId, focusedTabId, focusedTurnEndedAt, focusedSeenAt, backendFor])
+  // Opening a worktree by any route — sidebar, palette, PR badge, Cmd+N —
+  // reads its current PR event, same focus rule as tabs.
+  const activePrFingerprint = activeWorktreeId
+    ? (prEventFor(mergedData.prStatuses[activeWorktreeId], !!mergedData.mergedPaths[activeWorktreeId])
+        ?.fingerprint ?? null)
+    : null
+  const activePrSeen = activeWorktreeId ? mergedData.inboxPrSeen[activeWorktreeId] : undefined
+  useEffect(() => {
+    if (!activeWorktreeId || !activePrFingerprint || activePrSeen === activePrFingerprint) return
+    const mark = (): void => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      void backendFor(activeWorktreeId).markInboxPrSeen(activeWorktreeId, activePrFingerprint)
+    }
+    mark()
+    window.addEventListener('focus', mark)
+    return () => window.removeEventListener('focus', mark)
+  }, [activeWorktreeId, activePrFingerprint, activePrSeen, backendFor])
 
 
   const handleOpenSubscriptionGraph = useCallback(
