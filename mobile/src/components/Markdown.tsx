@@ -7,6 +7,11 @@
 import { memo, type ReactElement } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { c, mono } from '../theme'
+import { ChatImage } from '../chat/ChatImage'
+
+// `![alt](src)` — local paths are fetched from the backend, like the web's
+// MarkdownImage (jsonClaude:readAttachmentImage).
+const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 
 interface Props {
   text: string
@@ -76,11 +81,24 @@ export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, 
         )
         continue
       }
-      blocks.push(
-        <Text key={key} style={base} selectable>
-          <Inline text={preserveNewlines ? trimmed : trimmed.replace(/\n(?!\n)/g, ' ')} />
-        </Text>
-      )
+      const images = [...trimmed.matchAll(IMAGE_RE)]
+      const prose = images.length ? trimmed.replace(IMAGE_RE, '').trim() : trimmed
+      if (prose) {
+        blocks.push(
+          <Text key={key} style={base} selectable>
+            <Inline text={preserveNewlines ? prose : prose.replace(/\n(?!\n)/g, ' ')} />
+          </Text>
+        )
+      }
+      if (images.length) {
+        blocks.push(
+          <View key={`${key}-img`} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {images.map((m, k) => (
+              <ChatImage key={k} path={m[2]} alt={m[1]} height={160} maxWidth={320} />
+            ))}
+          </View>
+        )
+      }
     }
   })
   return <View style={{ gap: 10 }}>{blocks}</View>

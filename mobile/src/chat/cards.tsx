@@ -6,7 +6,7 @@
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 import { structuredPatch } from 'diff'
-import { Brain, ChevronDown, ChevronRight, ListChecks, Loader2, RotateCcw, Sparkles, X, Wrench } from 'lucide-react-native'
+import { Bot, Brain, ChevronDown, ChevronRight, ListChecks, Loader2, RotateCcw, Sparkles, X, Wrench } from 'lucide-react-native'
 import type {
   JsonClaudeBackgroundAgent,
   JsonClaudeImageRef,
@@ -24,6 +24,7 @@ import { NESS_MARK_PATHS } from '../../../src/renderer/components/NessMark'
 import { Markdown } from '../components/Markdown'
 import { Spin } from '../components/Spin'
 import { ROW_HIT_SLOP, useDensity } from './density'
+import { ImageStrip } from './ChatImage'
 
 export interface ToolResultView {
   content: string
@@ -128,8 +129,12 @@ export function ToolCardChrome({
   autoApproved,
   sessionAllowed,
   autoExpand = false,
+  images,
   children
 }: {
+  /** Tool-result images: a thumbnail strip while collapsed (the web's
+   *  collapsedImages), and at the top of the body when open. */
+  images?: JsonClaudeImageRef[]
   name: string
   subtitle: ReactNode
   isError?: boolean
@@ -148,7 +153,7 @@ export function ToolCardChrome({
       <ChatRow onPress={() => setExpanded(!isOpen)}>
         <Chevron open={isOpen} />
         <ToolIcon icon={icon} />
-        <Text style={{ fontSize: d.chrome, fontWeight: '500', fontFamily: d.toolFamily, color: isError ? c.danger : brand ? c.accent : c.fg }}>
+        <Text style={{ fontSize: d.chrome, fontWeight: '500', fontFamily: d.toolFamily, color: isError ? c.danger : brand ? c.brand : c.fg }}>
           {name}
         </Text>
         <Text style={{ flex: 1, fontSize: d.chrome, color: c.muted }} numberOfLines={1}>
@@ -158,8 +163,14 @@ export function ToolCardChrome({
         {sessionAllowed && <Meta>{sessionAllowed.rule ? 'always' : 'session'}</Meta>}
         {isError && <Meta color={c.danger}>error</Meta>}
       </ChatRow>
+      {!isOpen && images && images.length > 0 && <ImageStrip images={images} height={64} />}
       {isOpen && (
         <View style={{ marginTop: 2, marginBottom: 8, backgroundColor: c.panel, borderRadius: d.bubbleRadius, overflow: 'hidden' }}>
+          {images && images.length > 0 && (
+            <View style={{ paddingHorizontal: 8 }}>
+              <ImageStrip images={images} height={120} />
+            </View>
+          )}
           {children}
         </View>
       )}
@@ -230,6 +241,7 @@ function common(p: ToolCardProps) {
   return {
     icon: disp.icon as DesktopIcon,
     isError: !!p.result?.isError,
+    images: p.result?.images,
     autoApproved: p.autoApproved,
     sessionAllowed: p.sessionAllowed
   }
@@ -539,6 +551,9 @@ export function ToolGroup({ rows }: { rows: GroupRow[] }) {
         {hasPending && <Meta color={c.warning}>needs approval</Meta>}
         {hasError && <Meta color={c.danger}>error</Meta>}
       </ChatRow>
+      {!expanded && rows.some((r) => r.images?.length) && (
+        <ImageStrip images={rows.flatMap((r) => r.images ?? [])} height={56} />
+      )}
       {expanded && (
         <View style={{ marginTop: 2, marginBottom: 4 }}>
           {rows.map((r) => (
@@ -550,7 +565,7 @@ export function ToolGroup({ rows }: { rows: GroupRow[] }) {
   )
 }
 
-export function TurnGroup({ summary, hasError, children }: { summary: TurnSummary; hasError: boolean; children: ReactNode }) {
+export function TurnGroup({ summary, hasError, images, children }: { summary: TurnSummary; hasError: boolean; images?: JsonClaudeImageRef[]; children: ReactNode }) {
   const d = useDensity()
   const [open, setOpen] = useState(false)
   const parts = [
@@ -565,6 +580,7 @@ export function TurnGroup({ summary, hasError, children }: { summary: TurnSummar
         <Text style={{ fontSize: d.chrome, color: c.muted }}>{parts.join(' · ')}</Text>
         {hasError && <Meta color={alpha(c.danger, 0.8)}>errors</Meta>}
       </ChatRow>
+      {!open && images && images.length > 0 && <ImageStrip images={images} height={56} />}
       {open && <View style={{ marginTop: 2, marginBottom: 4, gap: 4 }}>{children}</View>}
     </View>
   )
@@ -697,7 +713,7 @@ export function NoticeCard({ title, detail, color = c.warning }: { title: string
 }
 
 /** Right-aligned prompt bubble; also the queued variant. */
-export function UserBubble({ text, queued, onCancel }: { text: string; queued?: boolean; onCancel?: () => void }) {
+export function UserBubble({ text, queued, onCancel, images }: { text: string; queued?: boolean; onCancel?: () => void; images?: JsonClaudeImageRef[] }) {
   const d = useDensity()
   return (
     <View style={{ alignItems: 'flex-end' }}>
@@ -717,6 +733,11 @@ export function UserBubble({ text, queued, onCancel }: { text: string; queued?: 
       >
         <View style={{ flexShrink: 1 }}>
           <Markdown text={text} size={d.body} preserveNewlines />
+          {images && images.length > 0 && (
+            <View style={{ marginTop: 8 }}>
+              <ImageStrip images={images} height={72} />
+            </View>
+          )}
         </View>
         {queued && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
@@ -752,8 +773,8 @@ export function AutomatedTurnCard({
   return (
     <View style={{ backgroundColor: c.panel, borderRadius: d.promptRadius, paddingHorizontal: 16, paddingVertical: 10, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Sparkles color={brand ? c.accent : c.warning} size={brand ? 14 : 12} />
-        <Text style={{ fontSize: d.chrome, fontWeight: '600', color: brand ? c.accent : c.warning, fontFamily: d.toolFamily }}>{label}</Text>
+        {brand ? <ToolIcon icon={NessIcon as DesktopIcon} className="icon-sm" /> : <Bot color={c.warning} size={12} />}
+        <Text style={{ fontSize: d.chrome, fontWeight: '600', color: brand ? c.brand : c.warning, fontFamily: d.toolFamily }}>{label}</Text>
         <Text style={{ flex: 1, fontSize: d.chrome, color: c.muted }} numberOfLines={1}>
           {note}
         </Text>
@@ -781,7 +802,8 @@ export function HeldNoticesCard({ notices }: { notices: { source: Parameters<typ
       <View style={{ maxWidth: d.bubbleMax, backgroundColor: c.panel, borderRadius: d.promptRadius }}>
         <Pressable onPress={() => setOpen(!open)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 }}>
           <Chevron open={open} />
-          <Text style={{ fontSize: d.chrome, fontWeight: '600', color: c.accent }}>
+          <ToolIcon icon={NessIcon as DesktopIcon} className="icon-sm" />
+          <Text style={{ fontSize: d.chrome, fontWeight: '600', color: c.brand }}>
             {notices.length === 1 ? '1 held notification' : `${notices.length} held notifications`}
           </Text>
           <Text style={{ fontSize: d.chrome, color: c.muted, flexShrink: 1 }} numberOfLines={1}>

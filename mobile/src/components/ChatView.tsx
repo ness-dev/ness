@@ -34,6 +34,7 @@ import {
   type ToolResultView
 } from '../chat/cards'
 import { ApprovalSlot } from '../chat/ApprovalCard'
+import { ChatClientContext } from '../chat/ChatImage'
 import { Composer } from '../chat/Composer'
 import { DENSITY, DensityContext } from '../chat/density'
 
@@ -89,7 +90,7 @@ function renderEntries(entries: JsonClaudeChatEntry[], ctx: Ctx): RenderedRow[] 
         entryId: entry.entryId,
         type: 'text',
         isTurnStart: !entry.isQueued,
-        node: <UserBubble text={entry.text ?? ''} queued={!!entry.isQueued} onCancel={() => ctx.onCancelQueued(entry.entryId)} />
+        node: <UserBubble text={entry.text ?? ''} queued={!!entry.isQueued} images={entry.images} onCancel={() => ctx.onCancelQueued(entry.entryId)} />
       })
       continue
     }
@@ -378,12 +379,18 @@ export function ChatView({
   const sessionApprovals = session?.sessionToolApprovals ?? []
 
   return (
+    <ChatClientContext.Provider value={client}>
     <DensityContext.Provider value={density}>
       <View style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
           data={reversed}
           inverted
+          // The web's stick-to-bottom rule: while you're within 32pt of the
+          // newest message, new content follows; scrolled up, your reading
+          // position stays put instead of shifting as messages stream in.
+          // (Inverted list: index 0 / "top" is the visual bottom.)
+          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 32 }}
           keyExtractor={(i) => i.key}
           renderItem={({ item }) => <DisplayRow item={item} />}
           contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}
@@ -456,13 +463,14 @@ export function ChatView({
         onSent={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })}
       />
     </DensityContext.Provider>
+    </ChatClientContext.Provider>
   )
 }
 
 function DisplayRow({ item }: { item: DisplayItem }) {
   if (item.kind === 'turn') {
     return (
-      <TurnGroup summary={item.summary} hasError={item.rows.some((r) => r.hasError)}>
+      <TurnGroup summary={item.summary} hasError={item.rows.some((r) => r.hasError)} images={item.rows.flatMap((r) => r.images ?? [])}>
         <Grouped items={item.items} />
       </TurnGroup>
     )

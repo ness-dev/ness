@@ -21,7 +21,9 @@ export const c = {
   warning: '#fbbf24',
   danger: '#ef4444',
   info: '#60a5fa',
-  accent: '#c084fc'
+  accent: '#c084fc',
+  // --color-brand; the default --brand-gradient is flat, so it's one colour.
+  brand: '#4ade80'
 }
 
 /** Tailwind's `color/NN` opacity modifier, for hex tokens. */

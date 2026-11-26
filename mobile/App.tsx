@@ -5,16 +5,15 @@
 // worktree list itself comes from the renderer's own pure model code via
 // src/fleet.ts, across every enabled backend.
 import { StatusBar } from 'expo-status-bar'
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Keyboard,
   Linking,
-  Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,7 +37,17 @@ import { Spin } from './src/components/Spin'
 import { PanelsHost } from './src/panels/PanelsHost'
 import { getLeaves } from '../src/shared/state/terminals'
 
-export default function App() {
+export default function Root() {
+  return (
+    <SafeAreaProvider>
+      <KeyboardProvider>
+        <App />
+      </KeyboardProvider>
+    </SafeAreaProvider>
+  )
+}
+
+function App() {
   const backends = useBackends()
   const fleet = useMemo(() => new Fleet(), [])
   // In an effect, not during render: setClients notifies subscribers.
@@ -81,11 +90,17 @@ export default function App() {
   )
 }
 
+// keyboard-controller's KeyboardAvoidingView animates frame-by-frame with
+// the keyboard on the UI thread. RN's own one ran a LayoutAnimation that
+// moved the composer's button row and its text box at different speeds.
+// It sizes its padding from its own frame, so sitting inside the full-edge
+// SafeAreaView means the home-indicator inset is absorbed when the keyboard
+// opens (RN's left a ~60pt gap above the keyboard).
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <SafeAreaView style={s.screen}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {children}
       </KeyboardAvoidingView>
     </SafeAreaView>
