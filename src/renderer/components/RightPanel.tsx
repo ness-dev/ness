@@ -92,7 +92,7 @@ export function RightPanel({
       className={`flex flex-col border-b border-border bg-panel ${outerSize} ${containerClassName}`}
     >
       <div
-        className={`drag-region flex items-stretch h-9 shrink-0 ${
+        className={`drag-region flex items-stretch h-9 pointer-coarse:h-11 shrink-0 ${
           collapsed ? '' : 'border-b border-border'
         } ${headerClassName}`}
       >
@@ -107,7 +107,11 @@ export function RightPanel({
           </span>
         </button>
         {actions && (
-          <div className="no-drag flex items-center gap-2 pr-3">{actions}</div>
+          // On touch screens every header action gets a 44px target (the
+          // icons themselves stay icon-xs) — they're 12px squares otherwise.
+          <div className="no-drag flex items-center gap-2 pr-3 pointer-coarse:gap-0 pointer-coarse:pr-0 pointer-coarse:[&_button]:p-4">
+            {actions}
+          </div>
         )}
       </div>
       {!collapsed && <div className={bodyClasses}>{children}</div>}
