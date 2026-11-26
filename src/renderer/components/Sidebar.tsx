@@ -128,6 +128,17 @@ export function Sidebar({
           </button>
         </Tooltip>
         <div className="ml-auto flex items-center gap-1">
+          {/* Deliberately one icon among many: most worktrees get started by
+              asking a Lead, so the manual path stays available but quiet. */}
+          <Tooltip label="New worktree" action="newWorktree" side="bottom">
+            <button
+              onClick={() => onNewWorktree()}
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
+              aria-label="New worktree"
+            >
+              <Plus className="icon-xs" />
+            </button>
+          </Tooltip>
           {/* Swaps the list below for the Inbox. Kept as a quiet icon:
               a bell only when something actually needs you. */}
           <Tooltip
@@ -149,17 +160,6 @@ export function Sidebar({
               }`}
             >
               {needsYouCount > 0 ? <BellDot className="icon-xs" /> : <Inbox className="icon-xs" />}
-            </button>
-          </Tooltip>
-          {/* Deliberately one icon among many: most worktrees get started by
-              asking a Lead, so the manual path stays available but quiet. */}
-          <Tooltip label="New worktree" action="newWorktree" side="bottom">
-            <button
-              onClick={() => onNewWorktree()}
-              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
-              aria-label="New worktree"
-            >
-              <Plus className="icon-xs" />
             </button>
           </Tooltip>
           <Tooltip label="Task list" action="toggleTaskList" side="bottom">
