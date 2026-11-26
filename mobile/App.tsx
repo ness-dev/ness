@@ -20,7 +20,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native'
-import { ChevronDown, FileDiff, FileText, Globe, Loader2, Plus, SquareTerminal } from 'lucide-react-native'
+import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightClose, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
 import { parseConnectionUrl } from '../src/shared/transport/parse-connection-url'
 import { supportsChat } from '../src/shared/agent-registry'
 import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
@@ -34,6 +34,8 @@ import { ChatView } from './src/components/ChatView'
 import { WorktreePicker } from './src/components/WorktreePicker'
 import { BackendsSheet } from './src/components/BackendsSheet'
 import { Spin } from './src/components/Spin'
+import { PanelsHost } from './src/panels/PanelsHost'
+import { getLeaves } from '../src/shared/state/terminals'
 
 export default function App() {
   const backends = useBackends()
@@ -103,6 +105,8 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
   // Mobile's own per-worktree tab focus, independent of desktop panes.
   const [selectedTabByWorktree, setSelectedTabByWorktree] = useState<Record<string, string>>({})
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Per-client UI focus, same as the web's rightPanelOpen.
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; x: number; y: number } | null>(null)
   const windowWidth = useWindowDimensions().width
 
@@ -216,6 +220,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
   const handleSelectWorktree = useCallback((wtPath: string) => {
     setActiveWorktreeId(wtPath)
     setPickerOpen(false)
+    setRightPanelOpen(false)
   }, [])
 
   const handleSelectTab = useCallback(
@@ -239,6 +244,28 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     setSelectedTabByWorktree((prev) => ({ ...prev, [wtPath]: tab.id }))
     setPickerOpen(false)
   }, [activeWorktree, client, merged.panes])
+
+  // Port of useTabHandlers' handleSendToAgent: the phone's selected tab if
+  // it's an agent/chat, else a pane's active one, else the first; chat gets
+  // a message, a terminal agent a bracketed paste. Then focus that tab.
+  const handleSendToAgent = useCallback(
+    (text: string) => {
+      if (!activeWorktree || !client) return
+      const sendable = (t: TerminalTab) => t.type === 'agent' || t.type === 'json-claude'
+      const tree = merged.panes[activeWorktree.path]
+      const leaves = tree ? getLeaves(tree) : []
+      const target =
+        (selectedTab && sendable(selectedTab) ? selectedTab : undefined) ??
+        leaves.map((l) => l.tabs.find((t) => t.id === l.activeTabId)).find((t): t is TerminalTab => !!t && sendable(t)) ??
+        tabs.find(sendable)
+      if (!target) return
+      setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: target.id }))
+      setRightPanelOpen(false)
+      if (target.type === 'json-claude') client.sig('jsonClaude:send', target.id, text)
+      else client.sig('pty:write', target.id, '\x1b[200~' + text + '\x1b[201~')
+    },
+    [activeWorktree, client, merged.panes, selectedTab, tabs]
+  )
 
   const handleConvertTabType = useCallback(
     (tabId: string, newType: 'agent' | 'json-claude') => {
@@ -300,6 +327,15 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
             </Pressable>
           )}
         </ScrollView>
+        {activeWorktree && (
+          <Pressable
+            onPress={() => setRightPanelOpen((v) => !v)}
+            style={({ pressed }) => [s.detailsBtn, (rightPanelOpen || pressed) && { backgroundColor: c.surface }]}
+            accessibilityLabel={rightPanelOpen ? 'Close worktree details' : 'Worktree details'}
+          >
+            {rightPanelOpen ? <PanelRightClose color={c.fgBright} size={16} /> : <PanelRightOpen color={c.dim} size={16} />}
+          </Pressable>
+        )}
       </View>
 
       <View style={{ flex: 1 }}>
@@ -338,6 +374,16 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
               </Pressable>
             </View>
           </Pressable>
+        )}
+        {rightPanelOpen && activeWorktree && client && (
+          <PanelsHost
+            key={`${client.id}:${activeWorktree.path}`}
+            client={client}
+            worktree={activeWorktree}
+            focusedTabId={selectedTabId}
+            onSendToAgent={handleSendToAgent}
+            onClose={() => setRightPanelOpen(false)}
+          />
         )}
         {pickerOpen && (
           <WorktreePicker
@@ -456,6 +502,7 @@ const s = StyleSheet.create({
   tabActive: { borderColor: c.muted, backgroundColor: c.app },
   tabText: { color: c.dim, fontSize: fs.xs, maxWidth: 140 },
   dot: { width: 6, height: 6, borderRadius: 3 },
+  detailsBtn: { width: 44, alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderColor: c.border },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 12, minWidth: 44, justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 24 },
   menu: {
