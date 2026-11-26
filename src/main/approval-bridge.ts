@@ -35,7 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { isAutoAllowedNessCall } from '../shared/ness-tool-policy'
+import { isAutoAllowedNessCall, nessGrantsMayAnswer } from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -420,24 +420,29 @@ export class ApprovalBridge {
     // a human; see shared/ness-tool-policy.ts for what's excluded and why.
     // No approvalSessionAllowed dispatch either: these calls fire every
     // turn, and an "auto-allowed" chip on each would be noise.
+    // Resolve each repoRoot's setup command once per request, so the
+    // policy check, the remembered-command check and the card all see the
+    // same snapshot.
     const repoSetupFor = this.deps?.repoSetupFor
-    let setup: { repoRoot: string; command: string } | null = null
+    const setups = new Map<string, { repoRoot: string; command: string } | null>()
+    const setupFor = (repoRoot: string | undefined): { repoRoot: string; command: string } | null => {
+      const key = repoRoot ?? ''
+      if (!setups.has(key)) setups.set(key, repoSetupFor?.(basePayload.sessionId, repoRoot) ?? null)
+      return setups.get(key) ?? null
+    }
+    const approved = this.store.getSnapshot().state.permissions.approvedSetupCommands
     const nessCtx = {
       repoSetupCommandFor: repoSetupFor
-        ? (repoRoot: string | undefined): string | null => {
-            setup = repoSetupFor(basePayload.sessionId, repoRoot)
-            return setup?.command ?? null
-          }
+        ? (repoRoot: string | undefined): string | null => setupFor(repoRoot)?.command ?? null
         : undefined,
       isOpenRepo: this.deps?.isOpenRepo
     }
-    const approved = this.store.getSnapshot().state.permissions.approvedSetupCommands
     if (
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
         ...nessCtx,
-        isSetupCommandApproved: () => {
-          const s = setup as { repoRoot: string; command: string } | null
-          return s !== null && approved[s.repoRoot] === s.command
+        isSetupCommandApproved: (repoRoot, command) => {
+          const resolved = setupFor(repoRoot)
+          return resolved !== null && approved[resolved.repoRoot] === command
         }
       })
     ) {
@@ -448,6 +453,10 @@ export class ApprovalBridge {
       )
       return
     }
+    // The policy said ask. For an input-gated Ness tool, a bare saved or
+    // session-wide grant mustn't overrule that wholesale; see
+    // nessGrantsMayAnswer for what it may still cover.
+    const grantsApply = !isQuestion && nessGrantsMayAnswer(basePayload.toolName, basePayload.input)
 
     // Two explicit-user-grant paths, both checked before the LLM
     // auto-reviewer because a grant the user made by hand is cheaper and
@@ -459,7 +468,7 @@ export class ApprovalBridge {
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
     const rootState = this.store.getSnapshot().state
-    if (!isQuestion) {
+    if (grantsApply) {
       const matched = findMatchingRule(
         rootState.permissions.rules,
         basePayload.toolName,
@@ -478,7 +487,7 @@ export class ApprovalBridge {
 
     const slice = rootState.jsonClaude
     const session = slice.sessions[basePayload.sessionId]
-    if (!isQuestion && session?.sessionToolApprovals.includes(basePayload.toolName)) {
+    if (grantsApply && session?.sessionToolApprovals.includes(basePayload.toolName)) {
       this.resolveAllowed(respond, basePayload)
       log(
         'approval-bridge',
@@ -502,19 +511,25 @@ export class ApprovalBridge {
         : { state: 'pending' }
     }
 
-    const payload: JsonClaudePendingApproval = { ...basePayload, autoReview }
     // Would this call have gone through with its setup command approved?
-    // Then the command is the only thing the user is being asked about.
-    const pendingSetup = setup as { repoRoot: string; command: string } | null
-    const approvesSetup =
-      pendingSetup &&
-      pendingSetup.command !== '' &&
+    // Then the command is the only thing the user is being asked about,
+    // so the card shows it and allowing remembers it.
+    let approvesSetup: { repoRoot: string; command: string } | undefined
+    if (
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
         ...nessCtx,
         isSetupCommandApproved: () => true
       })
-        ? pendingSetup
-        : undefined
+    ) {
+      const rawRoot = basePayload.input['repoRoot']
+      const resolved = setupFor(typeof rawRoot === 'string' && rawRoot ? rawRoot : undefined)
+      if (resolved && resolved.command) approvesSetup = resolved
+    }
+    const payload: JsonClaudePendingApproval = {
+      ...basePayload,
+      autoReview,
+      ...(approvesSetup ? { setupCommand: approvesSetup.command } : {})
+    }
     this.pendingResponses.set(payload.requestId, {
       respond,
       socket,

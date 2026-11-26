@@ -7,6 +7,7 @@ import {
   isAlwaysAutoAllowedNessTool,
   isAutoAllowedNessCall,
   isSafeAgentUrl,
+  nessGrantsMayAnswer,
   nessAllowedToolsFlagValue,
   nessControlToolName
 } from './ness-tool-policy'
@@ -143,5 +144,19 @@ describe('ness tool policy', () => {
     expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/Users/me/Downloads/clone' }, ctx)).toBe(false)
     // Without an isOpenRepo answer, a named repoRoot can't be vetted.
     expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/r' }, { repoSetupCommandFor: () => '' })).toBe(false)
+  })
+
+  it('lets grants answer only where an input check would not be skipped', () => {
+    const cw = 'mcp__ness-control__create_worktree'
+    const nav = 'mcp__ness-control__navigate_tab'
+    expect(nessGrantsMayAnswer(cw, { branchName: 'b' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, { url: 'https://example.com' })).toBe(true)
+    expect(nessGrantsMayAnswer(nav, { url: 'github.com' })).toBe(true)
+    expect(nessGrantsMayAnswer(nav, { url: 'file:///etc/passwd' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, { url: 'javascript:alert(1)' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, {})).toBe(false)
+    expect(nessGrantsMayAnswer('mcp__ness-control__create_browser_tab', {})).toBe(true)
+    expect(nessGrantsMayAnswer('Bash', { command: 'ls' })).toBe(true)
+    expect(nessGrantsMayAnswer('mcp__ness-control__eval_tab', {})).toBe(true)
   })
 })

@@ -11,7 +11,7 @@
 // filter state.
 
 import { ruleKey, type StoredPermissionRule } from '../../shared/permission-match'
-import { isAlwaysAutoAllowedNessTool } from '../../shared/ness-tool-policy'
+import { isAlwaysAutoAllowedNessTool, isGrantIgnoredNessTool } from '../../shared/ness-tool-policy'
 import { getMcpServerDisplay, parseMcpToolName } from './json-mode-cards/tool-display'
 
 /** At or below this many grants the list renders flat, as before. */
@@ -184,9 +184,14 @@ const LEGACY_NESS_PREFIX = 'mcp__harness-control__'
  *  registers `harness-control` any more, so those can never match, even
  *  for the input-gated tools (browser navigation, create_worktree) that a
  *  `ness-control` grant would still widen. */
-export function redundancy(rule: StoredPermissionRule): 'built-in' | 'old-name' | null {
+export function redundancy(
+  rule: StoredPermissionRule
+): 'built-in' | 'old-name' | 'input-checked' | null {
   if (rule.toolName.startsWith(LEGACY_NESS_PREFIX)) return 'old-name'
   if (isAlwaysAutoAllowedNessTool(rule.toolName)) return 'built-in'
+  // Ness decides these from their input and ignores saved grants for them
+  // (create_worktree). The URL-gated tools still honour grants for http(s).
+  if (isGrantIgnoredNessTool(rule.toolName)) return 'input-checked'
   return null
 }
 

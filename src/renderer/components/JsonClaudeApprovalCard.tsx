@@ -14,6 +14,7 @@ import { useJsonClaudeSession, useSettings } from '../store'
 import { useBackend } from '../backend'
 import { useViewport } from '../hooks/useViewport'
 import { getChatCapabilities } from '../../shared/agent-registry'
+import { nessGrantsMayAnswer } from '../../shared/ness-tool-policy'
 import {
   suggestPermissionPatterns,
   type PermissionPatternSuggestion
@@ -111,6 +112,10 @@ export function JsonClaudeApprovalCard({
   )
   const display = useMemo(() => getToolDisplay(approval.toolName), [approval.toolName])
   const parsedArgs = useMemo(() => extractArgs(approval.input), [approval.input])
+
+  // Ness ignores saved and session grants for some of its own tools'
+  // calls (see nessGrantsMayAnswer), so those buttons would promise nothing.
+  const inputGated = !nessGrantsMayAnswer(approval.toolName, approval.input)
 
   const session = useJsonClaudeSession(approval.sessionId)
   const cwd = session?.worktreePath
@@ -329,6 +334,14 @@ export function JsonClaudeApprovalCard({
 
       {mode === 'summary' && (
         <div className="space-y-2 pb-2">
+          {approval.setupCommand && (
+            <div className="px-3 pt-2 space-y-1">
+              <div className="text-xs text-fg">Runs this repo&apos;s setup command:</div>
+              <pre className="text-xs font-mono bg-app/40 rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap">
+                {approval.setupCommand}
+              </pre>
+            </div>
+          )}
           {approval.toolName === 'Bash' &&
           typeof approval.input?.command === 'string' ? (
             <div className="px-3 pt-2 space-y-2">
@@ -357,7 +370,7 @@ export function JsonClaudeApprovalCard({
               Allow once
               <span className="opacity-60 ml-1">{approveHotkeyLabel}</span>
             </button>
-            {!alreadyGranted && (
+            {!alreadyGranted && !inputGated && (
               <button
                 onClick={() => {
                   void allowThisSession()
@@ -376,6 +389,7 @@ export function JsonClaudeApprovalCard({
                 Allow with edits
               </button>
             )}
+            {!inputGated && (
             <button
               onClick={() => setMode('always')}
               title="Save a rule in Ness so future matching tool calls skip the prompt — across sessions, app restarts, and every worktree."
@@ -383,6 +397,7 @@ export function JsonClaudeApprovalCard({
             >
               Always allow…
             </button>
+            )}
             <button
               onClick={() => setMode('deny')}
               title={`Deny (${bindingToString(resolvedHotkeys.denyToolUse)}${denyNeedsEscape ? escapeNote : ''})`}

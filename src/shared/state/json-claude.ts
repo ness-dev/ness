@@ -579,6 +579,9 @@ export interface JsonClaudePendingApproval {
   toolUseId?: string
   timestamp: number
   autoReview?: AutoReviewStatus
+  /** create_worktree only: the repo's .ness.json setupCommand this call
+   *  would run, set when that command is the only reason it asks. */
+  setupCommand?: string
 }
 
 export interface JsonClaudeState {
