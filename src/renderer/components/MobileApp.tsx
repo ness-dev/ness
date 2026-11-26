@@ -612,10 +612,12 @@ function TabIcon({ tab, shellActivity, status }: { tab: TerminalTab; shellActivi
     )
   }
   if (tab.type === 'json-claude') {
+    // Live status, same as agent tabs and the desktop tab strip — a fixed
+    // accent dot hid whether a chat was working or waiting on you.
     return (
       <span className="inline-flex items-center gap-1">
         <AgentIcon kind={tab.agentKind ?? 'claude'} className="icon-xs" />
-        <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+        <span className={'w-1.5 h-1.5 rounded-full ' + STATUS_DOT[status]} />
       </span>
     )
   }

@@ -506,9 +506,10 @@ function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
     return (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <AgentIcon kind={tab.agentKind ?? 'claude'} size={12} />
-        {/* Same as the web: agent tabs show their status, chat tabs a
-            fixed accent dot (their state lives in the composer). */}
-        <View style={[s.dot, { backgroundColor: tab.type === 'agent' ? STATUS_DOT[status] : c.accent }]} />
+        {/* Live status for agent AND chat tabs, like the desktop tab strip
+            (TerminalPanel's TAB_STATUS_DOT): chat tabs get processing /
+            waiting / needs-approval statuses too. */}
+        <View style={[s.dot, { backgroundColor: STATUS_DOT[status] }]} />
       </View>
     )
   }
