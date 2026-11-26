@@ -64,7 +64,7 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
   const refresh = useCallback(async () => {
     if (!worktreePath) return
     try {
-      const result = await client.req<string[]>('worktree:listFiles', worktreePath)
+      const result = await client.api.listAllFiles(worktreePath)
       setFiles(result)
     } catch (err) {
       console.error('Failed to list files:', err) // eslint-disable-line no-console

@@ -34,7 +34,7 @@ export function ApprovalSlot({
   client: NessClient
   session: JsonClaudeSession | undefined
 }) {
-  const onResolve = (r: Resolution) => client.req('jsonClaude:resolveApproval', approval.requestId, r)
+  const onResolve = (r: Resolution) => client.api.resolveJsonClaudeApproval(approval.requestId, r)
   if (approval.toolName === 'AskUserQuestion') return <QuestionCard approval={approval} onResolve={onResolve} />
   return <ApprovalCard approval={approval} client={client} session={session} onResolve={onResolve} />
 }
@@ -86,13 +86,13 @@ function ApprovalCard({
     run(async () => {
       // Resolve first, so the bridge answers before any respawn.
       await onResolve({ behavior: 'allow', updatedInput: approval.input })
-      if (grantViaPermissionMode) await client.req('jsonClaude:setPermissionMode', approval.sessionId, 'acceptEdits')
-      else await client.req('jsonClaude:grantSessionToolApprovals', approval.sessionId, isEditTool ? [...EDIT_TOOL_NAMES] : [approval.toolName])
+      if (grantViaPermissionMode) await client.api.setJsonClaudePermissionMode(approval.sessionId, 'acceptEdits')
+      else await client.api.grantJsonClaudeSessionToolApprovals(approval.sessionId, isEditTool ? [...EDIT_TOOL_NAMES] : [approval.toolName])
     })
   const alwaysAllow = () => {
     if (!selected) return
     run(async () => {
-      void client.req('permissions:grant', selected.rule, session?.worktreePath)
+      void client.api.grantPermission(selected.rule, session?.worktreePath)
       await onResolve({ behavior: 'allow', updatedInput: approval.input })
     })
   }
@@ -165,8 +165,8 @@ function ApprovalCard({
                 onPress={() =>
                   run(async () => {
                     setGuidanceSaved(true)
-                    await client.req('config:setAutoApproveSteerInstructions', guidance)
-                    await client.req('jsonClaude:rerunAutoApprovalReview', approval.requestId)
+                    await client.api.setAutoApproveSteerInstructions(guidance)
+                    await client.api.rerunJsonClaudeAutoApprovalReview(approval.requestId)
                     setMode('summary')
                   })
                 }
@@ -175,7 +175,7 @@ function ApprovalCard({
                 label="Save only"
                 disabled={busy || guidance === savedGuidance}
                 onPress={() => run(async () => {
-                  await client.req('config:setAutoApproveSteerInstructions', guidance)
+                  await client.api.setAutoApproveSteerInstructions(guidance)
                   setGuidanceSaved(true)
                 })}
               />

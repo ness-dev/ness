@@ -29,7 +29,7 @@ export function ScratchpadPanel({ client, worktreePath }: PanelProps) {
     const pending = pendingRef.current
     if (!pending) return
     pendingRef.current = null
-    void clientRef.current.req('scratchpad:setText', pending.path, pending.text)
+    void clientRef.current.api.setScratchpadText(pending.path, pending.text)
   }
 
   // When the active worktree changes, flush the previous worktree's

@@ -13,6 +13,9 @@ import {
 } from '../../src/shared/state'
 import type { PaneNode, PtyStatus, TerminalTab } from '../../src/shared/state/terminals'
 import { ROLLUP_STATUS_RANK } from '../../src/shared/status-rollup'
+import { buildBackend } from '../../src/renderer/build-backend'
+import type { ElectronAPI } from '../../src/renderer/types'
+import type { LocalTransportHandle } from '../../src/shared/transport/transport'
 
 type Listener = () => void
 
@@ -27,6 +30,12 @@ export class NessClient {
   private conn: ConnState = { connected: false, hasSnapshot: false }
   private listeners = new Set<Listener>()
   readonly transport: WebSocketClientTransport
+  /** The desktop renderer's own typed backend API (build-backend.ts), bound
+   *  to this connection. Every request and signal goes through it — never a
+   *  hand-written channel string — so a server-side rename or signature
+   *  change updates build-backend.ts and fails the mobile typecheck in CI
+   *  instead of silently breaking the phone. */
+  readonly api: ElectronAPI
 
   constructor(
     readonly id: string,
@@ -47,6 +56,23 @@ export class NessClient {
         this.emit()
       }
     })
+    const t = this.transport
+    // Rejections are logged, not thrown: a fire-and-forget UI tap on a
+    // dropped connection shouldn't become an unhandled promise.
+    const handle: LocalTransportHandle = {
+      getStateSnapshot: () => t.getStateSnapshot(),
+      onStateEvent: (cb) => t.onStateEvent(cb),
+      request: (name, ...args) => {
+        const p = t.request(name, ...args)
+        p.catch((e: unknown) => console.warn(`[ness] ${name} failed`, e)) // eslint-disable-line no-console
+        return p
+      },
+      send: (name, ...args) => t.send(name, ...args),
+      onSignal: (name, h) => t.onSignal(name, h),
+      getClientId: () => t.getClientId(),
+      onReconnect: (cb) => t.onReconnect(cb)
+    }
+    this.api = buildBackend(() => handle, () => handle, null)
     this.transport.onStateEvent((event) => {
       this.state = rootReducer(this.state, event)
       this.emit()
@@ -75,17 +101,6 @@ export class NessClient {
     for (const l of this.listeners) l()
   }
 
-  /** Same request the web client's build-backend.ts `req(...)` sends.
-   *  Rejections are logged, not thrown: a fire-and-forget UI tap on a
-   *  dropped connection shouldn't become an unhandled promise. */
-  req<T = unknown>(channel: string, ...args: unknown[]): Promise<T> {
-    const p = this.transport.request(channel, ...args) as Promise<T>
-    p.catch((e: unknown) => console.warn(`[ness] ${channel} failed`, e)) // eslint-disable-line no-console
-    return p
-  }
-  sig(channel: string, ...args: unknown[]): void {
-    this.transport.send(channel, ...args)
-  }
 }
 
 export function useNess<T>(client: NessClient, select: (s: AppState) => T): T {

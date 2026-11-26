@@ -137,7 +137,7 @@ export function CostPanel({ client, worktreePath }: PanelProps) {
       title="Cost"
       defaultCollapsed
       onCollapsedChange={(collapsed) => {
-        void client.req('costs:setInterest', !collapsed)
+        void client.api.setCostsInterest(!collapsed)
       }}
     >
       <View style={{ paddingHorizontal: 12, paddingVertical: 8, gap: 12 }}>

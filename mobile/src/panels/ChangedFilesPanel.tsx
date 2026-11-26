@@ -58,7 +58,7 @@ export function requestChangedFiles(
     const existing = inFlight.get(key)
     if (existing) return existing
   }
-  const promise = client.req<ChangedFile[]>('worktree:changedFiles', path, mode).finally(() => {
+  const promise = client.api.getChangedFiles(path, mode).finally(() => {
     if (inFlight.get(key) === promise) inFlight.delete(key)
   })
   inFlight.set(key, promise)

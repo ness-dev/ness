@@ -25,7 +25,7 @@ function copyText(text: string): boolean {
 }
 
 export function CommitsPanel({ client, worktreePath }: PanelProps) {
-  const fetcher = useCallback((path: string) => client.req<BranchCommit[]>('worktree:branchCommits', path), [client])
+  const fetcher = useCallback((path: string) => client.api.getBranchCommits(path), [client])
   // Tracks the selected commit by index so the up/down controls can walk the list.
   const [popover, setPopover] = useState<number | null>(null)
 
@@ -192,8 +192,8 @@ function CommitInfoSheet({
     let cancelled = false
     setState('loading')
     void Promise.all([
-      client.req<CommitMeta | null>('worktree:commitMeta', worktreePath, sha),
-      client.req<ChangedFile[]>('worktree:commitChangedFiles', worktreePath, sha)
+      client.api.getCommitMeta(worktreePath, sha),
+      client.api.getCommitChangedFiles(worktreePath, sha)
     ])
       .then(([m, f]) => {
         if (cancelled) return

@@ -78,12 +78,12 @@ export function Composer({
     // First keystroke into an asleep tab wakes it (re-armed on next sleep).
     if (mode === 'asleep' && !woke.current) {
       woke.current = true
-      void client.req('panes:wakeTab', worktreePath, sessionId)
+      void client.api.panesWakeTab(worktreePath, sessionId)
     }
     const now = Date.now()
     if (now - lastTouch.current > 5000) {
       lastTouch.current = now
-      void client.req('terminals:touchLastActive', worktreePath)
+      void client.api.touchWorktreeLastActive(worktreePath)
     }
   }
 
@@ -106,9 +106,9 @@ export function Composer({
     if (!trimmed || exited) return false
     const model = /^\/model\s+(\S+)\s*$/.exec(trimmed)
     if (model && caps.modelPicker) {
-      void client.req('jsonClaude:setTabModel', sessionId, model[1])
+      void client.api.setJsonClaudeTabModel(sessionId, model[1])
     } else {
-      client.sig('jsonClaude:send', sessionId, trimmed)
+      client.api.sendJsonClaudeMessage(sessionId, trimmed)
     }
     setDraft('')
     afterSend()
@@ -125,7 +125,7 @@ export function Composer({
       const q = modelStage[1]
       const ranked = q ? fuzzyMatch(q, models.map((m) => m.id)).map((r) => models.find((m) => m.id === r.item)!) : models
       const pickModel = (id: string) => {
-        void client.req('jsonClaude:setTabModel', sessionId, id)
+        void client.api.setJsonClaudeTabModel(sessionId, id)
         setDraft('')
       }
       return [
@@ -235,7 +235,7 @@ export function Composer({
                 accessibilityLabel={`Permission mode: ${ms.label}. Tap to cycle.`}
                 onPress={() => {
                   const next = MODES[(MODES.indexOf(permissionMode as (typeof MODES)[number]) + 1) % MODES.length]
-                  void client.req('jsonClaude:setPermissionMode', sessionId, next)
+                  void client.api.setJsonClaudePermissionMode(sessionId, next)
                 }}
                 style={{
                   borderWidth: 1,
@@ -255,11 +255,11 @@ export function Composer({
               <Pressable
                 onPress={() => {
                   if (draft.trim()) {
-                    void client.req('jsonClaude:interruptAndSend', sessionId, draft.trim(), [])
+                    void client.api.interruptAndSendJsonClaude(sessionId, draft.trim(), [])
                     setDraft('')
                     afterSend()
                   } else {
-                    void client.req('jsonClaude:interrupt', sessionId)
+                    void client.api.interruptJsonClaude(sessionId)
                   }
                 }}
                 style={({ pressed }) => [btn, { backgroundColor: pressed ? c.surfaceHover : c.surface }]}

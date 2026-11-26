@@ -25,9 +25,9 @@ import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightClose, Panel
 import { parseConnectionUrl } from '../src/shared/transport/parse-connection-url'
 import { supportsChat } from '../src/shared/agent-registry'
 import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
-import { randomUUID } from '../src/renderer/uuid'
 import { useBackends } from './src/backends'
 import { consumeLaunchUrl } from './src/launchUrl'
+import { firstLeafId, newChatTab, pickInitialTab } from './src/tabs'
 import { Fleet, useFleetEntries, useMerged } from './src/fleet'
 import { useNess, type NessClient } from './src/ness'
 import { STATUS_DOT, applyTheme, c, fs, getThemeMode, themeKey, themed } from './src/theme'
@@ -140,10 +140,6 @@ function Shell({ children }: { children: React.ReactNode }) {
 const K_ACTIVE = 'ness.mobile.activeWorktree'
 const K_TABS = 'ness.mobile.selectedTabs'
 
-function pickInitialTab(tabs: TerminalTab[]): string | null {
-  return tabs.find((t) => t.type === 'agent')?.id ?? tabs.find((t) => t.type === 'shell')?.id ?? tabs[0]?.id ?? null
-}
-
 function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: () => void }) {
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
@@ -206,7 +202,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
   const client = activeWorktree ? fleet.client(merged.pathBackendId[activeWorktree.path]) ?? null : null
 
   useEffect(() => {
-    if (activeWorktree && client) void client.req('panes:ensureInitialized', activeWorktree.path)
+    if (activeWorktree && client) void client.api.panesEnsureInitialized(activeWorktree.path)
   }, [activeWorktree?.path, client])
 
   // Once per backend as it joins, like MobileApp's mount effect.
@@ -216,8 +212,8 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     for (const cl of clients) {
       if (refreshed.current.has(cl.id) || !cl.getConn().hasSnapshot) continue
       refreshed.current.add(cl.id)
-      void cl.req('worktrees:refreshList')
-      void cl.req('prs:refreshAllIfStale')
+      void cl.api.refreshWorktreesList()
+      void cl.api.refreshPRsAllIfStale()
     }
   })
 
@@ -242,7 +238,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     if (prev === selectedTabId || !activeWorktree || !selectedTab || !client) return
     if (selectedTab.type !== 'json-claude' && selectedTab.type !== 'shell') return
     if ((selectedTab.mode ?? 'awake') !== 'asleep') return
-    void client.req('panes:wakeTab', activeWorktree.path, selectedTab.id)
+    void client.api.panesWakeTab(activeWorktree.path, selectedTab.id)
   }, [activeWorktree, selectedTab, selectedTabId, client])
 
   // <scheme>://open?wt=<worktree path>&tab=<tab id> — jump straight to a
@@ -301,10 +297,8 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     const wtPath = activeWorktree.path
     const tree = merged.panes[wtPath]
     const paneId = tree ? firstLeafId(tree) : undefined
-    // One UUID as both tab id and session id, same as useTabHandlers.
-    const sessionId = randomUUID()
-    const tab: TerminalTab = { id: sessionId, type: 'json-claude', label: 'Chat', sessionId }
-    void client.req('panes:addTab', wtPath, tab, paneId)
+    const tab = newChatTab()
+    void client.api.panesAddTab(wtPath, tab, paneId)
     setSelectedTabByWorktree((prev) => ({ ...prev, [wtPath]: tab.id }))
     setPickerOpen(false)
   }, [activeWorktree, client, merged.panes])
@@ -325,15 +319,15 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
       if (!target) return
       setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: target.id }))
       setRightPanelOpen(false)
-      if (target.type === 'json-claude') client.sig('jsonClaude:send', target.id, text)
-      else client.sig('pty:write', target.id, '\x1b[200~' + text + '\x1b[201~')
+      if (target.type === 'json-claude') client.api.sendJsonClaudeMessage(target.id, text)
+      else client.api.writeTerminal(target.id, '\x1b[200~' + text + '\x1b[201~')
     },
     [activeWorktree, client, merged.panes, selectedTab, tabs]
   )
 
   const handleConvertTabType = useCallback(
     (tabId: string, newType: 'agent' | 'json-claude') => {
-      if (activeWorktree && client) void client.req('panes:convertTabType', activeWorktree.path, tabId, newType)
+      if (activeWorktree && client) void client.api.panesConvertTabType(activeWorktree.path, tabId, newType)
     },
     [activeWorktree, client]
   )
@@ -482,10 +476,6 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
       </View>
     </View>
   )
-}
-
-function firstLeafId(tree: import('../src/shared/state/terminals').PaneNode): string {
-  return tree.type === 'leaf' ? tree.id : firstLeafId(tree.children[0])
 }
 
 function TabChip({

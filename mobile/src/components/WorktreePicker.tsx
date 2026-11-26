@@ -152,7 +152,7 @@ export function WorktreePicker({
         <IconBtn label="Backends" onPress={onOpenBackends}>
           <Server color={c.dim} size={16} />
         </IconBtn>
-        <IconBtn label="Refresh" onPress={() => fleet.getClients().forEach((cl) => void cl.req('prs:refreshAll'))}>
+        <IconBtn label="Refresh" onPress={() => fleet.getClients().forEach((cl) => void cl.api.refreshPRsAll())}>
           {loading ? (
             <Spin>
               <Loader2 color={c.dim} size={16} />
@@ -349,7 +349,7 @@ function clientFor(ctx: Ctx, path: string) {
 function rowActions(row: WorktreeRowModel, ctx: Ctx, isProject: boolean): Action[] {
   const client = clientFor(ctx, row.path)
   if (!client || row.deleting) return []
-  const req = (ch: string, ...a: unknown[]) => void client.req(ch, ...a)
+  const api = client.api
   const out: Action[] = [
     {
       label: row.alias ? 'Rename Alias…' : 'Alias Worktree…',
@@ -358,13 +358,13 @@ function rowActions(row: WorktreeRowModel, ctx: Ctx, isProject: boolean): Action
       afterClose: true
     }
   ]
-  if (row.alias) out.push({ label: 'Clear Alias', icon: <X color={c.fgBright} size={16} />, run: () => req('aliases:clear', row.path) })
+  if (row.alias) out.push({ label: 'Clear Alias', icon: <X color={c.fgBright} size={16} />, run: () => void api.clearAlias(row.path) })
   const locked = row.worktree.isMain
   if (!locked) {
     out.push(
       row.isPinned
-        ? { label: 'Unpin Worktree', icon: <PinOff color={c.accent} size={16} />, tone: 'accent', run: () => req('pinned:unpin', row.path) }
-        : { label: 'Pin Worktree', icon: <Pin color={c.accent} size={16} />, tone: 'accent', run: () => req('pinned:pin', row.path) }
+        ? { label: 'Unpin Worktree', icon: <PinOff color={c.accent} size={16} />, tone: 'accent', run: () => void api.unpinWorktree(row.path) }
+        : { label: 'Pin Worktree', icon: <Pin color={c.accent} size={16} />, tone: 'accent', run: () => void api.pinWorktree(row.path) }
     )
     out.push(
       row.isSnoozed
@@ -372,17 +372,17 @@ function rowActions(row: WorktreeRowModel, ctx: Ctx, isProject: boolean): Action
             label: row.snoozeWakeAt ? `Wakes ${formatWakeAt(row.snoozeWakeAt)} — tap to wake up` : 'Wake up',
             icon: <AlarmClock color={c.accent} size={16} />,
             tone: 'accent',
-            run: () => req('snooze:unsnooze', row.path)
+            run: () => void api.unsnooze(row.path)
           }
         : {
             label: 'Snooze',
             icon: <Moon color={c.accent} size={16} />,
             tone: 'accent',
-            run: () => req('snooze:snooze', row.path, Date.now() + ctx.snoozeDays * 86_400_000)
+            run: () => void api.snooze(row.path, Date.now() + ctx.snoozeDays * 86_400_000)
           }
     )
   } else if (row.isPinned) {
-    out.push({ label: 'Unpin Worktree', icon: <PinOff color={c.accent} size={16} />, tone: 'accent', run: () => req('pinned:unpin', row.path) })
+    out.push({ label: 'Unpin Worktree', icon: <PinOff color={c.accent} size={16} />, tone: 'accent', run: () => void api.unpinWorktree(row.path) })
   }
   void isProject
   return out
@@ -633,7 +633,7 @@ function AliasEditor({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {
     if (done.current) return
     done.current = true
     // Server trims and treats empty as clear (main/index.ts aliases:set).
-    void clientFor(ctx, row.path)?.req('aliases:set', row.path, value)
+    void clientFor(ctx, row.path)?.api.setAlias(row.path, value)
     ctx.setEditingAlias(null)
   }
   return (
@@ -676,7 +676,7 @@ function PendingRow({ pending, ctx }: { pending: PendingWorktree; ctx: Ctx }) {
         <Text style={s.faintXs}>{failed ? 'Failed to create' : 'Creating worktree…'}</Text>
       </View>
       {failed && owner && (
-        <Pressable style={[s.icon44, { marginRight: -8 }]} onPress={() => void owner.req('worktrees:dismissPending', pending.id)} accessibilityLabel="Dismiss">
+        <Pressable style={[s.icon44, { marginRight: -8 }]} onPress={() => void owner.api.dismissPendingWorktree(pending.id)} accessibilityLabel="Dismiss">
           <X color={c.faint} size={12} />
         </Pressable>
       )}

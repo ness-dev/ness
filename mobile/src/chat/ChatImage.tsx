@@ -39,7 +39,7 @@ function load(client: NessClient, path: string, mediaType?: string): Promise<str
   let p = inflight.get(key)
   if (!p) {
     p = client
-      .req<string | null>('jsonClaude:readAttachmentImage', path)
+      .api.readJsonClaudeAttachmentImage(path)
       .then(
         (b64) => {
           const uri = b64 ? `data:${mediaTypeFor(path, mediaType)};base64,${b64}` : null

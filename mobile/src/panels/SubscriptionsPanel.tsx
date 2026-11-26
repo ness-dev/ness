@@ -150,13 +150,13 @@ export function SubscriptionsPanel({ client, worktreePath, focusedTabId }: Panel
                   ) : (
                     <IconBtn
                       label={f.mode === 'interrupt' ? 'Switch to silent' : 'Switch to interrupt'}
-                      onPress={() => void client.req('subscriptions:setMode', worktreePath, focusedTabId, f.targetPath, f.mode === 'interrupt' ? 'silent' : 'interrupt')}
+                      onPress={() => void client.api.setSubscriptionMode(worktreePath, focusedTabId, f.targetPath, f.mode === 'interrupt' ? 'silent' : 'interrupt')}
                     >
                       {f.mode === 'interrupt' ? <Bell color={c.muted} size={12} /> : <BellOff color={c.muted} size={12} />}
                     </IconBtn>
                   )}
                   {f.kind === 'explicit' ? (
-                    <IconBtn label={`Unsubscribe from ${f.name}`} onPress={() => void client.req('subscriptions:unsubscribe', worktreePath, focusedTabId, f.targetPath)}>
+                    <IconBtn label={`Unsubscribe from ${f.name}`} onPress={() => void client.api.unsubscribeTab(worktreePath, focusedTabId, f.targetPath)}>
                       <X color={c.muted} size={12} />
                     </IconBtn>
                   ) : (
@@ -204,13 +204,13 @@ export function SubscriptionsPanel({ client, worktreePath, focusedTabId }: Panel
               <View style={{ flex: 1 }} />
               <Pressable
                 disabled={busy}
-                onPress={() => void client.req('notifications:deliverHeld', worktreePath, focusedTabId)}
+                onPress={() => void client.api.deliverHeldNotices(worktreePath, focusedTabId)}
                 style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 6, opacity: busy ? 0.5 : 1 }}
               >
                 <Text style={{ ...small, color: c.accent }}>Deliver now</Text>
               </Pressable>
               <Pressable
-                onPress={() => void client.req('notifications:discardHeld', worktreePath, focusedTabId)}
+                onPress={() => void client.api.discardHeldNotices(worktreePath, focusedTabId)}
                 accessibilityHint="Drop these without telling the agent"
                 style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 6 }}
               >

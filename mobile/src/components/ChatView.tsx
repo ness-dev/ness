@@ -259,13 +259,13 @@ export function ChatView({
   // once per session.
   const sessionExists = !!session
   useEffect(() => {
-    if (mode === 'awake' && !sessionExists) void client.req('jsonClaude:start', sessionId, worktreePath)
+    if (mode === 'awake' && !sessionExists) void client.api.startJsonClaude(sessionId, worktreePath)
   }, [client, sessionId, worktreePath, mode, sessionExists])
   const fetched = useRef(new Set<string>())
   useEffect(() => {
     if (!sessionExists || fetched.current.has(sessionId)) return
     fetched.current.add(sessionId)
-    void client.req('jsonClaude:getEntries', sessionId)
+    void client.api.getJsonClaudeEntries(sessionId)
   }, [client, sessionId, sessionExists])
 
   // setComposerVisible: tells main someone is looking (gates attention
@@ -274,16 +274,16 @@ export function ChatView({
   useEffect(() => {
     if (mode === 'asleep') return
     let visible = RNAppState.currentState === 'active'
-    if (visible) void client.req('jsonClaude:setComposerVisible', sessionId, true)
+    if (visible) void client.api.setJsonClaudeComposerVisible(sessionId, true)
     const sub = RNAppState.addEventListener('change', (st) => {
       const next = st === 'active'
       if (next === visible) return
       visible = next
-      void client.req('jsonClaude:setComposerVisible', sessionId, next)
+      void client.api.setJsonClaudeComposerVisible(sessionId, next)
     })
     return () => {
       sub.remove()
-      if (visible) void client.req('jsonClaude:setComposerVisible', sessionId, false)
+      if (visible) void client.api.setJsonClaudeComposerVisible(sessionId, false)
     }
   }, [client, sessionId, mode])
 
@@ -303,8 +303,8 @@ export function ChatView({
 
   const restart = useCallback(() => {
     void (async () => {
-      await client.req('jsonClaude:kill', sessionId)
-      await client.req('jsonClaude:start', sessionId, worktreePath)
+      await client.api.killJsonClaude(sessionId)
+      await client.api.startJsonClaude(sessionId, worktreePath)
     })()
   }, [client, sessionId, worktreePath])
 
@@ -339,9 +339,9 @@ export function ChatView({
         seen.add(id)
         return <ApprovalSlot approval={a} client={client} session={session} />
       },
-      onCancelQueued: (entryId) => client.sig('jsonClaude:cancelQueued', sessionId, entryId),
+      onCancelQueued: (entryId) => client.api.cancelQueuedJsonClaudeMessage(sessionId, entryId),
       onRestart: restart,
-      onSignIn: () => void client.req('jsonClaude:openAuthLoginTab', worktreePath)
+      onSignIn: () => void client.api.openJsonClaudeAuthLoginTab(worktreePath)
     })
     return { rows: out, hidden: start, renderedToolUseIds: seen }
     // session identity changes per event; the deps below are what the
@@ -482,7 +482,7 @@ export function ChatView({
           <Text style={{ color: c.fg, fontSize: 11, flex: 1, fontFamily: 'Menlo' }} numberOfLines={1}>
             {sessionApprovals.join(', ')}
           </Text>
-          <Pressable hitSlop={14} accessibilityLabel="Stop auto-allowing" onPress={() => void client.req('jsonClaude:clearSessionToolApprovals', sessionId)}>
+          <Pressable hitSlop={14} accessibilityLabel="Stop auto-allowing" onPress={() => void client.api.clearJsonClaudeSessionToolApprovals(sessionId)}>
             <X color={c.muted} size={14} />
           </Pressable>
         </View>

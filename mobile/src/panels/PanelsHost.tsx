@@ -17,6 +17,7 @@ import {
 } from '../../../src/shared/state/repo-configs'
 import type { ToolSpec } from '../../../src/shared/tools'
 import type { Worktree } from '../../../src/shared/state/worktrees'
+import type { RepoConfig } from '../../../src/shared/state/repo-configs'
 import { useNess, type NessClient } from '../ness'
 import { c, fs } from '../theme'
 import { PANELS, PANEL_LABELS } from './registry'
@@ -39,7 +40,7 @@ export function PanelsHost({
 }) {
   const repoRoot = worktree.repoRoot
   const repoConfig = useNess(client, (s) => s.repoConfigs.byRepo[repoRoot] ?? null)
-  const fetchTools = useCallback((path: string) => client.req<ToolSpec[]>('tools:list', path), [client])
+  const fetchTools = useCallback((path: string) => client.api.listTools(path), [client])
   const { data: toolsData } = useWatchedQuery<ToolSpec[]>({ client, worktreePath: worktree.path, cacheKey: 'tools', fetcher: fetchTools })
   const tools = useMemo(() => toolsData ?? [], [toolsData])
   const toolKeys = useMemo(() => tools.map((t) => toolPanelKey(t.id)), [tools])
@@ -53,8 +54,8 @@ export function PanelsHost({
   // Same payloads as RightColumn's handlers (legacy fields nulled so old
   // values don't leak back through the effective-config migration).
   const setHidden = (next: HiddenRightPanels) =>
-    void client.req('repoConfig:set', repoRoot, { hiddenRightPanels: next, hideMergePanel: null, hidePrPanel: null })
-  const setOrder = (next: RightPanelKey[]) => void client.req('repoConfig:set', repoRoot, { rightPanelOrder: next })
+    void client.api.setRepoConfig(repoRoot, { hiddenRightPanels: next, hideMergePanel: null, hidePrPanel: null } as unknown as Partial<RepoConfig>)
+  const setOrder = (next: RightPanelKey[]) => void client.api.setRepoConfig(repoRoot, { rightPanelOrder: next })
 
   const props: PanelProps = {
     client,

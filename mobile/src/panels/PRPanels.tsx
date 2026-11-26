@@ -185,7 +185,7 @@ export function MergePanel(props: PanelProps) {
   if (!show || !worktree) return null
   // Desktop onMerged → prs:refreshAll; onRemoveWorktree → worktree:remove
   // (as the web client's MobileRightPanel does), then close the sheet.
-  const onMerged = (): void => void client.req('prs:refreshAll')
+  const onMerged = (): void => void client.api.refreshPRsAll()
   // Always confirm on the phone: the desktop confirms only for locked /
   // dirty / scratchpad-bearing worktrees, but a stray tap is much more
   // likely on a touch screen and removal can't be undone from here.
@@ -196,7 +196,7 @@ export function MergePanel(props: PanelProps) {
         text: 'Remove',
         style: 'destructive',
         onPress: () => {
-          void client.req('worktree:remove', worktree.repoRoot, path)
+          void client.api.removeWorktree(worktree.repoRoot, path)
           onClose()
         }
       }
@@ -243,7 +243,7 @@ function MergeLocallyBody({
   const refreshStatus = useCallback(async () => {
     setBusy('checking')
     try {
-      setMainStatus(await client.req<MainWorktreeStatus>('worktree:mainStatus', repoRoot))
+      setMainStatus(await client.api.getMainWorktreeStatus(repoRoot))
     } catch (err) {
       setError(errMsg(err))
     } finally {
@@ -261,7 +261,7 @@ function MergeLocallyBody({
     let cancelled = false
     const timer = setTimeout(() => {
       const pending = client
-        .req<MergeConflictPreview>('worktree:previewMerge', repoRoot, branch, path)
+        .api.previewMergeConflicts(repoRoot, branch, path)
         .catch(() => null)
       previewRef.current = pending
       void pending.then((preview) => {
@@ -277,14 +277,14 @@ function MergeLocallyBody({
   const handlePickStrategy = (s: MergeStrategy): void => {
     setMenuOpen(false)
     // Persist as new default — "last used wins".
-    void client.req('config:setMergeStrategy', s)
+    void client.api.setMergeStrategy(s)
   }
 
   const handleFix = async (): Promise<void> => {
     setError(null)
     setBusy('fixing')
     try {
-      setMainStatus(await client.req<MainWorktreeStatus>('worktree:prepareMain', repoRoot))
+      setMainStatus(await client.api.prepareMainForMerge(repoRoot))
     } catch (err) {
       setError(errMsg(err))
     } finally {
@@ -300,14 +300,14 @@ function MergeLocallyBody({
     try {
       // Settle the deferred preview rather than racing it.
       const preview = await (previewRef.current ??
-        client.req<MergeConflictPreview>('worktree:previewMerge', repoRoot, branch, path).catch(() => null))
+        client.api.previewMergeConflicts(repoRoot, branch, path).catch(() => null))
       if (preview?.hasConflict) {
         setConflictPreview(preview)
         setError('Resolve merge conflicts before merging.')
         return
       }
-      void client.req('config:setMergeStrategy', strategy)
-      const result = await client.req<MergeLocalResult>('worktree:mergeLocal', repoRoot, branch, strategy, path)
+      void client.api.setMergeStrategy(strategy)
+      const result = await client.api.mergeWorktreeLocally(repoRoot, branch, strategy, path)
       setSuccess(`Merged into ${result.baseBranch}`)
       onMerged()
     } catch (err) {
@@ -704,7 +704,7 @@ function usePRMergeAction(client: NessClient, pr: PRStatus | null | undefined, w
     setMerging(true)
     setError(null)
     try {
-      const result = await client.req<MergePRResult>('pr:merge', worktree.path, method)
+      const result = await client.api.mergePR(worktree.path, method)
       if (result.ok) setJustMerged(true)
       else setError(result.error || 'Merge failed')
     } catch (err) {
@@ -824,7 +824,7 @@ function usePRApproveAction(
     setApproving(true)
     setError(null)
     try {
-      const result = await client.req<{ ok: true } | { ok: false; error: string }>('pr:approve', worktree.path)
+      const result = await client.api.approvePR(worktree.path)
       if (result.ok) setJustApproved(true)
       else setError(result.error || 'Approval failed')
     } catch (err) {
@@ -899,7 +899,7 @@ function AiReviewRow({ client, worktree }: { client: NessClient; worktree: Workt
     setBusy(true)
     setError(null)
     try {
-      const result = await client.req<{ ok: true } | { ok: false; error: string }>('reviews:requestForWorktree', worktree.path)
+      const result = await client.api.requestAiReview(worktree.path)
       if (result.ok) setDone(true)
       else setError(result.error)
     } catch (err) {
@@ -956,7 +956,7 @@ export function PRPanel(props: PanelProps) {
   const needsGithubToken = hasGithubToken === false
   const mergeAction = usePRMergeAction(client, pr, worktree, needsGithubToken)
   const approveAction = usePRApproveAction(client, pr, worktree, viewerLogin, needsGithubToken)
-  const onRefresh = (): void => void client.req('prs:refreshAll')
+  const onRefresh = (): void => void client.api.refreshPRsAll()
 
   const refreshButton = !needsGithubToken ? (
     <PanelAction onPress={onRefresh} label="Refresh PR status" disabled={loading}>
@@ -1251,7 +1251,7 @@ function FixConflictsButton({ client, worktreePath }: { client: NessClient; work
     setPhase('sending')
     setError(null)
     try {
-      const result = await client.req<MergeConflictFixResult>('prs:requestConflictFix', worktreePath)
+      const result = await client.api.requestMergeConflictFix(worktreePath)
       setPhase(result.ok ? 'sent' : 'idle')
       if (!result.ok) setError(result.error || 'Failed to reach the agent')
     } catch (err) {
@@ -1303,7 +1303,7 @@ function CiNotifyToggle({
   const help = `Keep this worktree's agent posted on its PR: CI failures, change requests and conflicts interrupt it, routine updates wait for its next turn. Default for all worktrees: ${globalDefault ? 'on' : 'off'}.`
   const toggle = (): void => {
     const next = !enabled
-    void client.req('ciNotify:setOverride', worktreePath, next === globalDefault ? null : next)
+    void client.api.setCiNotifyOverride(worktreePath, next === globalDefault ? null : next)
   }
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>

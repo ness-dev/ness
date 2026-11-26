@@ -142,7 +142,7 @@ export function ContextPanel({ client, focusedTabId }: PanelProps) {
       title="Context"
       defaultCollapsed
       onCollapsedChange={(collapsed) => {
-        void client.req('contextWindow:setInterest', !collapsed)
+        void client.api.setContextWindowInterest(!collapsed)
       }}
       actions={snapshot ? <Text style={{ ...num, color: c.faint }}>{Math.round(pct)}%</Text> : undefined}
     >

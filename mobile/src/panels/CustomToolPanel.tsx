@@ -19,7 +19,7 @@ interface NessLinkAction {
 }
 
 export function CustomToolPanel({ client, worktreePath, onSendToAgent, onOpenUrl, spec }: PanelProps & { spec: ToolSpec }) {
-  const fetcher = useCallback((path: string) => client.req<ToolRunResult>('tools:run', path, spec.id), [client, spec.id])
+  const fetcher = useCallback((path: string) => client.api.runTool(path, spec.id), [client, spec.id])
 
   const { data, loading, refresh } = useWatchedQuery<ToolRunResult>({
     client,

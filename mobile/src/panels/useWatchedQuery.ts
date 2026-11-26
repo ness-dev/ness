@@ -90,7 +90,7 @@ export function useWatchedQuery<T>({
     const interval = fallbackPollMs > 0 ? setInterval(() => refresh(), fallbackPollMs) : null
     let off: (() => void) | null = null
     if (revalidateOnFileChange) {
-      client.sig('worktree:watchChangedFiles', worktreePath)
+      client.api.watchChangedFiles(worktreePath)
       off = client.transport.onSignal('worktree:changedFilesInvalidated', (path: unknown) => {
         if (path === worktreePath) refresh({ force: true })
       })
@@ -99,7 +99,7 @@ export function useWatchedQuery<T>({
       if (interval) clearInterval(interval)
       if (off) {
         off()
-        client.sig('worktree:unwatchChangedFiles', worktreePath)
+        client.api.unwatchChangedFiles(worktreePath)
       }
     }
   }, [client, worktreePath, enabled, fallbackPollMs, revalidateOnFileChange, refresh])

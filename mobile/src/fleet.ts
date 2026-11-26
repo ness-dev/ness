@@ -73,13 +73,57 @@ export function useFleetEntries(fleet: Fleet): readonly BackendStateLike[] {
 /** Fleet view is always 'merged' on the phone: there's no backend chip
  *  strip, every enabled host is listed at once. */
 export function useMerged(fleet: Fleet): MergedWorktreeData {
-  const entries = useFleetEntries(fleet)
-  const activeId = entries[0]?.backendId ?? ''
-  return getMergedWorktrees(entries, 'merged', activeId)
+  return mergedFor(useFleetEntries(fleet))
 }
 
-/** Mirror of useWorktreeListModel (renderer/hooks/useWorktreeListModel.ts)
- *  over the fleet: base build on merged inputs, then the accordion pass. */
+export function mergedFor(entries: readonly BackendStateLike[]): MergedWorktreeData {
+  return getMergedWorktrees(entries, 'merged', entries[0]?.backendId ?? '')
+}
+
+/** The worktree list the picker shows, as a plain function: the base
+ *  build on merged inputs (same as useWorktreeListModel in
+ *  renderer/hooks/useWorktreeListModel.ts), then the accordion pass. The
+ *  hook below memoizes the two steps; the contract test calls this. */
+export function listModelFor(
+  entries: readonly BackendStateLike[],
+  merged: MergedWorktreeData,
+  collapse: Pick<CollapseState, 'unifiedRepos' | 'isGroupCollapsed' | 'pinnedOpenRepos'>,
+  activeWorktreeId: string | null
+): WorktreeListModel {
+  return applyProjectAccordion(listBaseFor(entries, merged, collapse), activeWorktreeId, collapse.pinnedOpenRepos)
+}
+
+function listBaseFor(
+  entries: readonly BackendStateLike[],
+  merged: MergedWorktreeData,
+  collapse: Pick<CollapseState, 'unifiedRepos' | 'isGroupCollapsed'>
+): WorktreeListModel {
+  return buildWorktreeListBase({
+    worktrees: merged.flatWorktrees,
+    repoRoots: merged.repoRoots,
+    repoBackendId: merged.repoBackendId,
+    repoRemotes: merged.repoRemotes,
+    pendingWorktrees: merged.pendingWorktrees,
+    pendingDeletions: merged.pendingDeletions,
+    tabsByWorktree: merged.tabsByWorktree,
+    statuses: merged.statuses,
+    pendingTools: merged.pendingTools,
+    shellActivity: merged.shellActivity,
+    prStatuses: merged.prStatuses,
+    mergedPaths: merged.mergedPaths,
+    snoozeByPath: merged.snoozeByPath,
+    pinnedPaths: merged.pinnedPaths,
+    aliases: merged.aliases,
+    viewerLogin: entries[0]?.state.settings.viewerLogin ?? null,
+    assignedPRsByRepo: merged.assignedPRsByRepo,
+    unifiedRepos: collapse.unifiedRepos,
+    isGroupCollapsed: collapse.isGroupCollapsed,
+    // Touch doesn't bind Cmd+N, same as MobileApp's picker.
+    assignOrdinals: false,
+    projectOrder: entries[0]?.state.settings.sidebarProjectOrder
+  })
+}
+
 export function useListModel(
   fleet: Fleet,
   merged: MergedWorktreeData,
@@ -91,31 +135,10 @@ export function useListModel(
   const projectOrder = entries[0]?.state.settings.sidebarProjectOrder
   const { unifiedRepos, isGroupCollapsed, pinnedOpenRepos } = collapse
   const base = useMemo(
-    () =>
-      buildWorktreeListBase({
-        worktrees: merged.flatWorktrees,
-        repoRoots: merged.repoRoots,
-        repoBackendId: merged.repoBackendId,
-        repoRemotes: merged.repoRemotes,
-        pendingWorktrees: merged.pendingWorktrees,
-        pendingDeletions: merged.pendingDeletions,
-        tabsByWorktree: merged.tabsByWorktree,
-        statuses: merged.statuses,
-        pendingTools: merged.pendingTools,
-        shellActivity: merged.shellActivity,
-        prStatuses: merged.prStatuses,
-        mergedPaths: merged.mergedPaths,
-        snoozeByPath: merged.snoozeByPath,
-        pinnedPaths: merged.pinnedPaths,
-        aliases: merged.aliases,
-        viewerLogin,
-        assignedPRsByRepo: merged.assignedPRsByRepo,
-        unifiedRepos,
-        isGroupCollapsed,
-        // Touch doesn't bind Cmd+N, same as MobileApp's picker.
-        assignOrdinals: false,
-        projectOrder
-      }),
+    () => listBaseFor(entries, merged, { unifiedRepos, isGroupCollapsed }),
+    // entries is read only for viewerLogin / projectOrder (listed instead,
+    // so a streamed token on one chat doesn't rebuild the list).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [merged, viewerLogin, unifiedRepos, isGroupCollapsed, projectOrder]
   )
   return useMemo(
