@@ -17,6 +17,7 @@ function agent(
     toolCount: 0,
     childAgentCount: 0,
     hasPendingApproval: false,
+    pendingApprovalToolUseIds: [],
     steps: [],
     ...extra
   }

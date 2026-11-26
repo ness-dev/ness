@@ -261,6 +261,7 @@ export function JsonClaudeAgentsPanel({
       </RightPanel>
       {peeked && (
         <AgentPeek
+          sessionId={focusedTabId ?? ''}
           agent={peeked}
           now={now}
           onClose={() => setPeekId(null)}

@@ -478,6 +478,25 @@ describe('collectAgents', () => {
     )
   })
 
+  it('lists only an agent’s own pending calls, not its descendants’', () => {
+    const agents = collectAgents(
+      session([
+        launch('t1', 'Parent', { background: true }),
+        launch('t2', 'Child', { parentToolUseId: 't1', entryId: 'e2' }),
+        childWork('t1', [
+          { type: 'tool_use', id: 'p1', name: 'Write', input: { file_path: '/a' } }
+        ]),
+        childWork('t2', [
+          { type: 'tool_use', id: 'x9', name: 'Bash', input: { command: 'rm' } },
+          { type: 'tool_use', id: 'x10', name: 'Bash', input: { command: 'ls' } }
+        ], 2000, 'c2')
+      ]),
+      new Set(['p1', 'x9'])
+    )
+    expect(agents.find((a) => a.toolUseId === 't1')!.pendingApprovalToolUseIds).toEqual(['p1'])
+    expect(agents.find((a) => a.toolUseId === 't2')!.pendingApprovalToolUseIds).toEqual(['x9'])
+  })
+
   it('sorts running agents first (oldest first), then settled newest-first', () => {
     const agents = collectAgents(
       session([
