@@ -328,6 +328,22 @@ function titleCaseServer(server: string): string {
     .trim()
 }
 
+/** How an MCP server itself reads: its brand label and icon, or the
+ *  title-cased server name with the generic plug for unknown servers.
+ *  Spellings of one brand (`ness-control` / `harness-control`,
+ *  `claude_ai_Gmail` / `gmail`) share a `key`, so a list grouped by it
+ *  doesn't split one server in two. */
+export function getMcpServerDisplay(server: string): {
+  key: string
+  label: string
+  icon: ToolIcon
+} {
+  const normalized = normalizeServerName(server)
+  const brand = MCP_BRANDS[normalized]
+  if (brand) return { key: brand.label.toLowerCase(), label: brand.label, icon: brand.icon }
+  return { key: normalized, label: titleCaseServer(server), icon: McpGenericIcon }
+}
+
 export function getToolDisplay(name: string | undefined): ToolDisplay {
   if (!name) return { label: 'Tool', compactLabel: 'Tool', icon: null }
 

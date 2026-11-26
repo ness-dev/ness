@@ -1443,6 +1443,11 @@ export function usePermissionRules() {
   return useAppState((s) => s.permissions.rules)
 }
 
+/** repoRoot → approved .ness.json setup command; Settings only. */
+export function useApprovedSetupCommands() {
+  return useAppState((s) => s.permissions.approvedSetupCommands)
+}
+
 export function useBrowser() {
   return useAppState((s) => s.browser)
 }

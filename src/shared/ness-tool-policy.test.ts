@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest'
 import {
   NESS_ASK_TOOLS,
   NESS_AUTO_ALLOWED_TOOLS,
+  isAlwaysAutoAllowedNessTool,
   isAutoAllowedNessCall,
   isSafeAgentUrl,
+  nessGrantsMayAnswer,
   nessAllowedToolsFlagValue,
   nessControlToolName
 } from './ness-tool-policy'
@@ -84,6 +86,20 @@ describe('ness tool policy', () => {
     expect(isSafeAgentUrl('')).toBe(false)
   })
 
+  it('counts only input-independent tools as always auto-allowed', () => {
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__report_progress')).toBe(true)
+    // URL-gated: a grant still allows arbitrary URLs, so it isn't redundant.
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__navigate_tab')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__create_browser_tab')).toBe(false)
+    // Setup-script gated, and add_repo always asks.
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__create_worktree')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__add_repo')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('mcp__ness-control__eval_tab')).toBe(false)
+    // The old server name isn't Ness's any more.
+    expect(isAlwaysAutoAllowedNessTool('mcp__harness-control__list_worktrees')).toBe(false)
+    expect(isAlwaysAutoAllowedNessTool('Bash')).toBe(false)
+  })
+
   it('auto-allows create_worktree only when no repo setup script would run', () => {
     const cw = 'mcp__ness-control__create_worktree'
     const seen: (string | undefined)[] = []
@@ -103,6 +119,18 @@ describe('ness tool policy', () => {
     expect(nessAllowedToolsFlagValue()).not.toContain('create_worktree')
   })
 
+  it('auto-allows create_worktree when the repo setup command is the approved one', () => {
+    const cw = 'mcp__ness-control__create_worktree'
+    const ctx = (approved: string) => ({
+      repoSetupCommandFor: () => 'npm install',
+      isSetupCommandApproved: (_root: string | undefined, cmd: string) => cmd === approved
+    })
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx('npm install'))).toBe(true)
+    expect(isAutoAllowedNessCall(cw, { branchName: 'b' }, ctx('npm ci'))).toBe(false)
+    // Approval never overrides the PR-checkout gate.
+    expect(isAutoAllowedNessCall(cw, { prNumber: 1 }, ctx('npm install'))).toBe(false)
+  })
+
   it('asks for create_worktree on a PR checkout', () => {
     const ctx = { repoSetupCommandFor: () => '', isOpenRepo: () => true }
     const cw = 'mcp__ness-control__create_worktree'
@@ -116,5 +144,19 @@ describe('ness tool policy', () => {
     expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/Users/me/Downloads/clone' }, ctx)).toBe(false)
     // Without an isOpenRepo answer, a named repoRoot can't be vetted.
     expect(isAutoAllowedNessCall(cw, { branchName: 'b', repoRoot: '/r' }, { repoSetupCommandFor: () => '' })).toBe(false)
+  })
+
+  it('lets grants answer only where an input check would not be skipped', () => {
+    const cw = 'mcp__ness-control__create_worktree'
+    const nav = 'mcp__ness-control__navigate_tab'
+    expect(nessGrantsMayAnswer(cw, { branchName: 'b' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, { url: 'https://example.com' })).toBe(true)
+    expect(nessGrantsMayAnswer(nav, { url: 'github.com' })).toBe(true)
+    expect(nessGrantsMayAnswer(nav, { url: 'file:///etc/passwd' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, { url: 'javascript:alert(1)' })).toBe(false)
+    expect(nessGrantsMayAnswer(nav, {})).toBe(false)
+    expect(nessGrantsMayAnswer('mcp__ness-control__create_browser_tab', {})).toBe(true)
+    expect(nessGrantsMayAnswer('Bash', { command: 'ls' })).toBe(true)
+    expect(nessGrantsMayAnswer('mcp__ness-control__eval_tab', {})).toBe(true)
   })
 })

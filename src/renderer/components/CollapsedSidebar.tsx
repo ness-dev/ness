@@ -1,7 +1,6 @@
 import {
   PanelLeftOpen,
   Plus,
-  ListTodo,
   Trash2,
   Activity,
   ShieldAlert,
@@ -19,7 +18,6 @@ interface CollapsedSidebarProps {
   onAddRepo: () => void
   onNewWorktree: () => void
   onOpenCleanup: () => void
-  onOpenTaskList: () => void
   onOpenNewProject: () => void
   onOpenActivity: () => void
   /** Opens the subscription graph; a repo root scopes it to that project. */
@@ -36,7 +34,6 @@ export function CollapsedSidebar({
   onAddRepo,
   onNewWorktree,
   onOpenCleanup,
-  onOpenTaskList,
   onOpenNewProject,
   onOpenActivity,
   onOpenSubscriptionGraph,
@@ -94,15 +91,6 @@ export function CollapsedSidebar({
             className="text-dim hover:text-fg hover:bg-surface rounded p-1.5 transition-colors cursor-pointer"
           >
             <Plus className="icon-sm" />
-          </button>
-        </Tooltip>
-        <Tooltip label="Task list" action="toggleTaskList" side="right">
-          <button
-            onClick={onOpenTaskList}
-            className="text-dim hover:text-fg hover:bg-surface rounded p-1.5 transition-colors cursor-pointer"
-            aria-label="Task list"
-          >
-            <ListTodo className="icon-sm" />
           </button>
         </Tooltip>
         <Tooltip label="Clean up old worktrees" side="right">

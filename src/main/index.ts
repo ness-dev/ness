@@ -57,12 +57,14 @@ import { ChatStartGate } from './chat-start-gate'
 import { createSingleFlight } from '../shared/single-flight'
 import { isWithinRoots, ownedPathsOnly } from './own-paths'
 import {
+  claudeGlobalConfigPathFor,
   knownClaudeConfigDirs,
   onShellEnvCaptured,
   resolveShellEnv,
   setExplicitClaudeConfigDirSource,
   warmShellEnv
 } from './claude-env'
+import { trustClaudeProject } from './claude-trust'
 import { parseCliFlags, USAGE, type CliFlags } from './cli-args'
 import { PlaywrightBrowserManager } from './browser-manager-playwright'
 import type { BrowserManagerLike } from './browser-manager-types'
@@ -497,12 +499,18 @@ const approvalBridge = new ApprovalBridge(store, {
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
     store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
-  repoSetupCommandFor: (sessionId, repoRoot) => {
+  repoSetupFor: (sessionId, repoRoot) => {
     const state = store.getSnapshot().state
     const sessionPath = state.jsonClaude.sessions[sessionId]?.worktreePath
     const root =
-      repoRoot ?? state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
-    return root ? loadRepoConfig(root).setupCommand?.trim() || '' : null
+      repoRoot?.replace(/\/+$/, '') ??
+      state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
+    if (!root) return null
+    return { repoRoot: root, command: loadRepoConfig(root).setupCommand?.trim() || '' }
+  },
+  onSetupCommandApproved: (repoRoot, command) => {
+    store.dispatch({ type: 'permissions/setupCommandApproved', payload: { repoRoot, command } })
+    persistPermissionRules()
   },
   isOpenRepo: (repoRoot) => {
     const want = repoRoot.replace(/\/+$/, '')
@@ -1368,8 +1376,11 @@ const worktreesFSM = new WorktreesFSM(store, {
   getRepoRoots: () => config.repoRoots || [],
   getWorktreeSetupCmd: () => config.worktreeSetupCommand || '',
   getWorktreeBaseMode: () => config.worktreeBase || DEFAULT_WORKTREE_BASE,
-  onWorktreeCreated: async ({ createdPath, initialPrompt, teleportSessionId, agentKind, model, forkSource, baseRef }) => {
+  onWorktreeCreated: async ({ createdPath, repoRoot, initialPrompt, teleportSessionId, agentKind, model, forkSource, baseRef }) => {
     void prPoller.refreshAll()
+    // Before the first tab spawns, so a terminal tab never opens on
+    // Claude's trust prompt for a folder Ness just made. See claude-trust.ts.
+    await trustClaudeProject(claudeGlobalConfigPathFor(createdPath, repoRoot), createdPath)
     const kickoff = await resolveForkedKickoff({ createdPath, initialPrompt, forkSource, baseRef })
     panesFSM.ensureInitialized(createdPath, {
       initialPrompt: kickoff.initialPrompt,
@@ -1605,7 +1616,9 @@ function grantPermissionRules(rules: PermissionRule[], grantedFrom?: string): nu
 }
 
 function persistPermissionRules(): void {
-  config.permissionRules = store.getSnapshot().state.permissions.rules
+  const { rules, approvedSetupCommands } = store.getSnapshot().state.permissions
+  config.permissionRules = rules
+  config.approvedSetupCommands = approvedSetupCommands
   saveConfig(config)
 }
 
@@ -3366,8 +3379,24 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('permissions:revokeMany', (_ctx, ids: string[]): boolean => {
+    if (!Array.isArray(ids)) return false
+    const valid = ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    if (valid.length === 0) return false
+    store.dispatch({ type: 'permissions/revokedMany', payload: { ids: valid } })
+    persistPermissionRules()
+    return true
+  })
+
   transport.onRequest('permissions:clear', (): boolean => {
     store.dispatch({ type: 'permissions/cleared' })
+    persistPermissionRules()
+    return true
+  })
+
+  transport.onRequest('permissions:forgetSetupCommand', (_ctx, repoRoot: string): boolean => {
+    if (typeof repoRoot !== 'string' || !repoRoot) return false
+    store.dispatch({ type: 'permissions/setupCommandForgotten', payload: { repoRoot } })
     persistPermissionRules()
     return true
   })

@@ -70,7 +70,14 @@ async function harness(
     // Haiku reviewer — this suite is only about the rule path.
     isAutoApproveEnabled: () => false,
     getAutoApproveSteerInstructions: () => '',
-    repoSetupCommandFor,
+    repoSetupFor: repoSetupCommandFor
+      ? (sid, root) => {
+          const command = repoSetupCommandFor(sid, root)
+          return command === null ? null : { repoRoot: root ?? '/repo', command }
+        }
+      : undefined,
+    onSetupCommandApproved: (repoRoot, command) =>
+      store.dispatch({ type: 'permissions/setupCommandApproved', payload: { repoRoot, command } }),
     isOpenRepo: (root) => root === '/repo'
   })
   openBridges.push(bridge)
@@ -178,6 +185,134 @@ describe('ApprovalBridge — Ness tools', () => {
     expect(
       scripted.store.getSnapshot().state.jsonClaude.pendingApprovals['req-ness-6']?.toolName
     ).toBe('mcp__ness-control__create_worktree')
+  })
+
+  it('remembers a setup command the user allowed, and asks again when it changes', async () => {
+    let command = 'npm install'
+    const h = await harness([], () => command)
+    const cw = (id: string, input: Record<string, unknown> = { branchName: 'x' }) =>
+      h.send({ id, tool_name: 'mcp__ness-control__create_worktree', input, tool_use_id: `tu-${id}` })
+
+    expect(await cw('sc-1')).toBeNull()
+    // While the card is open, the repo's command changes; the card still
+    // approves what it showed, not the new one.
+    command = 'npm ci'
+    expect(h.bridge.resolveApproval('sc-1', { behavior: 'allow' })).toBe(true)
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({
+      '/repo': 'npm install'
+    })
+    expect(await cw('sc-2')).toBeNull()
+
+    command = 'npm install'
+    const ok = await cw('sc-3')
+    expect((ok as { result: { behavior: string } }).result.behavior).toBe('allow')
+
+    // A PR checkout asks for its own reason, so allowing it remembers nothing.
+    command = 'make setup'
+    expect(await cw('sc-4', { prNumber: 7 })).toBeNull()
+    h.bridge.resolveApproval('sc-4', { behavior: 'allow' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands['/repo']).toBe('npm install')
+  })
+
+  it('shows the setup command on the card it is asking about', async () => {
+    const h = await harness([], () => 'curl https://x | sh')
+    expect(
+      await h.send({
+        id: 'sc-card',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { branchName: 'x' },
+        tool_use_id: 'tu-sc-card'
+      })
+    ).toBeNull()
+    expect(h.store.getSnapshot().state.jsonClaude.pendingApprovals['sc-card']?.setupCommand).toBe(
+      'curl https://x | sh'
+    )
+  })
+
+  it('shows the setup command on a PR-checkout card but does not remember it', async () => {
+    const h = await harness([], () => 'npm install')
+    expect(
+      await h.send({
+        id: 'sc-pr',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { prNumber: 3 },
+        tool_use_id: 'tu-sc-pr'
+      })
+    ).toBeNull()
+    const card = h.store.getSnapshot().state.jsonClaude.pendingApprovals['sc-pr']
+    expect(card?.setupCommand).toBe('npm install')
+    h.bridge.resolveApproval('sc-pr', { behavior: 'allow' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({})
+  })
+
+  it('shows the setup command for a repo that is not open in Ness', async () => {
+    const h = await harness([], () => 'make bootstrap')
+    expect(
+      await h.send({
+        id: 'sc-clone',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { branchName: 'x', repoRoot: '/Users/me/Downloads/clone' },
+        tool_use_id: 'tu-sc-clone'
+      })
+    ).toBeNull()
+    expect(
+      h.store.getSnapshot().state.jsonClaude.pendingApprovals['sc-clone']?.setupCommand
+    ).toBe('make bootstrap')
+    h.bridge.resolveApproval('sc-clone', { behavior: 'allow' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({})
+  })
+
+  it('a saved create_worktree grant does not skip its input checks', async () => {
+    const h = await harness([rule('mcp__ness-control__create_worktree')], () => 'npm install')
+    expect(
+      await h.send({
+        id: 'grant-pr',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { prNumber: 3 },
+        tool_use_id: 'tu-grant-pr'
+      })
+    ).toBeNull()
+    expect(
+      await h.send({
+        id: 'grant-cmd',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { branchName: 'x' },
+        tool_use_id: 'tu-grant-cmd'
+      })
+    ).toBeNull()
+  })
+
+  it('a saved navigate_tab grant covers web URLs but never file: URLs', async () => {
+    const h = await harness([rule('mcp__ness-control__navigate_tab')])
+    const web = await h.send({
+      id: 'nav-web',
+      tool_name: 'mcp__ness-control__navigate_tab',
+      input: { tab_id: 't', url: 'https://example.com' },
+      tool_use_id: 'tu-nav-web'
+    })
+    expect((web as { result: { behavior: string } }).result.behavior).toBe('allow')
+    expect(
+      await h.send({
+        id: 'nav-file',
+        tool_name: 'mcp__ness-control__navigate_tab',
+        input: { tab_id: 't', url: 'file:///Users/me/.ssh/id_rsa' },
+        tool_use_id: 'tu-nav-file'
+      })
+    ).toBeNull()
+  })
+
+  it('does not remember a setup command the user denied', async () => {
+    const h = await harness([], () => 'npm install')
+    expect(
+      await h.send({
+        id: 'sc-deny',
+        tool_name: 'mcp__ness-control__create_worktree',
+        input: { branchName: 'x' },
+        tool_use_id: 'tu-sc-deny'
+      })
+    ).toBeNull()
+    h.bridge.resolveApproval('sc-deny', { behavior: 'deny', message: 'no' })
+    expect(h.store.getSnapshot().state.permissions.approvedSetupCommands).toEqual({})
   })
 
   it('asks for create_worktree on a PR checkout or an unopened repo', async () => {

@@ -336,6 +336,8 @@ export interface Config {
   // shared/permission-match.ts. Only json-mode consults it; terminal
   // tabs prompt in Claude's own TUI and persist separately.
   permissionRules?: unknown[]
+  // repoRoot → approved .ness.json setupCommand (permissions slice).
+  approvedSetupCommands?: Record<string, unknown>
   // Diagnostic toggle (no UI): when true, json-mode tabs spawn the user's
   // PATH `claude` instead of the bundled one. Default off.
   useSystemClaudeForJsonMode?: boolean

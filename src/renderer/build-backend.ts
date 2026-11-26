@@ -375,7 +375,9 @@ export function buildBackend(
     grantPermission: (rule: { toolName: string; ruleContent?: string }, grantedFrom?: string) =>
       req('permissions:grant', rule, grantedFrom),
     revokePermission: (id: string) => req('permissions:revoke', id),
+    revokePermissions: (ids: string[]) => req('permissions:revokeMany', ids),
     clearPermissions: () => req('permissions:clear'),
+    forgetSetupCommand: (repoRoot: string) => req('permissions:forgetSetupCommand', repoRoot),
     setNewWorktreeAdvancedOpen: (open: boolean) =>
       reqConfig('config:setNewWorktreeAdvancedOpen', open),
     setStarterTasksDismissed: (dismissed: boolean) =>

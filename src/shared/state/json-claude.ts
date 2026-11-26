@@ -583,6 +583,9 @@ export interface JsonClaudePendingApproval {
   toolUseId?: string
   timestamp: number
   autoReview?: AutoReviewStatus
+  /** create_worktree only: the repo's .ness.json setupCommand this call
+   *  would run, whatever the card is asking about. */
+  setupCommand?: string
 }
 
 export interface JsonClaudeState {

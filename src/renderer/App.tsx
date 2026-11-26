@@ -48,7 +48,6 @@ import { Activity } from './components/Activity'
 import { Cleanup } from './components/Cleanup'
 // Lazy: React Flow + ELK are only needed once someone opens the graph.
 const SubscriptionGraphView = lazy(() => import('./components/SubscriptionGraphView'))
-import { TaskListView } from './components/TaskListView'
 import { CommandPalette } from './components/CommandPalette'
 import { HotkeyCheatsheet } from './components/HotkeyCheatsheet'
 import { NewProjectScreen } from './components/NewProjectScreen'
@@ -475,7 +474,6 @@ function DesktopApp(): JSX.Element {
   const [showCleanup, setShowCleanup] = useState(false)
   /** Repo the subscription graph is showing, or null when it's closed. */
   const [graphRepo, setGraphRepo] = useState<string | null>(null)
-  const [showTaskList, setShowTaskList] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [commandPaletteMode, setCommandPaletteMode] = useState<'root' | 'files'>('root')
   const [showPerfMonitor, setShowPerfMonitor] = useState(false)
@@ -1009,7 +1007,6 @@ function DesktopApp(): JSX.Element {
           setShowActivity(false)
           setShowCleanup(false)
           setGraphRepo(null)
-          setShowTaskList(false)
         }
       )
     },
@@ -1034,7 +1031,6 @@ function DesktopApp(): JSX.Element {
       setShowNewWorktree(false)
       setShowActivity(false)
       setShowCleanup(false)
-      setShowTaskList(false)
       setGraphRepo(repo)
     },
     [activeWorktreeId, worktreeRepoByPath, repoRoots]
@@ -1186,7 +1182,6 @@ function DesktopApp(): JSX.Element {
     setRightColumnHidden,
     setSingleScreenMode,
     setShowNewWorktree,
-    setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
     setShowPerfMonitor,
@@ -1230,8 +1225,8 @@ function DesktopApp(): JSX.Element {
     }
   }, [backend, hotkeyActions])
 
-  // Per-worktree aggregates come from the shared list model so the sidebar,
-  // task list and command palette can't disagree about a status.
+  // Per-worktree aggregates come from the shared list model so the sidebar
+  // and command palette can't disagree about a status.
   const worktreeStatuses = worktreeListModel.statusByPath
   const worktreePendingTools = worktreeListModel.pendingToolByPath
 
@@ -1283,25 +1278,6 @@ function DesktopApp(): JSX.Element {
   const myWeekOverlay = showMyWeek ? (
     <div className="fixed inset-0 z-50 flex">
       <WeeklyWrappedScreen onClose={() => setShowMyWeek(false)} />
-    </div>
-  ) : null
-
-  const taskListOverlay = showTaskList ? (
-    <div className="fixed inset-0 z-50 flex">
-      <TaskListView
-        model={worktreeListModel}
-        pathBackendId={fleetData.pathBackendId}
-        activeWorktreeId={activeWorktreeId}
-        activeTabId={activeWorktreeId ? (activeTabId[activeWorktreeId] ?? null) : null}
-        unifiedRepos={unifiedRepos}
-        repoCount={repoRoots.length}
-        onToggleUnifiedRepos={() => setUnifiedRepos((v) => !v)}
-        onClose={() => setShowTaskList(false)}
-        onSelect={handleSidebarSelectWorktree}
-        onSelectTab={handleSidebarSelectTab}
-        onCloseTab={handleSidebarCloseTab}
-        onToggleGroup={toggleGroup}
-      />
     </div>
   ) : null
 
@@ -1817,7 +1793,6 @@ function DesktopApp(): JSX.Element {
       </div>
       {settingsOverlay}
       {myWeekOverlay}
-      {taskListOverlay}
       {repoPickerOverlay}
       {repoAddPromptOverlay}
       </HotkeysProvider>
@@ -2056,7 +2031,6 @@ function DesktopApp(): JSX.Element {
             onOpenActivity={() => setShowActivity(true)}
             onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
             onOpenCleanup={() => setShowCleanup(true)}
-            onOpenTaskList={() => setShowTaskList(true)}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenMyWeek={() => setShowMyWeek(true)}
             width={effectiveSidebarWidth}
@@ -2079,7 +2053,6 @@ function DesktopApp(): JSX.Element {
               setShowNewWorktree(true)
             }}
             onOpenCleanup={() => setShowCleanup(true)}
-            onOpenTaskList={() => setShowTaskList(true)}
             onOpenNewProject={() => setShowNewProject(true)}
             onOpenActivity={() => setShowActivity(true)}
             onOpenSubscriptionGraph={handleOpenSubscriptionGraph}
@@ -2354,7 +2327,6 @@ function DesktopApp(): JSX.Element {
     </div>
     {settingsOverlay}
     {myWeekOverlay}
-    {taskListOverlay}
     {repoPickerOverlay}
     {repoAddPromptOverlay}
     {showPerfMonitor && <PerfMonitorHUD onClose={() => setShowPerfMonitor(false)} />}

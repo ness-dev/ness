@@ -45,7 +45,6 @@ interface UseHotkeyHandlersArgs {
   setRightColumnHidden: React.Dispatch<React.SetStateAction<boolean>>
   setSingleScreenMode: React.Dispatch<React.SetStateAction<boolean>>
   setShowNewWorktree: React.Dispatch<React.SetStateAction<boolean>>
-  setShowTaskList: React.Dispatch<React.SetStateAction<boolean>>
   setShowCommandPalette: React.Dispatch<React.SetStateAction<boolean>>
   setCommandPaletteMode: React.Dispatch<React.SetStateAction<'root' | 'files'>>
   setShowPerfMonitor: React.Dispatch<React.SetStateAction<boolean>>
@@ -97,7 +96,6 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     setRightColumnHidden,
     setSingleScreenMode,
     setShowNewWorktree,
-    setShowTaskList,
     setShowCommandPalette,
     setCommandPaletteMode,
     setShowPerfMonitor,
@@ -323,7 +321,6 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
         if (!activeWorktreeId) return
         backendFor(activeWorktreeId).openInEditor(activeWorktreeId)
       },
-      toggleTaskList: () => setShowTaskList((v) => !v),
       commandPalette: () => {
         setShowHotkeyCheatsheet(false)
         setCommandPaletteMode('root')
@@ -444,7 +441,6 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       setRightColumnHidden,
       setSingleScreenMode,
       setShowNewWorktree,
-      setShowTaskList,
       setShowCommandPalette,
       setCommandPaletteMode,
       setShowPerfMonitor,

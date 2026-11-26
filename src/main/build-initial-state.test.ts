@@ -8,7 +8,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { buildInitialAppState } from './build-initial-state'
+import { buildInitialAppState, sanitizeApprovedSetupCommands } from './build-initial-state'
 import { runMigrations } from './persistence-migrations'
 import type { Config } from './persistence'
 import { initialPRs } from '../shared/state/prs'
@@ -174,5 +174,20 @@ describe('buildInitialAppState', () => {
     expect(wt.submissions?.[0]).not.toHaveProperty('briefing')
     expect(wt.submissions?.[1].briefing).toBe('## What it does')
     expect(wt.requests?.map((r) => r.id)).toEqual(['r1'])
+  })
+})
+
+describe('sanitizeApprovedSetupCommands', () => {
+  it('keeps absolute repo roots with non-empty string commands only', () => {
+    expect(
+      sanitizeApprovedSetupCommands({
+        '/repo': 'npm install',
+        relative: 'npm install',
+        '/blank': '  ',
+        '/num': 3
+      })
+    ).toEqual({ '/repo': 'npm install' })
+    expect(sanitizeApprovedSetupCommands(undefined)).toEqual({})
+    expect(sanitizeApprovedSetupCommands(['/repo'])).toEqual({})
   })
 })
