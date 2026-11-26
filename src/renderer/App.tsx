@@ -27,7 +27,7 @@ import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorkt
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
 import { FirstRunTour } from './components/FirstRunTour'
-import { CenterEmptyState } from './components/CenterEmptyState'
+import { CenterEmptyState, centerEmptyMode } from './components/CenterEmptyState'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -2237,17 +2237,10 @@ function DesktopApp(): JSX.Element {
             </div>
             <div className="flex-1 flex items-center justify-center">
               <CenterEmptyState
-                mode={
-                  !onboardingVisible && tourHomePath
-                    ? 'tour-home'
-                    : worktrees.length === 0
-                      ? 'no-repos'
-                      : 'no-selection'
-                }
+                mode={centerEmptyMode({ onboardingVisible, tourHomePath })}
                 newWorktreeBinding={resolvedHotkeys.newWorktree}
                 onTourStart={handleTourStart}
                 onNewWorktree={() => setShowNewWorktree(true)}
-                onAddRepo={handleAddRepo}
               />
             </div>
           </div>
