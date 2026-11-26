@@ -351,6 +351,67 @@ How that works:
 lucide icon set behind the shim. A babel import-rewrite to per-icon
 modules would recover most of it.
 
+## 8. The tools panel (right column)
+
+Both phone clients now have the desktop's **full** right column, not the
+web client's old four-panel subset.
+
+- **Web client:** `RightColumn` was split into `useRightPanelConfig`
+  (tools list, effective order/visibility, `repoConfig:set` writers) and
+  `RightPanelStack`. The desktop column and `MobileRightPanel` both render
+  them, so the phone web sheet gets every panel in the repo's order, plus
+  the visibility/reorder toolbar and "Build a custom tool…". The latter
+  pre-fills the phone's new-worktree screen, like the desktop.
+  - The diff, file and review openers became optional props. The phone
+    omits them, so those rows don't open a tab it can't render.
+  - Touch-only (`pointer-coarse:`) sizing gives the toolbar, panel headers
+    and header actions 44px targets. Measured: all 16 buttons in the sheet
+    are at least 44×44; they were 12–40px before.
+- **App:** `mobile/src/panels/` contains `PanelsHost`, a ported
+  `RightPanel` chrome and a ported `useWatchedQuery` (watch and invalidate
+  signals plus a fallback poll), and RN ports of every panel:
+  - PR Status and Merge Locally
+  - Branch Commits, with the commit popover
+  - Changed Files and All Files
+  - Todos, Agents, Subscriptions
+  - Cost and Context, with the same interest gates
+  - Scratchpad
+  - custom tools
+
+  Visibility and order edits write the repo's `.ness.json`, the same file
+  the desktop toolbar uses (verified).
+- **Shared rules:**
+  - Send-to-agent uses the desktop's routing (selected tab, else the
+    pane's active tab, else the first agent or chat tab).
+  - Removing a worktree from either phone UI always asks first.
+- **Desktop fixes found on the way:** several panels used `*-error` /
+  `text-text` classes that aren't theme tokens, so the Context meter's
+  tool rows, the Cost/Context totals, the GitHub API log errors and the
+  perf HUD rendered colourless. They now use `danger` / `fg`.
+- **Verified on Expo web**, read-only on real repos:
+  - PR #421's data, the checks list and the commit popover.
+  - In the throwaway repo: visibility/order round-trip into `.ness.json`,
+    Merge Locally's main-worktree check, the Scratchpad save across a
+    reload, and Cost and Context loading live data on expand.
+- **Not tested:** merge, approve and remove on a real PR/worktree
+  (deliberately not run); Todos and Agents with live data; Subscriptions;
+  a repo with custom tools.
+- **React Native's `Alert` is a no-op on react-native-web**, so the app's
+  long-press detail popups and confirmations only appear on native.
+
+## Driving the simulator (agent testing)
+
+- **What works:** Xcode 27 ships an MCP server, `xcode-tools`
+  (`xcrun mcpbridge`). Its `DeviceInteraction*` tools tap, swipe and type,
+  and return a screenshot plus the UI hierarchy after each action. It's
+  registered with Claude Code for this repo (`claude mcp add xcode --
+  xcrun mcpbridge`). This agent is approved; approval is raised by
+  `XcodeNewProject` / `XcodeOpenWorkspace` on a throwaway project.
+- **What didn't work:**
+  - `idb` taps fail on Xcode 27: SimulatorKit moved to
+    `Contents/SharedFrameworks`.
+  - Device interaction needs an **iOS 27+ simulator**.
+
 ## Recommended architecture to productionise
 
 - **Keep** importing `src/shared` directly. Enforce RN-safety in CI with
