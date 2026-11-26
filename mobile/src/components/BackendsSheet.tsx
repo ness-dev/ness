@@ -7,7 +7,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { Plus, QrCode, Trash2, X } from 'lucide-react-native'
 import { parseConnectionUrl } from '../../../src/shared/transport/parse-connection-url'
 import type { Backends } from '../backends'
-import { NessClient, useConn } from '../ness'
+import { NessClient, useConn, useNess } from '../ness'
 import { alpha, c, fs, mono } from '../theme'
 
 export function BackendsSheet({ backends, onClose }: { backends: Backends; onClose?: () => void }) {
@@ -38,6 +38,7 @@ export function BackendsSheet({ backends, onClose }: { backends: Backends; onClo
                 {b.wsUrl}
               </Text>
               <BackendStatus client={backends.clients.find((cl) => cl.id === b.id)} enabled={b.enabled} />
+              {backends.clients.some((cl) => cl.id === b.id) && <OverlapNote clients={backends.clients} selfId={b.id} />}
             </View>
             <Switch
               value={b.enabled}
@@ -87,6 +88,30 @@ function LiveDot({ client }: { client: NessClient }) {
 function BackendStatus({ client, enabled }: { client?: NessClient; enabled: boolean }) {
   if (!enabled || !client) return <Text style={s.status}>disabled</Text>
   return <LiveStatus client={client} />
+}
+
+/** Two Ness instances on one machine (e.g. the desktop app and a
+ *  harness-server) report the same worktree paths. The merged list can only
+ *  show one backend's view of each path — the later one in this list wins,
+ *  same as desktop — so its tabs, statuses and aliases replace the other's.
+ *  Say so instead of letting it happen silently. */
+function OverlapNote({ clients, selfId }: { clients: NessClient[]; selfId: string }) {
+  // Only rendered for an active client, so `self` exists.
+  const self = clients.find((cl) => cl.id === selfId)!
+  const mine = useNess(self, (st) => st.worktrees.list)
+  if (clients.length < 2) return null
+  const myPaths = new Set(mine.map((w) => w.path))
+  const myIndex = clients.indexOf(self)
+  const overlapping = clients.filter((o) => o !== self && o.getState().worktrees.list.some((w) => myPaths.has(w.path)))
+  if (overlapping.length === 0) return null
+  const shadowedBy = overlapping.filter((o) => clients.indexOf(o) > myIndex)
+  return (
+    <Text style={[s.status, { color: c.warning }]}>
+      {shadowedBy.length > 0
+        ? `Same worktrees as ${shadowedBy.map((o) => o.label).join(', ')}, which is shown instead. Turn one off.`
+        : `Same worktrees as ${overlapping.map((o) => o.label).join(', ')}. This one is shown; turn one off.`}
+    </Text>
+  )
 }
 
 function LiveStatus({ client }: { client: NessClient }) {

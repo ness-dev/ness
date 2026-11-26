@@ -26,6 +26,7 @@ import { supportsChat } from '../src/shared/agent-registry'
 import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
 import { randomUUID } from '../src/renderer/uuid'
 import { useBackends } from './src/backends'
+import { consumeLaunchUrl } from './src/launchUrl'
 import { Fleet, useFleetEntries, useMerged } from './src/fleet'
 import { useNess, type NessClient } from './src/ness'
 import { STATUS_DOT, c, fs } from './src/theme'
@@ -62,7 +63,7 @@ function App() {
       const r = parseConnectionUrl(decodeURIComponent(m[1]))
       if (r.ok) backends.add({ wsUrl: r.parsed.wsUrl, token: r.parsed.token })
     }
-    void Linking.getInitialURL().then(handle)
+    void consumeLaunchUrl().then(handle)
     const sub = Linking.addEventListener('url', (e) => handle(e.url))
     return () => sub.remove()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,7 +229,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
       if (tab) setSelectedTabByWorktree((prev) => ({ ...prev, [wt]: tab }))
       setPickerOpen(false)
     }
-    void Linking.getInitialURL().then(handle)
+    void consumeLaunchUrl().then(handle)
     const sub = Linking.addEventListener('url', (e) => handle(e.url))
     return () => sub.remove()
   }, [])
