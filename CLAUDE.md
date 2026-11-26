@@ -905,6 +905,31 @@ Catches tarball-layout / module-resolution / boot-time regressions
 before they ride a tag push to release. Run locally:
 `npm run build:headless && bash scripts/smoke-headless.sh`.
 
+### Mobile client guard on every PR
+
+The Expo app in `mobile/` is a separate client of the same server, and it
+reuses code from `src/`: the state slices + `rootReducer`, the WebSocket
+transport, `renderer/build-backend.ts` (its **only** way to call the
+server — never a hand-written channel string), and pure renderer modules
+(`merge-backend-states`, `worktree-list-model`, `turn-collapse`,
+`tool-display`, `chat-image-src`, `themes`, `theme-apply`). A change to any
+of those, or to a request handler, can break the phone without touching
+`mobile/`. CI guards it in four steps:
+
+- `npm run typecheck:mobile` — signature / state-shape drift. Renaming a
+  channel or changing its args means updating `build-backend.ts`, and the
+  phone follows (or fails to compile).
+- `npm run test:mobile` — unit tests in `mobile/test/`, including a check
+  that `mobile/src/themes.generated.ts` matches `styles.css` (regenerate
+  with `node mobile/scripts/gen-themes.mjs`).
+- `npx expo export --platform ios` in `mobile/` — a shared module that
+  grows a Node / DOM / Electron-only import fails to bundle here. Keep
+  the modules above free of those.
+- `npm run test:mobile:contract` (after `build:headless`) — the app's own
+  `NessClient` / `Fleet` / list model drive a fresh headless server.
+
+Mobile deps are installed separately (`npm ci --prefix mobile`).
+
 ### Headless tarballs
 
 The `Headless Release` workflow (`.github/workflows/headless-release.yml`)
