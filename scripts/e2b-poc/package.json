@@ -1,0 +1,10 @@
+{
+  "name": "ness-e2b-poc",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway proof of concept: a harness-server in an E2B sandbox",
+  "dependencies": {
+    "e2b": "2.66.0",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,3 @@
+node_modules/
+# Sandbox id + the harness-server auth token for the running POC sandbox.
+.state.json
