@@ -6,8 +6,8 @@
 // Desktop-only, omitted: row tap → diff tab (onOpenDiff), the "Review"
 // header button (onOpenReview opens a review tab), "Open file in editor"
 // (openInEditor), and drag-a-row-into-the-composer (the @ button covers it).
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, FlatList, Pressable, Text, View } from 'react-native'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AtSign, ChevronRight, Folder, FolderOpen, List, ListTree, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
@@ -128,8 +128,8 @@ export function fileTreeIndent(depth: number): number {
   return 8 + depth * 12 + 10
 }
 
-/** TreeBranch's recursion, flattened to rows so a long tree can live in a
- *  FlatList instead of one deep View hierarchy. Same visit order. */
+/** TreeBranch's recursion, flattened to rows so a long tree renders as one
+ *  flat list instead of one deep View hierarchy. Same visit order. */
 export type TreeRow =
   | { kind: 'dir'; node: TreeNode; depth: number; open: boolean }
   | { kind: 'file'; node: TreeNode; depth: number }
@@ -336,58 +336,62 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
     </PanelAction>
   )
 
+  const renderRow = (item: Row) => {
+    switch (item.kind) {
+      case 'section':
+        return (
+          <View
+            style={{
+              minHeight: 44,
+              paddingHorizontal: 12,
+              marginTop: item.top ? 0 : 4,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: alpha(c.panelRaised, 0.5)
+            }}
+          >
+            <Text style={sectionText}>{item.label}</Text>
+            <FileListViewToggle view={item.view} onToggle={item.onToggle} />
+          </View>
+        )
+      case 'subsection':
+        return <Text style={[sectionText, { paddingHorizontal: 12, paddingVertical: 4 }]}>{item.label}</Text>
+      case 'empty':
+        return (
+          <Text style={{ paddingHorizontal: 12, paddingVertical: 8, fontSize: fs.xs, color: c.faint, fontStyle: 'italic' }}>
+            {item.label}
+          </Text>
+        )
+      case 'dir':
+        return (
+          <DirRow
+            name={item.node.name}
+            depth={item.depth}
+            open={item.open}
+            onToggle={() => toggleDir(item.list, item.node.path)}
+            hasChangedDescendant={false}
+          />
+        )
+      case 'file':
+        return <FileRow file={item.file} depth={item.depth} onSendToAgent={onSendToAgent} />
+    }
+  }
+
   return (
     <RightPanel id="changed-files" title="Changed Files" actions={actions}>
       {!worktreePath && <Text style={{ padding: 12, fontSize: fs.xs, color: c.faint }}>No worktree selected</Text>}
       {rows.length > 0 && (
-        <FlatList
-          data={rows}
-          keyExtractor={(r) => r.key}
-          nestedScrollEnabled
-          style={{ maxHeight: 480 }}
-          initialNumToRender={30}
-          renderItem={({ item }) => {
-            switch (item.kind) {
-              case 'section':
-                return (
-                  <View
-                    style={{
-                      minHeight: 44,
-                      paddingHorizontal: 12,
-                      marginTop: item.top ? 0 : 4,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: alpha(c.panelRaised, 0.5)
-                    }}
-                  >
-                    <Text style={sectionText}>{item.label}</Text>
-                    <FileListViewToggle view={item.view} onToggle={item.onToggle} />
-                  </View>
-                )
-              case 'subsection':
-                return <Text style={[sectionText, { paddingHorizontal: 12, paddingVertical: 4 }]}>{item.label}</Text>
-              case 'empty':
-                return (
-                  <Text style={{ paddingHorizontal: 12, paddingVertical: 8, fontSize: fs.xs, color: c.faint, fontStyle: 'italic' }}>
-                    {item.label}
-                  </Text>
-                )
-              case 'dir':
-                return (
-                  <DirRow
-                    name={item.node.name}
-                    depth={item.depth}
-                    open={item.open}
-                    onToggle={() => toggleDir(item.list, item.node.path)}
-                    hasChangedDescendant={false}
-                  />
-                )
-              case 'file':
-                return <FileRow file={item.file} depth={item.depth} onSendToAgent={onSendToAgent} />
-            }
-          }}
-        />
+        // ScrollView + map, not FlatList: PanelsHost is already a ScrollView
+        // and nesting a VirtualizedList in one breaks windowing. A PR's changed
+        // set is small enough to render whole inside the capped height.
+        <ScrollView nestedScrollEnabled style={{ maxHeight: 480 }}>
+          {rows.map((item) => (
+            <Fragment key={item.key}>
+              {renderRow(item)}
+            </Fragment>
+          ))}
+        </ScrollView>
       )}
 
       {totalCount > 0 && (

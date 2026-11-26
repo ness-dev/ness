@@ -40,6 +40,8 @@ const num = { fontSize: fs.xs, fontVariant: ['tabular-nums' as const] }
 
 function Bar({ row, max, total }: { row: Row; max: number; total: number }) {
   const pct = total > 0 ? (row.cost / total) * 100 : 0
+  // Same as desktop: bar length is relative to the section's largest row
+  // (which always draws full), while the % label is the share of the total.
   const width = max > 0 ? (row.cost / max) * 100 : 0
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

@@ -83,8 +83,11 @@ export function ScratchpadPanel({ client, worktreePath }: PanelProps) {
         editable={!disabled}
         onChangeText={handleChange}
         onBlur={flush}
+        // Fixed height + its own scroll: a growing multiline input makes the
+        // sheet's ScrollView chase the caret and slide text under the header.
+        scrollEnabled
         // fontSize 16 (not the desktop's text-xs) so iOS doesn't zoom on focus.
-        style={{ minHeight: 160, maxHeight: 360, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.panel, color: c.fg, fontSize: fs.base }}
+        style={{ height: 200, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.panel, color: c.fg, fontSize: fs.base }}
       />
     </RightPanel>
   )

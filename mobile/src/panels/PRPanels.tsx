@@ -629,7 +629,7 @@ function ReviewSummary({
 
   return (
     <View>
-      <Pressable onPress={() => setExpanded(!expanded)} style={{ minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6 }} hitSlop={4}>
+      <Pressable onPress={() => setExpanded(!expanded)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         {!!label.text && <Text style={{ fontSize: fs.xs, color: label.color }}>{label.text}</Text>}
         <Text style={{ fontSize: fs.xs, color: c.faint }}>
           ({uniqueReviewers.length} {uniqueReviewers.length === 1 ? 'reviewer' : 'reviewers'}){expanded ? '▴' : '▾'}
@@ -1026,10 +1026,15 @@ export function PRPanel(props: PanelProps) {
                     onPress={() => onOpenUrl(pr.url)}
                     onLongPress={tip(pr.queuePosition ? queueBadgeLabel(pr.queuePosition, pr.queueEstimatedSeconds) : STATE_LABELS[pr.state])}
                     accessibilityLabel="Open PR in browser"
-                    hitSlop={8}
-                    style={({ pressed }) => ({ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: pillColor, backgroundColor: pressed ? alpha(pillColor, 0.1) : 'transparent' })}
+                    accessibilityRole="link"
+                    // The 44pt box is the target; the pill is drawn inside it.
+                    style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
                   >
-                    <Text style={{ color: pillColor, fontSize: fs.xs, fontWeight: '500' }}>#{pr.number}</Text>
+                    {({ pressed }) => (
+                      <View style={{ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: pillColor, backgroundColor: pressed ? alpha(pillColor, 0.1) : 'transparent' }}>
+                        <Text style={{ color: pillColor, fontSize: fs.xs, fontWeight: '500' }}>#{pr.number}</Text>
+                      </View>
+                    )}
                   </Pressable>
                 )
               })()}
@@ -1160,7 +1165,7 @@ export function PRPanel(props: PanelProps) {
             {pr.reviews.length > 0 && <ReviewSummary reviews={pr.reviews} decision={pr.reviewDecision} onOpenUrl={onOpenUrl} />}
 
             {/* Checks summary */}
-            <Pressable onPress={() => setExpanded(!expanded)} style={{ minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6 }} hitSlop={4}>
+            <Pressable onPress={() => setExpanded(!expanded)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={{ fontSize: fs.xs, color: OVERALL_COLORS[pr.checksOverall] }}>
                 {pr.checksOverall === 'success' && 'Checks passing'}
                 {pr.checksOverall === 'failure' && 'Checks failing'}

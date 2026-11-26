@@ -87,15 +87,34 @@ export function PanelsHost({
       {customizing ? (
         <ScrollView>
           {order.map((key, i) => (
-            <View key={key} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingLeft: 12, borderBottomWidth: 1, borderColor: c.border }}>
-              <Switch
-                value={!hidden[key]}
-                onValueChange={(on) => setHidden({ ...hidden, [key]: !on })}
-                trackColor={{ true: c.accent, false: c.surface }}
-                thumbColor="#fff"
+            <View key={key} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderColor: c.border }}>
+              {/* The whole label area toggles, so the target is the full row
+                  height rather than just the switch. */}
+              <Pressable
+                onPress={() => setHidden({ ...hidden, [key]: !hidden[key] })}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: !hidden[key] }}
                 accessibilityLabel={`Show ${labelFor(key)}`}
-              />
-              <Text style={{ flex: 1, color: c.fg, fontSize: fs.sm, marginLeft: 12 }}>{labelFor(key)}</Text>
+                style={({ pressed }) => ({
+                  flex: 1,
+                  alignSelf: 'stretch',
+                  minHeight: 48,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingLeft: 12,
+                  backgroundColor: pressed ? c.panelRaised : 'transparent'
+                })}
+              >
+                <View style={{ justifyContent: 'center' }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <Switch
+                    value={!hidden[key]}
+                    onValueChange={(on) => setHidden({ ...hidden, [key]: !on })}
+                    trackColor={{ true: c.accent, false: c.surface }}
+                    thumbColor="#fff"
+                  />
+                </View>
+                <Text style={{ flex: 1, color: c.fg, fontSize: fs.sm, marginLeft: 12 }}>{labelFor(key)}</Text>
+              </Pressable>
               <Pressable
                 disabled={i === 0}
                 onPress={() => setOrder(swap(order, i, i - 1))}

@@ -429,7 +429,7 @@ export function ChatView({
           <Pressable
             onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
             accessibilityLabel="Jump to bottom"
-            style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.accent, borderRadius: 999, paddingHorizontal: 12, minHeight: 36 }}
+            style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.accent, borderRadius: 999, paddingHorizontal: 14, minHeight: 44 }}
           >
             <ChevronDown color="#fff" size={14} />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '500' }}>Jump to bottom</Text>

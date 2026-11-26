@@ -47,10 +47,12 @@ export function RightPanel({
 
   return (
     <View style={{ borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel }}>
-      <View style={{ flexDirection: 'row', alignItems: 'stretch', minHeight: 44, borderBottomWidth: collapsed ? 0 : 1, borderColor: c.border }}>
+      <View style={{ flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: collapsed ? 0 : 1, borderColor: c.border }}>
         <Pressable
           onPress={() => setCollapsed((v) => !v)}
-          style={({ pressed }) => ({ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, backgroundColor: pressed ? c.panelRaised : 'transparent' })}
+          // minHeight on the pressable itself (not the bordered row) so the
+          // target is a full 44pt; the row's bottom border sits below it.
+          style={({ pressed }) => ({ flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, backgroundColor: pressed ? c.panelRaised : 'transparent' })}
           accessibilityRole="button"
           accessibilityState={{ expanded: !collapsed }}
         >
@@ -66,17 +68,18 @@ export function RightPanel({
   )
 }
 
-/** Header action button: icon-sized visually, 44pt touch target. */
+/** Header action button: icon-sized visually, 44x44 touch target. The
+ *  negative horizontal margin keeps neighbouring actions visually tight. */
 export function PanelAction({ onPress, label, children, disabled }: { onPress: () => void; label: string; children: ReactNode; disabled?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      hitSlop={10}
+      accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => ({ padding: 4, borderRadius: 4, opacity: disabled ? 0.4 : 1, backgroundColor: pressed ? c.surface : 'transparent' })}
+      style={{ width: 44, height: 44, marginHorizontal: -8, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1 }}
     >
-      {children}
+      {({ pressed }) => <View style={{ padding: 4, borderRadius: 4, backgroundColor: pressed ? c.surface : 'transparent' }}>{children}</View>}
     </Pressable>
   )
 }

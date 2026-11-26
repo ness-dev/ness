@@ -643,6 +643,9 @@ function AliasEditor({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {
       value={value}
       onChangeText={setValue}
       maxLength={80}
+      // Names, not prose: autocorrect only gets in the way.
+      autoCorrect={false}
+      spellCheck={false}
       onSubmitEditing={commit}
       onBlur={commit}
       returnKeyType="done"

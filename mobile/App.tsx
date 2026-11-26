@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Keyboard,
   Linking,
   Platform,
   Pressable,
@@ -217,6 +218,24 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     return () => sub.remove()
   }, [])
 
+  // Keep the selected tab visible: on a phone the strip overflows and the
+  // selected tab could otherwise sit under the details button.
+  const tabStripRef = useRef<React.ComponentRef<typeof ScrollView>>(null)
+  const tabStripWidth = useRef(0)
+  const tabLayouts = useRef<Record<string, { x: number; w: number }>>({})
+  useEffect(() => {
+    const id = selectedTabId
+    if (!id) return
+    // Layout lands a frame after the tab mounts.
+    const t = setTimeout(() => {
+      const l = tabLayouts.current[id]
+      if (!l) return
+      const visible = tabStripWidth.current
+      tabStripRef.current?.scrollTo({ x: Math.max(0, l.x + l.w - visible + 48), animated: true })
+    }, 50)
+    return () => clearTimeout(t)
+  }, [selectedTabId, tabs.length])
+
   const handleSelectWorktree = useCallback((wtPath: string) => {
     setActiveWorktreeId(wtPath)
     setPickerOpen(false)
@@ -282,7 +301,10 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     <View style={{ flex: 1 }}>
       <View style={s.header}>
         <Pressable
-          onPress={() => setPickerOpen((v) => !v)}
+          onPress={() => {
+            Keyboard.dismiss()
+            setPickerOpen((v) => !v)
+          }}
           style={({ pressed }) => [s.pickerBtn, (pickerOpen || pressed) && { backgroundColor: c.surface }]}
           accessibilityRole="button"
           accessibilityLabel="Switch worktree"
@@ -303,7 +325,14 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
             <Text style={{ color: c.fg, fontSize: fs.sm }}>Select a worktree</Text>
           )}
         </Pressable>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'stretch' }}>
+        <ScrollView
+          ref={tabStripRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ alignItems: 'stretch' }}
+          onLayout={(e) => (tabStripWidth.current = e.nativeEvent.layout.width)}
+        >
           {client &&
             tabs.map((tab) => {
               const convertible = (tab.type === 'agent' && supportsChat(tab.agentKind)) || tab.type === 'json-claude'
@@ -314,6 +343,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
                   tab={tab}
                   active={tab.id === selectedTabId}
                   onSelect={() => handleSelectTab(tab.id)}
+                  onLayout={(x, w) => (tabLayouts.current[tab.id] = { x, w })}
                   // With the picker open, a tap on the active tab means
                   // "dismiss the picker", so no convert menu.
                   onOpenMenu={convertible && !pickerOpen ? (pos) => setConvertMenu({ tab, ...pos }) : undefined}
@@ -329,7 +359,11 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
         </ScrollView>
         {activeWorktree && (
           <Pressable
-            onPress={() => setRightPanelOpen((v) => !v)}
+            onPress={() => {
+              // The composer's keyboard would otherwise sit over the sheet.
+              Keyboard.dismiss()
+              setRightPanelOpen((v) => !v)
+            }}
             style={({ pressed }) => [s.detailsBtn, (rightPanelOpen || pressed) && { backgroundColor: c.surface }]}
             accessibilityLabel={rightPanelOpen ? 'Close worktree details' : 'Worktree details'}
           >
@@ -409,7 +443,8 @@ function TabChip({
   tab,
   active,
   onSelect,
-  onOpenMenu
+  onOpenMenu,
+  onLayout
 }: {
   client: NessClient
   tab: TerminalTab
@@ -417,6 +452,7 @@ function TabChip({
   onSelect: () => void
   /** Tap the active tab → convert menu (mobile's right-click). */
   onOpenMenu?: (pos: { x: number; y: number }) => void
+  onLayout?: (x: number, width: number) => void
 }) {
   const ref = useRef<React.ComponentRef<typeof View>>(null)
   return (
@@ -429,6 +465,7 @@ function TabChip({
         }
         onSelect()
       }}
+      onLayout={(e) => onLayout?.(e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
       style={[s.tab, active && s.tabActive]}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
@@ -486,7 +523,8 @@ function Empty({ message }: { message: string }) {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.app },
-  header: { height: 44, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
+  // 45 = 44pt tap height + the 1px bottom border.
+  header: { height: 45, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
   pickerBtn: {
     flexDirection: 'row',
     alignItems: 'center',

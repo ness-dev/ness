@@ -17,6 +17,10 @@ import { summarizeTools } from '../../../src/renderer/components/json-mode-cards
 import { formatTurnDuration, type TurnSummary } from '../../../src/renderer/components/json-mode-cards/turn-collapse'
 import { automationLabel } from '../../../src/renderer/components/json-mode-cards/automation-label'
 import { alpha, c, mono } from '../theme'
+import { tw } from '../tw'
+import Svg, { G, Path, Rect } from 'react-native-svg'
+import { NessIcon, McpGenericIcon } from '../../../src/renderer/components/json-mode-cards/tool-icons'
+import { NESS_MARK_PATHS } from '../../../src/renderer/components/NessMark'
 import { Markdown } from '../components/Markdown'
 import { Spin } from '../components/Spin'
 import { ROW_HIT_SLOP, useDensity } from './density'
@@ -46,8 +50,45 @@ class IconBoundary extends Component<{ children: ReactNode }, { failed: boolean 
 }
 
 type DesktopIcon = (p: { className?: string }) => ReactNode
-export function ToolIcon({ icon: Icon, className = 'icon-xs text-muted' }: { icon: DesktopIcon | null | undefined; className?: string }) {
-  if (!Icon) return null
+
+// The two desktop tool icons that draw raw <svg> instead of a lucide glyph,
+// redrawn with react-native-svg from the same data. Rendering the DOM
+// versions throws "View config getter callback for component `path`" — the
+// IconBoundary below only catches that after dev's LogBox has already
+// taken over the screen.
+const BRAND = '#4ade80' // --color-brand
+function RnNessIcon({ className }: { className?: string }) {
+  const size = tw(className).size ?? 12
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G transform="translate(12,12) scale(0.42) translate(-32.2,-24.2)" fill={BRAND}>
+        {NESS_MARK_PATHS.map((d) => (
+          <Path key={d} d={d} />
+        ))}
+      </G>
+    </Svg>
+  )
+}
+function RnMcpGenericIcon({ className }: { className?: string }) {
+  const t = tw(className)
+  const size = t.size ?? 12
+  const col = t.color ?? c.muted
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M9 3v4 M15 3v4" />
+      <Rect x={6} y={7} width={12} height={6} rx={1} />
+      <Path d="M12 13v4 M9 17h6" />
+    </Svg>
+  )
+}
+const RN_ICON = new Map<unknown, DesktopIcon>([
+  [NessIcon, RnNessIcon],
+  [McpGenericIcon, RnMcpGenericIcon]
+])
+
+export function ToolIcon({ icon, className = 'icon-xs text-muted' }: { icon: DesktopIcon | null | undefined; className?: string }) {
+  if (!icon) return null
+  const Icon = RN_ICON.get(icon) ?? icon
   return (
     <IconBoundary>
       <Icon className={className} />

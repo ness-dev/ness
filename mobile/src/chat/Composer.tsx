@@ -259,5 +259,5 @@ export function Composer({
   )
 }
 
-// Visually the web's px-2.5 py-0.5 pill, but 36pt tall for a thumb.
-const btn = { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, borderRadius: 4, paddingHorizontal: 12, minHeight: 36 }
+// The web's px-2.5 py-0.5 pill, at a 44pt thumb-sized height.
+const btn = { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 5, borderRadius: 6, paddingHorizontal: 14, minHeight: 44, minWidth: 64 }

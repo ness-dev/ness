@@ -17,7 +17,11 @@ export function BackendsSheet({ backends, onClose }: { backends: Backends; onClo
       <View style={s.head}>
         <Text style={s.title}>BACKENDS</Text>
         {onClose && (
-          <Pressable onPress={onClose} hitSlop={10}>
+          <Pressable
+            onPress={onClose}
+            accessibilityLabel="Close backends"
+            style={({ pressed }) => ({ width: 44, height: 44, marginRight: -12, alignItems: 'center', justifyContent: 'center', borderRadius: 6, backgroundColor: pressed ? c.surface : 'transparent' })}
+          >
             <X color={c.dim} size={18} />
           </Pressable>
         )}
@@ -171,6 +175,8 @@ function AddBackend({
         style={s.input}
         placeholder="Label (optional, e.g. Laptop)"
         placeholderTextColor={c.faint}
+        autoCorrect={false}
+        spellCheck={false}
         value={label}
         onChangeText={setLabel}
       />
@@ -190,7 +196,10 @@ function AddBackend({
 }
 
 const s = StyleSheet.create({
-  sheet: { ...(StyleSheet.absoluteFill as object), backgroundColor: c.app, zIndex: 20 },
+  // Above the worktree picker (z 30) and the panels sheet (z 40): Fabric
+  // flattens the unstyled wrappers between them, so all three end up
+  // competing in one stacking context.
+  sheet: { ...(StyleSheet.absoluteFill as object), backgroundColor: c.app, zIndex: 60, elevation: 60 },
   head: {
     height: 56,
     flexDirection: 'row',

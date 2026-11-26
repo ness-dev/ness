@@ -4,8 +4,8 @@
 // editor" / "Open file in editor" (openInEditor), "Reveal in Finder"
 // (openPath), the quick-open hotkey hint in the footer (no Quick Open on
 // phone), and drag-a-row-into-the-composer (the @ button covers it).
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, FlatList, Pressable, Text, TextInput, View } from 'react-native'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { FileText, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
 import { buildTree, sortChildren, type TreeNode } from '../../../src/renderer/file-tree'
@@ -144,6 +144,32 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
     </>
   )
 
+  const renderRow = (item: Row) => {
+    if (item.kind === 'dir') {
+      return (
+        <DirRow
+          name={item.node.name}
+          depth={item.depth}
+          open={item.open}
+          onToggle={() => toggle(item.node.path)}
+          hasChangedDescendant={changed.folders.has(item.node.path)}
+        />
+      )
+    }
+    if (item.kind === 'more') {
+      return <Text style={{ paddingHorizontal: 12, paddingVertical: 8, fontSize: fs.xs, color: c.faint, fontStyle: 'italic' }}>{item.label}</Text>
+    }
+    return (
+      <FileRow
+        name={item.name}
+        path={item.path}
+        depth={item.depth}
+        onSendToAgent={sendToAgent}
+        changedStatus={changed.byPath.get(item.path)?.status}
+      />
+    )
+  }
+
   return (
     <RightPanel id="all-files" title="All Files" actions={actions} defaultCollapsed>
       <View style={{ padding: 8, borderBottomWidth: 1, borderColor: c.border }}>
@@ -170,39 +196,16 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
       {worktreePath && hasLoaded && files.length === 0 && <Text style={emptyText}>No files found</Text>}
       {worktreePath && filtering && filtered.length === 0 && files.length > 0 && <Text style={emptyText}>No matches</Text>}
       {rows.length > 0 && (
-        <FlatList
-          data={rows}
-          keyExtractor={(r) => r.key}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          style={{ maxHeight: 480 }}
-          initialNumToRender={30}
-          renderItem={({ item }) => {
-            if (item.kind === 'dir') {
-              return (
-                <DirRow
-                  name={item.node.name}
-                  depth={item.depth}
-                  open={item.open}
-                  onToggle={() => toggle(item.node.path)}
-                  hasChangedDescendant={changed.folders.has(item.node.path)}
-                />
-              )
-            }
-            if (item.kind === 'more') {
-              return <Text style={{ paddingHorizontal: 12, paddingVertical: 8, fontSize: fs.xs, color: c.faint, fontStyle: 'italic' }}>{item.label}</Text>
-            }
-            return (
-              <FileRow
-                name={item.name}
-                path={item.path}
-                depth={item.depth}
-                onSendToAgent={sendToAgent}
-                changedStatus={changed.byPath.get(item.path)?.status}
-              />
-            )
-          }}
-        />
+        // ScrollView + map, not FlatList: PanelsHost is already a ScrollView
+        // and nesting a VirtualizedList in one breaks windowing. Rows are capped
+        // at the desktop's LIST_VIEW_LIMIT, so rendering them all is bounded.
+        <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={{ maxHeight: 480 }}>
+          {rows.map((item) => (
+            <Fragment key={item.key}>
+              {renderRow(item)}
+            </Fragment>
+          ))}
+        </ScrollView>
       )}
       {files.length > 0 && (
         <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderTopWidth: 1, borderColor: c.border }}>

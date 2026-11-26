@@ -6,7 +6,7 @@
 // (onOpenCommitFileDiff), and drag-a-commit-into-the-composer.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as ExpoClipboard from 'expo-clipboard'
-import { Alert, FlatList, Modal, Pressable, ScrollView, Text, View } from 'react-native'
+import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { ArrowUp, Check, ChevronDown, ChevronUp, Copy, GitCommitHorizontal, RefreshCw, X } from 'lucide-react-native'
 import type { BranchCommit, ChangedFile, CommitMeta } from '../../../src/renderer/types'
 import type { NessClient } from '../ness'
@@ -59,21 +59,21 @@ export function CommitsPanel({ client, worktreePath }: PanelProps) {
           <Text style={{ paddingHorizontal: 16, paddingVertical: 8, fontSize: fs.xs, color: c.faint }}>No commits ahead of base</Text>
         )}
         {commits.length > 0 && (
-          // max-h-56 on desktop; taller here because rows are 44pt.
-          <FlatList
-            data={commits}
-            keyExtractor={(cm) => cm.hash}
-            nestedScrollEnabled
-            style={{ maxHeight: 44 * 6, paddingVertical: 6 }}
-            renderItem={({ item: cm, index: i }) => (
+          // max-h-56 on desktop; taller here because rows are 44pt. A plain
+          // ScrollView (not FlatList) since PanelsHost already scrolls, and
+          // the padding lives on the content so it can't eat into the cap
+          // and push the last row under the next panel.
+          <ScrollView nestedScrollEnabled style={{ maxHeight: 44 * 6 + 12 }} contentContainerStyle={{ paddingVertical: 6 }}>
+            {commits.map((cm, i) => (
               <CommitRow
+                key={cm.hash}
                 commit={cm}
                 isFirst={i === 0}
                 isLast={i === commits.length - 1}
                 onPress={() => setPopover(i)}
               />
-            )}
-          />
+            ))}
+          </ScrollView>
         )}
       </RightPanel>
       {popover !== null && selected && (
@@ -224,14 +224,17 @@ function CommitInfoSheet({
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
       {/* Full-screen catcher: tap outside closes, like the desktop overlay. */}
-      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 12 }}>
+      <Pressable onPress={onClose} accessible={false} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 12 }}>
         <Pressable
           onPress={() => {}}
+          // Not an accessibility element itself, so VoiceOver reaches each
+          // header button separately instead of one flattened blob.
+          accessible={false}
           style={{ maxHeight: '75%', backgroundColor: c.panelRaised, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, overflow: 'hidden' }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, borderBottomWidth: 1, borderColor: c.border }}>
             <GitCommitHorizontal color={c.accent} size={14} />
-            <Pressable onPress={copySha} accessibilityLabel="Copy full SHA" style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable onPress={copySha} accessibilityRole="button" accessibilityLabel="Copy full SHA" style={{ minHeight: 44, minWidth: 44, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={{ fontFamily: mono, fontSize: fs.xs, color: c.fg }}>{shortSha}</Text>
               {copied ? <Check color={c.success} size={10} /> : <Copy color={alpha(c.fg, 0.6)} size={10} />}
             </Pressable>
@@ -296,9 +299,11 @@ function HeaderBtn({ label, onPress, disabled, children }: { label: string; onPr
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => ({
-        width: 40,
+        width: 44,
         minHeight: 44,
         alignItems: 'center',
         justifyContent: 'center',
