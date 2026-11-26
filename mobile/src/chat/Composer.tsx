@@ -221,7 +221,11 @@ export function Composer({
             returnKeyType={sendOnEnter ? 'send' : 'default'}
             onSubmitEditing={sendOnEnter ? () => sendText(draft) : undefined}
           />
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 6, paddingBottom: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingLeft: 10, paddingRight: 6, paddingBottom: 6 }}>
+            {/* State + permission pill sit on the bottom edge of the row,
+                level with the bottom of the 44pt Send / interrupt buttons,
+                instead of floating mid-height beside them. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateDot }} />
             <Text style={{ color: c.muted, fontSize: fs.xs }}>{state}</Text>
             {caps.permissionModes && session && (
@@ -244,6 +248,7 @@ export function Composer({
                 <Text style={{ color: ms.color ?? c.muted, fontSize: fs.xs }}>{ms.label}</Text>
               </Pressable>
             )}
+            </View>
             <View style={{ flex: 1 }} />
             {busy && (
               <Pressable
