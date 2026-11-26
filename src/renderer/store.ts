@@ -1147,25 +1147,6 @@ export function usePrs() {
   return useAppState((s) => s.prs)
 }
 
-/** Local-merge state for the Merge Locally panel. `repoBusy` is true while
- *  any worktree of the repo is merging: they all merge into the same main
- *  checkout, so main refuses a second one and the panel shouldn't offer it. */
-export function useLocalMergeState(
-  worktreePath: string,
-  repoRoot: string
-): { merging: boolean; repoBusy: boolean; merged: boolean } {
-  const merging = useAppState((s) => !!s.prs.mergingByPath[worktreePath])
-  const repoBusy = useAppState((s) => {
-    // Usually empty, so this is a no-op outside an actual merge.
-    for (const path in s.prs.mergingByPath) {
-      if (s.worktrees.list.some((w) => w.path === path && w.repoRoot === repoRoot)) return true
-    }
-    return false
-  })
-  const merged = useAppState((s) => !!s.prs.mergedByPath[worktreePath])
-  return { merging, repoBusy, merged }
-}
-
 export function useOnboarding() {
   return useAppState((s) => s.onboarding)
 }

@@ -8,7 +8,6 @@ import type {
 } from '../../shared/state/repo-configs'
 
 const LABELS: Record<BuiltinRightPanelKey, string> = {
-  merge: 'Merge Locally',
   pr: 'PR Status',
   todos: 'Todos',
   agents: 'Agents',

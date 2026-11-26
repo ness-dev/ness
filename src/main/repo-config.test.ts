@@ -132,3 +132,51 @@ describe('migrateRepoConfigFilename', () => {
     expect(loadRepoConfig(repo).setupCommand).toBe('current')
   })
 })
+
+// The Merge Locally panel was removed. Repo config files are usually
+// committed, so ones written before then must keep loading, and we never
+// rewrite them just because they carry its keys.
+describe('repo configs from before Merge Locally was removed', () => {
+  const OLD = {
+    version: 1,
+    setupCommand: 'npm ci',
+    mergeStrategy: 'merge-commit',
+    hideMergePanel: true,
+    hiddenRightPanels: { merge: true, commits: true },
+    rightPanelOrder: ['merge', 'pr', 'commits'],
+    someFutureKey: { nested: 1 }
+  }
+
+  it('loads without throwing and keeps the fields still in use', () => {
+    write(NEW, OLD)
+    const cfg = loadRepoConfig(repo)
+    expect(cfg.setupCommand).toBe('npm ci')
+    expect(cfg.mergeStrategy).toBe('merge-commit')
+  })
+
+  it('loading does not touch the file on disk', () => {
+    write(LEGACY, OLD)
+    const before = readFileSync(join(repo, LEGACY), 'utf-8')
+    loadRepoConfig(repo)
+    expect(readFileSync(join(repo, LEGACY), 'utf-8')).toBe(before)
+    expect(existsSync(join(repo, NEW))).toBe(false)
+  })
+
+  it('drops the merge panel keys on the next write', () => {
+    write(NEW, OLD)
+    const saved = saveRepoConfig(repo, loadRepoConfig(repo))
+    expect(saved.hiddenRightPanels).toEqual({ commits: true })
+    expect(saved.rightPanelOrder).toEqual(['pr', 'commits'])
+    const onDisk = JSON.parse(readFileSync(join(repo, NEW), 'utf-8'))
+    expect(onDisk).not.toHaveProperty('hideMergePanel')
+    expect(onDisk.mergeStrategy).toBe('merge-commit')
+  })
+
+  it('an order of only the removed panel is dropped entirely', () => {
+    const saved = saveRepoConfig(repo, {
+      setupCommand: 'x',
+      rightPanelOrder: ['merge'] as unknown as never
+    })
+    expect(saved).not.toHaveProperty('rightPanelOrder')
+  })
+})

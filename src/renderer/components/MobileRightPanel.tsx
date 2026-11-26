@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useRepoConfigs, useSettings } from '../store'
 import { useBackend } from '../backend'
-import { PRStatusPanel, MergeLocallyPanel } from './PRStatusPanel'
+import { PRStatusPanel } from './PRStatusPanel'
 import { BranchCommitsPanel } from './BranchCommitsPanel'
 import { CostPanel } from './CostPanel'
 import type { Worktree, PRStatus } from '../types'
@@ -14,7 +14,7 @@ interface MobileRightPanelProps {
 }
 
 // Fullscreen takeover that surfaces the useful slices of the desktop
-// right panel — PR status, local merge, branch commits, cost. File
+// right panel — PR status, branch commits, cost. File
 // panels (ChangedFiles / AllFiles) are intentionally omitted: their
 // primary interaction is "tap a file to open a diff tab", and mobile
 // can't render diff/file tabs meaningfully.
@@ -35,15 +35,6 @@ export function MobileRightPanel({
     void backend.refreshPRsAll()
   }, [backend])
 
-  const handleRemoveWorktree = useCallback(
-    (path: string): void => {
-      if (!activeWorktree) return
-      void backend.removeWorktree(activeWorktree.repoRoot, path)
-      onClose()
-    },
-    [activeWorktree, onClose, backend]
-  )
-
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-app overflow-y-auto">
       {!activeWorktree && (
@@ -60,13 +51,6 @@ export function MobileRightPanel({
             loading={prLoading}
             onRefresh={handleRefresh}
             onConnectGithub={onClose}
-          />
-          <MergeLocallyPanel
-            pr={prStatuses[activeWorktree.path] ?? null}
-            worktree={activeWorktree}
-            hasGithubToken={hasGithubToken}
-            onMerged={handleRefresh}
-            onRemoveWorktree={handleRemoveWorktree}
           />
           <BranchCommitsPanel worktreePath={activeWorktree.path} />
           <CostPanel worktreePath={activeWorktree.path} />
