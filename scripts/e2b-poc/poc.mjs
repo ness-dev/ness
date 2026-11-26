@@ -4,7 +4,8 @@
 // subscription.
 //
 //   node poc.mjs up [--auth keychain|token]   create + install + auth + start
-//   node poc.mjs url                          print the Add Backend URL again
+//   node poc.mjs proxy [port]                 local proxy adding E2B's traffic token; prints the Add Backend URL
+//   node poc.mjs url                          sandbox id + host
 //   node poc.mjs auth-check                   claude auth status + claude -p inside
 //   node poc.mjs pause-bench [n]              pause/resume latency + what survives
 //   node poc.mjs stream-test                  pause in the middle of a model stream
@@ -107,9 +108,8 @@ async function startServer(sbx, state) {
 }
 
 function printConnect(sbx, state) {
-  const url = `https://${sbx.getHost(PORT)}/?token=${state.serverToken}`
-  console.log(`\nsandbox ${state.sandboxId}`)
-  console.log(`Add Backend URL (chip strip + / File → Add Backend…):\n  ${url}\n`)
+  console.log(`\nsandbox ${state.sandboxId} at ${sbx.getHost(PORT)}`)
+  console.log('public traffic is off: run `node poc.mjs proxy` and add the URL it prints to Ness\n')
 }
 
 async function up() {
@@ -237,7 +237,9 @@ async function serverAlive(sbx, state) {
 function openWs(sbx, state, onClose) {
   return new Promise((resolve, reject) => {
     const t0 = now()
-    const ws = new WebSocket(`wss://${sbx.getHost(PORT)}/?token=${encodeURIComponent(state.serverToken)}`)
+    const ws = new WebSocket(`wss://${sbx.getHost(PORT)}/?token=${encodeURIComponent(state.serverToken)}`, {
+      headers: { 'e2b-traffic-access-token': sbx.trafficAccessToken }
+    })
     const timer = setTimeout(() => reject(new Error('ws snapshot timeout')), 20_000)
     ws.on('open', () => ws.send(JSON.stringify({ t: 'snapreq', id: '1' })))
     ws.on('message', (raw) => {
@@ -296,21 +298,27 @@ async function streamTest() {
   let { sbx, state } = await connect()
   const out = `${HOME}/stream.out`
   await sh(sbx, `rm -f ${out} ${out}.exit`)
-  // A response long enough (~30-60s) to pause in the middle of.
-  await sh(
-    sbx,
-    `cd ${REPO} && nohup sh -c 'claude -p "Write the numbers 1 to 400, each on its own line as the English word. No other text." --output-format stream-json --verbose --include-partial-messages > ${out} 2>&1; echo $? > ${out}.exit' > /dev/null 2>&1 < /dev/null &`,
-    { envs: authEnvs(state) }
+  // A response long enough (~1-2 min) to pause in the middle of. envd waits
+  // on the whole process group, so `nohup … &` inside a foreground run still
+  // blocks until claude exits; the SDK's background mode doesn't.
+  await sbx.commands.run(
+    `cd ${REPO} && claude -p "Write the numbers 1 to 600, each on its own line as English words. No other text." --output-format stream-json --verbose --include-partial-messages > ${out} 2>&1; echo $? > ${out}.exit`,
+    { background: true, envs: authEnvs(state), timeoutMs: 0 }
   )
   const lines = async () => Number((await sh(sbx, `wc -l < ${out} 2>/dev/null || echo 0`, { allowFail: true })).stdout.trim())
+  const done = async () => (await sh(sbx, `cat ${out}.exit 2>/dev/null`, { allowFail: true })).stdout.trim()
   const t0 = now()
-  while ((await lines()) < 40 && now() - t0 < 60_000) await new Promise((r) => setTimeout(r, 1000))
+  // Wait for text deltas to be flowing, not just the init event.
+  while ((await lines()) < 60 && now() - t0 < 90_000) await new Promise((r) => setTimeout(r, 1000))
   const before = await lines()
+  if (await done()) throw new Error('response finished before the pause; make the prompt longer')
   console.log(`streaming: ${before} lines after ${ms(t0)}; pausing for 20s`)
   await sbx.pause()
   await new Promise((r) => setTimeout(r, 20_000))
   sbx = await Sandbox.connect(state.sandboxId)
-  console.log(`resumed; lines right after resume: ${await lines()}`)
+  const after = await lines()
+  await new Promise((r) => setTimeout(r, 5000))
+  console.log(`resumed; lines right after resume: ${after}, 5s later: ${await lines()}`)
   const t1 = now()
   let exit = ''
   while (now() - t1 < 180_000) {
@@ -318,12 +326,9 @@ async function streamTest() {
     if (exit) break
     await new Promise((r) => setTimeout(r, 2000))
   }
-  const tail = await sh(sbx, `tail -c 1500 ${out}`, { allowFail: true })
+  const tail = await sh(sbx, `grep '"type":"result"' ${out} | tail -1; echo; tail -n 3 ${out} | cut -c1-400`, { allowFail: true })
   console.log(`claude exit code: ${exit || '(still running after 3 min)'}; total lines ${await lines()}`)
-  const result = tail.stdout
-    .split('\n')
-    .reverse()
-    .find((l) => l.includes('"type":"result"'))
+  const result = tail.stdout.split('\n').find((l) => l.startsWith('{') && l.includes('"type":"result"'))
   if (result) {
     const r = JSON.parse(result)
     console.log({ subtype: r.subtype, is_error: r.is_error, duration_ms: r.duration_ms, num_turns: r.num_turns, tail: String(r.result ?? '').slice(-200) })
@@ -332,8 +337,59 @@ async function streamTest() {
   }
 }
 
+/** Loopback reverse proxy that adds E2B's traffic token. Sandboxes default to
+ *  allowPublicTraffic:false, and a browser-side WebSocket (Ness's renderer
+ *  transport) can't set the required header, so something local has to. */
+async function proxy(localPort) {
+  const { sbx, state } = await connect()
+  const host = sbx.getHost(PORT)
+  const auth = { 'e2b-traffic-access-token': sbx.trafficAccessToken }
+  const { createServer } = await import('node:http')
+  const { request } = await import('node:https')
+  const forwardHeaders = (h) => ({ ...h, host, ...auth })
+  const server = createServer((req, res) => {
+    const up = request({ host, path: req.url, method: req.method, headers: forwardHeaders(req.headers) }, (r) => {
+      res.writeHead(r.statusCode ?? 502, r.headers)
+      r.pipe(res)
+    })
+    up.on('error', (e) => {
+      res.writeHead(502)
+      res.end(String(e))
+    })
+    req.pipe(up)
+  })
+  server.on('upgrade', (req, socket, head) => {
+    const up = request({ host, path: req.url, method: req.method, headers: forwardHeaders(req.headers) })
+    up.on('upgrade', (r, upSocket, upHead) => {
+      const lines = [`HTTP/1.1 ${r.statusCode} ${r.statusMessage}`]
+      for (let i = 0; i < r.rawHeaders.length; i += 2) lines.push(`${r.rawHeaders[i]}: ${r.rawHeaders[i + 1]}`)
+      socket.write(lines.join('\r\n') + '\r\n\r\n')
+      if (upHead?.length) socket.write(upHead)
+      if (head?.length) upSocket.write(head)
+      upSocket.pipe(socket).pipe(upSocket)
+      const end = () => {
+        socket.destroy()
+        upSocket.destroy()
+      }
+      upSocket.on('error', end).on('close', end)
+      socket.on('error', end).on('close', end)
+    })
+    up.on('response', (r) => {
+      socket.end(`HTTP/1.1 ${r.statusCode} ${r.statusMessage}\r\n\r\n`)
+    })
+    up.on('error', () => socket.destroy())
+    up.end()
+  })
+  server.listen(localPort, '127.0.0.1', () => {
+    console.log(`proxying 127.0.0.1:${localPort} → ${host}`)
+    console.log(`Add Backend URL:\n  http://127.0.0.1:${localPort}/?token=${state.serverToken}`)
+  })
+}
+
 async function main() {
   switch (cmd) {
+    case 'proxy':
+      return proxy(Number(rest[0] ?? 47291))
     case 'up':
       return up()
     case 'url': {
