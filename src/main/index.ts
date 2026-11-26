@@ -3364,6 +3364,15 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('permissions:revokeMany', (_ctx, ids: string[]): boolean => {
+    if (!Array.isArray(ids)) return false
+    const valid = ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    if (valid.length === 0) return false
+    store.dispatch({ type: 'permissions/revokedMany', payload: { ids: valid } })
+    persistPermissionRules()
+    return true
+  })
+
   transport.onRequest('permissions:clear', (): boolean => {
     store.dispatch({ type: 'permissions/cleared' })
     persistPermissionRules()
