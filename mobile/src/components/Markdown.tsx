@@ -9,6 +9,7 @@ import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { c, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
 import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../src/shared/chat-image-src'
+import { CopyableMessage } from '../chat/CopyText'
 
 // `![alt](src)` — local paths are fetched from the backend, like the web's
 // MarkdownImage (jsonClaude:readAttachmentImage).
@@ -29,11 +30,13 @@ export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, 
   parts.forEach((part, i) => {
     if (i % 2 === 1) {
       blocks.push(
-        <ScrollView key={i} horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
-          <Text selectable style={s.codeBlockText}>
-            {part.replace(/\n$/, '')}
-          </Text>
-        </ScrollView>
+        // Long-press copies / selects just the code (the message's own
+        // long-press is the next one out).
+        <CopyableMessage key={i} text={part.replace(/\n$/, '')}>
+          <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
+            <Text style={s.codeBlockText}>{part.replace(/\n$/, '')}</Text>
+          </ScrollView>
+        </CopyableMessage>
       )
       return
     }
@@ -86,7 +89,7 @@ export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, 
       const prose = images.length ? trimmed.replace(IMAGE_RE, '').trim() : trimmed
       if (prose) {
         blocks.push(
-          <Text key={key} style={base} selectable>
+          <Text key={key} style={base}>
             <Inline text={preserveNewlines ? prose : prose.replace(/\n(?!\n)/g, ' ')} />
           </Text>
         )
