@@ -36,7 +36,7 @@ import {
 import { ApprovalSlot } from '../chat/ApprovalCard'
 import { ChatClientContext } from '../chat/ChatImage'
 import { Composer } from '../chat/Composer'
-import { DENSITY, DensityContext } from '../chat/density'
+import { DENSITY, DensityContext, ExpandStoreContext } from '../chat/density'
 
 interface RenderedRow extends GroupRow {
   entryId?: string
@@ -122,7 +122,7 @@ function renderEntries(entries: JsonClaudeChatEntry[], ctx: Ctx): RenderedRow[] 
     if (entry.kind === 'assistant' && entry.blocks) {
       for (const [i, block] of entry.blocks.entries()) {
         if (block.type === 'thinking') {
-          rows.push({ key: `${entry.entryId}-th-${i}`, entryId: entry.entryId, type: 'tool', isThinking: true, node: <ThinkingCard text={block.text || ''} isPartial={!!entry.isPartial} /> })
+          rows.push({ key: `${entry.entryId}-th-${i}`, entryId: entry.entryId, type: 'tool', isThinking: true, node: <ThinkingCard id={`${entry.entryId}-th-${i}`} text={block.text || ''} isPartial={!!entry.isPartial} /> })
         } else if (block.type === 'text' && (block.text || entry.isPartial)) {
           rows.push({ key: `${entry.entryId}-t`, entryId: entry.entryId, type: 'text', node: <AssistantText text={block.text || ''} streaming={!!entry.isPartial} /> })
         } else if (block.type === 'tool_use') {
@@ -370,6 +370,8 @@ export function ChatView({
 
   // Inverted list: index 0 is the bottom. Offset 0 = stuck to bottom.
   const listRef = useRef<FlatList<DisplayItem>>(null)
+  // One per chat (ChatView is keyed by session), outliving row unmounts.
+  const [expandStore] = useState(() => new Map<string, boolean>())
   const [awayFromBottom, setAway] = useState(false)
   const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     setAway(e.nativeEvent.contentOffset.y > 32)
@@ -379,6 +381,7 @@ export function ChatView({
   const sessionApprovals = session?.sessionToolApprovals ?? []
 
   return (
+    <ExpandStoreContext.Provider value={expandStore}>
     <ChatClientContext.Provider value={client}>
     <DensityContext.Provider value={density}>
       <View style={{ flex: 1 }}>
@@ -434,7 +437,12 @@ export function ChatView({
         />
         {awayFromBottom && (
           <Pressable
-            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            onPress={() => {
+              listRef.current?.scrollToOffset({ offset: 0, animated: true })
+              // An animated scroll across rows that haven't been measured
+              // yet can stop short on a long transcript; land it.
+              setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }), 450)
+            }}
             accessibilityLabel="Jump to bottom"
             style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.accent, borderRadius: 999, paddingHorizontal: 14, minHeight: 44 }}
           >
@@ -464,13 +472,14 @@ export function ChatView({
       />
     </DensityContext.Provider>
     </ChatClientContext.Provider>
+    </ExpandStoreContext.Provider>
   )
 }
 
 function DisplayRow({ item }: { item: DisplayItem }) {
   if (item.kind === 'turn') {
     return (
-      <TurnGroup summary={item.summary} hasError={item.rows.some((r) => r.hasError)} images={item.rows.flatMap((r) => r.images ?? [])}>
+      <TurnGroup id={item.key} summary={item.summary} hasError={item.rows.some((r) => r.hasError)} images={item.rows.flatMap((r) => r.images ?? [])}>
         <Grouped items={item.items} />
       </TurnGroup>
     )

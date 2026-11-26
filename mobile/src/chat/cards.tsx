@@ -23,7 +23,7 @@ import { NessIcon, McpGenericIcon } from '../../../src/renderer/components/json-
 import { NESS_MARK_PATHS } from '../../../src/renderer/components/NessMark'
 import { Markdown } from '../components/Markdown'
 import { Spin } from '../components/Spin'
-import { ROW_HIT_SLOP, useDensity } from './density'
+import { ROW_HIT_SLOP, useDensity, usePersistedChoice } from './density'
 import { ImageStrip } from './ChatImage'
 
 export interface ToolResultView {
@@ -130,8 +130,12 @@ export function ToolCardChrome({
   sessionAllowed,
   autoExpand = false,
   images,
+  id,
   children
 }: {
+  /** Stable id (the tool_use id) so an expansion survives the row
+   *  scrolling out of the virtualized transcript. */
+  id?: string
   /** Tool-result images: a thumbnail strip while collapsed (the web's
    *  collapsedImages), and at the top of the body when open. */
   images?: JsonClaudeImageRef[]
@@ -146,7 +150,7 @@ export function ToolCardChrome({
   children: ReactNode
 }) {
   const d = useDensity()
-  const [expanded, setExpanded] = useState<boolean | null>(null)
+  const [expanded, setExpanded] = usePersistedChoice(id ? `card:${id}` : undefined)
   const isOpen = expanded ?? autoExpand
   return (
     <View>
@@ -240,6 +244,7 @@ function common(p: ToolCardProps) {
   const disp = getToolDisplay(p.block.name)
   return {
     icon: disp.icon as DesktopIcon,
+    id: p.block.id,
     isError: !!p.result?.isError,
     images: p.result?.images,
     autoApproved: p.autoApproved,
@@ -416,7 +421,10 @@ function TaskCard(p: ToolCardProps) {
   const bgRunning = p.backgroundAgent ? p.backgroundAgent.status === 'running' : false
   const inFlight = (!p.result || launchStub) && (bgRunning || !p.backgroundAgent)
   const pending = !!p.subAgentDescendantHasPendingApproval
-  const [userChoice, setUserChoice] = useState<boolean | null>(null)
+  const [userChoice, setUserChoiceRaw] = usePersistedChoice(p.block.id ? `task:${p.block.id}` : undefined)
+  const setUserChoice = (v: boolean | null | ((prev: boolean | null) => boolean | null)) => {
+    setUserChoiceRaw(typeof v === 'function' ? v(userChoice) : v)
+  }
   const prev = useRef({ inFlight, pending })
   useEffect(() => {
     // Rising edge of "in flight" / "pending approval" opens; falling edge
@@ -518,10 +526,11 @@ export interface GroupRow {
 }
 
 export function ToolGroup({ rows }: { rows: GroupRow[] }) {
+  // Keyed by the first row, the same key the group itself renders under.
   const d = useDensity()
   const hasError = rows.some((r) => r.hasError)
   const hasPending = rows.some((r) => r.hasPendingApproval)
-  const [userChoice, setUserChoice] = useState<boolean | null>(null)
+  const [userChoice, setUserChoice] = usePersistedChoice(`group:${rows[0]?.key}`)
   const expanded = userChoice ?? hasPending
   const toolRows = rows.filter((r) => !r.isThinking)
   const thinkingCount = rows.length - toolRows.length
@@ -565,9 +574,10 @@ export function ToolGroup({ rows }: { rows: GroupRow[] }) {
   )
 }
 
-export function TurnGroup({ summary, hasError, images, children }: { summary: TurnSummary; hasError: boolean; images?: JsonClaudeImageRef[]; children: ReactNode }) {
+export function TurnGroup({ id, summary, hasError, images, children }: { id: string; summary: TurnSummary; hasError: boolean; images?: JsonClaudeImageRef[]; children: ReactNode }) {
   const d = useDensity()
-  const [open, setOpen] = useState(false)
+  const [choice, setOpen] = usePersistedChoice(`turn:${id}`)
+  const open = choice ?? false
   const parts = [
     summary.durationMs !== undefined ? `Worked for ${formatTurnDuration(summary.durationMs)}` : 'Worked',
     `${summary.toolCount} tool${summary.toolCount === 1 ? '' : 's'}`
@@ -588,12 +598,17 @@ export function TurnGroup({ summary, hasError, images, children }: { summary: Tu
 
 // ── non-tool cards from JsonModeChat.tsx ────────────────────────────────
 
-export function ThinkingCard({ text, isPartial }: { text: string; isPartial: boolean }) {
+export function ThinkingCard({ id, text, isPartial }: { id?: string; text: string; isPartial: boolean }) {
   const d = useDensity()
-  const [open, setOpen] = useState(isPartial)
+  const [choice, setChoice] = usePersistedChoice(id ? `thinking:${id}` : undefined)
+  const [auto, setAuto] = useState(isPartial)
+  // Opens while streaming and closes when it finishes, unless the user
+  // picked (their choice persists across virtualization).
+  const open = choice ?? auto
+  const setOpen = (v: boolean) => setChoice(v)
   const wasPartial = useRef(isPartial)
   useEffect(() => {
-    if (wasPartial.current && !isPartial) setOpen(false)
+    if (wasPartial.current && !isPartial) setAuto(false)
     wasPartial.current = isPartial
   }, [isPartial])
   return (
