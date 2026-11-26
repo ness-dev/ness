@@ -70,12 +70,11 @@ export function permissionsReducer(
       }
     }
     case 'permissions/cleared':
-      // Clearing every grant also forgets approved setup commands: both are
-      // "run this without asking me".
-      if (state.rules.length === 0 && Object.keys(state.approvedSetupCommands).length === 0) {
-        return state
-      }
-      return { rules: [], approvedSetupCommands: {} }
+      // Grants only: the Settings button that sends this is labelled with
+      // the grant count. Approved setup commands are forgotten one repo at
+      // a time (setupCommandForgotten).
+      if (state.rules.length === 0) return state
+      return { ...state, rules: [] }
     case 'permissions/setupCommandApproved': {
       const { repoRoot, command } = event.payload
       if (state.approvedSetupCommands[repoRoot] === command) return state

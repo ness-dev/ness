@@ -167,12 +167,18 @@ describe('permissionsReducer', () => {
     ).toBe(b)
   })
 
-  it('cleared also forgets approved setup commands', () => {
-    const seeded = apply(initialPermissions, {
-      type: 'permissions/setupCommandApproved',
-      payload: { repoRoot: '/r', command: 'npm install' }
-    })
-    expect(apply(seeded, { type: 'permissions/cleared' })).toEqual(initialPermissions)
+  it('cleared removes grants but keeps approved setup commands', () => {
+    const seeded = apply(
+      initialPermissions,
+      { type: 'permissions/granted', payload: { rule: rule('Read') } },
+      {
+        type: 'permissions/setupCommandApproved',
+        payload: { repoRoot: '/r', command: 'npm install' }
+      }
+    )
+    const cleared = apply(seeded, { type: 'permissions/cleared' })
+    expect(cleared.rules).toEqual([])
+    expect(cleared.approvedSetupCommands).toEqual({ '/r': 'npm install' })
   })
 
   it('setupCommandForgotten drops one repo and ignores unknown ones', () => {
