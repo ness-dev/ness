@@ -5,7 +5,7 @@
 // the pure steps are imported from it rather than re-implemented.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppState as RNAppState, FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
-import { ChevronDown, Loader2, X } from 'lucide-react-native'
+import { ChevronDown, Loader2, Sparkles, X } from 'lucide-react-native'
 import type { JsonClaudeChatEntry, JsonClaudePendingApproval, JsonClaudeSession } from '../../../src/shared/state/json-claude'
 import { DEFAULT_JSON_MODE_TRANSCRIPT_WINDOW } from '../../../src/shared/state/settings'
 import { buildChildrenMap, isSubAgentToolName } from '../../../src/renderer/components/json-mode-cards/grouping'
@@ -380,11 +380,35 @@ export function ChatView({
 
   const sessionApprovals = session?.sessionToolApprovals ?? []
 
+  // Nothing to show yet. Same three cases as the web (JsonModeChat's
+  // empty branch): history still on its way, a provider that loads history
+  // slowly (historyPending), or a genuinely new chat. The web renders blank
+  // while the lazy fetch runs because on a desktop it lands within a frame;
+  // over a phone's Wi-Fi it takes long enough that blank reads as broken,
+  // so the phone shows a loading line — after a short delay, so a fast
+  // fetch still doesn't flash a spinner.
+  const nothingYet = (entries?.length ?? 0) === 0 && approvals.length === 0 && !busy
+  const loadingPhase: 'starting' | 'history' | null = !nothingYet
+    ? null
+    : !session
+      ? mode === 'awake'
+        ? 'starting'
+        : null
+      : session.historyPending || !session.entriesHydrated
+        ? 'history'
+        : null
+  const showEmptyCard = nothingYet && !!session && session.entriesHydrated && !session.historyPending
+
   return (
     <ExpandStoreContext.Provider value={expandStore}>
     <ChatClientContext.Provider value={client}>
     <DensityContext.Provider value={density}>
       <View style={{ flex: 1 }}>
+        {loadingPhase ? (
+          <ChatLoading phase={loadingPhase} />
+        ) : showEmptyCard ? (
+          <EmptyChat />
+        ) : (
         <FlatList
           ref={listRef}
           data={reversed}
@@ -435,7 +459,8 @@ export function ChatView({
             ) : undefined
           }
         />
-        {awayFromBottom && (
+        )}
+        {awayFromBottom && !loadingPhase && !showEmptyCard && (
           <Pressable
             onPress={() => {
               listRef.current?.scrollToOffset({ offset: 0, animated: true })
@@ -473,6 +498,39 @@ export function ChatView({
     </DensityContext.Provider>
     </ChatClientContext.Provider>
     </ExpandStoreContext.Provider>
+  )
+}
+
+function ChatLoading({ phase }: { phase: 'starting' | 'history' }) {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 250)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} accessibilityLiveRegion="polite">
+      {visible && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Spin>
+            <Loader2 color={c.muted} size={14} />
+          </Spin>
+          <Text style={{ color: c.muted, fontSize: 13 }}>{phase === 'starting' ? 'Starting Claude…' : 'Loading conversation…'}</Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
+/** The web's empty-chat card ("What are we going to build today?"). */
+function EmptyChat() {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+      <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', marginBottom: 24, shadowColor: c.brand, shadowOpacity: 0.4, shadowRadius: 18 }}>
+        <Sparkles color="#fff" size={26} />
+      </View>
+      <Text style={{ color: c.brand, fontSize: 18, fontWeight: '600', textAlign: 'center' }}>What are we going to build today?</Text>
+      <Text style={{ color: c.muted, fontSize: 12, marginTop: 8 }}>Send a message to get started.</Text>
+    </View>
   )
 }
 
