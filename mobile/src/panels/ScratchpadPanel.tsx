@@ -73,6 +73,7 @@ export function ScratchpadPanel({ client, worktreePath }: PanelProps) {
   return (
     <RightPanel id="scratchpad" title="Scratchpad">
       <TextInput
+        accessibilityLabel="Scratchpad"
         multiline
         textAlignVertical="top"
         placeholder="Notes for this worktree…"

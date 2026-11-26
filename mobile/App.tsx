@@ -426,7 +426,12 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
             activeWorktreeId={activeWorktreeId}
             onSelect={handleSelectWorktree}
             onClose={() => setPickerOpen(false)}
-            onOpenBackends={onOpenBackends}
+            // One overlay at a time: the picker is accessibilityViewIsModal,
+            // so leaving it open under Backends hid Backends from VoiceOver.
+            onOpenBackends={() => {
+              setPickerOpen(false)
+              onOpenBackends()
+            }}
           />
         )}
       </View>

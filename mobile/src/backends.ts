@@ -29,8 +29,8 @@ export function useBackends(): Backends {
     const want = new Map(saved.filter((b) => b.enabled).map((b) => [b.id, b]))
     for (const [id, client] of map) {
       const b = want.get(id)
-      // Re-create if the URL/token changed (re-pairing an existing host).
-      if (!b || client.label !== b.label) {
+      // Re-create if the URL, token or label changed (re-pairing a host).
+      if (!b || client.wsUrl !== b.wsUrl || client.token !== b.token || client.label !== b.label) {
         client.close()
         map.delete(id)
       }
@@ -44,7 +44,17 @@ export function useBackends(): Backends {
     setClients(saved.filter((b) => map.has(b.id)).map((b) => map.get(b.id)!))
   }, [saved])
 
-  useEffect(() => () => live.current.forEach((c) => c.close()), [])
+  // Clear the map too: Fast Refresh (and any remount) runs this cleanup and
+  // then the reconcile effect again. Leaving closed clients in the map made
+  // reconcile keep them, so a backend sat at its last "close code 1000"
+  // forever instead of reconnecting.
+  useEffect(
+    () => () => {
+      live.current.forEach((c) => c.close())
+      live.current.clear()
+    },
+    []
+  )
 
   const update = useCallback((fn: (list: SavedBackend[]) => SavedBackend[]) => {
     setSaved((prev) => {

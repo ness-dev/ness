@@ -68,7 +68,7 @@ export function PanelsHost({
   }
 
   return (
-    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, backgroundColor: c.app }}>
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, backgroundColor: c.app }} accessibilityViewIsModal>
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 12, borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel }}>
         <Text style={{ flex: 1, color: c.dim, fontSize: fs.xs, fontWeight: '600', letterSpacing: 1.2 }}>
           {customizing ? 'PANELS' : 'WORKTREE'}

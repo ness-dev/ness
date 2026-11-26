@@ -13,7 +13,7 @@ import { alpha, c, fs, mono } from '../theme'
 export function BackendsSheet({ backends, onClose }: { backends: Backends; onClose?: () => void }) {
   const [adding, setAdding] = useState(backends.saved.length === 0)
   return (
-    <View style={s.sheet}>
+    <View style={s.sheet} accessibilityViewIsModal>
       <View style={s.head}>
         <Text style={s.title}>BACKENDS</Text>
         {onClose && (
@@ -42,6 +42,7 @@ export function BackendsSheet({ backends, onClose }: { backends: Backends; onClo
             <Switch
               value={b.enabled}
               onValueChange={(v) => backends.setEnabled(b.id, v)}
+              accessibilityLabel={`Connect to ${b.label}`}
               trackColor={{ true: c.accent, false: c.surface }}
               thumbColor="#fff"
             />

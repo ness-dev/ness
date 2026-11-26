@@ -139,7 +139,7 @@ export function WorktreePicker({
   }
 
   return (
-    <View style={s.sheet}>
+    <View style={s.sheet} accessibilityViewIsModal>
       <View style={s.head}>
         <Text style={s.headTitle}>WORKTREES</Text>
         <IconBtn
@@ -711,7 +711,7 @@ function ActionSheet({ sheet, onClose }: { sheet: { title: string; subtitle?: st
   if (!sheet) return null
   const toneColor = (t?: Action['tone']) => (t === 'accent' ? c.accent : t === 'warning' ? c.warning : t === 'danger' ? c.danger : c.fgBright)
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 50, justifyContent: 'flex-end' }]}>
+    <View style={[StyleSheet.absoluteFill, { zIndex: 50, justifyContent: 'flex-end' }]} accessibilityViewIsModal>
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]} onPress={onClose} accessibilityLabel="Close actions" />
       <View style={s.actionSheet}>
         <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderColor: c.border }}>

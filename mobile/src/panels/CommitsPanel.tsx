@@ -325,7 +325,7 @@ function CommitFileRow({ file, copied, onCopyPath }: { file: ChangedFile; copied
   return (
     <Pressable
       onPress={onCopyPath}
-      accessibilityLabel="Copy path"
+      accessibilityLabel={`Copy path ${file.path}`}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',

@@ -61,7 +61,7 @@ export function RightPanel({
             {title}
           </Text>
         </Pressable>
-        {actions ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8 }}>{actions}</View> : null}
+        {actions ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 8, paddingRight: 8 }}>{actions}</View> : null}
       </View>
       {!collapsed && <View>{children}</View>}
     </View>

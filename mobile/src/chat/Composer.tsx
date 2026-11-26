@@ -206,7 +206,6 @@ export function Composer({
             submitBehavior={sendOnEnter ? 'submit' : 'newline'}
             returnKeyType={sendOnEnter ? 'send' : 'default'}
             onSubmitEditing={sendOnEnter ? () => sendText(draft) : undefined}
-            accessibilityLabel="Message"
           />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 6, paddingBottom: 6 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateDot }} />

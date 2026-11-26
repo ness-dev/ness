@@ -31,8 +31,8 @@ export class NessClient {
   constructor(
     readonly id: string,
     readonly label: string,
-    wsUrl: string,
-    token: string
+    readonly wsUrl: string,
+    readonly token: string
   ) {
     this.transport = new WebSocketClientTransport({
       url: wsUrl,
