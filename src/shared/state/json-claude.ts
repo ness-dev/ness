@@ -448,12 +448,18 @@ export interface JsonClaudeChatEntry {
  *  separate transcript that SubagentTailer follows. Without this record
  *  the Task card would look instantly-complete-with-no-activity. */
 export interface JsonClaudeBackgroundAgent {
-  /** Claude Code's internal id for the detached agent. */
+  /** Claude Code's task id (`task_id`) — the agentId for an agent, the
+   *  shell id for a background Bash. Stable across a SendMessage resume. */
   agentId: string
   /** tool_use id of the launching Task call. Also this map's key, and the
    *  `parentToolUseId` stamped on every tailed child entry. */
   toolUseId: string
   description: string
+  /** Claude Code's `task_type`: 'local_agent', 'local_bash', …. Despite
+   *  this record's name, every detached task gets one — background Bash
+   *  emits the same task_started/task_notification pair. Missing on
+   *  records from before the field existed. */
+  taskType?: string
   status: 'running' | 'completed' | 'failed'
   startedAt: number
   completedAt?: number
@@ -769,6 +775,7 @@ export type JsonClaudeEvent =
         toolUseId: string
         agentId: string
         description: string
+        taskType?: string
         timestamp: number
       }
     }
@@ -777,6 +784,9 @@ export type JsonClaudeEvent =
       payload: {
         sessionId: string
         toolUseId: string
+        /** task_id, used to find the original record when `toolUseId` is
+         *  a resume's SendMessage id. See resolveBackgroundAgentKey. */
+        agentId?: string
         status: 'completed' | 'failed'
         timestamp: number
         usage?: { totalTokens?: number; toolUses?: number; durationMs?: number }
@@ -869,6 +879,36 @@ function applyBlockTextDelta(
   }
 }
 
+/** The map key a task event belongs under. A SendMessage resume re-runs
+ *  the same task (same `task_id`) but its task_started/task_notification
+ *  carry the SendMessage call's tool_use_id, not the Agent call's. Keying
+ *  by that id would leave the Agent card "completed" for the whole
+ *  resumed run, so fall back to the record that already owns this task
+ *  id. Linear in the session's task count, which is small and only
+ *  walked on task lifecycle events. */
+export function resolveBackgroundAgentKey(
+  session: Pick<JsonClaudeSession, 'backgroundAgents'>,
+  toolUseId: string,
+  agentId: string | undefined
+): string {
+  if (session.backgroundAgents[toolUseId] || !agentId) return toolUseId
+  for (const [key, agent] of Object.entries(session.backgroundAgents)) {
+    if (agent.agentId === agentId) return key
+  }
+  return toolUseId
+}
+
+/** Whether any detached task (agent or background Bash) is still in
+ *  flight — killing the process now would kill it too. */
+export function hasRunningBackgroundTask(
+  session: Pick<JsonClaudeSession, 'backgroundAgents'>
+): boolean {
+  for (const agent of Object.values(session.backgroundAgents)) {
+    if (agent.status === 'running') return true
+  }
+  return false
+}
+
 function patchBackgroundAgent(
   state: JsonClaudeState,
   sessionId: string,
@@ -896,24 +936,60 @@ function patchBackgroundAgent(
   }
 }
 
+// No completedAt: the reducer runs in main and every renderer, so a
+// Date.now() here would diverge between mirrors.
+function settleRunningAgents(
+  agents: Record<string, JsonClaudeBackgroundAgent>
+): Record<string, JsonClaudeBackgroundAgent> {
+  const out: Record<string, JsonClaudeBackgroundAgent> = {}
+  for (const [key, agent] of Object.entries(agents)) {
+    out[key] =
+      agent.status === 'running'
+        ? { ...agent, status: 'failed' }
+        : agent
+  }
+  return out
+}
+
 export function jsonClaudeReducer(
   state: JsonClaudeState,
   event: JsonClaudeEvent
 ): JsonClaudeState {
   switch (event.type) {
     case 'jsonClaude/backgroundAgentLaunched': {
-      const { sessionId, toolUseId, agentId, description, timestamp } =
+      const { sessionId, agentId, description, taskType, timestamp } =
         event.payload
+      const session = state.sessions[sessionId]
+      if (!session) return state
+      const toolUseId = resolveBackgroundAgentKey(
+        session,
+        event.payload.toolUseId,
+        agentId
+      )
+      const existing = session.backgroundAgents[toolUseId]
+      // A resume keeps the original description: the resume's
+      // task_started repeats it anyway, and the Agent card is labelled
+      // by the launch.
       return patchBackgroundAgent(state, sessionId, toolUseId, () => ({
         agentId,
         toolUseId,
-        description,
+        description: existing?.description || description,
+        ...((taskType ?? existing?.taskType)
+          ? { taskType: taskType ?? existing?.taskType }
+          : {}),
         status: 'running',
         startedAt: timestamp
       }))
     }
     case 'jsonClaude/backgroundAgentSettled': {
-      const { sessionId, toolUseId, status, timestamp, usage } = event.payload
+      const { sessionId, agentId, status, timestamp, usage } = event.payload
+      const session = state.sessions[sessionId]
+      if (!session) return state
+      const toolUseId = resolveBackgroundAgentKey(
+        session,
+        event.payload.toolUseId,
+        agentId
+      )
       return patchBackgroundAgent(state, sessionId, toolUseId, (existing) =>
         existing
           ? {
@@ -973,12 +1049,20 @@ export function jsonClaudeReducer(
       const session = state.sessions[event.payload.sessionId]
       if (!session) return state
       const { state: next, exitCode, exitReason } = event.payload
+      // Detached tasks live in the Claude process, so they die with it.
+      // Leaving them 'running' would show a phantom spinner forever and
+      // keep AutoSleepMonitor from ever sleeping the respawned tab.
+      const backgroundAgents =
+        next === 'exited' && hasRunningBackgroundTask(session)
+          ? settleRunningAgents(session.backgroundAgents)
+          : session.backgroundAgents
       return {
         ...state,
         sessions: {
           ...state.sessions,
           [session.sessionId]: {
             ...session,
+            backgroundAgents,
             state: next,
             exitCode: exitCode ?? session.exitCode,
             exitReason: exitReason ?? session.exitReason
