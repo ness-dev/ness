@@ -155,8 +155,11 @@ export function groupPermissionRules(rules: StoredPermissionRule[]): RuleGroup[]
 
     // A bare grant stays at the top of its group; it's the widest one.
     const rest = group.rules.filter((r) => !grouped.has(r))
+    // A lone sub-group holding the whole group (an MCP server whose grants
+    // are all dead) would only add a level, so the group stays flat.
+    if (group.subgroups.length === 1 && rest.length === 0) group.subgroups = []
     if (group.subgroups.length === 0) {
-      group.loose = rest
+      group.loose = group.rules
       continue
     }
     group.loose = group.kind === 'shell' ? rest.filter((r) => !r.ruleContent) : []

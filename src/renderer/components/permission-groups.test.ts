@@ -141,6 +141,15 @@ describe('groupPermissionRules', () => {
     ])
   })
 
+  it('stays flat when one sub-group would hold every row', () => {
+    const [ness] = groupPermissionRules([
+      rule('mcp__ness-control__report_progress'),
+      rule('mcp__ness-control__list_worktrees')
+    ])
+    expect(ness.subgroups).toEqual([])
+    expect(ness.loose).toHaveLength(2)
+  })
+
   it('leaves groups with nothing to sub-group flat', () => {
     const notion = byKey.get('mcp:notion')!
     expect(notion.subgroups).toEqual([])
