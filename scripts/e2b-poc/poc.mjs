@@ -341,7 +341,15 @@ async function streamTest() {
  *  allowPublicTraffic:false, and a browser-side WebSocket (Ness's renderer
  *  transport) can't set the required header, so something local has to. */
 async function proxy(localPort) {
+  // connect() resumes a paused sandbox but only extends it 5 minutes, so the
+  // proxy doubles as the keep-alive: while a client can reach the sandbox,
+  // keep pushing its timeout out. Stop the proxy and it pauses on its own.
   const { sbx, state } = await connect()
+  const KEEPALIVE_MS = 30 * 60_000
+  await sbx.setTimeout(KEEPALIVE_MS)
+  setInterval(() => {
+    sbx.setTimeout(KEEPALIVE_MS).catch((e) => console.error('keep-alive failed:', e.message))
+  }, 5 * 60_000)
   const host = sbx.getHost(PORT)
   const auth = { 'e2b-traffic-access-token': sbx.trafficAccessToken }
   const { createServer } = await import('node:http')
