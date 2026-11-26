@@ -48,8 +48,8 @@
 
 Grab the latest release from the [releases page](https://github.com/ness-dev/ness/releases/latest).
 
-- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.18.2-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.2/Ness-2.18.2-arm64.dmg)
-- **Intel Mac:** [Ness-2.18.2.dmg](https://github.com/ness-dev/ness/releases/download/v2.18.2/Ness-2.18.2.dmg)
+- **Apple Silicon (M1/M2/M3/M4):** [Ness-2.19.0-arm64.dmg](https://github.com/ness-dev/ness/releases/download/v2.19.0/Ness-2.19.0-arm64.dmg)
+- **Intel Mac:** [Ness-2.19.0.dmg](https://github.com/ness-dev/ness/releases/download/v2.19.0/Ness-2.19.0.dmg)
 
 ## Installation
 
@@ -185,7 +185,6 @@ If you're developing remote/multi-backend features rather than using them, `npm 
 - **Embedded editor** — full Monaco-powered editor for tweaking files without leaving Ness
 - **Full code review tool** — side-by-side syntax-highlighted diffs for every changed file in a worktree
 - **Status at a glance** — sidebar dots show which agent is working, waiting, or needs approval (powered by Claude Code hooks)
-- **Command center** — bird's-eye grid of every worktree with mini activity timelines
 - **Tabs + vertical split panes** — Claude, shells, and editor/diff tabs scoped to each checkout, splittable side-by-side
 - **Existing-branch worktrees** — fork a new branch, pick a local branch from a typeahead, or check out any git ref (commit SHA, tag, or remote-tracking ref)
 - **9 themes** — dark, dracula, nord, gruvbox, tokyo night, catppuccin, one dark, solarized dark/light

@@ -496,7 +496,18 @@ const approvalBridge = new ApprovalBridge(store, {
   isAutoApproveEnabled: () =>
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
-    store.getSnapshot().state.settings.autoApproveSteerInstructions || ''
+    store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
+  repoSetupCommandFor: (sessionId, repoRoot) => {
+    const state = store.getSnapshot().state
+    const sessionPath = state.jsonClaude.sessions[sessionId]?.worktreePath
+    const root =
+      repoRoot ?? state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
+    return root ? loadRepoConfig(root).setupCommand?.trim() || '' : null
+  },
+  isOpenRepo: (repoRoot) => {
+    const want = repoRoot.replace(/\/+$/, '')
+    return store.getSnapshot().state.worktrees.repoRoots.includes(want)
+  }
 })
 const copyDraftBroker = new CopyDraftBroker(
   store,

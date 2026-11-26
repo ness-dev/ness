@@ -66,10 +66,45 @@ export const THEME_OPTIONS: ThemeOption[] = [
     mode: 'dark'
   },
   {
+    id: 'light',
+    label: 'Light',
+    description: 'Neutral light — the default Ness look, on paper.',
+    swatches: ['#ffffff', '#ebebeb', '#262626', '#16a34a'],
+    mode: 'light'
+  },
+  {
+    id: 'catppuccin-latte',
+    label: 'Catppuccin Latte',
+    description: 'Soothing pastel theme, latte flavor.',
+    swatches: ['#eff1f5', '#dce0e8', '#4c4f69', '#8839ef'],
+    mode: 'light'
+  },
+  {
+    id: 'gruvbox-light',
+    label: 'Gruvbox Light',
+    description: 'Retro groove on warm parchment.',
+    swatches: ['#fbf1c7', '#ebdbb2', '#3c3836', '#af3a03'],
+    mode: 'light'
+  },
+  {
+    id: 'tokyo-night-day',
+    label: 'Tokyo Night Day',
+    description: 'Tokyo Night in daylight — cool lilac greys, blue ink.',
+    swatches: ['#e1e2e7', '#c9cddc', '#3760bf', '#9854f1'],
+    mode: 'light'
+  },
+  {
+    id: 'one-light',
+    label: 'One Light',
+    description: 'Atom’s classic light theme.',
+    swatches: ['#fafafa', '#e5e5e6', '#383a42', '#4078f2'],
+    mode: 'light'
+  },
+  {
     id: 'solarized-light',
     label: 'Solarized Light',
     description: 'The light half of Solarized — easy on the eyes in daylight.',
-    swatches: ['#fdf6e3', '#eee8d5', '#657b83', '#268bd2'],
+    swatches: ['#fdf6e3', '#eee8d5', '#586e75', '#268bd2'],
     mode: 'light'
   },
   {

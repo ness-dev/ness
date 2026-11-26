@@ -4832,7 +4832,9 @@ function readBuiltInThemeJson(opt: ThemeOption): string {
       const v = cs.getPropertyValue(`--color-${key}`).trim()
       if (v) colors[key] = v
     }
-    return JSON.stringify({ name: opt.label, mode: opt.mode, colors }, null, 2) + '\n'
+    // `base` keeps the theme's syntax and terminal palettes, which aren't
+    // semantic keys, so a copy of Latte still highlights code like Latte.
+    return JSON.stringify({ name: opt.label, mode: opt.mode, base: opt.id, colors }, null, 2) + '\n'
   } finally {
     probe.remove()
   }

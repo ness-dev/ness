@@ -65,7 +65,7 @@ export function HeroMock() {
   }, [beat, reduced, visible])
 
   return (
-    <section ref={sectionRef} className="max-w-6xl mx-auto px-6 pb-24">
+    <section ref={sectionRef} className="max-w-6xl mx-auto px-6 pb-10">
       <div
         role="img"
         aria-label="The Ness app: a project's main workspace handing work out to agent worktrees in the sidebar, one of them asking for approval, next to a Claude chat and the worktree's pull request, commits and changed files"

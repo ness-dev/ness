@@ -28,8 +28,10 @@ export type {
 }
 
 import type { ChatTabInfo } from '../shared/agent-tabs'
+import type { NotchInset } from '../shared/notch'
 import type { LochAskResult, LochBlameResult, LochRecordingResult } from '../shared/loch'
 export type { ChatTabInfo }
+export type { NotchInset }
 
 import type { ToolSpec, ToolRunResult } from '../shared/tools'
 export type { ToolSpec, ToolRunResult }
@@ -710,6 +712,8 @@ export interface ElectronAPI {
   onUiScaleDown(callback: () => void): () => void
   onUiScaleReset(callback: () => void): () => void
   onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void
+  /** Simple full screen on a notched display only; null otherwise. */
+  onNotchInsetChanged(callback: (inset: NotchInset | null) => void): () => void
   onNavigateBack(callback: () => void): () => void
   onNavigateForward(callback: () => void): () => void
 

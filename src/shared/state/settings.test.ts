@@ -29,7 +29,7 @@ describe('settingsReducer', () => {
   })
 
   it('themeLightChanged sets the light theme id', () => {
-    expect(initialSettings.themeLight).toBe('solarized-light')
+    expect(initialSettings.themeLight).toBe('light')
     const next = apply(initialSettings, {
       type: 'settings/themeLightChanged',
       payload: 'solarized-light'
@@ -1091,9 +1091,9 @@ describe('settingsReducer', () => {
   it('bottomIconOrderChanged replaces the render order', () => {
     const reordered = apply(initialSettings, {
       type: 'settings/bottomIconOrderChanged',
-      payload: ['settings', 'commandCenter', 'newProject']
+      payload: ['settings', 'activity', 'newProject']
     })
-    expect(reordered.bottomIconOrder).toEqual(['settings', 'commandCenter', 'newProject'])
+    expect(reordered.bottomIconOrder).toEqual(['settings', 'activity', 'newProject'])
   })
 
   it('sidebarProjectOrderChanged replaces the project order', () => {

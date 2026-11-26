@@ -1,6 +1,13 @@
 {
   "announcements": [
     {
+      "id": "conversation-blame-2026-11",
+      "title": "Ask any line why it's there",
+      "href": "https://getness.dev/announcements/conversation-blame.html",
+      "publishedAt": "2026-11-24",
+      "summary": "Ness now records which agent turn wrote each line of code. Hover a line to see the prompt behind it, then fork that conversation and ask it why."
+    },
+    {
       "id": "chat-forking-2026-08",
       "title": "Exploring chat forking",
       "href": "https://getness.dev/announcements/chat-forking.html",

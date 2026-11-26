@@ -25,6 +25,7 @@ import { useBackend } from '../backend'
 import { useReviewProgress } from '../review-progress'
 import { ReviewStatusIcon } from './ReviewStatusIcon'
 import { middleClickToClose } from '../middle-click'
+import { useNotchAvoidance } from '../notch'
 
 /** Chip shown in the tab bar when other clients are attached to the
  *  active terminal. Click-through is intentional — taking/releasing
@@ -594,6 +595,8 @@ export function TerminalPanel({
     ro.observe(el)
     return () => ro.disconnect()
   }, [updateTabScroll])
+  const tabBarRef = useRef<HTMLDivElement>(null)
+  useNotchAvoidance(tabBarRef)
   const scrollTabsBy = useCallback((dx: number) => {
     tabScrollRef.current?.scrollBy({ left: dx, behavior: 'smooth' })
   }, [])
@@ -605,6 +608,7 @@ export function TerminalPanel({
           content (set to clear the macOS traffic lights), so the title
           stays pinned regardless of sidebar collapse state. */}
       <div
+        ref={tabBarRef}
         className="drag-region flex items-center border-b border-border bg-panel h-10 shrink-0 relative z-10"
         style={
           topBarLeadingPx > 0 || topBarLeadingExtendPx > 0 || topBarTrailingExtendPx > 0
@@ -670,6 +674,7 @@ export function TerminalPanel({
         <div
           ref={tabScrollRef}
           onScroll={updateTabScroll}
+          data-notch-flow
           className="flex items-center h-full overflow-x-auto scrollbar-hidden flex-1 min-w-0"
         >
           <SortableContext items={pane.tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>

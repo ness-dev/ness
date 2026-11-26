@@ -64,6 +64,22 @@ describe('buildInitialAppState', () => {
     })
   }
 
+  it('drops removed bottom-icon ids from persisted order and hidden map', () => {
+    // 'commandCenter' was a bottom-strip icon until Command Center was removed;
+    // configs written before then still list it.
+    const result = buildInitialAppState(
+      {
+        ...emptyConfig,
+        bottomIconOrder: ['commandCenter', 'settings', 'activity'],
+        hiddenBottomIcons: { commandCenter: true, myWeek: true }
+      },
+      { hasGithubToken: false }
+    )
+    expect(result.settings.bottomIconOrder).not.toContain('commandCenter')
+    expect(result.settings.bottomIconOrder.slice(0, 2)).toEqual(['settings', 'activity'])
+    expect(result.settings.hiddenBottomIcons).toEqual({ myWeek: true })
+  })
+
   it('applies config overrides to settings', () => {
     const result = buildInitialAppState(
       {

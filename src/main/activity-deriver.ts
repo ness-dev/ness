@@ -178,7 +178,7 @@ export class ActivityDeriver {
     recordActivity(wtPath, next)
 
     // Debounce lastActive updates per worktree (30s window). Consumers
-    // (CommandCenter relative-time label, Cleanup sort, AutoSleepMonitor)
+    // (Cleanup sort, AutoSleepMonitor)
     // only need minute-level precision, so a relaxed window keeps this
     // event off the hot path.
     if (this.debounceTimers.has(wtPath)) return

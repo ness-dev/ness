@@ -1,9 +1,6 @@
-import {
-  DEFAULT_LIGHT_THEME,
-  DEFAULT_DARK_THEME,
-  nessieColorById
-} from '../shared/state/settings'
+import { CUSTOM_THEME_BASE, nessieColorById } from '../shared/state/settings'
 import type { ResolvedTheme } from './hooks/useActiveTheme'
+import { THEME_OPTIONS } from './themes'
 
 // Tracks which custom properties we set inline on the documentElement during
 // the previous apply, so the next apply can clear leftovers cleanly. Without
@@ -103,10 +100,10 @@ export function applyTheme(theme: ResolvedTheme, nessieColorId: string): void {
     return
   }
 
-  // Custom theme. Apply its mode's default selector first so any keys the
-  // custom didn't override fall back to a sensible base of the same mode,
-  // then layer the overrides inline.
-  root.dataset.theme = theme.mode === 'dark' ? DEFAULT_DARK_THEME : DEFAULT_LIGHT_THEME
+  // Custom theme. Apply its base built-in's selector first so any keys the
+  // custom didn't override fall back to a base of the same mode, then layer
+  // the overrides inline.
+  root.dataset.theme = customThemeBase(theme)
   for (const [key, value] of Object.entries(theme.colors)) {
     if (!SEMANTIC_KEYS.has(key)) continue
     setInline(`--color-${key}`, value)
@@ -127,12 +124,21 @@ export function applyTheme(theme: ResolvedTheme, nessieColorId: string): void {
   }
 }
 
+/** The built-in a custom theme layers over: its own `base` when that names a
+ *  built-in of the same mode, else the per-mode legacy base. */
+export function customThemeBase(theme: { mode: 'light' | 'dark'; base?: string }): string {
+  const named = THEME_OPTIONS.find((t) => t.id === theme.base && t.mode === theme.mode)
+  return named ? named.id : CUSTOM_THEME_BASE[theme.mode]
+}
+
 /** Best-effort hex/string for the app background after applying `theme`.
  *  Used as `lastEffectiveAppBg` so main can choose a matching window
  *  background on the next boot. */
 export function effectiveAppBg(theme: ResolvedTheme): string {
   if (theme.kind === 'custom') {
-    return theme.colors.app ?? (theme.mode === 'dark' ? '#0a0a0a' : '#fdf6e3')
+    if (theme.colors.app) return theme.colors.app
+    const base = THEME_OPTIONS.find((t) => t.id === customThemeBase(theme))
+    return base?.swatches[0] ?? (theme.mode === 'dark' ? '#0a0a0a' : '#ffffff')
   }
   // First swatch on every built-in is its app background hex.
   return theme.swatches[0]

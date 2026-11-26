@@ -28,7 +28,6 @@ import { join } from 'node:path'
 import { mkdtempSync, existsSync, unlinkSync } from 'node:fs'
 import type { Store } from './store'
 import {
-  EDIT_COPY_TOOL_NAME,
   QUESTION_TOOL_NAME,
   type JsonClaudePendingApproval
 } from '../shared/state/json-claude'
@@ -36,6 +35,7 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
+import { isAutoAllowedNessCall } from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -85,6 +85,12 @@ export interface ApprovalBridgeDeps {
    *  Appended to the reviewer's policy prompt as project-specific
    *  guidance. Empty string when unset. */
   getAutoApproveSteerInstructions: () => string
+  /** The repo's own (.ness.json) setup command an MCP create_worktree from
+   *  this session would run (repoRoot undefined = the session's own repo):
+   *  '' for none, null when unknown. */
+  repoSetupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+  /** True when `repoRoot` is a repo already open in Ness. */
+  isOpenRepo?: (repoRoot: string) => boolean
 }
 
 export class ApprovalBridge {
@@ -395,8 +401,24 @@ export class ApprovalBridge {
     // QUESTION_TOOL_NAME. Bail out above both auto-resolve paths.
     const isQuestion = basePayload.toolName === QUESTION_TOOL_NAME
 
-    if (basePayload.toolName === EDIT_COPY_TOOL_NAME) {
+    // Ness's own plumbing (report_progress, set_tab_name, …) never reaches
+    // a human; see shared/ness-tool-policy.ts for what's excluded and why.
+    // No approvalSessionAllowed dispatch either: these calls fire every
+    // turn, and an "auto-allowed" chip on each would be noise.
+    const repoSetupCommandFor = this.deps?.repoSetupCommandFor
+    if (
+      isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
+        repoSetupCommandFor: repoSetupCommandFor
+          ? (repoRoot) => repoSetupCommandFor(basePayload.sessionId, repoRoot)
+          : undefined,
+        isOpenRepo: this.deps?.isOpenRepo
+      })
+    ) {
       respond({ behavior: 'allow', updatedInput: basePayload.input })
+      log(
+        'approval-bridge',
+        `ness-tool-allowed session=${basePayload.sessionId} id=${basePayload.requestId} tool=${basePayload.toolName}`
+      )
       return
     }
 

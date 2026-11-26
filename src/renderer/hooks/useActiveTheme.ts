@@ -19,6 +19,7 @@ export type ResolvedTheme =
       label: string
       mode: 'light' | 'dark'
       colors: Record<string, string>
+      base?: string
     }
 
 function findBuiltIn(id: string): ThemeOption | undefined {
@@ -39,7 +40,8 @@ function wrapCustom(c: CustomTheme): ResolvedTheme {
     id: c.id,
     label: c.name,
     mode: c.mode,
-    colors: c.colors
+    colors: c.colors,
+    base: c.base
   }
 }
 
