@@ -27,6 +27,7 @@ import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorkt
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
 import { FirstRunTour } from './components/FirstRunTour'
+import { CenterEmptyState } from './components/CenterEmptyState'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -311,7 +312,7 @@ function DesktopApp(): JSX.Element {
   // Pane trees across ALL backends. `usePanes()` would be the active
   // backend's slice only, which silently breaks every cross-backend lookup
   // below: `activeWorkspaceVisible` would find no tree for a remote
-  // worktree and render the "Select a worktree to begin" fallback at the
+  // worktree and render the empty-center fallback at the
   // same time as the workspace it claims isn't there.
   const panes = mergedData.panes
   const [activePaneId, setActivePaneId] = useState<Record<string, string>>({})
@@ -594,6 +595,12 @@ function DesktopApp(): JSX.Element {
         : null,
     [tour, worktrees]
   )
+  // Shared by the tour popout and the center empty state so both drive the
+  // same kickoff and tour transition.
+  const handleTourStart = useCallback(async () => {
+    const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+    if (result.ok) setActiveWorktreeId(result.worktreePath)
+  }, [backend])
 
   const configLoadError = useConfigLoadError()
 
@@ -2228,8 +2235,20 @@ function DesktopApp(): JSX.Element {
             >
               {singleScreenMode && <AppTitleSegment />}
             </div>
-            <div className="flex-1 flex items-center justify-center text-dim">
-              {worktrees.length === 0 ? 'Create a worktree to get started' : 'Select a worktree to begin'}
+            <div className="flex-1 flex items-center justify-center">
+              <CenterEmptyState
+                mode={
+                  !onboardingVisible && tourHomePath
+                    ? 'tour-home'
+                    : worktrees.length === 0
+                      ? 'no-repos'
+                      : 'no-selection'
+                }
+                newWorktreeBinding={resolvedHotkeys.newWorktree}
+                onTourStart={handleTourStart}
+                onNewWorktree={() => setShowNewWorktree(true)}
+                onAddRepo={handleAddRepo}
+              />
             </div>
           </div>
         )}
@@ -2255,10 +2274,7 @@ function DesktopApp(): JSX.Element {
           <FirstRunTour
             tour={tour}
             homePath={tourHomePath}
-            onStart={async () => {
-              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
-              if (result.ok) setActiveWorktreeId(result.worktreePath)
-            }}
+            onStart={handleTourStart}
             onDismiss={() => void backend.tourDismiss().catch(() => {})}
           />
         )}
