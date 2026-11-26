@@ -40,6 +40,9 @@ export type PermissionsEvent =
   | { type: 'permissions/loaded'; payload: { rules: StoredPermissionRule[] } }
   | { type: 'permissions/granted'; payload: { rule: StoredPermissionRule } }
   | { type: 'permissions/revoked'; payload: { id: string } }
+  /** Several at once — a Settings group's "Remove all", or the redundant
+   *  Ness-tool cleanup — so one click is one dispatch and one config write. */
+  | { type: 'permissions/revokedMany'; payload: { ids: string[] } }
   | { type: 'permissions/cleared' }
   | { type: 'permissions/setupCommandApproved'; payload: { repoRoot: string; command: string } }
   | { type: 'permissions/setupCommandForgotten'; payload: { repoRoot: string } }
@@ -68,6 +71,12 @@ export function permissionsReducer(
         ...state,
         rules: [...state.rules.slice(0, idx), ...state.rules.slice(idx + 1)]
       }
+    }
+    case 'permissions/revokedMany': {
+      const ids = new Set(event.payload.ids)
+      const rules = state.rules.filter((r) => !ids.has(r.id))
+      if (rules.length === state.rules.length) return state
+      return { ...state, rules }
     }
     case 'permissions/cleared':
       // Grants only: the Settings button that sends this is labelled with

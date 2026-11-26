@@ -120,6 +120,32 @@ describe('permissionsReducer', () => {
     ).toBe(seeded)
   })
 
+  it('revokedMany drops every listed id and keeps the rest in order', () => {
+    const keep = rule('Write')
+    const seeded = apply(
+      initialPermissions,
+      { type: 'permissions/granted', payload: { rule: rule('Read') } },
+      { type: 'permissions/granted', payload: { rule: keep } },
+      { type: 'permissions/granted', payload: { rule: rule('Bash', 'ls:*') } }
+    )
+    const next = apply(seeded, {
+      type: 'permissions/revokedMany',
+      payload: { ids: ['Read', 'Bash(ls:*)', 'nope'] }
+    })
+    expect(next.rules).toEqual([keep])
+    expect(next.rules[0]).toBe(keep)
+  })
+
+  it('revokedMany with no matching ids returns the same object', () => {
+    const seeded = apply(initialPermissions, {
+      type: 'permissions/granted',
+      payload: { rule: rule('Read') }
+    })
+    expect(
+      permissionsReducer(seeded, { type: 'permissions/revokedMany', payload: { ids: ['nope'] } })
+    ).toBe(seeded)
+  })
+
   it('revoked preserves the identity of untouched entries', () => {
     const keep = rule('Read')
     const seeded = apply(

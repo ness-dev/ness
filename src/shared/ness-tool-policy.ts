@@ -171,6 +171,15 @@ export function isAutoAllowedNessCall(
   return typeof url === 'string' && isSafeAgentUrl(url)
 }
 
+/** True for a ness-control tool that's auto-allowed whatever its input,
+ *  so a saved grant for it adds nothing (the Settings redundant-grant
+ *  check). False for the input-gated tools: a grant for those still lets an
+ *  agent load arbitrary URLs or create a worktree that runs a setup script. */
+export function isAlwaysAutoAllowedNessTool(toolName: string): boolean {
+  const bare = nessControlToolName(toolName)
+  return bare !== null && AUTO_ALLOWED.has(bare) && !URL_GATED_TOOLS.has(bare) && bare !== 'create_worktree'
+}
+
 /** Value for Claude's `--allowedTools`, for terminal tabs where Claude
  *  prompts in its own TUI and Ness never sees the request. The flag can't
  *  look at inputs, so the input-gated tools are left out and prompt there. */

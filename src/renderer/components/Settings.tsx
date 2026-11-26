@@ -19,9 +19,8 @@ import { DEFAULT_HOTKEYS, ACTION_LABELS, ACTION_CATEGORIES, bindingToString, eve
 import { Tooltip } from './Tooltip'
 import { HotkeyBadge } from './HotkeyBadge'
 import { AGENT_REGISTRY, agentDisplayName, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '../../shared/agent-registry'
-import { getToolDisplay } from './json-mode-cards/tool-display'
-import type { StoredPermissionRule } from '../../shared/permission-match'
 import { AgentIcon } from './AgentIcon'
+import { PermissionRulesList } from './PermissionRulesList'
 import { LochRecordingRepos } from './LochRecordingRepos'
 import { InterfaceToggle } from './InterfaceToggle'
 import { BUILT_IN_THEMES_BY_MODE, type ThemeOption } from '../themes'
@@ -165,46 +164,6 @@ function highlightMatch(text: string, query: string): React.ReactNode {
       </mark>
       {text.slice(idx + query.length)}
     </>
-  )
-}
-
-/** One saved "Always allow" grant. Renders the tool through the same
- *  `getToolDisplay` the chat tool cards use, so `mcp__ness-control__type_tab`
- *  reads as "Ness Control · Type tab" with the server's icon instead of the
- *  raw wire name. The scoping half of the rule (`git status:*`, `/repo/**`)
- *  stays monospace — it's a pattern, not prose. */
-function PermissionRuleRow({
-  rule,
-  onRemove
-}: {
-  rule: StoredPermissionRule
-  onRemove: () => void
-}): JSX.Element {
-  const display = getToolDisplay(rule.toolName)
-  const Icon = display.icon
-  return (
-    <div className="flex items-center gap-2 px-3 py-2">
-      {Icon ? (
-        <Icon className="icon-sm shrink-0 text-dim" />
-      ) : (
-        <span className="icon-sm shrink-0" />
-      )}
-      <span className="text-xs text-fg-bright truncate shrink-0">
-        {display.label}
-      </span>
-      {rule.ruleContent && (
-        <code className="text-xs text-dim font-mono truncate min-w-0" title={rule.ruleContent}>
-          {rule.ruleContent}
-        </code>
-      )}
-      <button
-        onClick={onRemove}
-        title={`Remove ${rule.ruleContent ? `${rule.toolName}(${rule.ruleContent})` : rule.toolName}`}
-        className="text-xs text-dim hover:text-danger shrink-0 cursor-pointer ml-auto"
-      >
-        Remove
-      </button>
-    </div>
   )
 }
 
@@ -2761,27 +2720,12 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     so one grant covers every worktree and repo. Terminal
                     tabs prompt in Claude's own UI and keep a separate list.
                   </div>
-                  {permissionRules.length === 0 ? (
-                    <div className="text-xs text-faint">No saved grants yet.</div>
-                  ) : (
-                    <>
-                      <div className="border border-border rounded divide-y divide-border bg-panel">
-                        {permissionRules.map((rule) => (
-                          <PermissionRuleRow
-                            key={rule.id}
-                            rule={rule}
-                            onRemove={() => { void backend.revokePermission(rule.id) }}
-                          />
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => { void backend.clearPermissions() }}
-                        className="text-xs text-dim hover:text-danger mt-2 cursor-pointer"
-                      >
-                        Remove all {permissionRules.length}
-                      </button>
-                    </>
-                  )}
+                  <PermissionRulesList
+                    rules={permissionRules}
+                    onRevoke={(id) => { void backend.revokePermission(id) }}
+                    onRevokeMany={(ids) => { void backend.revokePermissions(ids) }}
+                    onClear={() => { void backend.clearPermissions() }}
+                  />
                 </div>
               </div>
 
