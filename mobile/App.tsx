@@ -5,7 +5,7 @@
 // worktree list itself comes from the renderer's own pure model code via
 // src/fleet.ts, across every enabled backend.
 import { StatusBar } from 'expo-status-bar'
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -92,17 +92,26 @@ function App() {
 }
 
 // keyboard-controller's KeyboardAvoidingView animates frame-by-frame with
-// the keyboard on the UI thread. RN's own one ran a LayoutAnimation that
-// moved the composer's button row and its text box at different speeds.
-// It sizes its padding from its own frame, so sitting inside the full-edge
-// SafeAreaView means the home-indicator inset is absorbed when the keyboard
-// opens (RN's left a ~60pt gap above the keyboard).
+// the keyboard on the UI thread (RN's own one ran a LayoutAnimation that
+// moved the composer's button row and its text box at different speeds).
+//
+// Bottom edge: the app runs to the bottom of the screen instead of
+// stopping at the home-indicator inset. A strip below the content keeps
+// what's left of that clearance (the composer already pads 12pt), and the
+// KeyboardAvoidingView's padding is reduced by the same amount, so when the
+// keyboard opens it slides up over the strip and the composer sits 12pt
+// above it. Only the KAV animates, so the motion stays in sync.
+const COMPOSER_PAD = 12
+
 function Shell({ children }: { children: React.ReactNode }) {
+  const insets = useSafeAreaInsets()
+  const strip = Math.max(insets.bottom - COMPOSER_PAD, 0)
   return (
-    <SafeAreaView style={s.screen}>
+    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={-strip}>
         {children}
+        <View style={{ height: strip, backgroundColor: c.app }} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   )
