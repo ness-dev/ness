@@ -2241,7 +2241,12 @@ export class JsonClaudeManager implements ChatProvider {
   ): void {
     this.store.dispatch({
       type: 'jsonClaude/sessionStateChanged',
-      payload: { sessionId, state, ...extra }
+      payload: {
+        sessionId,
+        state,
+        ...extra,
+        ...(state === 'exited' ? { timestamp: Date.now() } : {})
+      }
     })
   }
 

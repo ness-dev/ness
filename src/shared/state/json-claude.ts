@@ -619,6 +619,9 @@ export type JsonClaudeEvent =
         state: JsonClaudeSessionState
         exitCode?: number | null
         exitReason?: string | null
+        /** When it happened. Stamped onto tasks an exit interrupts as
+         *  their completedAt, so their elapsed time stops at the exit. */
+        timestamp?: number
       }
     }
   | {
@@ -938,16 +941,21 @@ function patchBackgroundAgent(
   }
 }
 
-// No completedAt: the reducer runs in main and every renderer, so a
-// Date.now() here would diverge between mirrors.
+// completedAt comes from the event, never Date.now(): the reducer runs in
+// main and every renderer, and a local clock would diverge between them.
 function settleRunningAgents(
-  agents: Record<string, JsonClaudeBackgroundAgent>
+  agents: Record<string, JsonClaudeBackgroundAgent>,
+  timestamp: number | undefined
 ): Record<string, JsonClaudeBackgroundAgent> {
   const out: Record<string, JsonClaudeBackgroundAgent> = {}
   for (const [key, agent] of Object.entries(agents)) {
     out[key] =
       agent.status === 'running'
-        ? { ...agent, status: 'interrupted' }
+        ? {
+            ...agent,
+            status: 'interrupted',
+            ...(timestamp !== undefined ? { completedAt: timestamp } : {})
+          }
         : agent
   }
   return out
@@ -1058,7 +1066,7 @@ export function jsonClaudeReducer(
       // off — usually by a sleep the user chose.
       const backgroundAgents =
         next === 'exited' && hasRunningBackgroundTask(session)
-          ? settleRunningAgents(session.backgroundAgents)
+          ? settleRunningAgents(session.backgroundAgents, event.payload.timestamp)
           : session.backgroundAgents
       return {
         ...state,

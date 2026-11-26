@@ -1725,9 +1725,11 @@ describe('jsonClaudeReducer background agents', () => {
     const state = launch(seedSession(initialJsonClaude))
     const next = jsonClaudeReducer(state, {
       type: 'jsonClaude/sessionStateChanged',
-      payload: { sessionId: SID, state: 'exited' }
+      payload: { sessionId: SID, state: 'exited', timestamp: 5000 }
     })
     expect(next.sessions[SID].backgroundAgents[TOOL_USE].status).toBe('interrupted')
+    // Stops the elapsed clock at the exit instead of ticking forever.
+    expect(next.sessions[SID].backgroundAgents[TOOL_USE].completedAt).toBe(5000)
   })
 
   it('sessionStateChanged to a live state leaves running tasks alone', () => {
