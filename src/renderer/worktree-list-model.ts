@@ -134,8 +134,8 @@ export interface WorktreeRepoSectionModel {
    *  shows this so an agent waiting on you elsewhere still surfaces.
    *  Selection-independent, so it lives in the base build. */
   worstStatus: PtyStatus
-  /** Every worktree grouped by status, main included. Overview surfaces
-   *  (task list) render this; the sidebar renders the
+  /** Every worktree grouped by status, main included. Whole-list
+   *  consumers (hotkey navigation) read this; the sidebar renders the
    *  homes / workGroups / tail split below instead. */
   groups: WorktreeListGroupModel[]
   /** Main worktrees, pulled out of the groups. One per repo, primary host
