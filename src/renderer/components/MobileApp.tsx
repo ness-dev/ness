@@ -17,6 +17,7 @@ import { AgentIcon } from './AgentIcon'
 import { randomUUID } from '../uuid'
 import { HotkeysProvider } from './Tooltip'
 import { resolveHotkeys } from '../hotkeys'
+import { pickInitialTab } from '../pick-initial-tab'
 
 type RunnableTab = TerminalTab & { type: 'agent' | 'shell' | 'json-claude' }
 
@@ -35,15 +36,6 @@ function flatTabs(panes: ReturnType<typeof usePanes>, wtPath: string): TerminalT
 
 function isRunnable(tab: TerminalTab): tab is RunnableTab {
   return tab.type === 'agent' || tab.type === 'shell' || tab.type === 'json-claude'
-}
-
-function pickInitialTab(tabs: TerminalTab[]): string | null {
-  return (
-    tabs.find((t) => t.type === 'agent')?.id ??
-    tabs.find((t) => t.type === 'shell')?.id ??
-    tabs[0]?.id ??
-    null
-  )
 }
 
 /** Mobile has no CreatingWorktreeScreen to drop onto, so a failed creation is

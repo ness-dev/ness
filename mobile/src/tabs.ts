@@ -4,10 +4,7 @@
 import { randomUUID } from '../../src/renderer/uuid'
 import type { PaneNode, TerminalTab } from '../../src/shared/state/terminals'
 
-/** Which tab a worktree opens on when the phone has no remembered choice. */
-export function pickInitialTab(tabs: TerminalTab[]): string | null {
-  return tabs.find((t) => t.type === 'agent')?.id ?? tabs.find((t) => t.type === 'shell')?.id ?? tabs[0]?.id ?? null
-}
+export { pickInitialTab } from '../../src/renderer/pick-initial-tab'
 
 /** A new Chat tab: one UUID as both tab id and session id, same as
  *  useTabHandlers. */

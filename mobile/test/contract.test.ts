@@ -196,7 +196,10 @@ describe('mobile client ↔ headless server', () => {
     const tree = await until((s) => s.terminals.panes[repo], 'pane tree')
     const tabs = tabsOf(tree)
     expect(tabs.length).toBeGreaterThan(0)
-    expect(pickInitialTab(tabs)).not.toBeNull()
+    // The server's default set (agent + Shell) must open on the agent,
+    // not the shell, whatever order the tabs come in.
+    const initial = tabs.find((t) => t.id === pickInitialTab(tabs))
+    expect(initial?.type === 'json-claude' || initial?.type === 'agent').toBe(true)
 
     const tab = newChatTab()
     await client.api.panesAddTab(repo, tab, firstLeafId(tree))
