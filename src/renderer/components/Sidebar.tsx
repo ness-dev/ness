@@ -1,4 +1,4 @@
-import { Trash2, Layers, ListTodo, Plus, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, ListTodo, Plus, Rows3, PanelLeftClose, RefreshCw, Inbox, BellDot } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
@@ -128,6 +128,29 @@ export function Sidebar({
           </button>
         </Tooltip>
         <div className="ml-auto flex items-center gap-1">
+          {/* Swaps the list below for the Inbox. Kept as a quiet icon:
+              a bell only when something actually needs you. */}
+          <Tooltip
+            label={
+              view === 'inbox'
+                ? 'Back to projects'
+                : needsYouCount > 0
+                  ? `Inbox: ${needsYouCount} need${needsYouCount === 1 ? 's' : ''} you`
+                  : 'Inbox'
+            }
+            side="bottom"
+          >
+            <button
+              onClick={() => onViewChange(view === 'inbox' ? 'projects' : 'inbox')}
+              aria-pressed={view === 'inbox'}
+              aria-label={needsYouCount > 0 ? `Inbox, ${needsYouCount} need you` : 'Inbox'}
+              className={`rounded p-0.5 transition-colors cursor-pointer hover:bg-surface ${
+                view === 'inbox' ? 'bg-surface text-fg' : needsYouCount > 0 ? 'text-accent' : 'text-dim hover:text-fg'
+              }`}
+            >
+              {needsYouCount > 0 ? <BellDot className="icon-xs" /> : <Inbox className="icon-xs" />}
+            </button>
+          </Tooltip>
           {/* Deliberately one icon among many: most worktrees get started by
               asking a Lead, so the manual path stays available but quiet. */}
           <Tooltip label="New worktree" action="newWorktree" side="bottom">
@@ -183,29 +206,6 @@ export function Sidebar({
             </button>
           </Tooltip>
         </div>
-      </div>
-
-      {/* Its own row: at the default 224px width the header icons
-          already fill the line above. */}
-      <div className="mx-3 mb-1 shrink-0 flex items-center rounded-md bg-surface p-0.5 text-xs" role="tablist">
-        {(['projects', 'inbox'] as const).map((v) => (
-          <button
-            key={v}
-            role="tab"
-            aria-selected={view === v}
-            onClick={() => onViewChange(v)}
-            className={`flex-1 justify-center px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors ${
-              view === v ? 'bg-panel text-fg-bright' : 'text-dim hover:text-fg'
-            }`}
-          >
-            {v === 'projects' ? 'Projects' : 'Inbox'}
-            {v === 'inbox' && needsYouCount > 0 && (
-              <span className="rounded-full bg-accent/30 text-fg-bright px-1.5 leading-tight">
-                {needsYouCount}
-              </span>
-            )}
-          </button>
-        ))}
       </div>
 
       <div data-sidebar-scroll className="flex-1 overflow-y-auto py-1">
