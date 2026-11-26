@@ -478,6 +478,69 @@ describe('collectAgents', () => {
     )
   })
 
+  it('does not reuse a settled summary once a resume makes it run again', () => {
+    const bg = (status: 'running' | 'completed', startedAt: number, completedAt?: number) => ({
+      t1: {
+        agentId: 'a1',
+        toolUseId: 't1',
+        description: 'Bg',
+        status,
+        startedAt,
+        ...(completedAt !== undefined ? { completedAt } : {})
+      }
+    })
+    const before = [
+      launch('t1', 'Bg', { background: true }),
+      childWork('t1', [{ type: 'text', text: 'hi' }], 1500, 'c1'),
+      toolResult('t1', 'hi')
+    ]
+    const settled = collectAgents(
+      session(before, { backgroundAgents: bg('completed', 1000, 2000) })
+    )
+    expect(settled[0].status).toBe('completed')
+
+    // SendMessage resume: same record flipped back to running, and the
+    // resumed run's activity still carries the Agent id as its parent.
+    const after = [
+      ...before,
+      childWork(
+        't1',
+        [{ type: 'tool_use', id: 'x1', name: 'Bash', input: { command: 'sleep 25' } }],
+        3000,
+        'c2'
+      )
+    ]
+    const resumed = collectAgents(
+      session(after, { backgroundAgents: bg('running', 2500) }),
+      new Set(['x1']),
+      settled
+    )
+    expect(resumed[0]).not.toBe(settled[0])
+    expect(resumed[0].status).toBe('running')
+    expect(resumed[0].steps.at(-1)?.toolName).toBe('Bash')
+    expect(resumed[0].pendingApprovalToolUseIds).toEqual(['x1'])
+  })
+
+  it('still reuses a settled summary whose lifecycle record is unchanged', () => {
+    const s = session(
+      [launch('t1', 'Bg', { background: true }), toolResult('t1', 'done')],
+      {
+        backgroundAgents: {
+          t1: {
+            agentId: 'a1',
+            toolUseId: 't1',
+            description: 'Bg',
+            status: 'completed',
+            startedAt: 1000,
+            completedAt: 2000
+          }
+        }
+      }
+    )
+    const first = collectAgents(s)
+    expect(collectAgents(s, undefined, first)[0]).toBe(first[0])
+  })
+
   it('lists only an agent’s own pending calls, not its descendants’', () => {
     const agents = collectAgents(
       session([

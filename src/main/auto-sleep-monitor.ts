@@ -15,6 +15,9 @@ export class AutoSleepMonitor {
   private store: Store
   private panesFSM: PanesFSM
   private timer: NodeJS.Timeout | null = null
+  /** Tabs already logged as kept awake by background work, so the skip
+   *  is logged once per stretch rather than every minute. */
+  private keptAwake = new Set<string>()
 
   constructor(store: Store, panesFSM: PanesFSM) {
     this.store = store
@@ -58,7 +61,24 @@ export class AutoSleepMonitor {
           // process would kill that work too. Bash counts because Claude
           // Code reports it through the same task_started/notification
           // pair (see json-claude-manager.ts).
-          if (session && hasRunningBackgroundTask(session)) continue
+          //
+          // No upper bound, deliberately: a backgrounded dev server or
+          // `tail -f` never settles, so its tab stays awake until the
+          // process exits. Killing the user's server would be worse than
+          // not sleeping. The cost is that a dropped task_notification
+          // (a Claude Code bug or protocol change) pins the tab too —
+          // hence the log line, so that's diagnosable from debug.log.
+          if (session && hasRunningBackgroundTask(session)) {
+            if (!this.keptAwake.has(tab.id)) {
+              this.keptAwake.add(tab.id)
+              log(
+                'auto-sleep',
+                `skip tab=${tab.id} wt=${wtPath}: running background task`
+              )
+            }
+            continue
+          }
+          this.keptAwake.delete(tab.id)
           log(
             'auto-sleep',
             `sleep tab=${tab.id} wt=${wtPath} idleMs=${now - lastActive}`

@@ -244,8 +244,19 @@ export function collectAgents(
   const summaries: AgentSummary[] = launches.map((site) => {
     // Settled last time, and still present in entries — nothing about it
     // can have changed, so skip rebuilding its step feed entirely.
+    // Unless the lifecycle record has moved since: a SendMessage resume
+    // flips a settled agent back to running under the same key, and
+    // reusing the old summary would freeze its status, steps and
+    // pending approvals at the pre-resume snapshot.
     const cached = reusable.get(site.toolUseId)
-    if (cached) return cached
+    const bgNow = session.backgroundAgents?.[site.toolUseId]
+    if (
+      cached &&
+      (!bgNow ||
+        (bgNow.status === cached.status && bgNow.completedAt === cached.completedAt))
+    ) {
+      return cached
+    }
 
     const childEntries = childEntriesByParent.get(site.toolUseId) ?? []
     const steps: AgentStep[] = []

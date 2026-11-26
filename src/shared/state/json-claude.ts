@@ -460,7 +460,9 @@ export interface JsonClaudeBackgroundAgent {
    *  emits the same task_started/task_notification pair. Missing on
    *  records from before the field existed. */
   taskType?: string
-  status: 'running' | 'completed' | 'failed'
+  /** 'interrupted' only ever comes from the process exiting under a
+   *  running task (sleep, crash, restart) — Claude never reports it. */
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
   startedAt: number
   completedAt?: number
   /** Totals reported in the completion notification's <usage> block. */
@@ -945,7 +947,7 @@ function settleRunningAgents(
   for (const [key, agent] of Object.entries(agents)) {
     out[key] =
       agent.status === 'running'
-        ? { ...agent, status: 'failed' }
+        ? { ...agent, status: 'interrupted' }
         : agent
   }
   return out
@@ -1052,6 +1054,8 @@ export function jsonClaudeReducer(
       // Detached tasks live in the Claude process, so they die with it.
       // Leaving them 'running' would show a phantom spinner forever and
       // keep AutoSleepMonitor from ever sleeping the respawned tab.
+      // 'interrupted', not 'failed': the task didn't error, it was cut
+      // off — usually by a sleep the user chose.
       const backgroundAgents =
         next === 'exited' && hasRunningBackgroundTask(session)
           ? settleRunningAgents(session.backgroundAgents)

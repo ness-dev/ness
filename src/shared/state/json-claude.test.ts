@@ -1721,13 +1721,13 @@ describe('jsonClaudeReducer background agents', () => {
     expect(agents[TOOL_USE].completedAt).toBe(4000)
   })
 
-  it('sessionStateChanged to exited marks running tasks failed', () => {
+  it('sessionStateChanged to exited marks running tasks interrupted', () => {
     const state = launch(seedSession(initialJsonClaude))
     const next = jsonClaudeReducer(state, {
       type: 'jsonClaude/sessionStateChanged',
       payload: { sessionId: SID, state: 'exited' }
     })
-    expect(next.sessions[SID].backgroundAgents[TOOL_USE].status).toBe('failed')
+    expect(next.sessions[SID].backgroundAgents[TOOL_USE].status).toBe('interrupted')
   })
 
   it('sessionStateChanged to a live state leaves running tasks alone', () => {

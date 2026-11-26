@@ -1676,6 +1676,10 @@ export class JsonClaudeManager implements ChatProvider {
       if (typeof rawToolUseId !== 'string') return
       // A resume's notification names the SendMessage call; its report
       // belongs on the Agent card, which is what the user is watching.
+      // Resolved here because toolResultAttached below needs the Agent
+      // id. The backgroundAgentSettled reducer resolves again so the
+      // event stays correct for any other dispatcher (tests, replay);
+      // after this pass that second resolve is a no-op, not dead code.
       const session = this.store.getSnapshot().state.jsonClaude.sessions[instance.sessionId]
       const toolUseId = session
         ? resolveBackgroundAgentKey(session, rawToolUseId, agentId)
