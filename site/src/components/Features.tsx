@@ -54,24 +54,23 @@ export function Features() {
         />
 
         <FeatureCard
-          title="Command center"
-          description="Bird's-eye view of every worktree in one grid, with mini activity timelines showing which agents have been productive and which got stuck."
+          title="Live PR status"
+          description="Every worktree shows its open PR and CI checks, and the sidebar sorts by urgency: failing checks and requested changes float to the top, merged work sinks out of the way."
           preview={
-            <div className="grid grid-cols-3 gap-1 w-full h-full p-2">
+            <div className="flex flex-col justify-center gap-1 w-full px-3">
               {[
-                { dot: 'bg-green-500', label: 'auth', pulse: true },
-                { dot: 'bg-red-500', label: 'api', pulse: true },
-                { dot: 'bg-amber-400', label: 'tests', pulse: false },
-                { dot: 'bg-green-500', label: 'docs', pulse: true },
-                { dot: 'bg-green-500', label: 'login', pulse: true },
-                { dot: 'bg-amber-400', label: 'perf', pulse: false }
-              ].map((c, i) => (
+                { dot: 'bg-red-500', label: 'fix-auth', pr: '#212', checks: 'text-red-400', status: '2 failing' },
+                { dot: 'bg-amber-400', label: 'api-cache', pr: '#209', checks: 'text-amber-300', status: 'running' },
+                { dot: 'bg-green-500', label: 'docs', pr: '#205', checks: 'text-green-400', status: 'passed' }
+              ].map((r) => (
                 <div
-                  key={i}
-                  className="rounded bg-ink-800/60 border border-ink-700/40 flex flex-col items-center justify-center gap-0.5"
+                  key={r.label}
+                  className="flex items-center gap-2 rounded bg-ink-800/60 border border-ink-700/40 px-2 py-1 text-[10px]"
                 >
-                  <span className={`w-2 h-2 rounded-full ${c.dot} ${c.pulse ? 'pulse-dot' : ''}`} />
-                  <span className="text-[7px] text-ink-500">{c.label}</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${r.dot}`} />
+                  <span className="text-ink-200 flex-1">{r.label}</span>
+                  <span className="text-ink-500 font-mono">{r.pr}</span>
+                  <span className={r.checks}>{r.status}</span>
                 </div>
               ))}
             </div>

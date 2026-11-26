@@ -16,7 +16,6 @@ import {
   Globe,
   Keyboard,
   Layers,
-  LayoutGrid,
   ListTodo,
   ListTree,
   Loader2,
@@ -488,7 +487,7 @@ function CodexGlyph({ size = 12 }: { size?: number }) {
 function BottomIconStrip() {
   return (
     <div className="border-t border-border p-2 flex items-center justify-center gap-1 shrink-0 text-dim">
-      {[LayoutGrid, FilePlus, FolderOpen, BarChart3, CalendarDays, Keyboard, Menu].map(
+      {[FilePlus, FolderOpen, BarChart3, CalendarDays, Keyboard, Menu].map(
         (Icon, i) => (
           <span key={i} className="rounded p-1.5">
             <Icon size={14} />

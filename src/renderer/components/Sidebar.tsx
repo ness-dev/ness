@@ -48,7 +48,6 @@ interface SidebarProps {
   onOpenSubscriptionGraph: (repoRoot?: string) => void
   onOpenCleanup: () => void
   onOpenTaskList: () => void
-  onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenMyWeek: () => void
   width: number
@@ -98,7 +97,6 @@ export function Sidebar({
   onOpenSubscriptionGraph,
   onOpenCleanup,
   onOpenTaskList,
-  onOpenCommandCenter,
   onOpenNewProject,
   onOpenMyWeek,
   width,
@@ -264,7 +262,6 @@ export function Sidebar({
           and surfaces every icon via the hamburger menu regardless. */}
       <BottomIconStrip
         orientation="horizontal"
-        onOpenCommandCenter={onOpenCommandCenter}
         onOpenNewProject={onOpenNewProject}
         onAddRepo={onAddRepo}
         onOpenActivity={onOpenActivity}

@@ -142,7 +142,6 @@ src/
     └── hooks/
         ├── useHotkeys.ts          # Keyboard event subscription
         ├── useMetaHeld.ts         # Meta key detection
-        ├── useTailLineBuffer.ts   # Rolling tail-line cache for CommandCenter
         ├── useTabHandlers.ts      # All pane/tab mutation handlers (addTab, splitPane, …)
         ├── useWorktreeHandlers.ts # All worktree+repo+pending-creation handlers
         └── useHotkeyHandlers.ts   # Sidebar-aware hotkey action map + keystroke binding
