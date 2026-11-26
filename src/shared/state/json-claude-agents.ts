@@ -72,6 +72,11 @@ export interface AgentSummary {
   usage?: { totalTokens?: number; toolUses?: number; durationMs?: number }
   /** True when this agent, or anything below it, is awaiting approval. */
   hasPendingApproval: boolean
+  /** tool_use ids of this agent's own calls that are awaiting approval —
+   *  not its descendants', which sit on their own cards. Lets the
+   *  Subagents column put the approval prompt on the card itself, since
+   *  a background agent's Task card is usually far up the transcript. */
+  pendingApprovalToolUseIds: string[]
   /** Chronological activity feed. The peek view renders this directly;
    *  the panel renders only its last element as the "currently" line. */
   steps: AgentStep[]
@@ -239,13 +244,24 @@ export function collectAgents(
   const summaries: AgentSummary[] = launches.map((site) => {
     // Settled last time, and still present in entries — nothing about it
     // can have changed, so skip rebuilding its step feed entirely.
+    // Unless the lifecycle record has moved since: a SendMessage resume
+    // flips a settled agent back to running under the same key, and
+    // reusing the old summary would freeze its status, steps and
+    // pending approvals at the pre-resume snapshot.
     const cached = reusable.get(site.toolUseId)
-    if (cached) return cached
+    const bgNow = session.backgroundAgents?.[site.toolUseId]
+    if (
+      cached &&
+      (!bgNow ||
+        (bgNow.status === cached.status && bgNow.completedAt === cached.completedAt))
+    ) {
+      return cached
+    }
 
     const childEntries = childEntriesByParent.get(site.toolUseId) ?? []
     const steps: AgentStep[] = []
     let toolCount = 0
-    let hasPendingApproval = false
+    const pendingApprovalToolUseIds: string[] = []
 
     for (const entry of childEntries) {
       if (!entry.blocks) continue
@@ -254,7 +270,7 @@ export function collectAgents(
         const key = `${entry.entryId}-${b.id ?? b.toolUseId ?? i}`
         if (b.type === 'tool_use') {
           toolCount += 1
-          if (b.id && pendingToolUseIds?.has(b.id)) hasPendingApproval = true
+          if (b.id && pendingToolUseIds?.has(b.id)) pendingApprovalToolUseIds.push(b.id)
           const nested =
             isSubAgentToolName(b.name) && b.id && launchById.has(b.id)
               ? b.id
@@ -350,7 +366,8 @@ export function collectAgents(
       toolCount,
       childAgentCount: childAgentCounts.get(site.toolUseId) ?? 0,
       ...(bg?.usage ? { usage: bg.usage } : {}),
-      hasPendingApproval,
+      hasPendingApproval: pendingApprovalToolUseIds.length > 0,
+      pendingApprovalToolUseIds,
       steps,
       ...(result ? { result: result.content, resultIsError: result.isError } : {})
     }

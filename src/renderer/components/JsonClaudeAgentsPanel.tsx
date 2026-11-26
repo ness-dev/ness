@@ -259,8 +259,9 @@ export function JsonClaudeAgentsPanel({
           )}
         </ul>
       </RightPanel>
-      {peeked && (
+      {peeked && focusedTabId && (
         <AgentPeek
+          sessionId={focusedTabId}
           agent={peeked}
           now={now}
           onClose={() => setPeekId(null)}

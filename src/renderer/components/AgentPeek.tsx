@@ -8,6 +8,7 @@ import {
   formatElapsed
 } from '../../shared/state/json-claude-agents'
 import { AgentStepLine } from './AgentStepLine'
+import { AgentApprovalCards } from './AgentApprovalCards'
 import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 
 /** How much of a text block to show inline in the feed. The peek is a
@@ -16,6 +17,8 @@ import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 const TEXT_PREVIEW = 600
 
 interface AgentPeekProps {
+  /** Session the agent belongs to, for its pending approvals. */
+  sessionId: string
   agent: AgentSummary
   /** Live clock, passed down so every peek and panel row ticks off the
    *  same interval rather than each mounting its own. */
@@ -32,6 +35,7 @@ interface AgentPeekProps {
  *  agent hard. Here every step gets exactly one line, newest at the
  *  bottom, and the view follows along. */
 export function AgentPeek({
+  sessionId,
   agent,
   now,
   onClose,
@@ -123,6 +127,15 @@ export function AgentPeek({
             </span>
           )}
         </div>
+
+        {agent.pendingApprovalToolUseIds.length > 0 && (
+          <div className="px-3 py-2 border-b border-border/40 shrink-0 max-h-[50%] overflow-y-auto">
+            <AgentApprovalCards
+              sessionId={sessionId}
+              toolUseIds={agent.pendingApprovalToolUseIds}
+            />
+          </div>
+        )}
 
         <div
           ref={feedRef}

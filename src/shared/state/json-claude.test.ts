@@ -1670,6 +1670,77 @@ describe('jsonClaudeReducer background agents', () => {
     expect(next).toBe(state)
   })
 
+  function settle(state: JsonClaudeState, toolUseId: string, timestamp: number): JsonClaudeState {
+    return jsonClaudeReducer(state, {
+      type: 'jsonClaude/backgroundAgentSettled',
+      payload: {
+        sessionId: SID,
+        toolUseId,
+        agentId: 'aece96b04cf6ba1c8',
+        status: 'completed',
+        timestamp,
+        usage: { toolUses: 3 }
+      }
+    })
+  }
+
+  function resume(state: JsonClaudeState): JsonClaudeState {
+    // What Claude Code emits on a SendMessage resume: same task_id, but
+    // tool_use_id is the SendMessage call's.
+    return jsonClaudeReducer(state, {
+      type: 'jsonClaude/backgroundAgentLaunched',
+      payload: {
+        sessionId: SID,
+        toolUseId: 'toolu_sendmessage',
+        agentId: 'aece96b04cf6ba1c8',
+        description: 'resumed',
+        taskType: 'local_agent',
+        timestamp: 3000
+      }
+    })
+  }
+
+  it('backgroundAgentLaunched for a resumed task flips the original record back to running', () => {
+    const next = resume(settle(launch(seedSession(initialJsonClaude)), TOOL_USE, 2000))
+    const agents = next.sessions[SID].backgroundAgents
+    expect(Object.keys(agents)).toEqual([TOOL_USE])
+    expect(agents[TOOL_USE].status).toBe('running')
+    expect(agents[TOOL_USE].startedAt).toBe(3000)
+    expect(agents[TOOL_USE].completedAt).toBeUndefined()
+    expect(agents[TOOL_USE].usage).toBeUndefined()
+    expect(agents[TOOL_USE].description).toBe('Source U of A financial deadlines')
+    expect(agents[TOOL_USE].taskType).toBe('local_agent')
+  })
+
+  it('backgroundAgentSettled for a resumed task settles the original record by task id', () => {
+    const resumed = resume(settle(launch(seedSession(initialJsonClaude)), TOOL_USE, 2000))
+    const next = settle(resumed, 'toolu_sendmessage', 4000)
+    const agents = next.sessions[SID].backgroundAgents
+    expect(Object.keys(agents)).toEqual([TOOL_USE])
+    expect(agents[TOOL_USE].status).toBe('completed')
+    expect(agents[TOOL_USE].completedAt).toBe(4000)
+  })
+
+  it('sessionStateChanged to exited marks running tasks interrupted', () => {
+    const state = launch(seedSession(initialJsonClaude))
+    const next = jsonClaudeReducer(state, {
+      type: 'jsonClaude/sessionStateChanged',
+      payload: { sessionId: SID, state: 'exited', timestamp: 5000 }
+    })
+    expect(next.sessions[SID].backgroundAgents[TOOL_USE].status).toBe('interrupted')
+    // Stops the elapsed clock at the exit instead of ticking forever.
+    expect(next.sessions[SID].backgroundAgents[TOOL_USE].completedAt).toBe(5000)
+  })
+
+  it('sessionStateChanged to a live state leaves running tasks alone', () => {
+    const state = launch(seedSession(initialJsonClaude))
+    const next = jsonClaudeReducer(state, {
+      type: 'jsonClaude/sessionStateChanged',
+      payload: { sessionId: SID, state: 'running' }
+    })
+    expect(next.sessions[SID].backgroundAgents).toBe(state.sessions[SID].backgroundAgents)
+  })
+
   it('sessionStarted preserves background agents across a respawn', () => {
     const next = seedSession(launch(seedSession(initialJsonClaude)))
     expect(next.sessions[SID].backgroundAgents[TOOL_USE].status).toBe('running')
