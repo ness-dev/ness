@@ -12,7 +12,8 @@
 //   import { FileText } from 'lucide-react'
 //     → import _FileText from 'lucide-react-native/icons/file-text'
 //       import { wrapIcon } from 'lucide-react'
-//       const FileText = wrapIcon('FileText', _FileText)
+//       const _lucide_FileText = wrapIcon('FileText', _FileText)
+//       (and every FileText reference renamed to match)
 //
 // Desktop never runs this plugin; its source is unchanged.
 const fs = require('fs')
@@ -57,9 +58,16 @@ module.exports = function lucidePerIcon({ types: t }) {
           if (source === NATIVE) {
             imports.push(t.importDeclaration([t.importDefaultSpecifier(t.identifier(s.local.name))], t.stringLiteral(spec)))
           } else {
+            // The wrapped binding gets a `_`-prefixed name: React Refresh
+            // registers any capitalized `const X = call()` as a component,
+            // and on these inserted declarations it references a `_cN`
+            // variable it never declares (dev bundles crash at load).
+            // JSX still treats `_name` tags as components.
+            const local = p.scope.generateUidIdentifier(`lucide_${exported}`)
+            p.scope.rename(s.local.name, local.name)
             const raw = p.scope.generateUidIdentifier(exported)
             imports.push(t.importDeclaration([t.importDefaultSpecifier(raw)], t.stringLiteral(spec)))
-            wraps.push({ local: s.local.name, exported, raw })
+            wraps.push({ local: local.name, exported, raw })
           }
         }
         if (wraps.length > 0) {
@@ -73,7 +81,7 @@ module.exports = function lucidePerIcon({ types: t }) {
           const lastImport = program.get('body').filter((b) => b.isImportDeclaration()).pop()
           const decls = wraps.map((w) =>
             t.variableDeclaration('const', [
-              t.variableDeclarator(t.identifier(w.local), t.callExpression(wrapId, [t.stringLiteral(w.exported), w.raw]))
+              t.variableDeclarator(t.identifier(w.local), t.callExpression(t.cloneNode(wrapId), [t.stringLiteral(w.exported), t.cloneNode(w.raw)]))
             ])
           )
           ;(lastImport ?? p).insertAfter(decls)

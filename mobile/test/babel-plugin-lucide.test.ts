@@ -19,8 +19,23 @@ describe('babel-plugin-lucide', () => {
     const out = run(`import { FileText } from 'lucide-react'\nimport x from 'y'\nexport const A = () => FileText`)
     expect(out).toMatch(/import _FileText from "lucide-react-native\/icons\/file-text"/)
     expect(out).toMatch(/import \{ wrapIcon as _wrapIcon \} from "lucide-react"/)
-    // Declared after the last import, before first use.
-    expect(out.indexOf('const FileText = _wrapIcon("FileText", _FileText)')).toBeGreaterThan(out.indexOf(`import x from 'y'`.replace(/'/g, '"')))
+    // Declared after the last import, under a name React Refresh won't
+    // register, with references renamed.
+    const decl = out.indexOf('const _lucide_FileText = _wrapIcon("FileText", _FileText)')
+    expect(decl).toBeGreaterThan(out.indexOf('import x from "y"'))
+    expect(out).toContain('export const A = () => _lucide_FileText')
+  })
+
+  it('survives the CommonJS transform Metro runs afterwards', () => {
+    // Reusing one identifier node across calls left all but the first
+    // pointing at an undeclared `_wrapIcon` once imports became requires.
+    const out = transformSync(`import { Bell, Bot } from 'lucide-react'\nexport const A = [Bell, Bot]`, {
+      plugins: [plugin, require.resolve('@babel/plugin-transform-modules-commonjs', { paths: [__dirname] })],
+      babelrc: false,
+      configFile: false
+    })!.code
+    expect(out.match(/\(0, _lucideReact\.wrapIcon\)\(/g)).toHaveLength(2)
+    expect(out).not.toMatch(/[^.]_wrapIcon\(/)
   })
 
   it('maps every icon the shared tool-icons module imports to a file', () => {
