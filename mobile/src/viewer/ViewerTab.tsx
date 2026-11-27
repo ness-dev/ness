@@ -16,6 +16,7 @@ import { c, fs, mono } from '../theme'
 import { Empty } from '../components/Empty'
 import { Markdown } from '../components/Markdown'
 import { ChatClientContext } from '../chat/ChatImage'
+import { CopyMenuHost } from '../chat/CopyText'
 import { CodeWebView } from './CodeWebView'
 import { diffHtml, fileHtml } from './code-html'
 import { parseGitDiff, unifiedDiff } from './diff-model'
@@ -180,10 +181,14 @@ function FileTabBody({ client, worktreePath, filePath }: { client: NessClient; w
       ) : result.truncated ? (
         <Empty message="File is larger than 2 MB — not shown." />
       ) : showMarkdown ? (
+        // Same providers as a chat: images resolve through this backend,
+        // and long-pressing a code block opens Select Text.
         <ChatClientContext.Provider value={client}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
-            <Markdown text={text} />
-          </ScrollView>
+          <CopyMenuHost>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+              <Markdown text={text} />
+            </ScrollView>
+          </CopyMenuHost>
         </ChatClientContext.Provider>
       ) : html !== null ? (
         <CodeWebView html={html} />

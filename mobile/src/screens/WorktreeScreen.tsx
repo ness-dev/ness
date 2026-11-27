@@ -247,18 +247,18 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
           <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
             <View style={[s.menu, { left: Math.max(4, Math.min(convertMenu.x, windowWidth - 232)), top: 0 }]}>
               {convertMenu.convertible && (
-              <Pressable
-                style={({ pressed }) => [s.menuItem, pressed && { backgroundColor: c.panel }]}
-                onPress={() => {
-                  const { tab } = convertMenu
-                  setConvertMenu(null)
-                  handleConvertTabType(tab.id, tab.type === 'agent' ? 'json-claude' : 'agent')
-                }}
-              >
-                <Text style={{ color: c.fgBright, fontSize: fs.xs }}>
-                  {convertMenu.tab.type === 'agent' ? 'Switch to Chat mode' : 'Switch to Terminal mode'}
-                </Text>
-              </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.menuItem, pressed && { backgroundColor: c.panel }]}
+                  onPress={() => {
+                    const { tab } = convertMenu
+                    setConvertMenu(null)
+                    handleConvertTabType(tab.id, tab.type === 'agent' ? 'json-claude' : 'agent')
+                  }}
+                >
+                  <Text style={{ color: c.fgBright, fontSize: fs.xs }}>
+                    {convertMenu.tab.type === 'agent' ? 'Switch to Chat mode' : 'Switch to Terminal mode'}
+                  </Text>
+                </Pressable>
               )}
               {/* The desktop chip's X: any tab, the last one included, no
                   confirm; PanesFSM.closeTab ends the tab's process. */}
