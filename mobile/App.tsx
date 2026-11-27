@@ -27,6 +27,7 @@ import { supportsChat } from '../src/shared/agent-registry'
 import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
 import { useBackends } from './src/backends'
 import { consumeLaunchUrl } from './src/launchUrl'
+import { haptic } from './src/haptics'
 import { firstLeafId, newChatTab, pickInitialTab } from './src/tabs'
 import { Fleet, useFleetEntries, useMerged } from './src/fleet'
 import { useNess, type NessClient } from './src/ness'
@@ -278,6 +279,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
   }, [selectedTabId, tabs.length])
 
   const handleSelectWorktree = useCallback((wtPath: string) => {
+    haptic.select()
     setActiveWorktreeId(wtPath)
     setPickerOpen(false)
     setRightPanelOpen(false)
@@ -286,10 +288,11 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
   const handleSelectTab = useCallback(
     (tabId: string) => {
       if (!activeWorktree) return
+      if (tabId !== selectedTabId) haptic.select()
       setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: tabId }))
       setPickerOpen(false)
     },
-    [activeWorktree]
+    [activeWorktree, selectedTabId]
   )
 
   const handleAddChat = useCallback(() => {

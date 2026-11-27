@@ -37,6 +37,7 @@ import { ApprovalSlot } from '../chat/ApprovalCard'
 import { ChatClientContext } from '../chat/ChatImage'
 import { Composer } from '../chat/Composer'
 import { CopyableMessage, CopyMenuHost } from '../chat/CopyText'
+import { haptic } from '../haptics'
 import { DENSITY, DensityContext, ExpandStoreContext } from '../chat/density'
 
 interface RenderedRow extends GroupRow {
@@ -304,6 +305,16 @@ export function ChatView({
     () => Object.values(allApprovals).filter((a) => a.sessionId === sessionId),
     [allApprovals, sessionId]
   )
+  // Buzz when Claude starts waiting on you in the chat you're looking at
+  // (the phone is often face-up on a desk while a turn runs). Approvals
+  // already pending when the chat opens are seeded silently.
+  const seenApprovals = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const ids = approvals.map((a) => a.requestId)
+    const seen = seenApprovals.current
+    if (seen && RNAppState.currentState === 'active' && ids.some((id) => !seen.has(id))) haptic.warning()
+    seenApprovals.current = new Set(ids)
+  }, [approvals])
   const approvalByToolUseId = useMemo(() => {
     const m = new Map<string, JsonClaudePendingApproval>()
     for (const a of approvals) if (a.toolUseId) m.set(a.toolUseId, a)

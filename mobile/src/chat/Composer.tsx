@@ -6,6 +6,7 @@
 // and Return inserts a newline unless the user turned on send-on-Enter,
 // matching the web's default.
 import { useMemo, useRef, useState } from 'react'
+import { haptic } from '../haptics'
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { Square } from 'lucide-react-native'
 import type { JsonClaudeSession } from '../../../src/shared/state/json-claude'
@@ -91,6 +92,7 @@ export function Composer({
   // brings the box back to the bottom edge and the transcript into view.
   // Slash-popover picks that only change the draft don't come through here.
   const afterSend = () => {
+    haptic.tap()
     // Blur the field itself (not just Keyboard.dismiss) and do it after
     // the cleared draft has rendered, so the re-render can't leave focus —
     // and the keyboard — on the composer.
@@ -235,6 +237,7 @@ export function Composer({
                 accessibilityLabel={`Permission mode: ${ms.label}. Tap to cycle.`}
                 onPress={() => {
                   const next = MODES[(MODES.indexOf(permissionMode as (typeof MODES)[number]) + 1) % MODES.length]
+                  haptic.select()
                   void client.api.setJsonClaudePermissionMode(sessionId, next)
                 }}
                 style={{
@@ -259,6 +262,7 @@ export function Composer({
                     setDraft('')
                     afterSend()
                   } else {
+                    haptic.tap()
                     void client.api.interruptJsonClaude(sessionId)
                   }
                 }}

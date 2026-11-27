@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { Modal, Pressable, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { c, fs, getThemeMode } from '../theme'
+import { haptic } from '../haptics'
 
 type OpenMenu = (text: string) => void
 const CopyMenuContext = createContext<OpenMenu | null>(null)
@@ -30,7 +31,11 @@ export function CopyableMessage({ text, children }: { text: string; children: Re
   const open = useContext(CopyMenuContext)
   if (!open || !text) return <>{children}</>
   return (
-    <Pressable onLongPress={() => open(text)} delayLongPress={350} accessibilityHint="Long-press to select and copy text">
+    <Pressable
+      onLongPress={() => {
+        haptic.press()
+        open(text)
+      }} delayLongPress={350} accessibilityHint="Long-press to select and copy text">
       {children}
     </Pressable>
   )

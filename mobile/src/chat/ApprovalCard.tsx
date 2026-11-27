@@ -4,6 +4,7 @@
 // shared/renderer modules the desktop card uses. Buttons use the desktop's
 // mobile sizing (px-3.5 py-2.5) bumped to a 44pt minimum.
 import { useMemo, useState, type ReactNode } from 'react'
+import { haptic } from '../haptics'
 import { Pressable, Text, TextInput, View } from 'react-native'
 import { Check, Circle, Square, SquareCheck } from 'lucide-react-native'
 import { EDIT_TOOL_NAMES, type JsonClaudePendingApproval, type JsonClaudeSession } from '../../../src/shared/state/json-claude'
@@ -34,7 +35,11 @@ export function ApprovalSlot({
   client: NessClient
   session: JsonClaudeSession | undefined
 }) {
-  const onResolve = (r: Resolution) => client.api.resolveJsonClaudeApproval(approval.requestId, r)
+  const onResolve = (r: Resolution) => {
+    if (r.behavior === 'deny') haptic.warning()
+    else haptic.success()
+    return client.api.resolveJsonClaudeApproval(approval.requestId, r)
+  }
   if (approval.toolName === 'AskUserQuestion') return <QuestionCard approval={approval} onResolve={onResolve} />
   return <ApprovalCard approval={approval} client={client} session={session} onResolve={onResolve} />
 }
