@@ -5,7 +5,6 @@
 // Desktop-only, omitted: "Open diff in tab" on a commit's files
 // (onOpenCommitFileDiff), and drag-a-commit-into-the-composer.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as ExpoClipboard from 'expo-clipboard'
 import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { ArrowUp, Check, ChevronDown, ChevronUp, Copy, GitCommitHorizontal, RefreshCw, X } from 'lucide-react-native'
 import type { BranchCommit, ChangedFile, CommitMeta } from '../../../src/renderer/types'
@@ -16,13 +15,7 @@ import { PanelAction, RightPanel } from './RightPanel'
 import { useWatchedQuery } from './useWatchedQuery'
 import { STATUS_COLOR, STATUS_LABEL } from './ChangedFilesPanel'
 import type { PanelProps } from './types'
-
-/** navigator.clipboard.writeText stand-in (expo-clipboard; ships in Expo
- *  Go). Fire-and-forget like the desktop's copy. */
-function copyText(text: string): boolean {
-  ExpoClipboard.setStringAsync(text).catch(() => Alert.alert('Copy failed', text))
-  return true
-}
+import { copyText } from '../clipboard'
 
 export function CommitsPanel({ client, worktreePath }: PanelProps) {
   const fetcher = useCallback((path: string) => client.api.getBranchCommits(path), [client])
