@@ -443,8 +443,8 @@ function FileRow({
   return (
     // Row tap opens a diff tab on desktop (omitted); long-press stands in
     // for the full-path hover tooltip. The row isn't one VoiceOver element
-    // (that would swallow the @ button): the file info is, and activating
-    // it taps the row.
+    // (that would swallow the @ button); the file info is, and its label
+    // already gives the full path.
     <Pressable
       onLongPress={() => Alert.alert(file.path)}
       accessible={false}

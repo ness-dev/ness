@@ -104,7 +104,9 @@ function BarRow({ row, used }: { row: Row; used: number }) {
       onPress={row.title ? () => setOpen((v) => !v) : undefined}
       accessibilityRole={row.title ? 'button' : undefined}
       accessibilityState={row.title ? { expanded: open } : undefined}
-      accessibilityLabel={`${row.label}, ${formatTokens(row.tokens)} tokens, ${pct >= 1 ? `${Math.round(pct)}%` : 'under 1%'}`}
+      // The label replaces the children's text, so it carries the revealed
+      // title too, or expanding would be silent under VoiceOver.
+      accessibilityLabel={`${row.label}, ${formatTokens(row.tokens)} tokens, ${pct >= 1 ? `${Math.round(pct)}%` : 'under 1%'}${open && row.title ? `. ${row.title}` : ''}`}
       style={[{ minHeight: 28 + 16, justifyContent: 'center' }, hitArea(8)]}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
