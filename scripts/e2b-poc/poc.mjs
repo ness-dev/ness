@@ -81,9 +81,12 @@ function readKeychainCredentials() {
   return { raw, expiresAt: parsed.claudeAiOauth.expiresAt, subscriptionType: parsed.claudeAiOauth.subscriptionType }
 }
 
-/** Env every claude process in the sandbox gets: the token for --auth token. */
+/** Env every claude process in the sandbox gets. 'egress' hands it only a
+ *  placeholder: E2B's egress proxy swaps in the real token (see egress-test). */
 function authEnvs(state) {
-  return state.auth === 'token' ? { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN ?? '' } : {}
+  if (state.auth === 'token') return { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN ?? '' }
+  if (state.auth === 'egress') return { CLAUDE_CODE_OAUTH_TOKEN: PLACEHOLDER_TOKEN }
+  return {}
 }
 
 async function startServer(sbx, state) {
@@ -452,8 +455,68 @@ async function proxy(localPort) {
   })
 }
 
+// What the sandbox holds instead of the real token. Shaped like one in case
+// claude checks the format locally before making a request.
+const PLACEHOLDER_TOKEN = 'sk-ant-oat01-' + 'x'.repeat(95)
+
+/** Can E2B's egress proxy carry the Claude login so the sandbox never holds it?
+ *  Puts the real token in a header rule for api.anthropic.com, then checks
+ *  from inside the sandbox with only a placeholder. */
+async function egressTest() {
+  const { sbx, state } = await connect()
+  const real = process.env.CLAUDE_CODE_OAUTH_TOKEN
+  if (!real) throw new Error('needs CLAUDE_CODE_OAUTH_TOKEN in the env')
+  await sbx.updateNetwork({
+    // Rules don't grant access on their own; keep the sandbox's egress open.
+    allowOut: ['0.0.0.0/0'],
+    rules: { 'api.anthropic.com': [{ transform: { headers: { Authorization: `Bearer ${real}` } } }] }
+  })
+  console.log('rule set: Authorization on api.anthropic.com')
+
+  const curlModels = (auth) =>
+    `curl -s -o /tmp/models.json -w '%{http_code}' https://api.anthropic.com/v1/models ` +
+    `-H 'anthropic-version: 2023-06-01' -H 'anthropic-beta: oauth-2025-04-20' ${auth}`
+  const withFake = await sh(sbx, curlModels(`-H 'Authorization: Bearer ${PLACEHOLDER_TOKEN}'`), { allowFail: true })
+  const noHeader = await sh(sbx, curlModels(''), { allowFail: true })
+  console.log(`curl /v1/models with placeholder → HTTP ${withFake.stdout}; with no Authorization at all → HTTP ${noHeader.stdout}`)
+  const body = await sh(sbx, 'head -c 300 /tmp/models.json', { allowFail: true })
+  console.log(`  last body: ${body.stdout.replace(/\s+/g, ' ')}`)
+
+  // Who signed the certificate the sandbox sees? A non-Anthropic issuer means
+  // the proxy terminates TLS, which is how it can rewrite headers at all.
+  const cert = await sh(
+    sbx,
+    `echo | openssl s_client -connect api.anthropic.com:443 -servername api.anthropic.com 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null || curl -sv https://api.anthropic.com -o /dev/null 2>&1 | grep -i 'issuer'`,
+    { allowFail: true }
+  )
+  console.log(`  cert issuer seen in sandbox: ${cert.stdout.trim() || '(could not read)'}`)
+
+  // Must stay unmodified: the rule is scoped to one host.
+  const other = await sh(sbx, `curl -s https://httpbin.org/headers -H 'Authorization: Bearer ${PLACEHOLDER_TOKEN}'`, { allowFail: true })
+  const leaked = other.stdout.includes(real.slice(-12))
+  console.log(`  httpbin.org sees the real token: ${leaked ? 'YES (leak!)' : 'no'}; sees placeholder: ${other.stdout.includes('xxxxxxxx')}`)
+
+  const t0 = now()
+  const hi = await sh(sbx, `cd ${REPO} && claude -p "say hi in five words" --output-format json 2>&1`, {
+    envs: { CLAUDE_CODE_OAUTH_TOKEN: PLACEHOLDER_TOKEN },
+    allowFail: true,
+    timeoutMs: 120_000
+  })
+  console.log(`claude -p with placeholder only (exit ${hi.exitCode}, ${ms(t0)}):`)
+  try {
+    const r = JSON.parse(hi.stdout)
+    console.log({ result: r.result, is_error: r.is_error })
+  } catch {
+    console.log(hi.stdout.slice(0, 600))
+  }
+  const env = await sh(sbx, `env | grep -c ${real.slice(-12)} || true`, { allowFail: true })
+  console.log(`real token visible in a sandbox shell's env: ${env.stdout.trim() !== '0' ? 'yes' : 'no'}`)
+}
+
 async function main() {
   switch (cmd) {
+    case 'egress-test':
+      return egressTest()
     case 'proxy':
       return proxy(Number(rest[0] ?? 47291))
     case 'up':
