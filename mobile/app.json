@@ -13,7 +13,12 @@
           "NSAllowsLocalNetworking": true
         },
         "NSLocalNetworkUsageDescription": "Connect to Ness running on your computer"
-      }
+      },
+      "bundleIdentifier": "org.mikelyons.ness",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "appleTeamId": "M7Y6TPCQ63"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +32,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.CAMERA"
-      ]
+      ],
+      "package": "org.mikelyons.ness"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,7 +48,24 @@
         }
       ],
       "expo-secure-store",
-      "expo-router"
+      "expo-router",
+      "expo-web-browser",
+      "expo-image",
+      "expo-sharing",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach photos to a message for Claude",
+          "cameraPermission": "Take a photo to attach to a message for Claude",
+          "microphonePermission": false
+        }
+      ]
     ],
     "scheme": "ness",
     "owner": "mikepersonal",
