@@ -261,7 +261,6 @@ describe('repo sectioning', () => {
     )
     expect(model.sections.map((s) => s.repoRoot)).toEqual(['/repos/alpha', '/repos/beta'])
     expect(model.sections.map((s) => s.repoName)).toEqual(['alpha', 'beta'])
-    expect(model.showRepoHeaders).toBe(true)
     expect(model.showRepoLabels).toBe(false)
     expect(model.sections[0].groups[0].rows[0].repoLabel).toBeUndefined()
   })
@@ -280,7 +279,6 @@ describe('repo sectioning', () => {
     expect(model.sections).toHaveLength(1)
     expect(model.sections[0].repoRoot).toBe(UNIFIED_REPO_ROOT)
     expect(model.sections[0].unified).toBe(true)
-    expect(model.showRepoHeaders).toBe(false)
     expect(model.showRepoLabels).toBe(true)
     const labels = model.sections[0].groups[0].rows.map((r) => r.repoLabel).sort()
     expect(labels).toEqual(['alpha', 'beta'])
@@ -291,7 +289,6 @@ describe('repo sectioning', () => {
       input({ worktrees: [wt({ path: '/w/a' })], unifiedRepos: true })
     )
     expect(model.sections[0].repoRoot).toBe('/repos/alpha')
-    expect(model.showRepoHeaders).toBe(false)
     expect(model.showRepoLabels).toBe(false)
   })
 

@@ -1,4 +1,4 @@
-import { Trash2, Layers, ListTodo, Plus, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, Plus, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
@@ -43,8 +43,6 @@ interface SidebarProps {
   /** Opens the subscription graph; a repo root scopes it to that project. */
   onOpenSubscriptionGraph: (repoRoot?: string) => void
   onOpenCleanup: () => void
-  onOpenTaskList: () => void
-  onOpenCommandCenter: () => void
   onOpenNewProject: () => void
   onOpenMyWeek: () => void
   width: number
@@ -89,8 +87,6 @@ export function Sidebar({
   onOpenActivity,
   onOpenSubscriptionGraph,
   onOpenCleanup,
-  onOpenTaskList,
-  onOpenCommandCenter,
   onOpenNewProject,
   onOpenMyWeek,
   width,
@@ -126,15 +122,6 @@ export function Sidebar({
               aria-label="New worktree"
             >
               <Plus className="icon-xs" />
-            </button>
-          </Tooltip>
-          <Tooltip label="Task list" action="toggleTaskList" side="bottom">
-            <button
-              onClick={onOpenTaskList}
-              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
-              aria-label="Task list"
-            >
-              <ListTodo className="icon-xs" />
             </button>
           </Tooltip>
           <Tooltip label="Clean up old worktrees" side="bottom">
@@ -219,7 +206,6 @@ export function Sidebar({
           and surfaces every icon via the hamburger menu regardless. */}
       <BottomIconStrip
         orientation="horizontal"
-        onOpenCommandCenter={onOpenCommandCenter}
         onOpenNewProject={onOpenNewProject}
         onAddRepo={onAddRepo}
         onOpenActivity={onOpenActivity}

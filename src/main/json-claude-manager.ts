@@ -34,7 +34,7 @@ import type {
   JsonClaudePermissionMode,
   JsonClaudeSessionState
 } from '../shared/state/json-claude'
-import { parseUserTurn } from '../shared/state/json-claude'
+import { parseUserTurn, resolveBackgroundAgentKey } from '../shared/state/json-claude'
 import { writeResultImage } from './json-claude-attachments'
 import type { ClaudeLaunchSettings } from './claude-launch'
 import { log } from './debug'
@@ -1625,9 +1625,27 @@ export class JsonClaudeManager implements ChatProvider {
     // actual work streams inline on this same stdout carrying
     // parent_tool_use_id, so nesting already works — only the card's
     // running/settled status needs wiring.
+    //
+    // What Claude Code 2.1.x actually emits (probed against the bundled
+    // binary):
+    //  - Background Bash gets the same pair, with task_type 'local_bash'
+    //    and tool_use_id = the Bash call, so it lands in backgroundAgents
+    //    too. Bash launched by a sub-agent carries owned_by_subagent.
+    //  - A SendMessage resume of a finished agent emits a fresh
+    //    task_started with the SAME task_id but tool_use_id = the
+    //    SendMessage call; its task_notification does likewise. The
+    //    reducer maps it back to the Agent call by task_id. The resumed
+    //    agent's inline activity still carries the original Agent id as
+    //    parent_tool_use_id.
+    //  - task_updated / task_progress / background_tasks_changed also
+    //    arrive; the pair above is enough, so they're ignored.
     if (type === 'system' && subtype === 'task_started') {
       const toolUseId = parsed['tool_use_id']
       const agentId = parsed['task_id']
+      log(
+        'json-claude',
+        `task_started sessionId=${instance.sessionId} tool_use_id=${String(toolUseId)} task_id=${String(agentId)} task_type=${String(parsed['task_type'])}`
+      )
       if (typeof toolUseId !== 'string' || typeof agentId !== 'string') return
       this.store.dispatch({
         type: 'jsonClaude/backgroundAgentLaunched',
@@ -1639,14 +1657,33 @@ export class JsonClaudeManager implements ChatProvider {
             typeof parsed['description'] === 'string'
               ? (parsed['description'] as string)
               : '',
+          ...(typeof parsed['task_type'] === 'string'
+            ? { taskType: parsed['task_type'] as string }
+            : {}),
           timestamp: Date.now()
         }
       })
       return
     }
     if (type === 'system' && subtype === 'task_notification') {
-      const toolUseId = parsed['tool_use_id']
-      if (typeof toolUseId !== 'string') return
+      const rawToolUseId = parsed['tool_use_id']
+      const agentId =
+        typeof parsed['task_id'] === 'string' ? (parsed['task_id'] as string) : undefined
+      log(
+        'json-claude',
+        `task_notification sessionId=${instance.sessionId} tool_use_id=${String(rawToolUseId)} task_id=${String(agentId)} status=${String(parsed['status'])}`
+      )
+      if (typeof rawToolUseId !== 'string') return
+      // A resume's notification names the SendMessage call; its report
+      // belongs on the Agent card, which is what the user is watching.
+      // Resolved here because toolResultAttached below needs the Agent
+      // id. The backgroundAgentSettled reducer resolves again so the
+      // event stays correct for any other dispatcher (tests, replay);
+      // after this pass that second resolve is a no-op, not dead code.
+      const session = this.store.getSnapshot().state.jsonClaude.sessions[instance.sessionId]
+      const toolUseId = session
+        ? resolveBackgroundAgentKey(session, rawToolUseId, agentId)
+        : rawToolUseId
       const failed = parsed['status'] !== 'completed'
       const rawUsage = parsed['usage'] as Record<string, unknown> | undefined
       const num = (v: unknown): number | undefined =>
@@ -1663,6 +1700,7 @@ export class JsonClaudeManager implements ChatProvider {
         payload: {
           sessionId: instance.sessionId,
           toolUseId,
+          ...(agentId ? { agentId } : {}),
           status: failed ? 'failed' : 'completed',
           timestamp: Date.now(),
           ...(usage ? { usage } : {})
@@ -2203,7 +2241,12 @@ export class JsonClaudeManager implements ChatProvider {
   ): void {
     this.store.dispatch({
       type: 'jsonClaude/sessionStateChanged',
-      payload: { sessionId, state, ...extra }
+      payload: {
+        sessionId,
+        state,
+        ...extra,
+        ...(state === 'exited' ? { timestamp: Date.now() } : {})
+      }
     })
   }
 

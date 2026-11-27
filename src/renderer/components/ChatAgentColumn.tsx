@@ -9,6 +9,7 @@ import {
   type AgentSummary
 } from '../../shared/state/json-claude-agents'
 import { AgentPeek } from './AgentPeek'
+import { AgentApprovalCards } from './AgentApprovalCards'
 import { Chevron } from './json-mode-cards/ChatRow'
 import { AgentStatusDot, agentStatusLabel } from './AgentStatusDot'
 import { AgentStepLine } from './AgentStepLine'
@@ -122,6 +123,7 @@ function useFollowTail(slack: number, enabled = true) {
 }
 
 interface CardProps {
+  sessionId: string
   agent: AgentSummary
   depth: number
   /** Only passed to running cards. Settled elapsed times are fixed, so a
@@ -137,6 +139,7 @@ interface CardProps {
  *  type scale — so an agent reads the same here as it does inline in the
  *  transcript. */
 function AgentCardImpl({
+  sessionId,
   agent,
   depth,
   now,
@@ -216,6 +219,18 @@ function AgentCardImpl({
           </span>
         </button>
 
+        {/* Outside the disclosure: a blocked agent stays blocked whether
+            or not its card is open, so the prompt can't hide behind the
+            chevron. */}
+        {agent.pendingApprovalToolUseIds.length > 0 && (
+          <div className="px-2 pb-1">
+            <AgentApprovalCards
+              sessionId={sessionId}
+              toolUseIds={agent.pendingApprovalToolUseIds}
+            />
+          </div>
+        )}
+
         {expanded && (
           <div className="px-2 pb-1">
             {agent.prompt && (
@@ -273,6 +288,7 @@ function AgentCardImpl({
 
 const AgentCard = memo(AgentCardImpl, (a, b) => {
   if (
+    a.sessionId !== b.sessionId ||
     a.depth !== b.depth ||
     a.expanded !== b.expanded ||
     a.onToggle !== b.onToggle ||
@@ -288,12 +304,14 @@ const AgentCard = memo(AgentCardImpl, (a, b) => {
  *  re-renders (per streamed token, via the session hook) stop here when
  *  the row list hasn't changed. */
 const AgentFeed = memo(function AgentFeed({
+  sessionId,
   rows,
   now,
   isExpanded,
   onToggle,
   onPeek
 }: {
+  sessionId: string
   rows: readonly Row[]
   now: number
   isExpanded: (agent: AgentSummary) => boolean
@@ -313,6 +331,7 @@ const AgentFeed = memo(function AgentFeed({
           {rows.map(({ agent, depth }) => (
             <AgentCard
               key={agent.toolUseId}
+              sessionId={sessionId}
               agent={agent}
               depth={depth}
               now={agent.status === 'running' ? now : 0}
@@ -398,8 +417,12 @@ function ChatAgentColumnLive({
   if (agents.length === 0) return null
 
   const status = running > 0 ? `${running} running` : `${agents.length} done`
+  // A blocked agent can't make progress until someone answers, and with
+  // the column collapsed nothing else on screen says so.
+  const blocked = agents.some((a) => a.pendingApprovalToolUseIds.length > 0)
   const peek = peeked && (
     <AgentPeek
+      sessionId={sessionId}
       agent={peeked}
       now={now}
       onClose={() => setPeekId(null)}
@@ -418,10 +441,14 @@ function ChatAgentColumnLive({
             <button
               type="button"
               onClick={() => setColumnClosed(false)}
-              title="Show subagents"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-xs text-muted hover:text-fg-bright cursor-pointer"
+              title={blocked ? 'A subagent needs approval — show subagents' : 'Show subagents'}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs hover:text-fg-bright cursor-pointer ${
+                blocked ? 'border-warning/60 text-warning' : 'border-border text-muted'
+              }`}
             >
-              {running > 0 ? (
+              {blocked ? (
+                <span className="shrink-0" aria-label="needs approval">⚠</span>
+              ) : running > 0 ? (
                 <span className="json-claude-spinner shrink-0" />
               ) : (
                 <Sparkles className="icon-2xs shrink-0" />
@@ -460,6 +487,7 @@ function ChatAgentColumnLive({
           </button>
         </div>
         <AgentFeed
+          sessionId={sessionId}
           rows={rows}
           now={now}
           isExpanded={isExpanded}

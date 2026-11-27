@@ -817,6 +817,40 @@ describe('JsonClaudeManager', () => {
       expect(results[results.length - 1]?.content).toBe('Exact stdout: alpha')
     })
 
+    // Recorded from Claude Code 2.1.327: a SendMessage resume re-runs the
+    // same task_id under the SendMessage call's tool_use_id.
+    it('a SendMessage resume re-runs and re-settles the original Agent card', () => {
+      const { store, feed } = setup()
+      const SEND_ID = 'toolu_sendmessage'
+      feed(started)
+      feed({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: TASK_ID,
+        tool_use_id: TOOL_USE_ID,
+        status: 'completed',
+        summary: 'hi'
+      })
+      feed({ ...started, tool_use_id: SEND_ID, prompt: 'now sleep 25' })
+      expect(Object.keys(agents(store) ?? {})).toEqual([TOOL_USE_ID])
+      expect(agents(store)?.[TOOL_USE_ID]?.status).toBe('running')
+      feed({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: TASK_ID,
+        tool_use_id: SEND_ID,
+        status: 'completed',
+        summary: 'done'
+      })
+      expect(agents(store)?.[TOOL_USE_ID]?.status).toBe('completed')
+      const entries =
+        store.getSnapshot().state.jsonClaude.sessions['sess-bg']?.entries ?? []
+      const results = entries
+        .flatMap((e) => e.blocks ?? [])
+        .filter((b) => b.type === 'tool_result' && b.toolUseId === TOOL_USE_ID)
+      expect(results[results.length - 1]?.content).toBe('done')
+    })
+
     it('ignores a task event with no tool_use_id', () => {
       const { store, feed } = setup()
       feed({ type: 'system', subtype: 'task_started', task_id: TASK_ID })

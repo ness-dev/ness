@@ -24,17 +24,28 @@ export interface PermissionsState {
   /** Insertion-ordered. The matcher short-circuits on the first hit, so
    *  order is observable only in which rule gets attributed in the log. */
   rules: StoredPermissionRule[]
+  /** repoRoot → the .ness.json setupCommand the user last allowed an
+   *  agent's create_worktree to run there. While the repo's command still
+   *  equals this, create_worktree runs without asking; once it changes, the
+   *  next one asks again. See shared/ness-tool-policy.ts. */
+  approvedSetupCommands: Record<string, string>
 }
 
 export const initialPermissions: PermissionsState = {
-  rules: []
+  rules: [],
+  approvedSetupCommands: {}
 }
 
 export type PermissionsEvent =
   | { type: 'permissions/loaded'; payload: { rules: StoredPermissionRule[] } }
   | { type: 'permissions/granted'; payload: { rule: StoredPermissionRule } }
   | { type: 'permissions/revoked'; payload: { id: string } }
+  /** Several at once — a Settings group's "Remove all", or the redundant
+   *  Ness-tool cleanup — so one click is one dispatch and one config write. */
+  | { type: 'permissions/revokedMany'; payload: { ids: string[] } }
   | { type: 'permissions/cleared' }
+  | { type: 'permissions/setupCommandApproved'; payload: { repoRoot: string; command: string } }
+  | { type: 'permissions/setupCommandForgotten'; payload: { repoRoot: string } }
 
 export function permissionsReducer(
   state: PermissionsState,
@@ -61,9 +72,32 @@ export function permissionsReducer(
         rules: [...state.rules.slice(0, idx), ...state.rules.slice(idx + 1)]
       }
     }
+    case 'permissions/revokedMany': {
+      const ids = new Set(event.payload.ids)
+      const rules = state.rules.filter((r) => !ids.has(r.id))
+      if (rules.length === state.rules.length) return state
+      return { ...state, rules }
+    }
     case 'permissions/cleared':
+      // Grants only: the Settings button that sends this is labelled with
+      // the grant count. Approved setup commands are forgotten one repo at
+      // a time (setupCommandForgotten).
       if (state.rules.length === 0) return state
       return { ...state, rules: [] }
+    case 'permissions/setupCommandApproved': {
+      const { repoRoot, command } = event.payload
+      if (state.approvedSetupCommands[repoRoot] === command) return state
+      return {
+        ...state,
+        approvedSetupCommands: { ...state.approvedSetupCommands, [repoRoot]: command }
+      }
+    }
+    case 'permissions/setupCommandForgotten': {
+      if (!(event.payload.repoRoot in state.approvedSetupCommands)) return state
+      const { [event.payload.repoRoot]: _dropped, ...rest } = state.approvedSetupCommands
+      void _dropped
+      return { ...state, approvedSetupCommands: rest }
+    }
     default: {
       const _exhaustive: never = event
       void _exhaustive

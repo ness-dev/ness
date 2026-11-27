@@ -54,7 +54,7 @@ export function PanelsHost({
   // Same payloads as RightColumn's handlers (legacy fields nulled so old
   // values don't leak back through the effective-config migration).
   const setHidden = (next: HiddenRightPanels) =>
-    void client.api.setRepoConfig(repoRoot, { hiddenRightPanels: next, hideMergePanel: null, hidePrPanel: null } as unknown as Partial<RepoConfig>)
+    void client.api.setRepoConfig(repoRoot, { hiddenRightPanels: next, hidePrPanel: null } as unknown as Partial<RepoConfig>)
   const setOrder = (next: RightPanelKey[]) => void client.api.setRepoConfig(repoRoot, { rightPanelOrder: next })
 
   const props: PanelProps = {

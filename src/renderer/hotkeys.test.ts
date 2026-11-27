@@ -9,6 +9,7 @@ import {
   matchesBinding,
   eventToBinding,
   yieldsToEditor,
+  resolveHotkeys,
   type Action
 } from './hotkeys'
 
@@ -239,5 +240,20 @@ describe('yieldsToEditor', () => {
 
   it('never yields other actions', () => {
     expect(yieldsToEditor('closeTab', inside('.monaco-editor'))).toBe(false)
+  })
+})
+
+describe('resolveHotkeys', () => {
+  it('ignores persisted overrides for actions that no longer exist', () => {
+    // 'toggleCommandCenter' was removed along with Command Center.
+    const resolved = resolveHotkeys({ toggleCommandCenter: 'Cmd+Shift+K' })
+    expect(resolved).toEqual(DEFAULT_HOTKEYS)
+    expect('toggleCommandCenter' in resolved).toBe(false)
+  })
+
+  it('ignores a persisted override for the removed task list toggle', () => {
+    const resolved = resolveHotkeys({ toggleTaskList: 'Cmd+Shift+L', commandPalette: 'Cmd+J' })
+    expect('toggleTaskList' in resolved).toBe(false)
+    expect(resolved.commandPalette).toEqual(parseBinding('Cmd+J'))
   })
 })

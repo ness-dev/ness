@@ -11,7 +11,7 @@ import {
 import { BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT } from '../../shared/tools'
 import { useWatchedQuery } from '../hooks/useWatchedQuery'
 import { CustomToolPanel } from './CustomToolPanel'
-import { PRStatusPanel, MergeLocallyPanel } from './PRStatusPanel'
+import { PRStatusPanel } from './PRStatusPanel'
 import { BranchCommitsPanel } from './BranchCommitsPanel'
 import { ChangedFilesPanel } from './ChangedFilesPanel'
 import { AllFilesPanel } from './AllFilesPanel'
@@ -44,8 +44,6 @@ export interface RightPanelStackProps {
   activeRepoConfig: RepoConfig | null
   onRefreshPRs: () => void
   onOpenGithubSettings: () => void
-  onMerged: () => void
-  onRemoveWorktree: (path: string) => void
   /** The three openers below are desktop-only (diff/file tabs); the phone
    *  web client leaves them out and the panels hide or no-op them. */
   onOpenDiff?: ChangedFilesPanelProps['onOpenDiff']
@@ -94,11 +92,10 @@ export function useRightPanelConfig(
 
   const handleChangeHidden = (next: HiddenRightPanels): void => {
     if (!activeRepoRoot) return
-    // Send the full hiddenRightPanels object; also null out legacy
-    // fields so old values don't leak back in via effective migration.
+    // Send the full hiddenRightPanels object; also null out the legacy
+    // field so an old value doesn't leak back in via effective migration.
     void backend.setRepoConfig(activeRepoRoot, {
       hiddenRightPanels: next,
-      hideMergePanel: null,
       hidePrPanel: null
     } as unknown as Partial<RepoConfig>)
   }
@@ -152,8 +149,6 @@ export function RightPanelStack({
   hasGithubToken,
   onRefreshPRs,
   onOpenGithubSettings,
-  onMerged,
-  onRemoveWorktree,
   onOpenDiff,
   onOpenCommitFileDiff,
   onOpenFile,
@@ -180,17 +175,6 @@ export function RightPanelStack({
       )
     }
     switch (key) {
-      case 'merge':
-        return (
-          <MergeLocallyPanel
-            key="merge"
-            pr={activeWorktreeId ? prStatuses[activeWorktreeId] : null}
-            worktree={worktrees.find((w) => w.path === activeWorktreeId) || null}
-            hasGithubToken={hasGithubToken}
-            onMerged={onMerged}
-            onRemoveWorktree={onRemoveWorktree}
-          />
-        )
       case 'pr':
         return (
           <PRStatusPanel

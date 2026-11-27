@@ -41,6 +41,7 @@ export function fingerprint(a: AgentSummary): string {
   return [
     a.status,
     a.hasPendingApproval ? 1 : 0,
+    a.pendingApprovalToolUseIds.join(','),
     a.steps.length,
     last?.key ?? '',
     last?.text?.length ?? 0,

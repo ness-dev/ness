@@ -47,17 +47,6 @@ export function MobileRightPanel({
     void backend.refreshPRsAll()
   }, [backend])
 
-  const handleRemoveWorktree = useCallback(
-    (path: string): void => {
-      if (!activeWorktree) return
-      // A stray tap is easy on a phone and removal can't be undone here.
-      if (!window.confirm(`Remove worktree ${activeWorktree.branch || path}? It will be deleted from disk.`)) return
-      void backend.removeWorktree(activeWorktree.repoRoot, path)
-      onClose()
-    },
-    [activeWorktree, onClose, backend]
-  )
-
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-app overflow-y-auto">
       {!activeWorktree && (
@@ -89,8 +78,6 @@ export function MobileRightPanel({
             hasGithubToken={hasGithubToken}
             onRefreshPRs={handleRefresh}
             onOpenGithubSettings={onClose}
-            onMerged={handleRefresh}
-            onRemoveWorktree={handleRemoveWorktree}
             onSendToAgent={onSendToAgent}
             onOpenPR={(url) => window.open(url, '_blank', 'noopener')}
           />

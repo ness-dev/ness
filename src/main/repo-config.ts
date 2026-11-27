@@ -17,6 +17,8 @@ export type { RepoConfig }
 // everyone's git status for a change they didn't make.
 const cache = new Map<string, RepoConfig>()
 
+const REMOVED_MERGE_PANEL_KEY = 'merge'
+
 /** The config file this repo actually uses: the new name if present or if
  *  the repo has no config yet, otherwise the legacy one it already has. */
 export function repoConfigFilename(repoRoot: string): string {
@@ -58,11 +60,15 @@ export function saveRepoConfig(repoRoot: string, next: RepoConfig): RepoConfig {
   if (setup) cleaned.setupCommand = setup
   if (teardown) cleaned.teardownCommand = teardown
   if (next.mergeStrategy) cleaned.mergeStrategy = next.mergeStrategy
-  // Migrate legacy hideMergePanel / hidePrPanel into hiddenRightPanels
-  // on write. Only the new field is persisted going forward.
+  // Migrate legacy hidePrPanel into hiddenRightPanels on write. Only the
+  // new field is persisted going forward.
   const hidden: Record<string, boolean | undefined> = { ...(next.hiddenRightPanels || {}) }
-  if (next.hideMergePanel && hidden.merge === undefined) hidden.merge = true
   if (next.hidePrPanel && hidden.pr === undefined) hidden.pr = true
+  // The Merge Locally panel is gone. Files written before then may still
+  // carry its `hideMergePanel` / `hiddenRightPanels.merge` / order entry;
+  // they're ignored on read and dropped here, on the next write the user
+  // makes anyway — never rewritten on their own.
+  delete hidden[REMOVED_MERGE_PANEL_KEY]
   // Compact: drop `false` entries that match the default visibility
   // (i.e. NOT in DEFAULT_HIDDEN_RIGHT_PANELS). For keys that default to
   // hidden, `false` is a meaningful opt-in signal — keep it.
@@ -73,7 +79,8 @@ export function saveRepoConfig(repoRoot: string, next: RepoConfig): RepoConfig {
   }
   if (Object.keys(hidden).length > 0) cleaned.hiddenRightPanels = hidden
   if (Array.isArray(next.rightPanelOrder) && next.rightPanelOrder.length > 0) {
-    cleaned.rightPanelOrder = [...next.rightPanelOrder]
+    const order = next.rightPanelOrder.filter((k) => (k as string) !== REMOVED_MERGE_PANEL_KEY)
+    if (order.length > 0) cleaned.rightPanelOrder = order
   }
 
   const hasAny = Object.keys(cleaned).some((k) => k !== 'version')

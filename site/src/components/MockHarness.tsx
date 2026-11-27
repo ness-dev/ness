@@ -16,8 +16,6 @@ import {
   Globe,
   Keyboard,
   Layers,
-  LayoutGrid,
-  ListTodo,
   ListTree,
   Loader2,
   Menu,
@@ -240,7 +238,6 @@ function MockSidebar({ state }: { state: MockHarnessState }) {
         <PanelLeftClose size={12} />
         <div className="ml-auto flex items-center gap-1">
           <span className="p-0.5"><Plus size={12} /></span>
-          <span className="p-0.5"><ListTodo size={12} /></span>
           <span className="p-0.5"><Trash2 size={12} /></span>
           <span className="p-0.5 opacity-40"><Layers size={12} /></span>
           <span className="p-0.5"><RefreshCw size={12} /></span>
@@ -488,7 +485,7 @@ function CodexGlyph({ size = 12 }: { size?: number }) {
 function BottomIconStrip() {
   return (
     <div className="border-t border-border p-2 flex items-center justify-center gap-1 shrink-0 text-dim">
-      {[LayoutGrid, FilePlus, FolderOpen, BarChart3, CalendarDays, Keyboard, Menu].map(
+      {[FilePlus, FolderOpen, BarChart3, CalendarDays, Keyboard, Menu].map(
         (Icon, i) => (
           <span key={i} className="rounded p-1.5">
             <Icon size={14} />

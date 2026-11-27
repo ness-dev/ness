@@ -25,7 +25,7 @@ import type { BrowserManagerLike, CaptureResult, ConsoleLog } from './browser-ma
 import type { BrowserViewport } from '../shared/browser-viewport'
 import type { Store } from './store'
 import { log } from './debug'
-import { normalizeBrowserUrl } from './browser-url'
+import { normalizeBrowserUrl } from '../shared/browser-url'
 import {
   evalWithTimeout,
   buildEvalScript,
