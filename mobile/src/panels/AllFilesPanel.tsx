@@ -17,6 +17,7 @@ import {
   FileListViewToggle,
   STATUS_COLOR,
   STATUS_LABEL,
+  STATUS_WORD,
   fileTreeIndent,
   flattenTree,
   useChangedFilesSet,
@@ -239,8 +240,11 @@ const FileRow = memo(function FileRow({
   const dir = depth === null ? path.slice(0, path.length - name.length) : ''
   return (
     // Row tap opens a file tab on desktop (omitted); long-press shows the path.
+    // The file info, not the row, is the VoiceOver element, so the @ button
+    // stays reachable (see ChangedFilesPanel's FileRow).
     <Pressable
       onLongPress={() => Alert.alert(path)}
+      accessible={false}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',
@@ -250,26 +254,31 @@ const FileRow = memo(function FileRow({
         backgroundColor: pressed ? c.panelRaised : 'transparent'
       })}
     >
-      {changedStatus ? (
-        <Text
-          accessibilityLabel={`${changedStatus} in this PR`}
-          style={{ width: 12, fontFamily: mono, fontSize: fs.xs, textAlign: 'center', color: STATUS_COLOR[changedStatus] }}
-        >
-          {STATUS_LABEL[changedStatus]}
-        </Text>
-      ) : (
-        <FileText color={c.faint} size={12} />
-      )}
-      {depth === null ? (
-        <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs }} numberOfLines={1} ellipsizeMode="head">
-          {dir ? <Text style={{ color: c.faint }}>{dir}</Text> : null}
-          <Text style={{ color: c.fg }}>{name}</Text>
-        </Text>
-      ) : (
-        <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs, color: c.fg }} numberOfLines={1}>
-          {name}
-        </Text>
-      )}
+      <View
+        accessible
+        accessibilityLabel={changedStatus ? `${STATUS_WORD[changedStatus]} in this PR: ${path}` : path}
+        style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 4 }}
+      >
+        {changedStatus ? (
+          <Text
+            style={{ width: 12, fontFamily: mono, fontSize: fs.xs, textAlign: 'center', color: STATUS_COLOR[changedStatus] }}
+          >
+            {STATUS_LABEL[changedStatus]}
+          </Text>
+        ) : (
+          <FileText color={c.faint} size={12} />
+        )}
+        {depth === null ? (
+          <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs }} numberOfLines={1} ellipsizeMode="head">
+            {dir ? <Text style={{ color: c.faint }}>{dir}</Text> : null}
+            <Text style={{ color: c.fg }}>{name}</Text>
+          </Text>
+        ) : (
+          <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs, color: c.fg }} numberOfLines={1}>
+            {name}
+          </Text>
+        )}
+      </View>
       <AtButton onPress={() => onSendToAgent(`@${path} `)} />
     </Pressable>
   )

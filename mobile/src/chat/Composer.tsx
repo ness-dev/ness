@@ -15,6 +15,7 @@ import { fuzzyMatch } from '../../../src/renderer/fuzzy'
 import type { NessClient } from '../ness'
 import { useNess } from '../ness'
 import { alpha, c, fs, themed, getThemeMode } from '../theme'
+import { hitArea } from '../hit'
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const
 const MODE_STYLE: Record<string, { label: string; color: string | null }> = themed(() => ({
@@ -232,24 +233,30 @@ export function Composer({
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateDot }} />
             <Text style={{ color: c.muted, fontSize: fs.xs }}>{state}</Text>
             {caps.permissionModes && session && (
+              // A ~20pt pill with a real 44pt frame (hit.ts).
               <Pressable
-                hitSlop={12}
-                accessibilityLabel={`Permission mode: ${ms.label}. Tap to cycle.`}
+                accessibilityRole="button"
+                accessibilityLabel={`Permission mode: ${ms.label}`}
+                accessibilityHint="Cycles to the next permission mode"
                 onPress={() => {
                   const next = MODES[(MODES.indexOf(permissionMode as (typeof MODES)[number]) + 1) % MODES.length]
                   haptic.select()
                   void client.api.setJsonClaudePermissionMode(sessionId, next)
                 }}
-                style={{
-                  borderWidth: 1,
-                  borderRadius: 4,
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  backgroundColor: ms.color ? alpha(ms.color, 0.15) : c.surface,
-                  borderColor: ms.color ? alpha(ms.color, 0.3) : c.border
-                }}
+                style={hitArea(12, 8)}
               >
-                <Text style={{ color: ms.color ?? c.muted, fontSize: fs.xs }}>{ms.label}</Text>
+                <View
+                  style={{
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    backgroundColor: ms.color ? alpha(ms.color, 0.15) : c.surface,
+                    borderColor: ms.color ? alpha(ms.color, 0.3) : c.border
+                  }}
+                >
+                  <Text style={{ color: ms.color ?? c.muted, fontSize: fs.xs }}>{ms.label}</Text>
+                </View>
               </Pressable>
             )}
             </View>

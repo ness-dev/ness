@@ -7,6 +7,7 @@
 // per-segment titles are omitted — every segment is a row right below.
 import { useMemo, useState } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
+import { hitArea } from '../hit'
 import { findTabById, isClaudeBackedTab } from '../../../src/shared/state/terminals'
 import type { ContextSnapshot } from '../../../src/shared/state/context-window'
 import { useNess } from '../ness'
@@ -96,7 +97,16 @@ function BarRow({ row, used }: { row: Row; used: number }) {
   const [open, setOpen] = useState(false)
   const pct = used > 0 ? (row.tokens / used) * 100 : 0
   return (
-    <Pressable onPress={() => setOpen((v) => !v)} disabled={!row.title} style={{ minHeight: 28, justifyContent: 'center' }} hitSlop={{ top: 8, bottom: 8 }}>
+    // 28pt rows, touch area grown to 44 (hit.ts).
+    <Pressable
+      // No onPress (not `disabled`) when there's nothing to reveal, so
+      // VoiceOver reads a plain row instead of a dimmed button.
+      onPress={row.title ? () => setOpen((v) => !v) : undefined}
+      accessibilityRole={row.title ? 'button' : undefined}
+      accessibilityState={row.title ? { expanded: open } : undefined}
+      accessibilityLabel={`${row.label}, ${formatTokens(row.tokens)} tokens, ${pct >= 1 ? `${Math.round(pct)}%` : 'under 1%'}`}
+      style={[{ minHeight: 28 + 16, justifyContent: 'center' }, hitArea(8)]}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: row.color }} />
         <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontSize: fs.xs, color: c.faint }}>
@@ -159,8 +169,18 @@ export function ContextPanel({ client, focusedTabId }: PanelProps) {
               </Text>
             </View>
             <Meter rows={sorted} limit={snapshot.limit} />
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <Pressable onPress={() => setShowCompactHint((v) => !v)} hitSlop={12} style={{ flexShrink: 1 }}>
+            {/* center, not baseline: Yoga's baseline alignment doesn't
+                cancel the pressable's negative margin. Same-size text, so
+                it looks the same. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              {/* 14pt of text grown to a 44pt frame (hit.ts), mostly upward:
+                  the scrolling list below comes later, so it wins any overlap. */}
+              <Pressable
+                onPress={() => setShowCompactHint((v) => !v)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showCompactHint }}
+                style={{ flexShrink: 1, paddingTop: 22, marginTop: -22, paddingBottom: 8, marginBottom: -8, paddingRight: 12, marginRight: -12 }}
+              >
                 <Text style={{ fontSize: fs.xs, color: c.faint }}>{toCompact > 0 ? `${formatTokens(toCompact)} until compact` : 'compact imminent'}</Text>
               </Pressable>
               {snapshot.model && (
