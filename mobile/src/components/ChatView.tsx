@@ -331,10 +331,11 @@ export function ChatView({
     })()
   }, [client, sessionId, worktreePath])
 
-  // Deferred, as on the desktop (JsonModeChat): while a reply streams,
-  // React drops intermediate token renders it can't keep up with instead
-  // of queueing every one, so the composer and scrolling stay responsive.
-  // Streamed text lags the data by a frame or two.
+  // Deferred, as on the desktop (JsonModeChat): the transcript re-renders
+  // for each streamed token at transition priority, so a tap or keystroke
+  // can interrupt one instead of queueing behind it. It doesn't make a
+  // token's render cheaper (Markdown's block memo does that), and measured
+  // on a dev build it doesn't hold text back: every update still commits.
   const entries = useDeferredValue(session?.entries)
   const { rows, hidden, renderedToolUseIds } = useMemo(() => {
     if (!session || !entries) return { rows: [] as RenderedRow[], hidden: 0, renderedToolUseIds: new Set<string>() }
