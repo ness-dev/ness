@@ -19,6 +19,7 @@ import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../s
 import { c, fs, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
 import { SelectableText as T } from './SelectableText'
+import { sameCtx, sameNode, type BlockCtx } from './markdown-memo'
 
 const assistantProcessor = unified().use(remarkParse).use(ASSISTANT_REMARK_PLUGINS).freeze()
 const userProcessor = unified().use(remarkParse).use(USER_REMARK_PLUGINS).freeze()
@@ -38,10 +39,7 @@ interface Props {
   preserveNewlines?: boolean
 }
 
-interface Ctx {
-  base: TextStyle
-  size: number
-}
+type Ctx = BlockCtx
 
 export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, italic, preserveNewlines }: Props) {
   const tree = useMemo(() => parse(text, !!preserveNewlines), [text, preserveNewlines])
@@ -63,26 +61,6 @@ function Blocks({ nodes, ctx }: { nodes: readonly RootContent[]; ctx: Ctx }) {
 // matters more with UITextView-backed text, where each span carries its own
 // context provider and a re-render reaches native text measurement.
 const Block = memo(BlockView, (a, b) => sameCtx(a.ctx, b.ctx) && sameNode(a.node, b.node))
-
-function sameCtx(a: Ctx, b: Ctx): boolean {
-  if (a === b) return true
-  if (a.size !== b.size) return false
-  const ka = Object.keys(a.base) as (keyof TextStyle)[]
-  return ka.length === Object.keys(b.base).length && ka.every((k) => a.base[k] === b.base[k])
-}
-
-function sameNode(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a)) {
-    return Array.isArray(b) && a.length === b.length && a.every((x, i) => sameNode(x, b[i]))
-  }
-  const ra = a as Record<string, unknown>
-  const rb = b as Record<string, unknown>
-  const ka = Object.keys(ra).filter((k) => k !== 'position')
-  if (ka.length !== Object.keys(rb).filter((k) => k !== 'position').length) return false
-  return ka.every((k) => sameNode(ra[k], rb[k]))
-}
 
 function BlockView({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
   switch (node.type) {
@@ -229,7 +207,11 @@ function CodeBlock({ code }: { code: string }) {
 // streamed block only ever grows — and remounts when it changes. With
 // Block memoised that's just the one growing text, not the message; a
 // selection inside the still-streaming text is dropped, which is fine.
-// The real fix is native (set the frame before the text) — SPIKE.md.
+// The key measures source text (textOf), not what's drawn: a soft break
+// is a '\n' in a text value but renders as ' ' (same length), and a hard
+// `break` node adds nothing. Fine for tracking growth, which is all it has
+// to do; keep that in mind before changing either. It doesn't cover a
+// width-only change. The real fix is native (set the frame before the text) — SPIKE.md.
 function grownKey(text: string): string {
   return String(text.length)
 }

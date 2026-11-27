@@ -256,7 +256,12 @@ export function ChatView({
   mode: 'awake' | 'asleep'
 }) {
   const session = useNess(client, (s) => s.jsonClaude.sessions[sessionId])
-  const allApprovals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
+  // Deferred with `entries` (below) so the transcript memo always pairs
+  // an approval with the entries it arrived with: React commits a
+  // component's deferred values in the same background render. Read live,
+  // an approval could land a render before its tool_use entry and flash as
+  // an orphan at the bottom before jumping inline.
+  const allApprovals = useDeferredValue(useNess(client, (s) => s.jsonClaude.pendingApprovals))
   const settings = useNess(client, (s) => s.settings)
   const density = DENSITY[settings.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact']
 
