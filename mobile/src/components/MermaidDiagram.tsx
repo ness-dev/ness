@@ -71,11 +71,14 @@ function remember(key: string, r: RenderResult): void {
   if (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value as string)
 }
 
-function svgPage(svg: string): string {
+/** `width` in points. An explicit width, not 100%: the page's
+ *  device-width viewport is the screen's, not this WebView's frame, so a
+ *  percentage would lay the diagram out wider than the box and clip it. */
+function svgPage(svg: string, width: number): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>html, body { margin: 0; background: transparent; overflow: hidden; }
-svg { display: block; width: 100% !important; max-width: none !important; height: auto; }</style>
+svg { display: block; width: ${width}px !important; max-width: none !important; height: auto; }</style>
 </head><body>${svg}</body></html>`
 }
 
@@ -159,7 +162,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
         <View style={{ width: shown, height }} pointerEvents="none">
           {width > 0 && (
             <WebView
-              source={{ html: svgPage(result.svg) }}
+              source={{ html: svgPage(result.svg, shown) }}
               originWhitelist={['*']}
               scrollEnabled={false}
               style={{ backgroundColor: 'transparent' }}

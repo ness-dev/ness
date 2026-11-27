@@ -345,6 +345,10 @@ function CommitFileRow({ file, copied, onCopyPath, onOpen }: { file: ChangedFile
     <Pressable
       onPress={onOpen ?? onCopyPath}
       accessibilityLabel={onOpen ? `Open diff ${file.path}` : `Copy path ${file.path}`}
+      // The copy button inside an accessible row is hidden from VoiceOver,
+      // so the row offers it as an action.
+      accessibilityActions={onOpen ? [{ name: 'copy', label: 'Copy path' }] : undefined}
+      onAccessibilityAction={(e) => e.nativeEvent.actionName === 'copy' && onCopyPath()}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',

@@ -9,7 +9,9 @@ export const CodeWebView = memo(function CodeWebView({ html }: { html: string })
     <WebView
       source={{ html }}
       originWhitelist={['*']}
-      onShouldStartLoadWithRequest={(req) => req.url === 'about:blank' || req.url.startsWith('data:')}
+      // Only the page's own load; a link inside a file must not navigate
+      // the viewer away.
+      onShouldStartLoadWithRequest={(req) => req.navigationType !== 'click'}
       // Without these the page flashes white before its own background paints.
       style={{ flex: 1, backgroundColor: c.app }}
       containerStyle={{ backgroundColor: c.app }}

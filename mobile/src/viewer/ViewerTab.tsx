@@ -53,7 +53,7 @@ export function ViewerTab({ client, worktreePath, tab }: { client: NessClient; w
 function Header({ path, detail, children }: { path: string; detail?: ReactNode; children?: ReactNode }) {
   const slash = path.lastIndexOf('/')
   return (
-    <View style={{ minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel }}>
+    <View style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel }}>
       <Text style={{ flex: 1, minWidth: 0, fontFamily: mono, fontSize: fs.xs }} numberOfLines={1} ellipsizeMode="head">
         {slash >= 0 && <Text style={{ color: c.faint }}>{path.slice(0, slash + 1)}</Text>}
         <Text style={{ color: c.fg }}>{path.slice(slash + 1)}</Text>
@@ -153,7 +153,7 @@ function FileTabBody({ client, worktreePath, filePath }: { client: NessClient; w
             minimumZoomScale={1}
             centerContent
           >
-            <Image source={{ uri: state.uri }} contentFit="contain" style={{ flex: 1, minHeight: 200 }} accessibilityLabel={filePath} />
+            <Image source={{ uri: state.uri }} contentFit="scale-down" style={{ flex: 1, minHeight: 200 }} accessibilityLabel={filePath} />
           </ScrollView>
         ) : (
           <WebView source={{ uri: state.uri }} originWhitelist={['*']} style={{ flex: 1, backgroundColor: c.app }} />

@@ -267,7 +267,13 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
                 onPress={() => {
                   const { tab } = convertMenu
                   setConvertMenu(null)
-                  if (activeWorktree && client) void client.api.panesCloseTab(activeWorktree.path, tab.id)
+                  if (!activeWorktree || !client) return
+                  // Land on the neighbour, as the desktop's pane does (the
+                  // one before it, else the one after).
+                  const i = tabs.findIndex((t) => t.id === tab.id)
+                  const next = tabs[i - 1] ?? tabs[i + 1]
+                  if (next) rememberTab(activeWorktree.path, next.id)
+                  void client.api.panesCloseTab(activeWorktree.path, tab.id)
                 }}
               >
                 <Text style={{ color: c.fgBright, fontSize: fs.xs }}>Close tab</Text>
