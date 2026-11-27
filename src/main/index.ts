@@ -4094,6 +4094,14 @@ function registerIpcHandlers(): void {
     // unconditional side-effect added to either wake path can't silently
     // fire on the wrong tab type.
     const type = panesFSM.getTabType(wtPath, tabId)
+    // A wake is user activity. Without this, AutoSleepMonitor's next
+    // sweep (≤60s) sees the worktree's stale lastActive and sleeps the tab
+    // straight back — every open of an idle chat from a phone (web or
+    // app), where nothing else touches lastActive until a keystroke,
+    // woke the session only to kill it again.
+    if (type === 'json-claude' || type === 'shell') {
+      store.dispatch({ type: 'terminals/lastActiveChanged', payload: { worktreePath: wtPath, ts: Date.now() } })
+    }
     if (type === 'json-claude') {
       panesFSM.wakeJsonClaudeTab(wtPath, await forkIfRunningElsewhere(wtPath, tabId))
     } else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)

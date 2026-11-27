@@ -37,13 +37,13 @@ const NOT_MEASURED_CLASS = 'text-faint'
 function statusClass(value: number, green: number, amber: number): string {
   if (value < green) return 'text-success'
   if (value < amber) return 'text-warning'
-  return 'text-error'
+  return 'text-danger'
 }
 
 function fpsClass(fps: number): string {
   if (fps >= 50) return 'text-success'
   if (fps >= 30) return 'text-warning'
-  return 'text-error'
+  return 'text-danger'
 }
 
 function formatBytes(bytes: number): string {
