@@ -941,6 +941,21 @@ of those, or to a request handler, can break the phone without touching
 
 Mobile deps are installed separately (`npm ci --prefix mobile`).
 
+### Mobile OTA updates
+
+`.github/workflows/mobile-update.yml` fires on the same tag push and
+publishes `mobile/` as an EAS Update on the `production` channel
+(`eas update`), so the phone's JS ships with the release it talks to.
+The EAS project is **`@mikepersonal/ness`** (`owner` and `projectId` in
+`mobile/app.json`). Keep it there: the Expo CLI on this machine can also
+reach work accounts, and `owner` is what stops `eas` commands from
+creating or publishing anywhere else. `runtimeVersion` uses the
+`fingerprint` policy, so an update only reaches builds with matching
+native code; adding a native module means a new build (profiles in
+`mobile/eas.json`), not just an OTA. The job needs the `EXPO_TOKEN` repo
+secret (a robot token from mikepersonal) and skips with a notice without
+it. Expo Go ignores OTAs; they only apply to EAS-built apps.
+
 ### Headless tarballs
 
 The `Headless Release` workflow (`.github/workflows/headless-release.yml`)

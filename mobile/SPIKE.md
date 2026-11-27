@@ -449,6 +449,11 @@ Each item is meant for its own worktree.
 
 - **Development build.** Move off Expo Go (`npx expo run:ios` / EAS) so
   the app can ship native modules. Several items below need it.
+- **First EAS builds** (`eas build --profile preview|production`). OTA
+  updates are wired up (`mobile-update.yml`, project `@mikepersonal/ness`)
+  but only reach EAS-built apps. Needs `ios.bundleIdentifier` /
+  `android.package` (permanent once on a store) and Apple / Google
+  credentials.
 - **Inline text selection** (needs the development build). Swap chat
   `<Text>` for Bluesky's `react-native-uitextview`, which gives real
   iOS range selection in place, keeps nested styling and tappable links.
