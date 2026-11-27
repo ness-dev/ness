@@ -285,6 +285,10 @@ export function TerminalView({
   const reload = useCallback(() => {
     started.current = false
     spawned.current = false
+    // The new page starts unfocused and at the bottom; its focus/scroll
+    // messages only arrive on change, so reset what the old page reported.
+    setKeyboardOpen(false)
+    setScrolledBack(false)
     setGeneration((g) => g + 1)
   }, [])
 
