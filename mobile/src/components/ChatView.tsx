@@ -36,7 +36,6 @@ import {
 import { ApprovalSlot } from '../chat/ApprovalCard'
 import { ChatClientContext } from '../chat/ChatImage'
 import { Composer } from '../chat/Composer'
-import { CopyableMessage, CopyMenuHost } from '../chat/CopyText'
 import { haptic } from '../haptics'
 import { DENSITY, DensityContext, ExpandStoreContext } from '../chat/density'
 
@@ -231,10 +230,10 @@ function GroupedNode({ item }: { item: GroupedItem }) {
 function AssistantText({ text, streaming }: { text: string; streaming: boolean }) {
   const d = DENSITY.compact
   return (
-    <CopyableMessage text={streaming ? '' : text}>
+    <View>
       <Markdown text={text} size={d.body} />
       {streaming && <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />}
-    </CopyableMessage>
+    </View>
   )
 }
 
@@ -425,7 +424,6 @@ export function ChatView({
 
   return (
     <ExpandStoreContext.Provider value={expandStore}>
-      <CopyMenuHost>
     <ChatClientContext.Provider value={client}>
     <DensityContext.Provider value={density}>
       <View style={{ flex: 1 }}>
@@ -522,7 +520,6 @@ export function ChatView({
       />
     </DensityContext.Provider>
     </ChatClientContext.Provider>
-      </CopyMenuHost>
     </ExpandStoreContext.Provider>
   )
 }

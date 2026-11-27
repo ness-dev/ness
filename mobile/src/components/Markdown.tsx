@@ -18,7 +18,7 @@ import { ASSISTANT_REMARK_PLUGINS, USER_REMARK_PLUGINS } from '../../../src/rend
 import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../src/shared/chat-image-src'
 import { c, fs, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
-import { CopyableMessage } from '../chat/CopyText'
+import { SelectableText as T } from './SelectableText'
 
 const assistantProcessor = unified().use(remarkParse).use(ASSISTANT_REMARK_PLUGINS).freeze()
 const userProcessor = unified().use(remarkParse).use(USER_REMARK_PLUGINS).freeze()
@@ -71,9 +71,9 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
       return (
         <>
           {hasText && (
-            <Text style={ctx.base}>
+            <T style={ctx.base}>
               <Inlines nodes={inline} />
-            </Text>
+            </T>
           )}
           {images.length > 0 && <ImageRow images={images} />}
         </>
@@ -81,9 +81,9 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     }
     case 'heading':
       return (
-        <Text style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
+        <T style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'thematicBreak':
       return <View style={{ height: 1, backgroundColor: c.border, marginVertical: 4 }} />
@@ -100,7 +100,7 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     case 'table':
       return <TableBlock node={node} ctx={ctx} />
     case 'html':
-      return <Text style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</Text>
+      return <T style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</T>
     case 'footnoteDefinition':
       return (
         <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -120,44 +120,46 @@ function Inlines({ nodes }: { nodes: readonly PhrasingContent[] }) {
   return <>{nodes.map((n, i) => <Inline key={i} node={n} />)}</>
 }
 
+// Every case renders through T, even bare strings: see SelectableText's
+// nesting rule.
 function Inline({ node }: { node: PhrasingContent }): ReactNode {
   switch (node.type) {
     case 'text':
       // A soft line break inside a paragraph is whitespace, as in HTML.
       // (USER_REMARK_PLUGINS turns them into `break` nodes instead.)
-      return node.value.replace(/\n/g, ' ')
+      return <T>{node.value.replace(/\n/g, ' ')}</T>
     case 'break':
-      return '\n'
+      return <T>{'\n'}</T>
     case 'emphasis':
       return (
-        <Text style={{ fontStyle: 'italic' }}>
+        <T style={{ fontStyle: 'italic' }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'strong':
       return (
-        <Text style={{ fontWeight: '600', color: c.fgBright }}>
+        <T style={{ fontWeight: '600', color: c.fgBright }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'delete':
       return (
-        <Text style={{ textDecorationLine: 'line-through', color: c.dim }}>
+        <T style={{ textDecorationLine: 'line-through', color: c.dim }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'inlineCode':
-      return <Text style={s.code}>{node.value}</Text>
+      return <T style={s.code}>{node.value}</T>
     case 'link':
       return (
-        <Text style={{ color: c.info, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(node.url)}>
+        <T style={{ color: c.info, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(node.url)}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'footnoteReference':
-      return <Text style={{ color: c.dim, fontSize: fs.xs }}>[{node.label ?? node.identifier}]</Text>
+      return <T style={{ color: c.dim, fontSize: fs.xs }}>[{node.label ?? node.identifier}]</T>
     case 'html':
-      return node.value
+      return <T>{node.value}</T>
     default:
       // image (drawn at paragraph level), imageReference, linkReference.
       return 'children' in node ? <Inlines nodes={(node as { children: PhrasingContent[] }).children} /> : null
@@ -185,13 +187,9 @@ function ListBlock({ node, ctx }: { node: List; ctx: Ctx }) {
 
 function CodeBlock({ code }: { code: string }) {
   return (
-    // Long-press selects just the code (the message's own long-press is
-    // the next one out).
-    <CopyableMessage text={code}>
-      <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
-        <Text style={s.codeBlockText}>{code}</Text>
-      </ScrollView>
-    </CopyableMessage>
+    <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
+      <T style={s.codeBlockText}>{code}</T>
+    </ScrollView>
   )
 }
 
@@ -239,9 +237,9 @@ function TableBlock({ node, ctx }: { node: Table; ctx: Ctx }) {
                     borderColor: c.border
                   }}
                 >
-                  <Text style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
+                  <T style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
                     {cell && <Inlines nodes={cell.children} />}
-                  </Text>
+                  </T>
                 </View>
               )
             })}

@@ -25,7 +25,6 @@ import { Markdown } from '../components/Markdown'
 import { Spin } from '../components/Spin'
 import { ROW_HIT_SLOP, useDensity, usePersistedChoice } from './density'
 import { ImageStrip } from './ChatImage'
-import { CopyableMessage } from './CopyText'
 
 export interface ToolResultView {
   content: string
@@ -626,9 +625,7 @@ export function ThinkingCard({ id, text, isPartial }: { id?: string; text: strin
       {open && (
         <View style={{ paddingLeft: 20, paddingBottom: 6 }}>
           {text ? (
-            <CopyableMessage text={isPartial ? '' : text}>
-              <Markdown text={text} size={12} color={c.muted} italic />
-            </CopyableMessage>
+            <Markdown text={text} size={12} color={c.muted} italic />
           ) : (
             <Text style={{ color: c.dim, fontSize: 12, fontStyle: 'italic' }}>(hidden)</Text>
           )}
@@ -753,9 +750,7 @@ export function UserBubble({ text, queued, onCancel, images }: { text: string; q
         }}
       >
         <View style={{ flexShrink: 1 }}>
-          <CopyableMessage text={text}>
-            <Markdown text={text} size={d.body} preserveNewlines />
-          </CopyableMessage>
+          <Markdown text={text} size={d.body} preserveNewlines />
           {images && images.length > 0 && (
             <View style={{ marginTop: 8 }}>
               <ImageStrip images={images} height={72} />

@@ -454,13 +454,6 @@ Each item is meant for its own worktree.
   but only reach EAS-built apps. Needs `ios.bundleIdentifier` /
   `android.package` (permanent once on a store) and Apple / Google
   credentials.
-- **Inline text selection** (needs the development build). Swap chat
-  `<Text>` for Bluesky's `react-native-uitextview`, which gives real
-  iOS range selection in place, keeps nested styling and tappable links.
-  Today a long-press opens the message in a Select Text sheet
-  (`src/chat/CopyText.tsx`), because RN's iOS `selectable` copies only a
-  whole Text block. Selection still won't cross paragraph or code-block
-  boundaries.
 - **Terminal and Shell tabs.** Currently a "terminal tabs don't work
   yet" placeholder.
 - **File and diff viewer** from Changed Files, All Files and commits.
