@@ -7,7 +7,7 @@
 // header button (onOpenReview opens a review tab), "Open file in editor"
 // (openInEditor), and drag-a-row-into-the-composer (the @ button covers it).
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native'
+import { Alert, Pressable, ScrollView, Text, View, StyleSheet } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AtSign, ChevronRight, Folder, FolderOpen, List, ListTree, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
@@ -351,12 +351,12 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
               backgroundColor: alpha(c.panelRaised, 0.5)
             }}
           >
-            <Text style={sectionText}>{item.label}</Text>
+            <Text style={sectionStyles.sectionText}>{item.label}</Text>
             <FileListViewToggle view={item.view} onToggle={item.onToggle} />
           </View>
         )
       case 'subsection':
-        return <Text style={[sectionText, { paddingHorizontal: 12, paddingVertical: 4 }]}>{item.label}</Text>
+        return <Text style={[sectionStyles.sectionText, { paddingHorizontal: 12, paddingVertical: 4 }]}>{item.label}</Text>
       case 'empty':
         return (
           <Text style={{ paddingHorizontal: 12, paddingVertical: 8, fontSize: fs.xs, color: c.faint, fontStyle: 'italic' }}>
@@ -405,13 +405,6 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
   )
 }
 
-const sectionText = themed(() => ({
-  fontSize: fs.xs,
-  fontWeight: '500' as const,
-  color: c.dim,
-  textTransform: 'uppercase' as const,
-  letterSpacing: 0.6
-}))
 
 function FileRow({
   file,
@@ -469,3 +462,19 @@ function FileRow({
     </Pressable>
   )
 }
+
+// Read styles from this map (st.x); never pass a themed() object itself
+// as a style. React freezes styles and flattens them by enumerating
+// keys, and themed()'s Proxy supports neither, so the style silently
+// vanished (text fell back to iOS's default black on dark themes).
+const sectionStyles = themed(() =>
+  StyleSheet.create({
+  sectionText: {
+  fontSize: fs.xs,
+  fontWeight: '500' as const,
+  color: c.dim,
+  textTransform: 'uppercase' as const,
+  letterSpacing: 0.6
+}
+  })
+)
