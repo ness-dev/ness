@@ -128,7 +128,7 @@ export function TerminalView({
     return api.onTerminalExit((tid) => {
       if (tid !== id) return
       exitedRef.current = true
-      if (tab.type === 'agent') setExited(true)
+      setExited(true)
     })
   }, [api, id, tab.type])
 
@@ -307,13 +307,23 @@ export function TerminalView({
         if (exitedRef.current || !started.current) return
         if (everLive.current && !client.getState().terminals.sessions[id]) {
           exitedRef.current = true
-          if (tab.type === 'agent') setExited(true)
+          setExited(true)
           return
         }
         reload()
       }),
     [client, reload, id, tab.type]
   )
+
+  // A shell has no session to resume, so "restart" is what desktop does on
+  // mount: a fresh shell under the same tab id. Most often reached after a
+  // headless server restart, which ends every PTY.
+  const restartShell = useCallback(() => {
+    exitedRef.current = false
+    everLive.current = false // so the reload spawns instead of reattaching
+    setExited(false)
+    reload()
+  }, [reload])
 
   const takeControl = useCallback(() => {
     const d = dims.current ?? { cols: 120, rows: 30 }
@@ -398,10 +408,15 @@ export function TerminalView({
 
         {exited && (
           <View style={[StyleSheet.absoluteFill, s.center, { backgroundColor: alpha(c.app, 0.8) }]}>
-            <Text style={{ color: c.dim, fontSize: fs.sm }}>{agentName} exited.</Text>
-            {onRestartAgent && (
+            <Text style={{ color: c.dim, fontSize: fs.sm }}>{tab.type === 'agent' ? agentName : 'Shell'} exited.</Text>
+            {tab.type === 'agent' && onRestartAgent && (
               <Pressable onPress={onRestartAgent} style={({ pressed }) => [s.restart, pressed && { backgroundColor: c.surface }]} accessibilityRole="button">
                 <Text style={{ color: c.fgBright, fontSize: fs.sm }}>Start a new session</Text>
+              </Pressable>
+            )}
+            {tab.type === 'shell' && (
+              <Pressable onPress={restartShell} style={({ pressed }) => [s.restart, pressed && { backgroundColor: c.surface }]} accessibilityRole="button">
+                <Text style={{ color: c.fgBright, fontSize: fs.sm }}>Restart shell</Text>
               </Pressable>
             )}
           </View>
