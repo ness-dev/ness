@@ -95,7 +95,7 @@ function CommitRow({ commit: cm, isFirst, isLast, onPress }: { commit: BranchCom
       // Long-press = the desktop's hover tooltip + right-click "Copy commit SHA".
       onLongPress={() =>
         Alert.alert(`${cm.shortHash} · ${cm.author} · ${cm.relativeDate} · ${tipSuffix}`, cm.subject, [
-          { text: 'Copy commit SHA', onPress: () => copyText(cm.hash) },
+          { text: 'Copy commit SHA', onPress: () => void copyText(cm.hash) },
           { text: 'Cancel', style: 'cancel' }
         ])
       }
@@ -175,10 +175,12 @@ function CommitInfoSheet({
   }, [])
 
   const copyPath = (path: string): void => {
-    if (!copyText(path)) return
-    setCopiedPath(path)
-    if (pathTimer.current !== null) clearTimeout(pathTimer.current)
-    pathTimer.current = setTimeout(() => setCopiedPath(null), 1200)
+    void copyText(path).then((ok) => {
+      if (!ok) return
+      setCopiedPath(path)
+      if (pathTimer.current !== null) clearTimeout(pathTimer.current)
+      pathTimer.current = setTimeout(() => setCopiedPath(null), 1200)
+    })
   }
 
   useEffect(() => {
@@ -207,9 +209,11 @@ function CommitInfoSheet({
   }, [client, worktreePath, sha])
 
   const copySha = (): void => {
-    if (!copyText(meta?.hash ?? sha)) return
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1200)
+    void copyText(meta?.hash ?? sha).then((ok) => {
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
   }
 
   const shortSha = meta?.shortHash ?? sha.slice(0, 10)

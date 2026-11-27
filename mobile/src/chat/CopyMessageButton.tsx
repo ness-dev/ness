@@ -20,10 +20,12 @@ export function CopyMessageButton({ text, align = 'flex-start' }: { text: string
   return (
     <Pressable
       onPress={() => {
-        if (!copyText(text)) return
-        setCopied(true)
-        if (timer.current !== null) clearTimeout(timer.current)
-        timer.current = setTimeout(() => setCopied(false), 1200)
+        void copyText(text).then((ok) => {
+          if (!ok) return
+          setCopied(true)
+          if (timer.current !== null) clearTimeout(timer.current)
+          timer.current = setTimeout(() => setCopied(false), 1200)
+        })
       }}
       hitSlop={12}
       accessibilityRole="button"
