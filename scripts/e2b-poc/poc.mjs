@@ -3,7 +3,9 @@
 // from a local Ness as a remote backend, running on the user's Claude
 // subscription.
 //
-//   node poc.mjs up [--auth keychain|token]   create + install + auth + start
+//   node poc.mjs up [--auth token|keychain]   create + install + auth + start
+//                                             (keychain copies die within ~8h: the Mac's next refresh
+//                                             rotates the refresh token out from under the sandbox)
 //   node poc.mjs proxy [port]                 local proxy adding E2B's traffic token; prints the Add Backend URL
 //   node poc.mjs url                          sandbox id + host
 //   node poc.mjs auth-check                   claude auth status + claude -p inside
@@ -113,7 +115,7 @@ function printConnect(sbx, state) {
 }
 
 async function up() {
-  const auth = flag('--auth', 'keychain')
+  const auth = flag('--auth', 'token')
   if (auth === 'token' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     throw new Error('--auth token needs CLAUDE_CODE_OAUTH_TOKEN in your env (run `claude setup-token` locally)')
   }
@@ -341,34 +343,82 @@ async function streamTest() {
  *  allowPublicTraffic:false, and a browser-side WebSocket (Ness's renderer
  *  transport) can't set the required header, so something local has to. */
 async function proxy(localPort) {
-  // connect() resumes a paused sandbox but only extends it 5 minutes, so the
-  // proxy doubles as the keep-alive: while a client can reach the sandbox,
-  // keep pushing its timeout out. Stop the proxy and it pauses on its own.
-  const { sbx, state } = await connect()
-  const KEEPALIVE_MS = 30 * 60_000
-  await sbx.setTimeout(KEEPALIVE_MS)
+  // The proxy owns the sandbox's lifecycle. A request to a paused sandbox
+  // resumes it (Sandbox.connect); while a WS client is attached the timeout
+  // keeps getting pushed out; with no clients it lapses and the sandbox
+  // pauses itself. setTimeout() can't wake a paused sandbox ("not found"),
+  // so a failed extend falls back to a resume on the next request.
+  const state = loadState()
+  const IDLE_GRACE_MS = 10 * 60_000
+  let sbx = await Sandbox.connect(state.sandboxId, { timeoutMs: IDLE_GRACE_MS })
+  let resuming = null
+  let mustResume = false
+  let lastCheck = Date.now()
+  const ensureRunning = async () => {
+    // A page load fans out into dozens of asset requests; one liveness
+    // check per 30s covers them all.
+    if (!mustResume && Date.now() - lastCheck < 30_000) return
+    resuming ??= (async () => {
+      const running = !mustResume && (await sbx.isRunning().catch(() => false))
+      if (!running) {
+        const t0 = now()
+        sbx = await Sandbox.connect(state.sandboxId, { timeoutMs: IDLE_GRACE_MS })
+        console.log(`${new Date().toISOString()} resumed sandbox in ${ms(t0)}`)
+      }
+      mustResume = false
+      lastCheck = Date.now()
+    })().finally(() => {
+      resuming = null
+    })
+    await resuming
+  }
+  let openSockets = 0
   setInterval(() => {
-    sbx.setTimeout(KEEPALIVE_MS).catch((e) => console.error('keep-alive failed:', e.message))
-  }, 5 * 60_000)
+    if (openSockets === 0) return
+    sbx.setTimeout(IDLE_GRACE_MS).catch((e) => {
+      console.error(`${new Date().toISOString()} keep-alive failed (${e.message}); will resume on next request`)
+      mustResume = true
+    })
+  }, 60_000)
   const host = sbx.getHost(PORT)
-  const auth = { 'e2b-traffic-access-token': sbx.trafficAccessToken }
   const { createServer } = await import('node:http')
   const { request } = await import('node:https')
-  const forwardHeaders = (h) => ({ ...h, host, ...auth })
-  const server = createServer((req, res) => {
+  // Read the token off the current handle: a resume returns a new one.
+  const forwardHeaders = (h) => ({ ...h, host, 'e2b-traffic-access-token': sbx.trafficAccessToken })
+  const fail = (e) => {
+    mustResume = true
+    return String(e?.message ?? e)
+  }
+  const server = createServer(async (req, res) => {
+    try {
+      await ensureRunning()
+    } catch (e) {
+      res.writeHead(503)
+      res.end(`sandbox resume failed: ${fail(e)}`)
+      return
+    }
     const up = request({ host, path: req.url, method: req.method, headers: forwardHeaders(req.headers) }, (r) => {
+      if ((r.statusCode ?? 0) >= 502) mustResume = true
       res.writeHead(r.statusCode ?? 502, r.headers)
       r.pipe(res)
     })
     up.on('error', (e) => {
       res.writeHead(502)
-      res.end(String(e))
+      res.end(fail(e))
     })
     req.pipe(up)
   })
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', async (req, socket, head) => {
+    try {
+      await ensureRunning()
+    } catch (e) {
+      socket.end(`HTTP/1.1 503 Service Unavailable\r\n\r\n${fail(e)}`)
+      return
+    }
     const up = request({ host, path: req.url, method: req.method, headers: forwardHeaders(req.headers) })
     up.on('upgrade', (r, upSocket, upHead) => {
+      openSockets++
+      let counted = true
       const lines = [`HTTP/1.1 ${r.statusCode} ${r.statusMessage}`]
       for (let i = 0; i < r.rawHeaders.length; i += 2) lines.push(`${r.rawHeaders[i]}: ${r.rawHeaders[i + 1]}`)
       socket.write(lines.join('\r\n') + '\r\n\r\n')
@@ -376,6 +426,10 @@ async function proxy(localPort) {
       if (head?.length) upSocket.write(head)
       upSocket.pipe(socket).pipe(upSocket)
       const end = () => {
+        if (counted) {
+          counted = false
+          openSockets--
+        }
         socket.destroy()
         upSocket.destroy()
       }
@@ -383,9 +437,13 @@ async function proxy(localPort) {
       socket.on('error', end).on('close', end)
     })
     up.on('response', (r) => {
+      if ((r.statusCode ?? 0) >= 502) mustResume = true
       socket.end(`HTTP/1.1 ${r.statusCode} ${r.statusMessage}\r\n\r\n`)
     })
-    up.on('error', () => socket.destroy())
+    up.on('error', (e) => {
+      fail(e)
+      socket.destroy()
+    })
     up.end()
   })
   server.listen(localPort, '127.0.0.1', () => {
