@@ -54,11 +54,14 @@ function Shell() {
           screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.app } }}
           screenLayout={({ children }) => <Fragment key={themeKey}>{children}</Fragment>}
         >
+          {/* Home only ever redirects; no transition into or out of it. */}
+          <Stack.Screen name="index" options={{ animation: 'none' }} />
           {/* One worktree screen, ever: worktrees are peers, not history, so
               opening another (the picker, an /open link) reuses this screen
               with the new path instead of stacking a second one that
-              swipe-back would return to. */}
-          <Stack.Screen name="w/[wt]/index" dangerouslySingular={() => 'worktree'} />
+              swipe-back would return to. No slide either: switching
+              worktrees is instant, like the web's picker. */}
+          <Stack.Screen name="w/[wt]/index" dangerouslySingular={() => 'worktree'} options={{ animation: 'none' }} />
           <Stack.Screen name="backends" options={{ presentation: 'modal' }} />
         </Stack>
       </KeyboardAvoidingView>
