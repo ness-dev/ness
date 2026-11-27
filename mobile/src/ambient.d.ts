@@ -8,3 +8,14 @@ declare global {
     __HARNESS_WEB__?: boolean
   }
 }
+
+// The renderer's remark plugins set `data.hName` / `data.hProperties` on
+// mdast nodes (remarkInsight, remarkMermaid). On desktop those fields are
+// typed by mdast-util-to-hast's augmentation, which react-markdown pulls
+// in; the app renders mdast itself, so it declares them here.
+declare module 'mdast' {
+  interface Data {
+    hName?: string
+    hProperties?: Record<string, unknown>
+  }
+}

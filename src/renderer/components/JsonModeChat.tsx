@@ -12,10 +12,7 @@ import {
 } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import { rehypeHighlightShared } from '../rehype-highlight-shared'
-import remarkGfm from 'remark-gfm'
-import { remarkInsight } from '../remark-insight'
-import { remarkMermaid } from '../remark-mermaid'
-import { USER_REMARK_PLUGINS } from '../remark-user-text'
+import { ASSISTANT_REMARK_PLUGINS, USER_REMARK_PLUGINS } from '../chat-remark-plugins'
 import type { PluggableList } from 'unified'
 import { InsightCard } from './InsightCard'
 import { MarkdownPre } from './MermaidDiagram'
@@ -119,8 +116,7 @@ import {
   useFindController
 } from './JsonModeChatFind'
 
-// remarkMermaid must run after remarkInsight, which rebuilds the tree.
-const REMARK_PLUGINS = [remarkGfm, remarkInsight, remarkMermaid]
+const REMARK_PLUGINS = ASSISTANT_REMARK_PLUGINS
 const REHYPE_PLUGINS = [rehypeHighlightShared, rehypeColorHex]
 
 /** Markdown `![alt](…)` in a message. An agent that just took a browser
