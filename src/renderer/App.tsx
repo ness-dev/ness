@@ -27,7 +27,7 @@ import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorkt
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
 import { FirstRunTour } from './components/FirstRunTour'
-import { CenterEmptyState, centerEmptyMode } from './components/CenterEmptyState'
+import { CenterEmptyState } from './components/CenterEmptyState'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -595,12 +595,6 @@ function DesktopApp(): JSX.Element {
         : null,
     [tour, worktrees]
   )
-  // Shared by the tour popout and the center empty state so both drive the
-  // same kickoff and tour transition.
-  const handleTourStart = useCallback(async () => {
-    const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
-    if (result.ok) setActiveWorktreeId(result.worktreePath)
-  }, [backend])
 
   const configLoadError = useConfigLoadError()
 
@@ -881,8 +875,18 @@ function DesktopApp(): JSX.Element {
   // finished deletion, a dismissed pending creation, a stale focus after
   // a refresh — route focus to a neighbor so the center pane doesn't
   // collapse into an empty region.
+  // Nothing selected yet is the same problem: a fresh install mounts with
+  // an empty list, so once the wizard adds projects (one or many), open the
+  // one the tour is about rather than leaving the center empty.
   useEffect(() => {
-    if (!activeWorktreeId) return
+    if (!activeWorktreeId) {
+      // `eligible` with rows present means main hasn't started the tour
+      // yet; wait a beat so we open its project, not whichever row is first.
+      if (tour.step === 'eligible') return
+      const pick = tourHomePath ?? worktrees[0]?.path ?? null
+      if (pick) setActiveWorktreeId(pick)
+      return
+    }
     if (isPendingId(activeWorktreeId)) {
       if (pendingWorktrees.some((p) => p.id === activeWorktreeId)) return
     } else {
@@ -890,7 +894,7 @@ function DesktopApp(): JSX.Element {
       if (pendingDeletions.some((d) => d.path === activeWorktreeId)) return
     }
     setActiveWorktreeId(worktrees[0]?.path ?? null)
-  }, [activeWorktreeId, worktrees, pendingWorktrees, pendingDeletions])
+  }, [activeWorktreeId, worktrees, pendingWorktrees, pendingDeletions, tourHomePath, tour.step])
 
   const handleAcceptHooks = useCallback(() => {
     void backend.acceptHooks()
@@ -2237,9 +2241,7 @@ function DesktopApp(): JSX.Element {
             </div>
             <div className="flex-1 flex items-center justify-center">
               <CenterEmptyState
-                mode={centerEmptyMode({ onboardingVisible, tourHomePath })}
                 newWorktreeBinding={resolvedHotkeys.newWorktree}
-                onTourStart={handleTourStart}
                 onNewWorktree={() => setShowNewWorktree(true)}
               />
             </div>
@@ -2267,7 +2269,10 @@ function DesktopApp(): JSX.Element {
           <FirstRunTour
             tour={tour}
             homePath={tourHomePath}
-            onStart={handleTourStart}
+            onStart={async () => {
+              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+              if (result.ok) setActiveWorktreeId(result.worktreePath)
+            }}
             onDismiss={() => void backend.tourDismiss().catch(() => {})}
           />
         )}
