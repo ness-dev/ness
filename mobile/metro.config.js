@@ -34,7 +34,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (fromSrc && SHIMS[moduleName]) return { type: 'sourceFile', filePath: SHIMS[moduleName] }
   if (isBare(moduleName) && fromSrc) {
     return context.resolveRequest(
-      { ...context, originModulePath: path.join(projectRoot, 'index.ts') },
+      { ...context, originModulePath: path.join(projectRoot, 'package.json') },
       moduleName,
       platform
     )

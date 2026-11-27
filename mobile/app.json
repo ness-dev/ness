@@ -37,7 +37,9 @@
           "recordAudioAndroid": false
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-router"
+    ],
+    "scheme": "ness"
   }
 }

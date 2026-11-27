@@ -1,231 +1,69 @@
-// Port of the web client's mobile shell (src/renderer/components/
-// MobileApp.tsx). Kept structurally parallel to it on purpose — selection
-// fallback, rising-edge wake, add-tab and convert-menu behaviour all mirror
-// that file, so read the two side by side when changing either. The
-// worktree list itself comes from the renderer's own pure model code via
-// src/fleet.ts, across every enabled backend.
-import { StatusBar } from 'expo-status-bar'
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
-import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+// The worktree screen: header (worktree picker button, tab strip, tools
+// button) over the selected tab. Port of the web client's mobile shell
+// (src/renderer/components/MobileApp.tsx), kept structurally parallel to it
+// on purpose — selection fallback, rising-edge wake, add-tab and
+// convert-menu behaviour mirror that file, so read the two side by side
+// when changing either. Which worktree is shown is the route (/w/[wt]);
+// the picker is an overlay on this screen, like the web's dropdown.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Keyboard,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  useWindowDimensions,
-  View
-} from 'react-native'
-import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightClose, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
-import { parseConnectionUrl } from '../src/shared/transport/parse-connection-url'
-import { supportsChat } from '../src/shared/agent-registry'
-import type { PtyStatus, TerminalTab } from '../src/shared/state/terminals'
-import { useBackends } from './src/backends'
-import { consumeLaunchUrl } from './src/launchUrl'
-import { haptic } from './src/haptics'
-import { firstLeafId, newChatTab, pickInitialTab } from './src/tabs'
-import { Fleet, useFleetEntries, useMerged } from './src/fleet'
-import { useNess, type NessClient } from './src/ness'
-import { STATUS_DOT, applyTheme, c, fs, getThemeMode, themeKey, themed } from './src/theme'
-import { AgentIcon } from './src/components/AgentIcon'
-import { ChatView } from './src/components/ChatView'
-import { WorktreePicker } from './src/components/WorktreePicker'
-import { BackendsSheet } from './src/components/BackendsSheet'
-import { Spin } from './src/components/Spin'
-import { PanelsHost } from './src/panels/PanelsHost'
-import { getLeaves } from '../src/shared/state/terminals'
+import { Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { Redirect, router } from 'expo-router'
+import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
+import { supportsChat } from '../../../src/shared/agent-registry'
+import type { PtyStatus, TerminalTab } from '../../../src/shared/state/terminals'
+import { haptic } from '../haptics'
+import { firstLeafId, newChatTab } from '../tabs'
+import { rememberTab, setLastWorktree, useSelectedTabId } from '../navState'
+import { toolsHref, worktreeHref } from '../routes'
+import { useFleetEntries, useMerged } from '../fleet'
+import { useWorkspace } from '../workspace'
+import { useNess, type NessClient } from '../ness'
+import { STATUS_DOT, c, fs, themed } from '../theme'
+import { AgentIcon } from '../components/AgentIcon'
+import { ChatView } from '../components/ChatView'
+import { WorktreePicker } from '../components/WorktreePicker'
+import { Spin } from '../components/Spin'
+import { Empty } from '../components/Empty'
 
-export default function Root() {
-  return (
-    <SafeAreaProvider>
-      <KeyboardProvider>
-        <App />
-      </KeyboardProvider>
-    </SafeAreaProvider>
-  )
-}
-
-function App() {
-  const backends = useBackends()
-  const fleet = useMemo(() => new Fleet(), [])
-  // In an effect, not during render: setClients notifies subscribers.
-  useEffect(() => fleet.setClients(backends.clients), [fleet, backends.clients])
-  const [showBackends, setShowBackends] = useState(false)
-  const theme = useThemeFromSettings(fleet)
-
-  // Deep-link pairing: <scheme>://pair?url=<connection link>.
-  useEffect(() => {
-    const handle = (link: string | null | undefined) => {
-      const m = link && /[?&]url=([^&]+)/.exec(link)
-      if (!m) return
-      const r = parseConnectionUrl(decodeURIComponent(m[1]))
-      if (r.ok) backends.add({ wsUrl: r.parsed.wsUrl, token: r.parsed.token })
-    }
-    void consumeLaunchUrl().then(handle)
-    const sub = Linking.addEventListener('url', (e) => handle(e.url))
-    return () => sub.remove()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  if (!backends.loaded) {
-    return (
-      <Shell key={theme}>
-        <ActivityIndicator color={c.muted} style={{ flex: 1 }} />
-      </Shell>
-    )
-  }
-  if (backends.saved.length === 0) {
-    return (
-      <Shell key={theme}>
-        <BackendsSheet backends={backends} />
-      </Shell>
-    )
-  }
-  return (
-    <Shell key={theme}>
-      <MobileApp fleet={fleet} onOpenBackends={() => setShowBackends(true)} />
-      {showBackends && <BackendsSheet backends={backends} onClose={() => setShowBackends(false)} />}
-    </Shell>
-  )
-}
-
-// Ness's colour theme is a client-owned setting; the phone follows the
-// first connected backend's (normally the user's own desktop), with
-// 'system' resolved against the phone's appearance. The palette is applied
-// during render, before anything below reads `c`, and the returned key
-// remounts the UI subtree so every component and themed() style picks up
-// the new colours. Backend connections live above it and stay up.
-function useThemeFromSettings(fleet: Fleet): string {
-  const entries = useFleetEntries(fleet)
-  const settings = entries[0]?.state.settings
-  const systemScheme = useColorScheme()
-  return useMemo(() => {
-    const inputs = {
-      themeMode: settings?.themeMode ?? 'dark',
-      themeLight: settings?.themeLight ?? '',
-      themeDark: settings?.themeDark ?? '',
-      customThemes: settings?.customThemes ?? [],
-      nessieColor: settings?.nessieColor ?? '',
-      systemScheme
-    }
-    applyTheme(inputs)
-    return themeKey(inputs)
-  }, [settings, systemScheme])
-}
-
-// keyboard-controller's KeyboardAvoidingView animates frame-by-frame with
-// the keyboard on the UI thread (RN's own one ran a LayoutAnimation that
-// moved the composer's button row and its text box at different speeds).
-//
-// Bottom edge: deliberately ignores the bottom safe area, so with the
-// keyboard down the composer sits on the screen's bottom edge (only its own
-// 12pt padding below it, over the home indicator) instead of 34pt higher.
-// The KAV spans to the screen bottom, so its padding is exactly the
-// keyboard height and the composer still rests 12pt above the keyboard.
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-      <StatusBar style={getThemeMode() === 'light' ? 'dark' : 'light'} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        {children}
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  )
-}
-
-const K_ACTIVE = 'ness.mobile.activeWorktree'
-const K_TABS = 'ness.mobile.selectedTabs'
-
-function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: () => void }) {
+export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
+  const { fleet } = useWorkspace()
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
-  const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(null)
-  // Mobile's own per-worktree tab focus, independent of desktop panes.
-  const [selectedTabByWorktree, setSelectedTabByWorktree] = useState<Record<string, string>>({})
   const [pickerOpen, setPickerOpen] = useState(false)
-  // Per-client UI focus, same as the web's rightPanelOpen.
-  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; x: number; y: number } | null>(null)
   const windowWidth = useWindowDimensions().width
 
-  // Usability deviation from the web (which starts at worktrees[0] on every
-  // load): a phone app is relaunched constantly, so restore the last
-  // worktree + per-worktree tab focus. Still per-client UI state.
-  const restored = useRef<{ wt: string | null; tabs: Record<string, string> } | null>(null)
-  const [restoreDone, setRestoreDone] = useState(false)
+  const activeWorktree = useMemo(() => worktrees.find((w) => w.path === wtPath) ?? null, [worktrees, wtPath])
+  const client = activeWorktree ? fleet.client(merged.pathBackendId[activeWorktree.path]) ?? null : null
+
   useEffect(() => {
-    void AsyncStorage.multiGet([K_ACTIVE, K_TABS]).then((pairs) => {
-      const m = Object.fromEntries(pairs)
-      let tabs: Record<string, string> = {}
-      try {
-        tabs = m[K_TABS] ? JSON.parse(m[K_TABS]) : {}
-      } catch {
-        // ignore corrupt entry
-      }
-      restored.current = { wt: m[K_ACTIVE] ?? null, tabs }
-      setSelectedTabByWorktree((prev) => ({ ...tabs, ...prev }))
-      setRestoreDone(true)
-    })
-  }, [])
-  // Backends snapshot at different times: don't fall back to
-  // worktrees[0] while the saved worktree's host may still be connecting
-  // (that would also overwrite the saved choice). Capped so an offline
-  // host can't hold the first screen hostage.
+    if (activeWorktree) setLastWorktree(activeWorktree.path)
+  }, [activeWorktree])
+
+  // A link's ?tab= (an approval push, an /open link) is applied on arrival,
+  // then dropped from the route so it can't override later choices.
+  useEffect(() => {
+    if (!tabParam) return
+    rememberTab(wtPath, tabParam)
+    router.setParams({ tab: undefined })
+  }, [wtPath, tabParam])
+
+  // A worktree that isn't (or is no longer) there — removed, or a link to
+  // a host that isn't connected: once every backend has reported (or 3s
+  // have passed), go home, which picks a worktree that exists.
   const allSnapshotted = useFleetEntries(fleet).length === fleet.getClients().length
   const [waitedEnough, setWaitedEnough] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setWaitedEnough(true), 3000)
     return () => clearTimeout(t)
   }, [])
-  useEffect(() => {
-    if (activeWorktreeId && worktrees.some((w) => w.path === activeWorktreeId)) return
-    if (worktrees.length === 0 || !restoreDone) return
-    const saved = restored.current?.wt
-    if (saved && worktrees.some((w) => w.path === saved)) setActiveWorktreeId(saved)
-    else if (!saved || allSnapshotted || waitedEnough) setActiveWorktreeId(worktrees[0].path)
-  }, [activeWorktreeId, worktrees, restoreDone, allSnapshotted, waitedEnough])
-  useEffect(() => {
-    if (activeWorktreeId) void AsyncStorage.setItem(K_ACTIVE, activeWorktreeId)
-  }, [activeWorktreeId])
-  useEffect(() => {
-    if (Object.keys(selectedTabByWorktree).length) void AsyncStorage.setItem(K_TABS, JSON.stringify(selectedTabByWorktree))
-  }, [selectedTabByWorktree])
-
-  const activeWorktree = useMemo(
-    () => worktrees.find((w) => w.path === activeWorktreeId) ?? null,
-    [worktrees, activeWorktreeId]
-  )
-  const client = activeWorktree ? fleet.client(merged.pathBackendId[activeWorktree.path]) ?? null : null
 
   useEffect(() => {
     if (activeWorktree && client) void client.api.panesEnsureInitialized(activeWorktree.path)
   }, [activeWorktree?.path, client])
 
-  // Once per backend as it joins, like MobileApp's mount effect.
-  const refreshed = useRef(new Set<string>())
-  const clients = fleet.getClients()
-  useEffect(() => {
-    for (const cl of clients) {
-      if (refreshed.current.has(cl.id) || !cl.getConn().hasSnapshot) continue
-      refreshed.current.add(cl.id)
-      void cl.api.refreshWorktreesList()
-      void cl.api.refreshPRsAllIfStale()
-    }
-  })
-
   const tabs = activeWorktree ? merged.tabsByWorktree[activeWorktree.path] ?? [] : []
-
-  const selectedTabId = useMemo(() => {
-    if (!activeWorktree) return null
-    const claimed = selectedTabByWorktree[activeWorktree.path]
-    if (claimed && tabs.some((t) => t.id === claimed)) return claimed
-    return pickInitialTab(tabs)
-  }, [activeWorktree, selectedTabByWorktree, tabs])
+  const selectedTabId = useSelectedTabId(activeWorktree?.path ?? null, tabs)
   const selectedTab = tabs.find((t) => t.id === selectedTabId) ?? null
 
   // Rising-edge wake, mirroring MobileApp: PanesFSM hydrates persisted
@@ -241,24 +79,6 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     if ((selectedTab.mode ?? 'awake') !== 'asleep') return
     void client.api.panesWakeTab(activeWorktree.path, selectedTab.id)
   }, [activeWorktree, selectedTab, selectedTabId, client])
-
-  // <scheme>://open?wt=<worktree path>&tab=<tab id> — jump straight to a
-  // chat. What a push notification for an approval will deep-link to.
-  useEffect(() => {
-    const handle = (link: string | null | undefined) => {
-      if (!link || !/\/open\?/.test(link)) return
-      const q = new URLSearchParams(link.slice(link.indexOf('?') + 1))
-      const wt = q.get('wt')
-      const tab = q.get('tab')
-      if (!wt) return
-      setActiveWorktreeId(wt)
-      if (tab) setSelectedTabByWorktree((prev) => ({ ...prev, [wt]: tab }))
-      setPickerOpen(false)
-    }
-    void consumeLaunchUrl().then(handle)
-    const sub = Linking.addEventListener('url', (e) => handle(e.url))
-    return () => sub.remove()
-  }, [])
 
   // Keep the selected tab visible: on a phone the strip overflows and the
   // selected tab could otherwise sit under the details button.
@@ -278,18 +98,22 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     return () => clearTimeout(t)
   }, [selectedTabId, tabs.length])
 
-  const handleSelectWorktree = useCallback((wtPath: string) => {
-    haptic.select()
-    setActiveWorktreeId(wtPath)
-    setPickerOpen(false)
-    setRightPanelOpen(false)
-  }, [])
+  // Switching worktrees replaces the route: there's no "back" to the
+  // previous worktree, same as the web's picker.
+  const handleSelectWorktree = useCallback(
+    (path: string) => {
+      haptic.select()
+      setPickerOpen(false)
+      if (path !== wtPath) router.replace(worktreeHref(path))
+    },
+    [wtPath]
+  )
 
   const handleSelectTab = useCallback(
     (tabId: string) => {
       if (!activeWorktree) return
       if (tabId !== selectedTabId) haptic.select()
-      setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: tabId }))
+      rememberTab(activeWorktree.path, tabId)
       setPickerOpen(false)
     },
     [activeWorktree, selectedTabId]
@@ -302,31 +126,9 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     const paneId = tree ? firstLeafId(tree) : undefined
     const tab = newChatTab()
     void client.api.panesAddTab(wtPath, tab, paneId)
-    setSelectedTabByWorktree((prev) => ({ ...prev, [wtPath]: tab.id }))
+    rememberTab(wtPath, tab.id)
     setPickerOpen(false)
   }, [activeWorktree, client, merged.panes])
-
-  // Port of useTabHandlers' handleSendToAgent: the phone's selected tab if
-  // it's an agent/chat, else a pane's active one, else the first; chat gets
-  // a message, a terminal agent a bracketed paste. Then focus that tab.
-  const handleSendToAgent = useCallback(
-    (text: string) => {
-      if (!activeWorktree || !client) return
-      const sendable = (t: TerminalTab) => t.type === 'agent' || t.type === 'json-claude'
-      const tree = merged.panes[activeWorktree.path]
-      const leaves = tree ? getLeaves(tree) : []
-      const target =
-        (selectedTab && sendable(selectedTab) ? selectedTab : undefined) ??
-        leaves.map((l) => l.tabs.find((t) => t.id === l.activeTabId)).find((t): t is TerminalTab => !!t && sendable(t)) ??
-        tabs.find(sendable)
-      if (!target) return
-      setSelectedTabByWorktree((prev) => ({ ...prev, [activeWorktree.path]: target.id }))
-      setRightPanelOpen(false)
-      if (target.type === 'json-claude') client.api.sendJsonClaudeMessage(target.id, text)
-      else client.api.writeTerminal(target.id, '\x1b[200~' + text + '\x1b[201~')
-    },
-    [activeWorktree, client, merged.panes, selectedTab, tabs]
-  )
 
   const handleConvertTabType = useCallback(
     (tabId: string, newType: 'agent' | 'json-claude') => {
@@ -334,6 +136,8 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
     },
     [activeWorktree, client]
   )
+
+  if (!activeWorktree && (allSnapshotted || waitedEnough) && worktrees.length > 0) return <Redirect href="/" />
 
   const label = activeWorktree
     ? merged.aliases[activeWorktree.path] ?? (activeWorktree.branch || activeWorktree.path.split('/').pop())
@@ -402,14 +206,15 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
         {activeWorktree && (
           <Pressable
             onPress={() => {
-              // The composer's keyboard would otherwise sit over the sheet.
+              // The composer's keyboard would otherwise sit over the panel.
               Keyboard.dismiss()
-              setRightPanelOpen((v) => !v)
+              setPickerOpen(false)
+              router.push(toolsHref(activeWorktree.path))
             }}
-            style={({ pressed }) => [s.detailsBtn, (rightPanelOpen || pressed) && { backgroundColor: c.surface }]}
-            accessibilityLabel={rightPanelOpen ? 'Close worktree details' : 'Worktree details'}
+            style={({ pressed }) => [s.detailsBtn, pressed && { backgroundColor: c.surface }]}
+            accessibilityLabel="Worktree details"
           >
-            {rightPanelOpen ? <PanelRightClose color={c.fgBright} size={16} /> : <PanelRightOpen color={c.dim} size={16} />}
+            <PanelRightOpen color={c.dim} size={16} />
           </Pressable>
         )}
       </View>
@@ -432,6 +237,7 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
         )}
         {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
         {!activeWorktree && worktrees.length === 0 && <Empty message={fleet.getEntries().length ? 'No worktrees yet.' : 'Connecting…'} />}
+        {!activeWorktree && worktrees.length > 0 && <Empty message="Connecting…" />}
 
         {convertMenu && (
           <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
@@ -451,28 +257,18 @@ function MobileApp({ fleet, onOpenBackends }: { fleet: Fleet; onOpenBackends: ()
             </View>
           </Pressable>
         )}
-        {rightPanelOpen && activeWorktree && client && (
-          <PanelsHost
-            key={`${client.id}:${activeWorktree.path}`}
-            client={client}
-            worktree={activeWorktree}
-            focusedTabId={selectedTabId}
-            onSendToAgent={handleSendToAgent}
-            onClose={() => setRightPanelOpen(false)}
-          />
-        )}
         {pickerOpen && (
           <WorktreePicker
             fleet={fleet}
             merged={merged}
-            activeWorktreeId={activeWorktreeId}
+            activeWorktreeId={activeWorktree?.path ?? null}
             onSelect={handleSelectWorktree}
             onClose={() => setPickerOpen(false)}
             // One overlay at a time: the picker is accessibilityViewIsModal,
             // so leaving it open under Backends hid Backends from VoiceOver.
             onOpenBackends={() => {
               setPickerOpen(false)
-              onOpenBackends()
+              router.push('/backends')
             }}
           />
         )}
@@ -557,16 +353,7 @@ function NonRunnablePlaceholder({ tab }: { tab: TerminalTab }) {
   )
 }
 
-function Empty({ message }: { message: string }) {
-  return (
-    <View style={s.empty}>
-      <Text style={{ color: c.dim, fontSize: fs.sm, textAlign: 'center' }}>{message}</Text>
-    </View>
-  )
-}
-
 const s = themed(() => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.app },
   // 45 = 44pt tap height + the 1px bottom border.
   header: { height: 45, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
   pickerBtn: {

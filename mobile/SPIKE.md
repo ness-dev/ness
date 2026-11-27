@@ -421,8 +421,9 @@ web client's old four-panel subset.
 - Keep the renderer's model layer DOM-free (it mostly is). The one coupling
   that forced shims is `tool-display.ts` owning icon components; splitting
   labels from icons would remove the `lucide-react` shim.
-- Navigation: switch to Expo Router (the spike uses state-switched screens
-  in one file).
+- Navigation: Expo Router (done). Routes live in `src/app/` (the table is in
+  `src/app/_layout.tsx`); screens are in `src/screens/`, and shared
+  connections, the fleet and the theme are in `src/workspace.tsx`.
 - Transcript rendering: build an RN markdown renderer plus tool-call
   summaries. Reuse the `JsonClaudeChatEntry` model, not the DOM components.
 - Server:
