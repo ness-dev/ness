@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState as RNAppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useKeyboardState } from 'react-native-keyboard-controller'
 import * as ExpoClipboard from 'expo-clipboard'
 import { ArrowDownToLine, ChevronDown, ClipboardPaste, Eye, Keyboard as KeyboardIcon, Loader2 } from 'lucide-react-native'
 import type { TerminalTab } from '../../../src/shared/state/terminals'
@@ -130,7 +132,9 @@ export function TerminalView({
   const start = useCallback(async () => {
     let off: (() => void) | null = null
     let disposed = false
+    console.log('[tt] start', id) // TTDEBUG
     const history = await api.getTerminalHistory(id).catch(() => '')
+    console.log('[tt] history', history.length) // TTDEBUG
     if (history) {
       setLoading(false)
       queue.push(history)
@@ -152,6 +156,7 @@ export function TerminalView({
     const shellCwd = tab.type === 'shell' && tab.cwd
       ? tab.cwd.startsWith('/') ? tab.cwd : `${worktreePath}/${tab.cwd}`
       : worktreePath
+    console.log('[tt] args', alive.current, JSON.stringify(args).slice(0, 100)) // TTDEBUG
     if (!alive.current) return () => {}
     const d = dims.current
     off = api.onTerminalData((tid, data) => {
@@ -200,6 +205,7 @@ export function TerminalView({
       } catch {
         return
       }
+      if (m.t !== 'ack') console.log('[tt] page', e.nativeEvent.data.slice(0, 120)) // TTDEBUG
       switch (m.t) {
         case 'ready':
           dims.current = { cols: m.cols, rows: m.rows }
@@ -290,6 +296,11 @@ export function TerminalView({
   )
 
   const agentName = agentDisplayName(tab.agentKind)
+  // The root layout leaves the bottom safe area to each screen (the chat
+  // composer sits over it). Keys must not: a swipe on them would hit the
+  // home indicator. With the keyboard up the KAV already lifts the row.
+  const kbVisible = useKeyboardState((k) => k.isVisible)
+  const bottomInset = useSafeAreaInsets().bottom
 
   return (
     <View style={{ flex: 1, backgroundColor: c.app }}>
@@ -362,7 +373,7 @@ export function TerminalView({
         )}
       </View>
 
-      <View style={s.bar}>
+      <View style={[s.bar, { paddingBottom: kbVisible ? 0 : bottomInset }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={s.keys}>
           <Key label="esc" onPress={() => sendKey('Escape')} />
           <Key label="tab" onPress={() => sendKey('Tab')} />
