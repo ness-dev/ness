@@ -30,11 +30,13 @@ export function CenterEmptyState({
   mode,
   newWorktreeBinding,
   onTourStart,
+  onSkipTour,
   onNewWorktree
 }: {
   mode: CenterEmptyMode
   newWorktreeBinding: HotkeyBinding | undefined
   onTourStart: () => Promise<void>
+  onSkipTour: () => void
   onNewWorktree: () => void
 }): JSX.Element {
   if (mode === 'tour-home') {
@@ -46,6 +48,15 @@ export function CenterEmptyState({
           Start something new and an agent will set up a workspace for it.
         </div>
         <TourStartButton onStart={onTourStart} />
+        {/* The popout's ✕ isn't on screen when the sidebar is collapsed or
+            the row is scrolled away, and main holds this workspace's tabs
+            back until the tour moves on, so this screen needs its own exit. */}
+        <button
+          onClick={onSkipTour}
+          className="text-xs text-dim hover:text-fg-bright hover:underline cursor-pointer"
+        >
+          Skip the tour and open the workspace
+        </button>
       </div>
     )
   }

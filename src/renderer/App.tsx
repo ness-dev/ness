@@ -603,6 +603,7 @@ function DesktopApp(): JSX.Element {
     const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
     if (result.ok) setActiveWorktreeId(result.worktreePath)
   }, [backend])
+  const handleTourDismiss = useCallback(() => void backend.tourDismiss().catch(() => {}), [backend])
 
   const configLoadError = useConfigLoadError()
 
@@ -2255,6 +2256,7 @@ function DesktopApp(): JSX.Element {
                 mode={centerEmptyMode({ onboardingVisible, tourHomePath })}
                 newWorktreeBinding={resolvedHotkeys.newWorktree}
                 onTourStart={handleTourStart}
+                onSkipTour={handleTourDismiss}
                 onNewWorktree={() => setShowNewWorktree(true)}
               />
             </div>
@@ -2283,7 +2285,7 @@ function DesktopApp(): JSX.Element {
             tour={tour}
             homePath={tourHomePath}
             onStart={handleTourStart}
-            onDismiss={() => void backend.tourDismiss().catch(() => {})}
+            onDismiss={handleTourDismiss}
           />
         )}
         {/* Right panel — hidden on the new-worktree screen so the form gets the full width.

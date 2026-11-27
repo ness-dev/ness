@@ -98,8 +98,9 @@ export function onboardingReducer(
       if (tour.step !== 'awaiting-worktree') return state
       return { ...state, tour: { step: 'home', repoRoot: tour.repoRoot } }
     case 'onboarding/tourWorktreeCreated':
-      // From `home` too: the wizard's default agent tab can make the
-      // worktree before the user ever presses Start something new.
+      // From `home` too: main holds back the home workspace's default tabs
+      // during `home`, but an imported conversation is still seeded there,
+      // and its agent can make the worktree before the user presses Start.
       if (tour.step !== 'home' && tour.step !== 'awaiting-worktree') return state
       return {
         ...state,
