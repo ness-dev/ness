@@ -132,9 +132,7 @@ export function TerminalView({
   const start = useCallback(async () => {
     let off: (() => void) | null = null
     let disposed = false
-    console.log('[tt] start', id) // TTDEBUG
     const history = await api.getTerminalHistory(id).catch(() => '')
-    console.log('[tt] history', history.length) // TTDEBUG
     if (history) {
       setLoading(false)
       queue.push(history)
@@ -156,7 +154,6 @@ export function TerminalView({
     const shellCwd = tab.type === 'shell' && tab.cwd
       ? tab.cwd.startsWith('/') ? tab.cwd : `${worktreePath}/${tab.cwd}`
       : worktreePath
-    console.log('[tt] args', alive.current, JSON.stringify(args).slice(0, 100)) // TTDEBUG
     if (!alive.current) return () => {}
     const d = dims.current
     off = api.onTerminalData((tid, data) => {
@@ -205,7 +202,6 @@ export function TerminalView({
       } catch {
         return
       }
-      if (m.t !== 'ack') console.log('[tt] page', e.nativeEvent.data.slice(0, 120)) // TTDEBUG
       switch (m.t) {
         case 'ready':
           dims.current = { cols: m.cols, rows: m.rows }

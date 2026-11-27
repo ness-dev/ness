@@ -62,13 +62,24 @@ const BRIDGE = String.raw`
   }
   term.onData(function (d) { post({ t: 'data', data: d }); });
 
-  var lastCols = -1, lastRows = -1;
+  // The local fit follows every frame, but the PTY hears only the settled
+  // size: the keyboard animates the frame through ~6 heights, and each
+  // SIGWINCH makes a TUI like Claude Code redraw its whole screen.
+  var lastCols = -1, lastRows = -1, resizeTimer = 0;
   var refit = function (initial) {
     if (host.clientWidth < 20 || host.clientHeight < 20) return;
     try { fit.fit(); } catch (e) { return; }
-    if (term.cols === lastCols && term.rows === lastRows && !initial) return;
-    lastCols = term.cols; lastRows = term.rows;
-    post({ t: initial ? 'ready' : 'resize', cols: term.cols, rows: term.rows });
+    if (initial) {
+      lastCols = term.cols; lastRows = term.rows;
+      post({ t: 'ready', cols: term.cols, rows: term.rows });
+      return;
+    }
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (term.cols === lastCols && term.rows === lastRows) return;
+      lastCols = term.cols; lastRows = term.rows;
+      post({ t: 'resize', cols: term.cols, rows: term.rows });
+    }, 150);
   };
   var readySent = false;
   var tryReady = function () {
@@ -93,22 +104,28 @@ const BRIDGE = String.raw`
   var input = document.getElementById('input');
   var composing = false;
   var KEYS = { Enter: 1, Backspace: 1, Tab: 1, Escape: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Home: 1, End: 1 };
-  input.addEventListener('input', function () {
-    if (composing) return;
-    var v = input.value;
-    if (!v) return;
-    input.value = '';
-    post({ t: 'text', text: v });
+  // Read each insertion from the event, never by diffing or clearing the
+  // value per keystroke: resetting the value under UIKit mid-burst desyncs
+  // its text state and fast typing loses characters ("echo hi" → "ech").
+  // The value is only trimmed when it grows, between keystrokes.
+  var trim = function () { if (input.value.length > 256) input.value = ''; };
+  input.addEventListener('input', function (e) {
+    if (composing || e.isComposing) return;
+    var type = e.inputType || '';
+    if (type === 'insertLineBreak' || type === 'insertParagraph') post({ t: 'key', key: 'Enter' });
+    else if (type === 'deleteContentBackward') post({ t: 'key', key: 'Backspace' });
+    else if (e.data) post({ t: 'text', text: e.data });
+    setTimeout(trim, 0);
   });
   input.addEventListener('keydown', function (e) {
-    if (composing) return;
+    if (composing || e.isComposing) return;
     if (KEYS[e.key]) { e.preventDefault(); post({ t: 'key', key: e.key }); }
   });
   input.addEventListener('compositionstart', function () { composing = true; });
-  input.addEventListener('compositionend', function () {
+  input.addEventListener('compositionend', function (e) {
     composing = false;
-    var v = input.value;
-    if (v) { input.value = ''; post({ t: 'text', text: v }); }
+    if (e.data) post({ t: 'text', text: e.data });
+    setTimeout(trim, 0);
   });
   // The iOS edit menu's Paste: through term.paste so bracketed-paste mode
   // is honoured exactly as on desktop.
