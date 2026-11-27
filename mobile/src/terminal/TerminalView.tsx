@@ -292,10 +292,27 @@ export function TerminalView({
   // isn't replayed), so after a reconnect the page is stale. Reload it,
   // which re-runs the attach above: fresh history, then live data.
   // Reconnects are common on a phone (every return from the background).
-  // An exited PTY has nothing new to show, and keeps its overlay.
+  // Also retries an attach that a drop interrupted (started, never live).
+  //
+  // An exited PTY keeps its overlay and isn't reloaded. That includes an
+  // exit while the socket was down, whose terminal:exit signal was lost:
+  // PtyManager dispatched terminals/removed, so the session is missing
+  // from the fresh snapshot. Checked here, synchronously, because the
+  // transport applies the snapshot before calling reconnect listeners, and
+  // our own re-join (another listener) re-creates the session entry a
+  // round trip later, so a render-time check would race it.
   useEffect(
-    () => client.transport.onReconnect(() => spawned.current && !exitedRef.current && reload()),
-    [client, reload]
+    () =>
+      client.transport.onReconnect(() => {
+        if (exitedRef.current || !started.current) return
+        if (everLive.current && !client.getState().terminals.sessions[id]) {
+          exitedRef.current = true
+          if (tab.type === 'agent') setExited(true)
+          return
+        }
+        reload()
+      }),
+    [client, reload, id, tab.type]
   )
 
   const takeControl = useCallback(() => {

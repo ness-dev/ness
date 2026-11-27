@@ -55,20 +55,27 @@ export async function attachTerminal(deps: AttachDeps, mode: 'spawn' | 'reattach
     return NOT_LIVE
   }
 
-  if (history) deps.queue.push(history + RESET_MODES + RESTORED)
-  // Also keeps xterm's replies to the replayed bytes (focus reports, DSR)
-  // away from the PTY: the caller forwards them only once `live`.
-  await deps.queue.drained()
-  if (!deps.isCurrent()) return bail()
-  for (const data of held) deps.queue.push(data)
-  held = null
-
-  if (mode === 'spawn') {
-    const args = await deps.buildArgs()
+  // Everything from here can throw (a request rejected by a dropped
+  // socket, most likely mid-buildArgs); the listener must not outlive it.
+  try {
+    if (history) deps.queue.push(history + RESET_MODES + RESTORED)
+    // Also keeps xterm's replies to the replayed bytes (focus reports, DSR)
+    // away from the PTY: the caller forwards them only once `live`.
+    await deps.queue.drained()
     if (!deps.isCurrent()) return bail()
-    deps.create(args)
-  } else {
-    deps.resize()
+    for (const data of held) deps.queue.push(data)
+    held = null
+
+    if (mode === 'spawn') {
+      const args = await deps.buildArgs()
+      if (!deps.isCurrent()) return bail()
+      deps.create(args)
+    } else {
+      deps.resize()
+    }
+  } catch (e) {
+    off()
+    throw e
   }
   return { live: true, stop: off }
 }

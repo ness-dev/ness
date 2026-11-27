@@ -195,6 +195,30 @@ describe('attachTerminal', () => {
   })
 })
 
+describe('attachTerminal failure', () => {
+  it('a rejected buildArgs (socket dropped mid-attach) removes the data listener', async () => {
+    const listeners = new Set<(d: string) => void>()
+    const deps: AttachDeps = {
+      getHistory: async () => '',
+      buildArgs: async () => {
+        throw new Error('socket closed')
+      },
+      onData: (cb) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+      create: () => {
+        throw new Error('must not create')
+      },
+      resize: () => {},
+      queue: { push: () => {}, drained: async () => {} },
+      isCurrent: () => true
+    }
+    await expect(attachTerminal(deps, 'spawn')).rejects.toThrow('socket closed')
+    expect(listeners.size).toBe(0)
+  })
+})
+
 describe('makeTerminalId', () => {
   it('matches the desktop id shape', () => {
     expect(makeTerminalId('agent', '/private/tmp/x/repo')).toBe('agent-private-tmp-x-repo')
