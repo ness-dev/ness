@@ -2,9 +2,9 @@
 // accessory key row. The PTY conversation is XTerminal.tsx's, step for
 // step, through client.api:
 //
-//   join → wait for the page's first fit → replay scrollback (history) →
-//   reset reporting modes → spawn / attach (pty:create, at the fitted size)
-//   → stream terminal:data → leave on unmount (main owns PTY lifetime).
+//   join → wait for the page's first fit → attachTerminal (./attach.ts:
+//   replay scrollback, then pty:create at the fitted size) → stream
+//   terminal:data → leave on unmount (main owns PTY lifetime).
 //
 // Terminal data is a side-effect signal, never state, so it goes straight
 // from the socket to the page through OutputQueue (batched, one injection
@@ -27,12 +27,7 @@ import { terminalPageHtml } from './html'
 import { terminalTheme } from './theme'
 import { OutputQueue } from './output-queue'
 import { encodeKey, encodeText } from './keys'
-
-// XTerminal writes these after replaying scrollback so a mode the old
-// process left on (focus or mouse reporting, bracketed paste) doesn't apply
-// to the fresh one.
-const RESET_MODES = '\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l'
-const RESTORED = '\r\n\x1b[2m── session restored ──\x1b[0m\r\n'
+import { attachTerminal } from './attach'
 
 type PageMessage =
   | { t: 'ready' | 'resize'; cols: number; rows: number }
@@ -58,10 +53,19 @@ export function TerminalView({
   const id = tab.id
   const webRef = useRef<React.ComponentRef<typeof WebView>>(null)
   const dims = useRef<{ cols: number; rows: number } | null>(null)
-  /** start() has begun for this page load (guards a second 'ready'). */
+  /** The attach has begun for this page load (guards a second 'ready'). */
   const started = useRef(false)
-  /** pty:create has been sent: from here the PTY may take input/resizes. */
+  /** The PTY is created or attached: input and resizes may flow. */
   const spawned = useRef(false)
+  /** Identifies the current page load. Bumped on every reload and on
+   *  unmount, so an attach still awaiting for an earlier page bails instead
+   *  of wiring itself to the new one. */
+  const loadToken = useRef(0)
+  /** Some page load got the PTY live. Until then a reload still spawns
+   *  (the page died before the first create); after, it only reattaches. */
+  const everLive = useRef(false)
+  /** The PTY exited (agent or shell). A reload must not bring it back. */
+  const exitedRef = useRef(false)
   const [loading, setLoading] = useState(tab.type === 'agent')
   const [exited, setExited] = useState(false)
   const [ctrl, setCtrl] = useState(false)
@@ -121,63 +125,75 @@ export function TerminalView({
   }, [api, client, id])
 
   useEffect(() => {
-    if (tab.type !== 'agent') return
     return api.onTerminalExit((tid) => {
-      if (tid === id) setExited(true)
+      if (tid !== id) return
+      exitedRef.current = true
+      if (tab.type === 'agent') setExited(true)
     })
   }, [api, id, tab.type])
 
   // Runs once per page load, on its first fit: the spawn needs real
   // dimensions so the PTY doesn't come up at main's 120x30 fallback.
   const start = useCallback(async () => {
-    let off: (() => void) | null = null
-    let disposed = false
-    const history = await api.getTerminalHistory(id).catch(() => '')
-    if (history) {
-      setLoading(false)
-      queue.push(history)
-      queue.push(RESET_MODES + RESTORED)
-      // Wait for the page to finish parsing the replay before xterm's own
-      // replies are forwarded, or a focus report in the saved bytes leaks
-      // into the fresh PTY as a stray "O" (XTerminal's fix).
-      await queue.drained()
-    }
-    const args = tab.type === 'agent'
-      ? ['-ilc', await api.buildAgentSpawnArgs(tab.agentKind || 'claude', {
-          terminalId: id,
-          cwd: worktreePath,
-          sessionId: tab.sessionId,
-          sessionName: tab.label,
-          modelOverride: tab.model
-        })]
-      : ['-il']
+    const token = loadToken.current
+    const isCurrent = () => loadToken.current === token
+    const mode = everLive.current ? 'reattach' : 'spawn'
     const shellCwd = tab.type === 'shell' && tab.cwd
       ? tab.cwd.startsWith('/') ? tab.cwd : `${worktreePath}/${tab.cwd}`
       : worktreePath
-    if (!alive.current) return () => {}
-    const d = dims.current
-    off = api.onTerminalData((tid, data) => {
-      if (tid !== id) return
-      queue.push(data)
-      setLoading(false)
-    })
-    api.createTerminal(id, shellCwd, '', args, tab.type === 'agent' ? tab.agentKind : undefined, d?.cols, d?.rows)
-    spawned.current = true
+    const attached = await attachTerminal(
+      {
+        getHistory: async () => {
+          const h = await api.getTerminalHistory(id)
+          if (h && isCurrent()) setLoading(false)
+          return h
+        },
+        buildArgs: async () =>
+          tab.type === 'agent'
+            ? ['-ilc', await api.buildAgentSpawnArgs(tab.agentKind || 'claude', {
+                terminalId: id,
+                cwd: worktreePath,
+                sessionId: tab.sessionId,
+                sessionName: tab.label,
+                modelOverride: tab.model
+              })]
+            : ['-il'],
+        onData: (cb) =>
+          api.onTerminalData((tid, data) => {
+            if (tid !== id) return
+            cb(data)
+            setLoading(false)
+          }),
+        create: (args) => {
+          const d = dims.current
+          api.createTerminal(id, shellCwd, '', args, tab.type === 'agent' ? tab.agentKind : undefined, d?.cols, d?.rows)
+        },
+        resize: () => {
+          const d = dims.current
+          if (d && isControllerRef.current) api.resizeTerminal(id, d.cols, d.rows)
+        },
+        queue,
+        isCurrent
+      },
+      mode
+    ).catch(() => null)
+    if (!attached) return
+    if (!isCurrent()) {
+      attached.stop()
+      return
+    }
+    stopRef.current = attached.stop
+    spawned.current = attached.live
+    if (attached.live) everLive.current = true
     // An attached-but-idle agent with no history sends nothing; don't
     // leave the loading overlay up forever.
-    setTimeout(() => !disposed && setLoading(false), 800)
-    return () => {
-      disposed = true
-      off?.()
-    }
+    setTimeout(() => isCurrent() && setLoading(false), 800)
   }, [api, id, queue, tab.type, tab.agentKind, tab.sessionId, tab.label, tab.model, tab.cwd, worktreePath])
 
   const stopRef = useRef<(() => void) | null>(null)
-  const alive = useRef(true)
   useEffect(() => {
-    alive.current = true
     return () => {
-      alive.current = false
+      loadToken.current++
       stopRef.current?.()
       stopRef.current = null
     }
@@ -207,11 +223,7 @@ export function TerminalView({
           dims.current = { cols: m.cols, rows: m.rows }
           if (!started.current) {
             started.current = true
-            void start().then((stop) => {
-              // Unmounted (or the page died) while history was loading.
-              if (alive.current) stopRef.current = stop
-              else stop()
-            })
+            void start()
           }
           break
         case 'resize':
@@ -234,6 +246,9 @@ export function TerminalView({
           break
         }
         case 'key':
+          // Sticky Ctrl means "the next key": a named key consumes it too,
+          // so it never stays latched behind an arrow or ⌫.
+          if (ctrlRef.current) setCtrl(false)
           write(encodeKey(m.key))
           break
         case 'focus':
@@ -250,6 +265,7 @@ export function TerminalView({
   const sendKey = useCallback(
     (key: string) => {
       haptic.select()
+      if (ctrlRef.current) setCtrl(false)
       write(encodeKey(key))
     },
     [write]
@@ -264,6 +280,8 @@ export function TerminalView({
     inject(`window.ness.paste(${JSON.stringify(text)})`)
   }, [inject])
 
+  // A reload after the PTY went live never respawns (reattach mode): if the
+  // PTY is gone, a create would start a new process behind the phone's back.
   const reload = useCallback(() => {
     started.current = false
     spawned.current = false
@@ -274,7 +292,11 @@ export function TerminalView({
   // isn't replayed), so after a reconnect the page is stale. Reload it,
   // which re-runs the attach above: fresh history, then live data.
   // Reconnects are common on a phone (every return from the background).
-  useEffect(() => client.transport.onReconnect(() => spawned.current && reload()), [client, reload])
+  // An exited PTY has nothing new to show, and keeps its overlay.
+  useEffect(
+    () => client.transport.onReconnect(() => spawned.current && !exitedRef.current && reload()),
+    [client, reload]
+  )
 
   const takeControl = useCallback(() => {
     const d = dims.current ?? { cols: 120, rows: 30 }

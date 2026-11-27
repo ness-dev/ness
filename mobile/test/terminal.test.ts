@@ -3,6 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ctrlByte, encodeKey, encodeText } from '../src/terminal/keys'
 import { MAX_BATCH, OutputQueue } from '../src/terminal/output-queue'
+import { attachTerminal, RESET_MODES, RESTORED, type AttachDeps } from '../src/terminal/attach'
+import { makeTerminalId } from '../../src/shared/terminal-id'
 import { terminalPageHtml } from '../src/terminal/html'
 import { terminalTheme } from '../src/terminal/theme'
 import { applyTheme } from '../src/theme'
@@ -112,5 +114,89 @@ describe('terminal page', () => {
 
   it('every light theme has an ANSI palette', () => {
     for (const t of THEME_OPTIONS.filter((t) => t.mode === 'light')) expect(TERM_PALETTES, t.id).toHaveProperty(t.id)
+  })
+})
+
+describe('attachTerminal', () => {
+  // A fake socket + page: `emit` delivers terminal:data, `pushed` is what
+  // reached the page, and `drain` lets the test decide when the replay has
+  // finished parsing.
+  function harness(history = '') {
+    const pushed: string[] = []
+    const listeners = new Set<(d: string) => void>()
+    const calls: string[] = []
+    let releaseDrain: () => void = () => {}
+    let current = true
+    const deps: AttachDeps = {
+      getHistory: async () => history,
+      buildArgs: async () => {
+        calls.push('buildArgs')
+        return ['-il']
+      },
+      onData: (cb) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+      create: () => calls.push('create'),
+      resize: () => calls.push('resize'),
+      queue: {
+        push: (d) => pushed.push(d),
+        drained: () => new Promise<void>((r) => (releaseDrain = r))
+      },
+      isCurrent: () => current
+    }
+    return {
+      deps,
+      pushed,
+      calls,
+      listeners,
+      emit: (d: string) => listeners.forEach((l) => l(d)),
+      drain: () => releaseDrain(),
+      supersede: () => (current = false)
+    }
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+
+  it('replays history, then output that arrived during the replay, then spawns', async () => {
+    const h = harness('old')
+    const p = attachTerminal(h.deps, 'spawn')
+    await tick()
+    h.emit('during-replay')
+    expect(h.pushed).toEqual(['old' + RESET_MODES + RESTORED])
+    h.drain()
+    const res = await p
+    expect(h.pushed).toEqual(['old' + RESET_MODES + RESTORED, 'during-replay'])
+    expect(h.calls).toEqual(['buildArgs', 'create'])
+    expect(res.live).toBe(true)
+    h.emit('live')
+    expect(h.pushed.at(-1)).toBe('live')
+  })
+
+  it('reattach never sends pty:create', async () => {
+    const h = harness('old')
+    const p = attachTerminal(h.deps, 'reattach')
+    await tick()
+    h.drain()
+    const res = await p
+    expect(h.calls).toEqual(['resize'])
+    expect(res.live).toBe(true)
+  })
+
+  it('a superseded load stops before creating and unsubscribes', async () => {
+    const h = harness('old')
+    const p = attachTerminal(h.deps, 'spawn')
+    await tick()
+    h.supersede()
+    h.drain()
+    const res = await p
+    expect(res.live).toBe(false)
+    expect(h.calls).toEqual([])
+    expect(h.listeners.size).toBe(0)
+  })
+})
+
+describe('makeTerminalId', () => {
+  it('matches the desktop id shape', () => {
+    expect(makeTerminalId('agent', '/private/tmp/x/repo')).toBe('agent-private-tmp-x-repo')
   })
 })

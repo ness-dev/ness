@@ -10,6 +10,7 @@ import { Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDi
 import { Redirect, router } from 'expo-router'
 import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
 import { supportsChat } from '../../../src/shared/agent-registry'
+import { makeTerminalId } from '../../../src/shared/terminal-id'
 import type { PtyStatus, TerminalTab } from '../../../src/shared/state/terminals'
 import { haptic } from '../haptics'
 import { firstLeafId, newChatTab } from '../tabs'
@@ -163,8 +164,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
       const wt = activeWorktree.path
       client.api.killTerminal(tabId)
       void client.api.clearTerminalHistory(tabId)
-      const safe = wt.replace(/[/\\]/g, '-').replace(/^-+/, '').replace(/-+/g, '-')
-      const newId = `agent-${safe}-${Date.now()}`
+      const newId = `${makeTerminalId('agent', wt)}-${Date.now()}`
       rememberTab(wt, newId)
       void client.api.panesRestartAgentTab(wt, tabId, newId)
     },
