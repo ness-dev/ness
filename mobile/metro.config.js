@@ -28,7 +28,7 @@ function ensureMermaidPage() {
   const fs = require('fs')
   const dist = require.resolve('mermaid/dist/mermaid.min.js', { paths: [projectRoot] })
   const version = require(require.resolve('mermaid/package.json', { paths: [projectRoot] })).version
-  const out = path.join(projectRoot, '.generated/mermaid.html')
+  const out = path.join(projectRoot, 'generated/mermaid.html')
   const stamp = `<!-- mermaid ${version} -->`
   if (fs.existsSync(out) && fs.readFileSync(out, 'utf8').startsWith(stamp)) return
   const lib = fs.readFileSync(dist, 'utf8').replace(/<\/script/gi, '<\\/script')

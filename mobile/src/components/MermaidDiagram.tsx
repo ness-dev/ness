@@ -8,14 +8,53 @@
 // the SVG. The diagram is then that SVG alone in a light WebView with no
 // mermaid in it, so a chat row that remounts while scrolling redraws from
 // the cache instead of parsing mermaid again.
-import { memo, useState, type ReactNode } from 'react'
-import { Image, Pressable, ScrollView, Text, View } from 'react-native'
+//
+// Loading the page: expo-asset's localUri, a file:// path in every build —
+// inside the app for the embedded bundle, the expo-updates asset store for
+// an OTA, a cached download from Metro in development — so dev exercises
+// the same file:// load release does. (RN's resolveAssetSource alone gives
+// an http URL in dev and, for an OTA asset expo-asset hasn't resolved, an
+// empty one.) If the file still won't load, the page's text is read and
+// handed to the WebView inline; if that fails too, the source stays up.
+import { memo, useEffect, useState, type ReactNode } from 'react'
+import { Pressable, ScrollView, Text, View } from 'react-native'
+import { Asset } from 'expo-asset'
+import { File } from 'expo-file-system'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { Code2, Workflow } from 'lucide-react-native'
 import { c, fs, getThemeMode, themeVersion } from '../theme'
 import { CopyableMessage } from '../chat/CopyText'
 
-const PAGE_URI = Image.resolveAssetSource(require('../../.generated/mermaid.html'))?.uri ?? ''
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PAGE_MODULE: number = require('../../generated/mermaid.html')
+/** A render that hasn't answered by then failed to load, not to parse. */
+const RENDER_TIMEOUT_MS = 20_000
+
+type PageSource = { uri: string; dir: string } | { html: string }
+
+let pageUri: Promise<string> | null = null
+function mermaidPageUri(): Promise<string> {
+  pageUri ??= Asset.fromModule(PAGE_MODULE)
+    .downloadAsync()
+    .then((a) => {
+      if (!a.localUri) throw new Error('Mermaid page has no local file')
+      return a.localUri
+    })
+    .catch((e: unknown) => {
+      pageUri = null // retry on the next diagram
+      throw e
+    })
+  return pageUri
+}
+
+let pageHtml: Promise<string> | null = null
+function mermaidPageHtml(uri: string): Promise<string> {
+  pageHtml ??= new File(uri).text().catch((e: unknown) => {
+    pageHtml = null
+    throw e
+  })
+  return pageHtml
+}
 
 const FONT = '-apple-system, system-ui, sans-serif'
 const FONT_PX = 13
@@ -90,6 +129,40 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
   const [result, setResult] = useState<RenderResult | null>(() => cache.get(key) ?? null)
   const [showSource, setShowSource] = useState(false)
   const [width, setWidth] = useState(0)
+  const [page, setPage] = useState<PageSource | null>(null)
+
+  // A failure to load mermaid isn't remembered: the next mount retries.
+  // Only what mermaid itself answered is cached.
+  const loadFailed = (why: string) => setResult({ error: why })
+
+  useEffect(() => {
+    if (result) return
+    let cancelled = false
+    mermaidPageUri().then(
+      (uri) => !cancelled && setPage({ uri, dir: uri.replace(/[^/]*$/, '') }),
+      () => !cancelled && loadFailed('Mermaid is missing from this build')
+    )
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result === null])
+
+  // The file:// page didn't load (or never answered): try it inline once.
+  const fallBack = () => {
+    if (!page || !('uri' in page)) return loadFailed('Mermaid failed to load')
+    mermaidPageHtml(page.uri).then(
+      (html) => setPage({ html }),
+      () => loadFailed('Mermaid failed to load')
+    )
+  }
+
+  useEffect(() => {
+    if (result || !page) return
+    const t = setTimeout(fallBack, RENDER_TIMEOUT_MS)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, page])
 
   const onMessage = (e: WebViewMessageEvent) => {
     let r: RenderResult
@@ -103,22 +176,22 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
     setResult(r)
   }
 
-  const renderer = !result && (
+  const renderer = !result && page && (
     // Invisible but laid out: mermaid measures text, which needs a live
     // page with a real width.
     <View style={{ position: 'absolute', left: 0, top: 0, width: Math.max(width, 320), height: 1, opacity: 0 }} pointerEvents="none">
       <WebView
-        source={{ uri: PAGE_URI }}
+        key={'uri' in page ? 'file' : 'inline'}
+        source={'uri' in page ? { uri: page.uri } : { html: page.html }}
         originWhitelist={['*']}
+        // WKWebView may only read a file:// page under a directory it's
+        // granted; the page's own directory is enough (it loads nothing else).
         allowFileAccess
-        allowingReadAccessToURL={PAGE_URI.startsWith('file:') ? PAGE_URI.replace(/[^/]*$/, '') : undefined}
+        allowingReadAccessToURL={'uri' in page ? page.dir : undefined}
         injectedJavaScript={`window.nessRender(${JSON.stringify(mermaidConfig())}, ${JSON.stringify(source)}); true;`}
         onMessage={onMessage}
-        onError={() => {
-          const r = { error: 'Mermaid failed to load' }
-          remember(key, r)
-          setResult(r)
-        }}
+        onError={fallBack}
+        onContentProcessDidTerminate={fallBack}
       />
     </View>
   )

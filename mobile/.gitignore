@@ -41,4 +41,4 @@ yarn-error.*
 /android
 
 # Built by metro.config.js (mermaid page asset)
-.generated/
+/generated/
