@@ -220,29 +220,6 @@ export interface MergePRResult {
   sha?: string
 }
 
-export interface MainWorktreeStatus {
-  path: string
-  currentBranch: string
-  baseBranch: string
-  isOnBase: boolean
-  isDirty: boolean
-  ready: boolean
-}
-
-export interface MergeConflictPreview {
-  hasConflict: boolean
-  files: string[]
-  unsupported?: boolean
-}
-
-export interface MergeLocalResult {
-  ok: true
-  strategy: MergeStrategy
-  mergedBranch: string
-  baseBranch: string
-  mainPath: string
-}
-
 export interface ElectronAPI {
   listWorktrees(repoRoot: string): Promise<Worktree[]>
   listBranches(repoRoot: string): Promise<string[]>
@@ -313,16 +290,6 @@ export interface ElectronAPI {
   pickDirectory(opts?: { defaultPath?: string; title?: string }): Promise<string | null>
   listDir(path: string, opts?: { showHidden?: boolean }): Promise<FsEntry[]>
   resolveHome(): Promise<string>
-
-  getMainWorktreeStatus(repoRoot: string): Promise<MainWorktreeStatus>
-  prepareMainForMerge(repoRoot: string): Promise<MainWorktreeStatus>
-  previewMergeConflicts(repoRoot: string, sourceBranch: string, worktreePath?: string): Promise<MergeConflictPreview>
-  mergeWorktreeLocally(
-    repoRoot: string,
-    sourceBranch: string,
-    strategy: MergeStrategy,
-    worktreePath?: string
-  ): Promise<MergeLocalResult>
 
   refreshPRsAll(): Promise<boolean>
   refreshPRsAllIfStale(): Promise<boolean>

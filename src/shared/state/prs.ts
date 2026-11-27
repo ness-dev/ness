@@ -74,13 +74,12 @@ export interface PRStatus {
 export interface PRsState {
   /** PR status per worktree path. null = "we looked and there's no PR yet". */
   byPath: Record<string, PRStatus | null>
-  /** Locally-merged flag per worktree path. Replaced wholesale on poll. */
+  /** Locally-merged flag per worktree path. Replaced wholesale on poll.
+   * Only ever true for worktrees merged by the since-removed "Merge Locally"
+   * action: nothing records new entries, so the persisted branch → SHA map
+   * behind it only shrinks (pruned once a branch moves or its worktree is
+   * removed). Kept so those worktrees don't jump back to Active. */
   mergedByPath: Record<string, boolean>
-  /** Worktree paths with a "Merge Locally" in flight. Lives in the slice, not
-   * the panel, so the in-flight state follows the worktree rather than
-   * whichever worktree the panel happens to be showing when it settles — and
-   * so every client sees it and can't start a second merge. */
-  mergingByPath: Record<string, true>
   /** True while a full refresh is in flight. */
   loading: boolean
 }
@@ -90,13 +89,10 @@ export type PRsEvent =
   | { type: 'prs/bulkStatusChanged'; payload: Record<string, PRStatus | null> }
   | { type: 'prs/mergedChanged'; payload: Record<string, boolean> }
   | { type: 'prs/loadingChanged'; payload: boolean }
-  | { type: 'prs/localMergeStarted'; payload: { path: string } }
-  | { type: 'prs/localMergeFinished'; payload: { path: string; merged: boolean } }
 
 export const initialPRs: PRsState = {
   byPath: {},
   mergedByPath: {},
-  mergingByPath: {},
   loading: false
 }
 
@@ -108,8 +104,8 @@ export function isPRMerged(pr: PRStatus | null | undefined): boolean {
 }
 
 /** Canonical "is this worktree merged?" check. A worktree counts as merged
- * if the locally-merged poller flagged it (branch SHA matches a recorded
- * merge SHA — works without a GitHub token), or its PR is in a terminal
+ * if the locally-merged poller flagged it (branch SHA still matches a SHA
+ * recorded by the old "Merge Locally" action), or its PR is in a terminal
  * state. Used by the activity deriver, the cleanup view, and boot-time
  * pane init (sleep-on-boot for merged worktrees). */
 export function isWorktreeMerged(prs: PRsState, worktreePath: string): boolean {
@@ -129,26 +125,6 @@ export function prsReducer(state: PRsState, event: PRsEvent): PRsState {
       return { ...state, mergedByPath: event.payload }
     case 'prs/loadingChanged':
       return { ...state, loading: event.payload }
-    case 'prs/localMergeStarted': {
-      if (state.mergingByPath[event.payload.path]) return state
-      return {
-        ...state,
-        mergingByPath: { ...state.mergingByPath, [event.payload.path]: true }
-      }
-    }
-    case 'prs/localMergeFinished': {
-      const { path, merged } = event.payload
-      const { [path]: _wasMerging, ...mergingByPath } = state.mergingByPath
-      void _wasMerging
-      // Mark merged immediately rather than waiting for the poller's next
-      // wholesale mergedChanged, so there's no window where the merge has
-      // landed but the panel offers the merge button again.
-      const mergedByPath =
-        merged && !state.mergedByPath[path]
-          ? { ...state.mergedByPath, [path]: true }
-          : state.mergedByPath
-      return { ...state, mergingByPath, mergedByPath }
-    }
     default: {
       const _exhaustive: never = event
       void _exhaustive

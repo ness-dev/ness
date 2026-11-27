@@ -37,7 +37,7 @@ describe('repoConfigsReducer', () => {
     }
     const updated: RepoConfig = {
       setupCommand: 'a-updated',
-      hideMergePanel: true
+      hidePrPanel: true
     }
     const next = repoConfigsReducer(start, {
       type: 'repoConfigs/changed',
@@ -74,12 +74,7 @@ describe('repoConfigsReducer', () => {
     expect(next).toBe(start)
   })
 
-  it('effectiveHiddenRightPanels migrates legacy hideMergePanel / hidePrPanel', () => {
-    expect(effectiveHiddenRightPanels({ hideMergePanel: true })).toEqual({
-      scratchpad: true,
-      subscriptions: true,
-      merge: true
-    })
+  it('effectiveHiddenRightPanels migrates legacy hidePrPanel', () => {
     expect(effectiveHiddenRightPanels({ hidePrPanel: true })).toEqual({
       scratchpad: true,
       subscriptions: true,
@@ -87,21 +82,25 @@ describe('repoConfigsReducer', () => {
     })
     expect(
       effectiveHiddenRightPanels({
-        hideMergePanel: true,
-        hiddenRightPanels: { pr: true, commits: true }
+        hidePrPanel: true,
+        hiddenRightPanels: { commits: true }
       })
-    ).toEqual({ scratchpad: true, subscriptions: true, merge: true, pr: true, commits: true })
+    ).toEqual({ scratchpad: true, subscriptions: true, pr: true, commits: true })
   })
 
   it('effectiveHiddenRightPanels prefers new field over legacy', () => {
-    // Legacy says "hide merge", new explicitly sets merge: false.
-    // effectiveHiddenRightPanels only adds legacy when new is undefined.
     expect(
       effectiveHiddenRightPanels({
-        hideMergePanel: true,
-        hiddenRightPanels: { merge: false }
+        hidePrPanel: true,
+        hiddenRightPanels: { pr: false }
       })
-    ).toEqual({ scratchpad: true, subscriptions: true, merge: false })
+    ).toEqual({ scratchpad: true, subscriptions: true, pr: false })
+  })
+
+  it('effectiveHiddenRightPanels ignores the removed Merge Locally panel flag', () => {
+    // Saved before the panel was removed; must not resurrect a "merge" key.
+    const legacy = { hideMergePanel: true } as unknown as RepoConfig
+    expect(effectiveHiddenRightPanels(legacy)).toEqual({ scratchpad: true, subscriptions: true })
   })
 
   it('effectiveHiddenRightPanels defaults scratchpad to hidden', () => {
@@ -126,7 +125,6 @@ describe('repoConfigsReducer', () => {
         rightPanelOrder: [
           'cost',
           'pr',
-          'merge',
           'todos',
           'agents',
           'commits',
@@ -139,7 +137,6 @@ describe('repoConfigsReducer', () => {
     ).toEqual([
       'cost',
       'pr',
-      'merge',
       'todos',
       'agents',
       'commits',
@@ -160,7 +157,6 @@ describe('repoConfigsReducer', () => {
     expect(result[1]).toBe('pr')
     // Remaining keys in canonical order
     expect(result.slice(2)).toEqual([
-      'merge',
       'commits',
       'changedFiles',
       'allFiles',
@@ -170,6 +166,15 @@ describe('repoConfigsReducer', () => {
       'context',
       'scratchpad'
     ])
+    expect(result).toHaveLength(DEFAULT_RIGHT_PANEL_ORDER.length)
+  })
+
+  it('effectiveRightPanelOrder drops the removed Merge Locally panel from a saved order', () => {
+    const result = effectiveRightPanelOrder({
+      rightPanelOrder: ['merge', 'cost', 'pr'] as never
+    })
+    expect(result).not.toContain('merge')
+    expect(result.slice(0, 2)).toEqual(['cost', 'pr'])
     expect(result).toHaveLength(DEFAULT_RIGHT_PANEL_ORDER.length)
   })
 

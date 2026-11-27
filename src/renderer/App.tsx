@@ -775,12 +775,6 @@ function DesktopApp(): JSX.Element {
     ? repoConfigs[activeRepoRoot] ?? null
     : null
 
-  // After a local merge, kick the poller so the merged flag and PR state
-  // propagate to the UI without waiting for the 5-min interval.
-  const refreshMergedStatus = useCallback(() => {
-    void backend.refreshPRsAll()
-  }, [])
-
   // Ask main for a single-worktree PR refresh. Used by the activity observer
   // when a terminal enters the "waiting" state (likely just pushed).
   const fetchPRStatus = useCallback((wtPath: string) => {
@@ -2285,8 +2279,6 @@ function DesktopApp(): JSX.Element {
             activeRepoConfig={activeRepoConfig}
             onRefreshPRs={fetchAllPRStatuses}
             onOpenGithubSettings={handleOpenGithubSettings}
-            onMerged={refreshMergedStatus}
-            onRemoveWorktree={handleDeleteWorktree}
             onOpenDiff={handleOpenDiff}
             onOpenCommitFileDiff={handleOpenCommitFileDiff}
             onOpenFile={handleOpenFile}
