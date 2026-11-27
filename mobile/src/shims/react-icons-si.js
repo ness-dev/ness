@@ -3,7 +3,8 @@
 // desktop passes — recognisable enough in a tool chip until real RN brand
 // marks are worth bundling.
 const React = require('react')
-const { Plug } = require('lucide-react-native')
+// Per-icon path: the barrel would pull in all of lucide.
+const Plug = require('lucide-react-native/icons/plug').default
 const { tw } = require('../tw')
 
 function Brand({ className, color }) {
