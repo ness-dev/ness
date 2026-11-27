@@ -3,7 +3,7 @@
 // (react-markdown + GFM isn't available here, so this is a small block +
 // inline parser covering exactly the elements that map renders).
 import { useCallback, useMemo, type ReactNode } from 'react'
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native'
+import { Alert, Pressable, ScrollView, Text, View, StyleSheet } from 'react-native'
 import { RefreshCw, TriangleAlert } from 'lucide-react-native'
 import type { ToolRunResult, ToolSpec } from '../../../src/shared/tools'
 import { toolPanelKey } from '../../../src/shared/state/repo-configs'
@@ -250,14 +250,6 @@ function soleLink(nodes: Inline[]): string | null {
   return meaningful.length === 1 && meaningful[0].t === 'link' ? meaningful[0].href : null
 }
 
-const SECTION = themed(() => ({
-  paddingHorizontal: 12,
-  paddingVertical: 6,
-  minHeight: 32,
-  justifyContent: 'center' as const,
-  backgroundColor: alpha(c.panelRaised, 0.5)
-}))
-const SECTION_TEXT = themed(() => ({ fontSize: fs.xs, fontWeight: '500' as const, color: c.dim, textTransform: 'uppercase' as const, letterSpacing: 0.6 }))
 
 function SidebarMarkdown({
   markdown,
@@ -325,15 +317,15 @@ function SidebarMarkdown({
           case 'h':
             if (b.level <= 2)
               return (
-                <View key={i} style={SECTION}>
-                  <Text style={SECTION_TEXT} numberOfLines={2}>
+                <View key={i} style={sectionStyles.section}>
+                  <Text style={sectionStyles.sectionText} numberOfLines={2}>
                     {renderInline(parseInline(b.text))}
                   </Text>
                 </View>
               )
             if (b.level === 3)
               return (
-                <Text key={i} style={[SECTION_TEXT, { paddingHorizontal: 12, paddingVertical: 4 }]}>
+                <Text key={i} style={[sectionStyles.sectionText, { paddingHorizontal: 12, paddingVertical: 4 }]}>
                   {renderInline(parseInline(b.text))}
                 </Text>
               )
@@ -401,7 +393,7 @@ function SidebarMarkdown({
                 <View>
                   <View style={{ flexDirection: 'row' }}>
                     {b.head.map((h, j) => (
-                      <Text key={j} style={[SECTION_TEXT, { paddingRight: 12, minWidth: 48 }]}>
+                      <Text key={j} style={[sectionStyles.sectionText, { paddingRight: 12, minWidth: 48 }]}>
                         {renderInline(parseInline(h))}
                       </Text>
                     ))}
@@ -423,3 +415,20 @@ function SidebarMarkdown({
     </View>
   )
 }
+
+// Read styles from this map (st.x); never pass a themed() object itself
+// as a style. React freezes styles and flattens them by enumerating
+// keys, and themed()'s Proxy supports neither, so the style silently
+// vanished (text fell back to iOS's default black on dark themes).
+const sectionStyles = themed(() =>
+  StyleSheet.create({
+  section: {
+  paddingHorizontal: 12,
+  paddingVertical: 6,
+  minHeight: 32,
+  justifyContent: 'center' as const,
+  backgroundColor: alpha(c.panelRaised, 0.5)
+},
+  sectionText: { fontSize: fs.xs, fontWeight: '500' as const, color: c.dim, textTransform: 'uppercase' as const, letterSpacing: 0.6 }
+  })
+)
