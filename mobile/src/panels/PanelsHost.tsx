@@ -30,13 +30,15 @@ export function PanelsHost({
   worktree,
   focusedTabId,
   onSendToAgent,
-  onClose
+  onClose,
+  openers
 }: {
   client: NessClient
   worktree: Worktree
   focusedTabId: string | null
   onSendToAgent: (text: string) => void
   onClose: () => void
+  openers?: Pick<PanelProps, 'onOpenFile' | 'onOpenDiff' | 'onOpenCommitFileDiff'>
 }) {
   const repoRoot = worktree.repoRoot
   const repoConfig = useNess(client, (s) => s.repoConfigs.byRepo[repoRoot] ?? null)
@@ -65,7 +67,8 @@ export function PanelsHost({
     repoConfig,
     onSendToAgent,
     onOpenUrl: (url) => void Linking.openURL(url),
-    onClose
+    onClose,
+    ...openers
   }
 
   return (

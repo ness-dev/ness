@@ -1,6 +1,6 @@
 // Port of renderer/components/AllFilesPanel.tsx.
 //
-// Desktop-only, omitted: row tap → file tab (onOpenFile), "Open worktree in
+// Desktop-only, omitted: "Open worktree in
 // editor" / "Open file in editor" (openInEditor), "Reveal in Finder"
 // (openPath), the quick-open hotkey hint in the footer (no Quick Open on
 // phone), and drag-a-row-into-the-composer (the @ button covers it).
@@ -48,7 +48,7 @@ type Row =
   | { key: string; kind: 'file'; name: string; path: string; depth: number | null }
   | { key: string; kind: 'more'; label: string }
 
-export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProps) {
+export function AllFilesPanel({ client, worktreePath, onSendToAgent, onOpenFile }: PanelProps) {
   const [files, setFiles] = useState<string[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
   const [filter, setFilter] = useState('')
@@ -59,6 +59,9 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
   const onSendToAgentRef = useRef(onSendToAgent)
   onSendToAgentRef.current = onSendToAgent
   const sendToAgent = useCallback((text: string) => onSendToAgentRef.current(text), [])
+  const onOpenFileRef = useRef(onOpenFile)
+  onOpenFileRef.current = onOpenFile
+  const openFile = useCallback((path: string) => onOpenFileRef.current?.(path), [])
   const [view, toggleView] = useFileListView('all-files', 'tree')
 
   const refresh = useCallback(async () => {
@@ -165,6 +168,7 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
         path={item.path}
         depth={item.depth}
         onSendToAgent={sendToAgent}
+        onOpenFile={openFile}
         changedStatus={changed.byPath.get(item.path)?.status}
       />
     )
@@ -228,6 +232,7 @@ const FileRow = memo(function FileRow({
   path,
   depth,
   onSendToAgent,
+  onOpenFile,
   changedStatus
 }: {
   name: string
@@ -235,12 +240,16 @@ const FileRow = memo(function FileRow({
   /** Tree indent level, or null in list view to show the full path. */
   depth: number | null
   onSendToAgent: (text: string) => void
+  onOpenFile: (path: string) => void
   changedStatus?: ChangedFile['status']
 }) {
   const dir = depth === null ? path.slice(0, path.length - name.length) : ''
   return (
-    // Row tap opens a file tab on desktop (omitted); long-press shows the path.
+    // Tap opens a file tab, as on desktop; long-press shows the path.
     <Pressable
+      onPress={() => onOpenFile(path)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${path}`}
       onLongPress={() => Alert.alert(path)}
       style={({ pressed }) => ({
         minHeight: 44,

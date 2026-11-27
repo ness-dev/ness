@@ -40,6 +40,17 @@ export interface Palette {
   brand: string
   brandMid: string
   brandDeep: string
+  /** highlight.js token colours (styles.css --syntax-*), for the file and
+   *  diff viewers. */
+  syntaxKeyword: string
+  syntaxType: string
+  syntaxString: string
+  syntaxNumber: string
+  syntaxComment: string
+  syntaxVariable: string
+  syntaxParams: string
+  syntaxAddition: string
+  syntaxDeletion: string
 }
 
 export const c: Palette = { ...(BUILT_IN_PALETTES.dark as unknown as Palette) }

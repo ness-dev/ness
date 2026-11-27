@@ -3,7 +3,7 @@
 // FileTree.tsx (view toggle, dir rows, indent), useFileListView,
 // changed-files-request (in-flight dedup) and useChangedFilesSet.
 //
-// Desktop-only, omitted: row tap → diff tab (onOpenDiff), the "Review"
+// Desktop-only, omitted: the "Review"
 // header button (onOpenReview opens a review tab), "Open file in editor"
 // (openInEditor), and drag-a-row-into-the-composer (the @ button covers it).
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
@@ -234,10 +234,10 @@ type Row =
   | { key: string; kind: 'section'; label: string; view: FileListView; onToggle: () => void; top: boolean }
   | { key: string; kind: 'subsection'; label: string }
   | { key: string; kind: 'empty'; label: string }
-  | { key: string; kind: 'file'; file: ChangedFile; depth?: number }
+  | { key: string; kind: 'file'; list: ListId; file: ChangedFile; depth?: number }
   | { key: string; kind: 'dir'; list: ListId; node: TreeNode; depth: number; open: boolean }
 
-export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: PanelProps) {
+export function ChangedFilesPanel({ client, worktreePath, onSendToAgent, onOpenDiff }: PanelProps) {
   const fetcher = useCallback(
     async (path: string, opts: { force: boolean }): Promise<ChangedFilesData> => {
       const [working, branch] = await Promise.all([
@@ -288,7 +288,7 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
     const out: Row[] = []
     const pushList = (list: ListId, files: ChangedFile[], view: FileListView): void => {
       if (view !== 'tree') {
-        for (const file of files) out.push({ key: `${list}:f:${file.path}`, kind: 'file', file })
+        for (const file of files) out.push({ key: `${list}:f:${file.path}`, kind: 'file', list, file })
         return
       }
       // Renames are "old -> new"; place them by destination so the arrow
@@ -297,7 +297,7 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
       const shut = collapsed[list]
       for (const r of flattenTree(buildTree([...byPath.keys()]), (p) => !shut.has(p))) {
         if (r.kind === 'dir') out.push({ key: `${list}:d:${r.node.path}`, kind: 'dir', list, node: r.node, depth: r.depth, open: r.open })
-        else out.push({ key: `${list}:f:${r.node.path}`, kind: 'file', file: byPath.get(r.node.path)!, depth: r.depth })
+        else out.push({ key: `${list}:f:${r.node.path}`, kind: 'file', list, file: byPath.get(r.node.path)!, depth: r.depth })
       }
     }
 
@@ -374,7 +374,15 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
           />
         )
       case 'file':
-        return <FileRow file={item.file} depth={item.depth} onSendToAgent={onSendToAgent} />
+        return (
+          <FileRow
+            file={item.file}
+            depth={item.depth}
+            onSendToAgent={onSendToAgent}
+            // Same arguments as the desktop's three ChangedFileList onOpen handlers.
+            onOpen={onOpenDiff && (() => onOpenDiff(item.file.path, item.list === 'staged', item.list === 'branch' ? 'branch' : 'working'))}
+          />
+        )
     }
   }
 
@@ -416,12 +424,14 @@ const sectionText = themed(() => ({
 function FileRow({
   file,
   depth,
-  onSendToAgent
+  onSendToAgent,
+  onOpen
 }: {
   file: ChangedFile
   /** Set in tree view: indent to this depth and show only the file name. */
   depth?: number
   onSendToAgent: (text: string) => void
+  onOpen?: () => void
 }) {
   const inTree = depth !== undefined
   const lastSlash = file.path.lastIndexOf('/')
@@ -431,9 +441,12 @@ function FileRow({
   const name = shown.slice(shown.lastIndexOf('/') + 1)
 
   return (
-    // Row tap opens a diff tab on desktop (omitted); long-press stands in
-    // for the full-path hover tooltip.
+    // Tap opens a diff tab, as on desktop; long-press stands in for the
+    // full-path hover tooltip.
     <Pressable
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`Open diff ${file.path}`}
       onLongPress={() => Alert.alert(file.path)}
       style={({ pressed }) => ({
         minHeight: 44,

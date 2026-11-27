@@ -22,7 +22,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#c084fc",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#c084fc",
+    "syntaxType": "#60a5fa",
+    "syntaxString": "#22c55e",
+    "syntaxNumber": "#fbbf24",
+    "syntaxComment": "#525252",
+    "syntaxVariable": "#d4d4d4",
+    "syntaxParams": "#a3a3a3",
+    "syntaxAddition": "#22c55e",
+    "syntaxDeletion": "#ef4444"
   },
   "solarized-dark": {
     "app": "#002b36",
@@ -45,7 +54,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#6c71c4",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#6c71c4",
+    "syntaxType": "#268bd2",
+    "syntaxString": "#859900",
+    "syntaxNumber": "#b58900",
+    "syntaxComment": "#586e75",
+    "syntaxVariable": "#93a1a1",
+    "syntaxParams": "#839496",
+    "syntaxAddition": "#859900",
+    "syntaxDeletion": "#dc322f"
   },
   "light": {
     "app": "#ffffff",
@@ -68,7 +86,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#9333ea",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#8b2fd6",
+    "syntaxType": "#1d4ed8",
+    "syntaxString": "#147538",
+    "syntaxNumber": "#a54c08",
+    "syntaxComment": "#656565",
+    "syntaxVariable": "#262626",
+    "syntaxParams": "#525252",
+    "syntaxAddition": "#147538",
+    "syntaxDeletion": "#b91c1c"
   },
   "solarized-light": {
     "app": "#fdf6e3",
@@ -91,7 +118,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#6c71c4",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#5155ac",
+    "syntaxType": "#1b6396",
+    "syntaxString": "#576500",
+    "syntaxNumber": "#785a00",
+    "syntaxComment": "#4e6268",
+    "syntaxVariable": "#45585f",
+    "syntaxParams": "#4e6167",
+    "syntaxAddition": "#576500",
+    "syntaxDeletion": "#b7211f"
   },
   "catppuccin-latte": {
     "app": "#eff1f5",
@@ -114,7 +150,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#8839ef",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#7933d5",
+    "syntaxType": "#1755d1",
+    "syntaxString": "#2a6c1b",
+    "syntaxNumber": "#a23f09",
+    "syntaxComment": "#5a5d72",
+    "syntaxVariable": "#4c4f69",
+    "syntaxParams": "#5a5d75",
+    "syntaxAddition": "#2a6c1b",
+    "syntaxDeletion": "#bc0e33"
   },
   "gruvbox-light": {
     "app": "#fbf1c7",
@@ -137,7 +182,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#8f3f71",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#9d0006",
+    "syntaxType": "#80530d",
+    "syntaxString": "#625e0c",
+    "syntaxNumber": "#8f3f71",
+    "syntaxComment": "#645a51",
+    "syntaxVariable": "#076577",
+    "syntaxParams": "#504945",
+    "syntaxAddition": "#625e0c",
+    "syntaxDeletion": "#9d0006"
   },
   "tokyo-night-day": {
     "app": "#e1e2e7",
@@ -160,7 +214,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#894cd9",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#653ca0",
+    "syntaxType": "#1650a2",
+    "syntaxString": "#42592a",
+    "syntaxNumber": "#814200",
+    "syntaxComment": "#4a5074",
+    "syntaxVariable": "#264695",
+    "syntaxParams": "#643ba5",
+    "syntaxAddition": "#42592a",
+    "syntaxDeletion": "#933030"
   },
   "one-light": {
     "app": "#fafafa",
@@ -183,7 +246,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#a626a4",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#a1259f",
+    "syntaxType": "#2a59bf",
+    "syntaxString": "#336b32",
+    "syntaxNumber": "#7f5701",
+    "syntaxComment": "#5c5f69",
+    "syntaxVariable": "#af3126",
+    "syntaxParams": "#383a42",
+    "syntaxAddition": "#336b32",
+    "syntaxDeletion": "#bc113e"
   },
   "dracula": {
     "app": "#282a36",
@@ -206,7 +278,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#bd93f9",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#bd93f9",
+    "syntaxType": "#8be9fd",
+    "syntaxString": "#50fa7b",
+    "syntaxNumber": "#f1fa8c",
+    "syntaxComment": "#4a5075",
+    "syntaxVariable": "#f8f8f2",
+    "syntaxParams": "#bfbfbf",
+    "syntaxAddition": "#50fa7b",
+    "syntaxDeletion": "#ff5555"
   },
   "nord": {
     "app": "#2e3440",
@@ -229,7 +310,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#b48ead",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#b48ead",
+    "syntaxType": "#88c0d0",
+    "syntaxString": "#a3be8c",
+    "syntaxNumber": "#ebcb8b",
+    "syntaxComment": "#4c566a",
+    "syntaxVariable": "#d8dee9",
+    "syntaxParams": "#a3adc2",
+    "syntaxAddition": "#a3be8c",
+    "syntaxDeletion": "#bf616a"
   },
   "gruvbox-dark": {
     "app": "#282828",
@@ -252,7 +342,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#d3869b",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#d3869b",
+    "syntaxType": "#83a598",
+    "syntaxString": "#b8bb26",
+    "syntaxNumber": "#fabd2f",
+    "syntaxComment": "#665c54",
+    "syntaxVariable": "#ebdbb2",
+    "syntaxParams": "#bdae93",
+    "syntaxAddition": "#b8bb26",
+    "syntaxDeletion": "#fb4934"
   },
   "tokyo-night": {
     "app": "#1a1b26",
@@ -275,7 +374,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#bb9af7",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#bb9af7",
+    "syntaxType": "#7aa2f7",
+    "syntaxString": "#9ece6a",
+    "syntaxNumber": "#e0af68",
+    "syntaxComment": "#3b4261",
+    "syntaxVariable": "#c0caf5",
+    "syntaxParams": "#a9b1d6",
+    "syntaxAddition": "#9ece6a",
+    "syntaxDeletion": "#f7768e"
   },
   "catppuccin-mocha": {
     "app": "#1e1e2e",
@@ -298,7 +406,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#cba6f7",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#cba6f7",
+    "syntaxType": "#89b4fa",
+    "syntaxString": "#a6e3a1",
+    "syntaxNumber": "#f9e2af",
+    "syntaxComment": "#585b70",
+    "syntaxVariable": "#cdd6f4",
+    "syntaxParams": "#bac2de",
+    "syntaxAddition": "#a6e3a1",
+    "syntaxDeletion": "#f38ba8"
   },
   "one-dark": {
     "app": "#282c34",
@@ -321,7 +438,16 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#c678dd",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#c678dd",
+    "syntaxType": "#61afef",
+    "syntaxString": "#98c379",
+    "syntaxNumber": "#e5c07b",
+    "syntaxComment": "#4b5263",
+    "syntaxVariable": "#abb2bf",
+    "syntaxParams": "#9da5b4",
+    "syntaxAddition": "#98c379",
+    "syntaxDeletion": "#e06c75"
   },
   "cyberfunk": {
     "app": "#000000",
@@ -344,6 +470,15 @@ export const BUILT_IN_PALETTES: Record<string, Record<string, string>> = {
     "accent": "#ff6600",
     "brand": "#4ade80",
     "brandMid": "#22c55e",
-    "brandDeep": "#16a34a"
+    "brandDeep": "#16a34a",
+    "syntaxKeyword": "#ff6600",
+    "syntaxType": "#00ffff",
+    "syntaxString": "#00ff9d",
+    "syntaxNumber": "#ffee00",
+    "syntaxComment": "#663366",
+    "syntaxVariable": "#ffffff",
+    "syntaxParams": "#ff99ff",
+    "syntaxAddition": "#00ff9d",
+    "syntaxDeletion": "#ff1a8c"
   }
 }
