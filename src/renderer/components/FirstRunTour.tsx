@@ -140,7 +140,32 @@ function Popout({
 }
 
 const primaryButton =
-  'w-full inline-flex items-center justify-center gap-2 brand-gradient-bg text-white font-semibold text-sm px-4 py-2 rounded-lg hover:brightness-110 transition-all cursor-pointer disabled:opacity-70 disabled:cursor-default'
+  'inline-flex items-center justify-center gap-2 brand-gradient-bg text-white font-semibold text-sm px-4 py-2 rounded-lg hover:brightness-110 transition-all cursor-pointer disabled:opacity-70 disabled:cursor-default'
+
+/** The tour's "Start something new" action. Shared with the center empty
+ *  state so the two surfaces can't drift in look or busy behaviour. */
+export function TourStartButton({
+  onStart,
+  className = ''
+}: {
+  onStart: () => Promise<void>
+  className?: string
+}): JSX.Element {
+  const [starting, setStarting] = useState(false)
+  return (
+    <button
+      className={`${primaryButton} ${className}`}
+      disabled={starting}
+      onClick={() => {
+        setStarting(true)
+        void onStart().finally(() => setStarting(false))
+      }}
+    >
+      {starting && <Loader2 className="icon-sm animate-spin" />}
+      Start something new
+    </button>
+  )
+}
 
 /** The two first-run popouts. `homePath` is the tour project's main
  *  workspace row, resolved by the caller from the worktree list. */
@@ -158,7 +183,6 @@ export function FirstRunTour({
   const anchorPath =
     tour.step === 'home' ? homePath : tour.step === 'new-worktree' ? (tour.worktreePath ?? null) : null
   const anchor = useSidebarAnchor(anchorPath)
-  const [starting, setStarting] = useState(false)
   if (!anchor) return null
 
   if (tour.step === 'home') {
@@ -169,19 +193,7 @@ export function FirstRunTour({
         icon={<Sparkles className="icon-base text-accent" />}
         eyebrow="Main workspace"
         onDismiss={onDismiss}
-        action={
-          <button
-            className={primaryButton}
-            disabled={starting}
-            onClick={() => {
-              setStarting(true)
-              void onStart().finally(() => setStarting(false))
-            }}
-          >
-            {starting && <Loader2 className="icon-sm animate-spin" />}
-            Start something new
-          </button>
-        }
+        action={<TourStartButton onStart={onStart} className="w-full" />}
       >
         This is your main workspace for this project. Agents here can spin up worktrees for any
         work that you might want to do.
@@ -197,7 +209,7 @@ export function FirstRunTour({
       eyebrow="New worktree"
       onDismiss={onDismiss}
       action={
-        <button className={primaryButton} onClick={onDismiss}>
+        <button className={`${primaryButton} w-full`} onClick={onDismiss}>
           Got it
         </button>
       }

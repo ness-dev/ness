@@ -1703,13 +1703,18 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
     if (activated && importForksPending.has(wtPath)) activatedDuringImportFork.add(wtPath)
     return
   }
+  // The tour's home workspace stays empty until the user acts on popout 1:
+  // seeding the default agent + Shell pair here would put an idle agent
+  // (spawned as soon as the workspace is shown) beside the "Getting
+  // started" chat the kickoff adds. Dismissing the tour seeds it then.
+  const tourHolds = tourHomePath(store.getSnapshot().state) === wtPath
   if (!importedWorktrees.has(wtPath)) {
-    panesFSM.ensureInitialized(wtPath)
+    if (!tourHolds) panesFSM.ensureInitialized(wtPath)
     return
   }
   const session = importedWorktrees.get(wtPath)
   if (!session) {
-    if (activated) panesFSM.ensureInitialized(wtPath)
+    if (activated && !tourHolds) panesFSM.ensureInitialized(wtPath)
     return
   }
   importedWorktrees.set(wtPath, null)
@@ -3956,7 +3961,11 @@ function registerIpcHandlers(): void {
     return { ok: true as const, worktreePath: homePath, tabId }
   })
   transport.onRequest('onboarding:tourDismiss', () => {
+    const homePath = tourHomePath(store.getSnapshot().state)
     store.dispatch({ type: 'onboarding/tourEnded' })
+    // initWorktreePanes held back the home workspace's default tabs while
+    // popout 1 was up; it's open in front of the user, so give it them now.
+    if (homePath) initWorktreePanes(homePath, true)
     return true
   })
 
