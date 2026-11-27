@@ -10,8 +10,11 @@ export const CodeWebView = memo(function CodeWebView({ html }: { html: string })
       source={{ html }}
       originWhitelist={['*']}
       // Only the page's own load; a link inside a file must not navigate
-      // the viewer away.
-      onShouldStartLoadWithRequest={(req) => req.navigationType !== 'click'}
+      // the viewer away. navigationType is iOS-only (the initial html load
+      // there isn't about:blank), so Android falls back to the URL.
+      onShouldStartLoadWithRequest={(req) =>
+        req.navigationType !== undefined ? req.navigationType !== 'click' : req.url === 'about:blank' || req.url.startsWith('data:')
+      }
       // Without these the page flashes white before its own background paints.
       style={{ flex: 1, backgroundColor: c.app }}
       containerStyle={{ backgroundColor: c.app }}

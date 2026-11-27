@@ -29,10 +29,13 @@ function ensureMermaidPage() {
   const dist = require.resolve('mermaid/dist/mermaid.min.js', { paths: [projectRoot] })
   const version = require(require.resolve('mermaid/package.json', { paths: [projectRoot] })).version
   const out = path.join(projectRoot, 'generated/mermaid.html')
-  const stamp = `<!-- mermaid ${version} -->`
+  const page = fs.readFileSync(path.join(projectRoot, 'src/components/mermaid-page.html'), 'utf8')
+  // Both inputs in the stamp: a template edit must rebuild a page that
+  // already exists, or the app keeps talking to the old nessRender.
+  const templateHash = require('crypto').createHash('sha1').update(page).digest('hex').slice(0, 8)
+  const stamp = `<!-- mermaid ${version} page ${templateHash} -->`
   if (fs.existsSync(out) && fs.readFileSync(out, 'utf8').startsWith(stamp)) return
   const lib = fs.readFileSync(dist, 'utf8').replace(/<\/script/gi, '<\\/script')
-  const page = fs.readFileSync(path.join(projectRoot, 'src/components/mermaid-page.html'), 'utf8')
   fs.mkdirSync(path.dirname(out), { recursive: true })
   fs.writeFileSync(out, `${stamp}\n${page.replace('/*MERMAID*/', () => lib)}`)
 }

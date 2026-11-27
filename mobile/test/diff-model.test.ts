@@ -55,6 +55,27 @@ describe('parseGitDiff', () => {
       { kind: 'file', path: 'old.md → new.md' }
     ])
   })
+
+  it('ends a hunk at a file header it cannot parse (git-quoted paths)', () => {
+    const raw = [
+      'diff --git a/x.ts b/x.ts',
+      '@@ -1 +1 @@',
+      '-a',
+      '+b',
+      'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"',
+      'index 1..2 100644',
+      '--- "a/caf\\303\\251.md"',
+      '+++ "b/caf\\303\\251.md"',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new'
+    ].join('\n')
+    const d = parseGitDiff(raw)
+    expect(d.additions).toBe(2)
+    expect(d.deletions).toBe(2)
+    expect(d.rows[4]).toEqual({ kind: 'file', path: '"a/caf\\303\\251.md" "b/caf\\303\\251.md"' })
+    expect(d.rows[5]).toEqual({ kind: 'hunk', header: '@@ -1 +1 @@' })
+  })
 })
 
 describe('viewer pages', () => {

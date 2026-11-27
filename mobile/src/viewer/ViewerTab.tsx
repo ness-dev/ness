@@ -82,8 +82,9 @@ const Detail = ({ children }: { children: ReactNode }) => <Text style={{ fontSiz
 
 /** Re-runs `load` whenever the file changes on disk, via the same
  *  worktree:watchFile signal the desktop's FileView listens on. */
-function useFileWatch(client: NessClient, worktreePath: string, filePath: string, onChange: () => void): void {
+function useFileWatch(client: NessClient, worktreePath: string, filePath: string | null, onChange: () => void): void {
   useEffect(() => {
+    if (!filePath) return
     client.api.watchFile(worktreePath, filePath)
     const off = client.api.onFileContentChanged((wt, rel) => {
       if (wt === worktreePath && rel === filePath) onChange()
@@ -203,6 +204,9 @@ function FileDiffBody({ client, worktreePath, tab, filePath }: { client: NessCli
   const [state, setState] = useState<DiffState>({ kind: 'loading' })
   const [reload, setReload] = useState(0)
   const { commitHash, staged, branchDiff } = tab
+  // A commit's diff never changes; working and branch diffs follow the file
+  // on disk, as the desktop's ReviewDiffPane does.
+  useFileWatch(client, worktreePath, commitHash ? null : filePath, () => setReload((n) => n + 1))
 
   useEffect(() => {
     let cancelled = false

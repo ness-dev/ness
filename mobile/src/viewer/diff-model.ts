@@ -56,10 +56,16 @@ export function parseGitDiff(raw: string): UnifiedDiff {
   let newNo = 0
   let inHunk = false
   for (const line of raw.split('\n')) {
-    const file = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
-    if (file) {
-      rows.push({ kind: 'file', path: file[1] === file[2] ? file[2] : `${file[1]} → ${file[2]}` })
+    if (line.startsWith('diff --git ')) {
+      // Any file header ends the previous hunk, parsed or not: git quotes
+      // non-ASCII paths ("a/caf\303\251.md"), which the pattern doesn't
+      // take, and the next file's ---/+++ lines must not become rows.
       inHunk = false
+      const file = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
+      rows.push({
+        kind: 'file',
+        path: !file ? line.slice('diff --git '.length) : file[1] === file[2] ? file[2] : `${file[1]} → ${file[2]}`
+      })
       continue
     }
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
