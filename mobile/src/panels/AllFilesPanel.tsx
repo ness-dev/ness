@@ -5,7 +5,7 @@
 // (openPath), the quick-open hotkey hint in the footer (no Quick Open on
 // phone), and drag-a-row-into-the-composer (the @ button covers it).
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Alert, Pressable, ScrollView, Text, TextInput, View, StyleSheet } from 'react-native'
 import { FileText, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
 import { buildTree, sortChildren, type TreeNode } from '../../../src/renderer/file-tree'
@@ -193,9 +193,9 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
           }}
         />
       </View>
-      {!worktreePath && <Text style={emptyText}>No worktree selected</Text>}
-      {worktreePath && hasLoaded && files.length === 0 && <Text style={emptyText}>No files found</Text>}
-      {worktreePath && filtering && filtered.length === 0 && files.length > 0 && <Text style={emptyText}>No matches</Text>}
+      {!worktreePath && <Text style={emptyStyles.emptyText}>No worktree selected</Text>}
+      {worktreePath && hasLoaded && files.length === 0 && <Text style={emptyStyles.emptyText}>No files found</Text>}
+      {worktreePath && filtering && filtered.length === 0 && files.length > 0 && <Text style={emptyStyles.emptyText}>No matches</Text>}
       {rows.length > 0 && (
         // ScrollView + map, not FlatList: PanelsHost is already a ScrollView
         // and nesting a VirtualizedList in one breaks windowing. Rows are capped
@@ -221,7 +221,6 @@ export function AllFilesPanel({ client, worktreePath, onSendToAgent }: PanelProp
   )
 }
 
-const emptyText = themed(() => ({ padding: 12, fontSize: fs.xs, color: c.faint }))
 
 const FileRow = memo(function FileRow({
   name,
@@ -275,3 +274,13 @@ const FileRow = memo(function FileRow({
     </Pressable>
   )
 })
+
+// Read styles from this map (st.x); never pass a themed() object itself
+// as a style. React freezes styles and flattens them by enumerating
+// keys, and themed()'s Proxy supports neither, so the style silently
+// vanished (text fell back to iOS's default black on dark themes).
+const emptyStyles = themed(() =>
+  StyleSheet.create({
+  emptyText: { padding: 12, fontSize: fs.xs, color: c.faint }
+  })
+)
