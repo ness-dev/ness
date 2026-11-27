@@ -257,17 +257,29 @@ export function ChatView({
 
   // Lifecycle (JsonModeChat.tsx:1864-1881): start only an awake tab with
   // no session at all (an exited one waits for Restart); fetch history
-  // once per session.
+  // whenever it isn't hydrated (below).
   const sessionExists = !!session
   useEffect(() => {
     if (mode === 'awake' && !sessionExists) void client.api.startJsonClaude(sessionId, worktreePath)
   }, [client, sessionId, worktreePath, mode, sessionExists])
-  const fetched = useRef(new Set<string>())
+  // Fetch history whenever the session isn't hydrated, not once per
+  // session: every reconnect delivers a fresh snapshot with entries
+  // stripped, and phones reconnect constantly (backgrounding, Wi-Fi). Same
+  // rule as JsonModeChat; entriesSeeded flips the flag even for an empty
+  // chat, so this can't loop. `session` is a dep so a reconnect retries a
+  // fetch that failed while disconnected.
+  const fetchInFlight = useRef<string | null>(null)
+  const hydrated = session?.entriesHydrated ?? false
   useEffect(() => {
-    if (!sessionExists || fetched.current.has(sessionId)) return
-    fetched.current.add(sessionId)
-    void client.api.getJsonClaudeEntries(sessionId)
-  }, [client, sessionId, sessionExists])
+    if (!session || hydrated || fetchInFlight.current === sessionId) return
+    fetchInFlight.current = sessionId
+    const done = () => {
+      if (fetchInFlight.current === sessionId) fetchInFlight.current = null
+    }
+    // then(done, done), not finally: finally re-rejects, and a fetch that
+    // fails while disconnected would surface as an unhandled rejection.
+    void client.api.getJsonClaudeEntries(sessionId).then(done, done)
+  }, [client, sessionId, session, hydrated])
 
   // setComposerVisible: tells main someone is looking (gates attention
   // notifications). App backgrounding counts as hidden, like

@@ -1776,17 +1776,25 @@ export function JsonModeChat({
   }, [sessionId, worktreePath, session, mode])
 
   // Lazy-load the chat history. The wire snapshot ships sessions with
-  // entries=[] to keep initial-load latency bounded; we fetch once per
-  // sessionId here and trust the slice-side `entriesSeeded` dispatch to
-  // populate. Empty result is normal (truly empty session) and the ref
-  // prevents a refetch loop in that case.
-  const fetchedEntriesForSession = useRef<Set<string>>(new Set())
+  // entries=[] and entriesHydrated=false to keep initial-load latency
+  // bounded; we fetch whenever the session isn't hydrated and trust the
+  // slice-side `entriesSeeded` dispatch to populate (it flips the flag
+  // even for an empty session, so this can't loop). Keyed on the flag, not
+  // "once per sessionId": a remote backend's reconnect delivers a fresh
+  // stripped snapshot, and a once-only fetch left the chat blank after it.
+  // `session` (not just its id) is a dep so a reconnect re-runs this even
+  // when an earlier fetch failed while disconnected.
+  const entriesFetchInFlight = useRef<string | null>(null)
+  const entriesHydratedForFetch = session?.entriesHydrated ?? false
   useEffect(() => {
-    if (!session) return
-    if (fetchedEntriesForSession.current.has(sessionId)) return
-    fetchedEntriesForSession.current.add(sessionId)
-    void backend.getJsonClaudeEntries(sessionId)
-  }, [sessionId, session])
+    if (!session || entriesHydratedForFetch) return
+    if (entriesFetchInFlight.current === sessionId) return
+    entriesFetchInFlight.current = sessionId
+    const done = (): void => {
+      if (entriesFetchInFlight.current === sessionId) entriesFetchInFlight.current = null
+    }
+    void backend.getJsonClaudeEntries(sessionId).then(done, done)
+  }, [sessionId, session, entriesHydratedForFetch])
 
   useEffect(() => {
     const el = scrollRef.current
