@@ -30,7 +30,7 @@ export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, 
   parts.forEach((part, i) => {
     if (i % 2 === 1) {
       blocks.push(
-        // Long-press copies / selects just the code (the message's own
+        // Long-press selects just the code (the message's own
         // long-press is the next one out).
         <CopyableMessage key={i} text={part.replace(/\n$/, '')}>
           <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
