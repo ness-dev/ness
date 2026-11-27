@@ -192,6 +192,11 @@ describe('mobile client ↔ headless server', () => {
   })
 
   it('initialises panes the phone can open, and adds a Chat tab', async () => {
+    // A fresh server puts its first repo in the first-run tour, which keeps
+    // the repo's main workspace empty until the tour is dismissed
+    // (initWorktreePanes / tourHomePath). Dismiss it, as the desktop user
+    // would, to test the workspace an existing user's phone sees.
+    await client.api.tourDismiss()
     await client.api.panesEnsureInitialized(repo)
     const tree = await until((s) => s.terminals.panes[repo], 'pane tree')
     const tabs = tabsOf(tree)
