@@ -454,6 +454,14 @@ Each item is meant for its own worktree.
   but only reach EAS-built apps. Needs `ios.bundleIdentifier` /
   `android.package` (permanent once on a store) and Apple / Google
   credentials.
+- **Fix uitextview's clipped-growth bug natively** (rides along with the
+  next native build). When a selectable text block grows a line, the
+  library's `drawRect` assigns `attributedText` before the new frame, and
+  the text container can keep the old height, so the last line is never
+  drawn. Markdown works around it by remounting a text view whose length
+  changed (`grownKey`). A `patches/` fix (assign the frame first, or reset
+  `textContainer.size` after it) would let that go, and would keep a
+  selection alive inside a block that's still streaming.
 - **Terminal and Shell tabs.** Currently a "terminal tabs don't work
   yet" placeholder.
 - **File and diff viewer** from Changed Files, All Files and commits.

@@ -3,7 +3,7 @@
 // results map → tail window → renderEntries → foldFinishedTurns →
 // groupConsecutiveToolRows) and the composer rules follow that file, and
 // the pure steps are imported from it rather than re-implemented.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppState as RNAppState, FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import { ChevronDown, Loader2, Sparkles, X } from 'lucide-react-native'
 import type { JsonClaudeChatEntry, JsonClaudePendingApproval, JsonClaudeSession } from '../../../src/shared/state/json-claude'
@@ -331,7 +331,11 @@ export function ChatView({
     })()
   }, [client, sessionId, worktreePath])
 
-  const entries = session?.entries
+  // Deferred, as on the desktop (JsonModeChat): while a reply streams,
+  // React drops intermediate token renders it can't keep up with instead
+  // of queueing every one, so the composer and scrolling stay responsive.
+  // Streamed text lags the data by a frame or two.
+  const entries = useDeferredValue(session?.entries)
   const { rows, hidden, renderedToolUseIds } = useMemo(() => {
     if (!session || !entries) return { rows: [] as RenderedRow[], hidden: 0, renderedToolUseIds: new Set<string>() }
     const { topLevelEntries, childrenByParentToolUseId } = buildChildrenMap(entries)

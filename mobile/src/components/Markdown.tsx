@@ -56,7 +56,35 @@ function Blocks({ nodes, ctx }: { nodes: readonly RootContent[]; ctx: Ctx }) {
   return <View style={{ gap: 10 }}>{nodes.map((n, i) => <Block key={i} node={n} ctx={ctx} />)}</View>
 }
 
-function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
+// A streamed reply is re-parsed on every token, so every block arrives as a
+// fresh mdast object even though only the last one grew. Skip a block whose
+// node is structurally unchanged (positions aside — they're the only part
+// that moves) so a token re-renders the tail, not the whole message. That
+// matters more with UITextView-backed text, where each span carries its own
+// context provider and a re-render reaches native text measurement.
+const Block = memo(BlockView, (a, b) => sameCtx(a.ctx, b.ctx) && sameNode(a.node, b.node))
+
+function sameCtx(a: Ctx, b: Ctx): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  const ka = Object.keys(a.base) as (keyof TextStyle)[]
+  return ka.length === Object.keys(b.base).length && ka.every((k) => a.base[k] === b.base[k])
+}
+
+function sameNode(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((x, i) => sameNode(x, b[i]))
+  }
+  const ra = a as Record<string, unknown>
+  const rb = b as Record<string, unknown>
+  const ka = Object.keys(ra).filter((k) => k !== 'position')
+  if (ka.length !== Object.keys(rb).filter((k) => k !== 'position').length) return false
+  return ka.every((k) => sameNode(ra[k], rb[k]))
+}
+
+function BlockView({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
   switch (node.type) {
     case 'paragraph': {
       // remarkInsight's card: a paragraph renamed via data.hName whose
@@ -71,7 +99,7 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
       return (
         <>
           {hasText && (
-            <T style={ctx.base}>
+            <T key={grownKey(textOf(node))} style={ctx.base}>
               <Inlines nodes={inline} />
             </T>
           )}
@@ -81,7 +109,7 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     }
     case 'heading':
       return (
-        <T style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
+        <T key={grownKey(textOf(node))} style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
           <Inlines nodes={node.children} />
         </T>
       )
@@ -100,7 +128,7 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     case 'table':
       return <TableBlock node={node} ctx={ctx} />
     case 'html':
-      return <T style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</T>
+      return <T key={grownKey(node.value)} style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</T>
     case 'footnoteDefinition':
       return (
         <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -188,12 +216,25 @@ function ListBlock({ node, ctx }: { node: List; ctx: Ctx }) {
 function CodeBlock({ code }: { code: string }) {
   return (
     <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
-      <T style={s.codeBlockText}>{code}</T>
+      <T key={grownKey(code)} style={s.codeBlockText}>{code}</T>
     </ScrollView>
   )
 }
 
-/** Plain text of a node, for sizing table columns. */
+// react-native-uitextview can leave a block clipped when its text grows a
+// line: the native view gets the new text and the taller frame, but its
+// text container keeps the old height, so the new last line is never drawn
+// (and stays missing after the stream ends). A fresh native view lays out
+// correctly, so each selectable root is keyed on its text length — a
+// streamed block only ever grows — and remounts when it changes. With
+// Block memoised that's just the one growing text, not the message; a
+// selection inside the still-streaming text is dropped, which is fine.
+// The real fix is native (set the frame before the text) — SPIKE.md.
+function grownKey(text: string): string {
+  return String(text.length)
+}
+
+/** Plain text of a node, for sizing table columns and grownKey. */
 function textOf(node: Nodes): string {
   if ('value' in node && typeof node.value === 'string') return node.value
   if ('children' in node) return (node.children as Nodes[]).map(textOf).join('')
@@ -237,7 +278,7 @@ function TableBlock({ node, ctx }: { node: Table; ctx: Ctx }) {
                     borderColor: c.border
                   }}
                 >
-                  <T style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
+                  <T key={grownKey(cell ? textOf(cell) : '')} style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
                     {cell && <Inlines nodes={cell.children} />}
                   </T>
                 </View>
