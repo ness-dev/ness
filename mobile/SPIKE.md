@@ -442,6 +442,41 @@ web client's old four-panel subset.
   auth.
 - Plus App Store and Play review overhead.
 
+## Future work
+
+Each item is meant for its own worktree.
+
+- **Development build.** Move off Expo Go (`npx expo run:ios` / EAS) so
+  the app can ship native modules. Several items below need it.
+- **Inline text selection** (needs the development build). Swap chat
+  `<Text>` for Bluesky's `react-native-uitextview`, which gives real
+  iOS range selection in place, keeps nested styling and tappable links.
+  Today a long-press opens the message in a Select Text sheet
+  (`src/chat/CopyText.tsx`), because RN's iOS `selectable` copies only a
+  whole Text block. Selection still won't cross paragraph or code-block
+  boundaries.
+- **Terminal and Shell tabs.** Currently a "terminal tabs don't work
+  yet" placeholder.
+- **File and diff viewer** from Changed Files, All Files and commits.
+  Wanted before launch.
+- **"Switch to Chat mode" button** on the terminal placeholder. Wanted
+  before launch.
+- **Paged history loading.** A server change so long transcripts arrive
+  in pages instead of one `getEntries` response.
+- **Polish:**
+  - Visual tap targets under 44pt: the permission pill (20pt), chat fold
+    rows (26pt), context breakdown rows (28pt).
+  - The "@" in Changed Files rows isn't its own VoiceOver element.
+  - No ellipsis on the tool-group summary line.
+  - The lucide shim pulls in the whole icon set; the bundle is about
+    4.6MB.
+- **Phone-only theme override.** The app follows the first backend's
+  theme today.
+- **More regression coverage:**
+  - A fake `claude` for the contract test, to cover starting a chat,
+    streaming and approvals.
+  - Render tests (jest-expo) for screens that crash on unexpected state.
+
 ## Running the spike
 
 ```sh
