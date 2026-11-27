@@ -341,6 +341,7 @@ export function TerminalView({
   )
 
   const agentName = agentDisplayName(tab.agentKind)
+  const commandShell = tab.type === 'shell' && !!tab.command
   // The root layout leaves the bottom safe area to each screen (the chat
   // composer sits over it). Keys must not: a swipe on them would hit the
   // home indicator. With the keyboard up the KAV already lifts the row.
@@ -406,7 +407,19 @@ export function TerminalView({
           </Pressable>
         )}
 
-        {exited && (
+        {/* A command shell (create_shell with a command) is never re-run,
+            by main or desktop, so there's nothing to restart: keep its
+            output readable and just say it finished. */}
+        {exited && commandShell && (
+          <View style={[s.chipRow, { right: 8 }]} pointerEvents="none">
+            <View style={[s.chip, { flexShrink: 1 }]}>
+              <Text style={[s.chipText, { color: c.dim, fontFamily: mono, flexShrink: 1 }]} numberOfLines={1}>
+                {tab.command} finished
+              </Text>
+            </View>
+          </View>
+        )}
+        {exited && !commandShell && (
           <View style={[StyleSheet.absoluteFill, s.center, { backgroundColor: alpha(c.app, 0.8) }]}>
             <Text style={{ color: c.dim, fontSize: fs.sm }}>{tab.type === 'agent' ? agentName : 'Shell'} exited.</Text>
             {tab.type === 'agent' && onRestartAgent && (
@@ -472,7 +485,7 @@ function Key({ label, onPress, active, a11y, children }: { label?: string; onPre
 
 const s = themed(() => StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', gap: 12 },
-  chipRow: { position: 'absolute', top: 8, flexDirection: 'row', gap: 4 },
+  chipRow: { position: 'absolute', top: 8, flexDirection: 'row', gap: 4, maxWidth: '70%' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
