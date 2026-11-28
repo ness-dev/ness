@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, RefreshCw, Loader2, SquareTerminal, FileText, FileDiff, Globe, X, ExternalLink, PanelRightOpen, PanelRightClose, Layers, Rows3, Sparkles, Plus } from 'lucide-react'
+import { ChevronDown, RefreshCw, Loader2, SquareTerminal, FileText, FileDiff, Globe, X, ExternalLink, PanelRightOpen, PanelRightClose, Layers, Rows3, Sparkles, Plus, Inbox, BellDot } from 'lucide-react'
 import { useWorktrees, usePanes, useTerminals, usePrs, useSettings, useAliases } from '../store'
 import { useBackend } from '../backend'
 import { getLeaves } from '../../shared/state/terminals'
@@ -18,6 +18,9 @@ import { randomUUID } from '../uuid'
 import { HotkeysProvider } from './Tooltip'
 import { resolveHotkeys } from '../hotkeys'
 import { pickInitialTab } from '../pick-initial-tab'
+import { InboxView } from './InboxView'
+import { useMergedWorktrees } from '../hooks/useMergedWorktrees'
+import { buildInboxModelFromMerged, prEventFor, type InboxItem, type InboxModel } from '../inbox-model'
 
 type RunnableTab = TerminalTab & { type: 'agent' | 'shell' | 'json-claude' }
 
@@ -69,6 +72,14 @@ export function MobileApp(): JSX.Element {
   // yank another client's split pane around.
   const [selectedTabByWorktree, setSelectedTabByWorktree] = useState<Record<string, string>>({})
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Which list the picker sheet shows. Per-client UI, kept here because
+  // the sheet unmounts on close and should reopen where you left it.
+  const [pickerView, setPickerView] = useState<'projects' | 'inbox'>(() =>
+    localStorage.getItem('harness:mobilePickerView') === 'inbox' ? 'inbox' : 'projects'
+  )
+  useEffect(() => {
+    localStorage.setItem('harness:mobilePickerView', pickerView)
+  }, [pickerView])
   // Fullscreen takeover that surfaces the desktop right panel (PR status,
   // branch commits, cost). Per-client UI focus → renderer-local state, not
   // a slice (see CLAUDE.md workflow #5).
@@ -148,6 +159,51 @@ export function MobileApp(): JSX.Element {
     if ((selectedTab.mode ?? 'awake') !== 'asleep') return
     void backend.panesWakeTab(activeWorktree.path, selectedTab.id)
   }, [activeWorktree, selectedTab, selectedTabId])
+
+  // Inbox: same model as the desktop sidebar's (inbox-model.ts).
+  const mergedData = useMergedWorktrees()
+  const inboxModel = useMemo(() => buildInboxModelFromMerged(mergedData), [mergedData])
+  const handleOpenInboxItem = useCallback(
+    (item: InboxItem) => {
+      setActiveWorktreeId(item.worktreePath)
+      if (item.tabId) {
+        const tabId = item.tabId
+        setSelectedTabByWorktree((prev) => ({ ...prev, [item.worktreePath]: tabId }))
+      }
+      if (item.prFingerprint) void backend.markInboxPrSeen(item.worktreePath, item.prFingerprint)
+      setPickerOpen(false)
+    },
+    [backend]
+  )
+  // Looking at a tab reads it, as on the desktop: only while the page is
+  // visible and the picker isn't covering the tab.
+  const shownTurnEndedAt = selectedTabId ? (mergedData.inboxTurns[selectedTabId]?.endedAt ?? 0) : 0
+  const shownSeenAt = selectedTabId ? (mergedData.inboxSeenAt[selectedTabId] ?? 0) : 0
+  useEffect(() => {
+    if (pickerOpen || !activeWorktreeId || !selectedTabId) return
+    if (shownTurnEndedAt <= shownSeenAt) return
+    const mark = (): void => {
+      if (document.visibilityState !== 'visible') return
+      void backend.markInboxSeen(activeWorktreeId, selectedTabId)
+    }
+    mark()
+    document.addEventListener('visibilitychange', mark)
+    return () => document.removeEventListener('visibilitychange', mark)
+  }, [backend, pickerOpen, activeWorktreeId, selectedTabId, shownTurnEndedAt, shownSeenAt])
+  const shownPrFingerprint = activeWorktreeId
+    ? (prEventFor(mergedData.prStatuses[activeWorktreeId], !!mergedData.mergedPaths[activeWorktreeId])?.fingerprint ?? null)
+    : null
+  const shownPrSeen = activeWorktreeId ? mergedData.inboxPrSeen[activeWorktreeId] : undefined
+  useEffect(() => {
+    if (pickerOpen || !activeWorktreeId || !shownPrFingerprint || shownPrSeen === shownPrFingerprint) return
+    const mark = (): void => {
+      if (document.visibilityState !== 'visible') return
+      void backend.markInboxPrSeen(activeWorktreeId, shownPrFingerprint)
+    }
+    mark()
+    document.addEventListener('visibilitychange', mark)
+    return () => document.removeEventListener('visibilitychange', mark)
+  }, [backend, pickerOpen, activeWorktreeId, shownPrFingerprint, shownPrSeen])
 
   const handleSelectWorktree = useCallback((wtPath: string) => {
     setActiveWorktreeId(wtPath)
@@ -309,6 +365,7 @@ export function MobileApp(): JSX.Element {
         statuses={terminals.statuses}
         shellActivity={terminals.shellActivity}
         pickerOpen={pickerOpen}
+        inboxCount={inboxModel.needsYou.length}
         onTogglePicker={() => setPickerOpen((v) => !v)}
         onSelectTab={handleSelectTab}
         onAddTab={handleAddTab}
@@ -352,6 +409,11 @@ export function MobileApp(): JSX.Element {
           <WorktreePickerSheet
             loading={prs.loading}
             activeWorktreeId={activeWorktreeId}
+            activeTabId={selectedTabId}
+            view={pickerView}
+            onViewChange={setPickerView}
+            inboxModel={inboxModel}
+            onOpenInboxItem={handleOpenInboxItem}
             onSelect={handleSelectWorktree}
             onClose={() => setPickerOpen(false)}
             onRefresh={() => void backend.refreshPRsAll()}
@@ -403,6 +465,8 @@ interface HeaderProps {
   statuses: Record<string, PtyStatus>
   shellActivity: Record<string, { active: boolean; processName?: string }>
   pickerOpen: boolean
+  /** Needs-you items in the Inbox; > 0 puts a dot on the picker button. */
+  inboxCount: number
   onTogglePicker: () => void
   onSelectTab: (tabId: string) => void
   onAddTab: (type: 'json-claude' | 'shell') => void
@@ -412,7 +476,7 @@ interface HeaderProps {
   onToggleRightPanel?: () => void
 }
 
-function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, pickerOpen, onTogglePicker, onSelectTab, onAddTab, onConvertTabType, rightPanelOpen, onToggleRightPanel }: HeaderProps): JSX.Element {
+function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, pickerOpen, inboxCount, onTogglePicker, onSelectTab, onAddTab, onConvertTabType, rightPanelOpen, onToggleRightPanel }: HeaderProps): JSX.Element {
   const aliases = useAliases()
   const repoLabel = worktree ? worktree.repoRoot.split('/').pop() || worktree.repoRoot : null
   return (
@@ -424,6 +488,7 @@ function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, picker
           (pickerOpen ? 'bg-surface' : 'hover:bg-panel-raised')
         }
         style={{ maxWidth: '45%' }}
+        aria-label={inboxCount > 0 ? `Switch worktree, ${inboxCount} in inbox` : 'Switch worktree'}
       >
         {worktree ? (
           <>
@@ -433,7 +498,12 @@ function Header({ worktree, tabs, selectedTabId, statuses, shellActivity, picker
                 {aliases.byPath[worktree.path] ?? (worktree.branch || worktree.path.split('/').pop())}
               </span>
             </span>
-            <ChevronDown className={'icon-sm text-dim shrink-0 transition-transform ' + (pickerOpen ? 'rotate-180' : '')} />
+            <span className="relative shrink-0 flex">
+              <ChevronDown className={'icon-sm text-dim transition-transform ' + (pickerOpen ? 'rotate-180' : '')} />
+              {inboxCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-accent border border-panel" />
+              )}
+            </span>
           </>
         ) : (
           <span className="inline-flex items-center gap-1 text-sm text-fg">
@@ -628,6 +698,11 @@ function TabIcon({ tab, shellActivity, status }: { tab: TerminalTab; shellActivi
 interface WorktreePickerSheetProps {
   loading: boolean
   activeWorktreeId: string | null
+  activeTabId: string | null
+  view: 'projects' | 'inbox'
+  onViewChange: (view: 'projects' | 'inbox') => void
+  inboxModel: InboxModel
+  onOpenInboxItem: (item: InboxItem) => void
   onSelect: (path: string) => void
   onClose: () => void
   onRefresh: () => void
@@ -638,6 +713,11 @@ interface WorktreePickerSheetProps {
 function WorktreePickerSheet({
   loading,
   activeWorktreeId,
+  activeTabId,
+  view,
+  onViewChange,
+  inboxModel,
+  onOpenInboxItem,
   onSelect,
   onClose,
   onRefresh,
@@ -655,8 +735,28 @@ function WorktreePickerSheet({
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-app">
       <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-border bg-panel">
-        <span className="text-xs uppercase tracking-wider text-dim font-semibold">Worktrees</span>
+        <span className="text-xs uppercase tracking-wider text-dim font-semibold">
+          {view === 'inbox' ? 'Inbox' : 'Worktrees'}
+        </span>
         <div className="flex items-center gap-1">
+          {/* Same affordance as the desktop header: a quiet inbox icon, a
+              bell only when something needs you. */}
+          <button
+            onClick={() => onViewChange(view === 'inbox' ? 'projects' : 'inbox')}
+            aria-pressed={view === 'inbox'}
+            className={`inline-flex items-center justify-center w-11 h-11 rounded active:bg-surface ${
+              view === 'inbox' ? 'bg-surface text-fg' : inboxModel.needsYou.length > 0 ? 'text-accent' : 'text-dim'
+            }`}
+            aria-label={
+              view === 'inbox'
+                ? 'Back to worktrees'
+                : inboxModel.needsYou.length > 0
+                  ? `Inbox, ${inboxModel.needsYou.length} need you`
+                  : 'Inbox'
+            }
+          >
+            {inboxModel.needsYou.length > 0 ? <BellDot className="icon-base" /> : <Inbox className="icon-base" />}
+          </button>
           <button
             onClick={() => collapse.setUnifiedRepos((v) => !v)}
             disabled={repoCount <= 1}
@@ -682,21 +782,31 @@ function WorktreePickerSheet({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        <WorktreeList
-          model={model}
-          variant="touch"
-          activeWorktreeId={activeWorktreeId}
-          snoozeDefaultDays={snoozeDefaultDays}
-          agentCount={model.totalWorktrees}
-          editingAliasPath={editingAliasPath}
-          onStartAliasEdit={setEditingAliasPath}
-          onEndAliasEdit={() => setEditingAliasPath(null)}
-          onSelectWorktree={onSelect}
-          onToggleGroup={collapse.toggleGroup}
-          onTogglePinnedOpen={collapse.togglePinnedOpen}
-          onNewWorktree={onNewWorktree}
-          onDismissPendingWorktree={onDismissPendingWorktree}
-        />
+        {view === 'inbox' ? (
+          <InboxView
+            model={inboxModel}
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeTabId}
+            onOpen={onOpenInboxItem}
+            touch
+          />
+        ) : (
+          <WorktreeList
+            model={model}
+            variant="touch"
+            activeWorktreeId={activeWorktreeId}
+            snoozeDefaultDays={snoozeDefaultDays}
+            agentCount={model.totalWorktrees}
+            editingAliasPath={editingAliasPath}
+            onStartAliasEdit={setEditingAliasPath}
+            onEndAliasEdit={() => setEditingAliasPath(null)}
+            onSelectWorktree={onSelect}
+            onToggleGroup={collapse.toggleGroup}
+            onTogglePinnedOpen={collapse.togglePinnedOpen}
+            onNewWorktree={onNewWorktree}
+            onDismissPendingWorktree={onDismissPendingWorktree}
+          />
+        )}
       </div>
     </div>
   )

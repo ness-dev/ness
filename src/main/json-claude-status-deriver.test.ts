@@ -53,7 +53,10 @@ function startDeriverWithCapture(
   const events: CapturedEvents = { statusChanged: [], removed: [] }
   store.subscribe((event: StateEvent) => {
     if (event.type === 'terminals/statusChanged') {
-      events.statusChanged.push(event.payload)
+      // `at` is a wall-clock stamp; the assertions are about what changed.
+      const { at: _at, ...rest } = event.payload
+      void _at
+      events.statusChanged.push(rest)
     } else if (event.type === 'terminals/removed') {
       events.removed.push(event.payload)
     }

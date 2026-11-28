@@ -66,6 +66,8 @@ interface UseHotkeyHandlersArgs {
   historyForward: (() => void) | undefined
   setShowSettings: React.Dispatch<React.SetStateAction<boolean>>
   onStartAliasEdit: (path: string) => void
+  /** Opens the top sidebar-inbox item (see inbox-model.ts). */
+  onJumpToInbox: () => void
 }
 
 /** Sidebar-aware hotkey handler block. Computes the visible/ordered
@@ -112,6 +114,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
     historyForward,
     setShowSettings,
     onStartAliasEdit,
+    onJumpToInbox,
     pathBackendId
   } = args
 
@@ -321,6 +324,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
         if (!activeWorktreeId) return
         backendFor(activeWorktreeId).openInEditor(activeWorktreeId)
       },
+      jumpToInbox: onJumpToInbox,
       commandPalette: () => {
         setShowHotkeyCheatsheet(false)
         setCommandPaletteMode('root')
@@ -451,6 +455,7 @@ export function useHotkeyHandlers(args: UseHotkeyHandlersArgs): {
       backend,
       uiScale,
       onStartAliasEdit,
+      onJumpToInbox,
       activeApproval,
       preventSleepMode,
       preventSleepUntil

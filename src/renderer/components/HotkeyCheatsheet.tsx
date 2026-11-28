@@ -52,6 +52,7 @@ function buildGroups(hotkeys: Record<Action, HotkeyBinding>): ShortcutGroup[] {
       rows: [
         { label: 'New worktree', binding: b('newWorktree') },
         { label: 'Refresh worktrees', binding: b('refreshWorktrees') },
+        { label: 'Jump to next thing that needs you', binding: b('jumpToInbox') },
         { label: 'Open PR in browser', binding: b('openPR') },
         { label: 'Open in editor', binding: b('openInEditor') },
         { label: 'Find in terminal or chat', binding: 'Cmd+F' },

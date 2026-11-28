@@ -20,7 +20,9 @@ import { useHoldToQuit } from './hooks/useHoldToQuit'
 import { applyTheme, effectiveAppBg } from './theme-apply'
 import { getBackend } from './backend'
 import { HotkeysProvider, Tooltip } from './components/Tooltip'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar, type SidebarView } from './components/Sidebar'
+import { buildInboxModelFromMerged, nextInboxItem, prEventFor, type InboxItem } from './inbox-model'
+import { showToast } from './toast'
 import { ResizeHandle } from './components/ResizeHandle'
 import { AppTitleSegment } from './components/AppTitleSegment'
 import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorktreeScreen'
@@ -1040,6 +1042,73 @@ function DesktopApp(): JSX.Element {
 
   const handleEndAliasEdit = useCallback(() => setEditingAliasPath(null), [])
 
+  // Sidebar inbox. Which view is showing is per-client; what's read and
+  // how each turn ended live in the inbox slice (main derives the turns).
+  const [sidebarView, setSidebarView] = useState<SidebarView>(() =>
+    localStorage.getItem('harness:sidebarView') === 'inbox' ? 'inbox' : 'projects'
+  )
+  useEffect(() => {
+    localStorage.setItem('harness:sidebarView', sidebarView)
+  }, [sidebarView])
+  const inboxModel = useMemo(() => buildInboxModelFromMerged(mergedData), [mergedData])
+  const handleOpenInboxItem = useCallback(
+    (item: InboxItem) => {
+      if (item.tabId && item.paneId) handleSidebarSelectTab(item.worktreePath, item.paneId, item.tabId)
+      else handleSidebarSelectWorktree(item.worktreePath)
+      if (item.prFingerprint) {
+        void backendFor(item.worktreePath).markInboxPrSeen(item.worktreePath, item.prFingerprint)
+      }
+    },
+    [handleSidebarSelectTab, handleSidebarSelectWorktree, backendFor]
+  )
+  const jumpToNextInboxItem = useCallback(() => {
+    const next = nextInboxItem(inboxModel, focusedTabId)
+    if (next) handleOpenInboxItem(next)
+    else if (inboxModel.needsYou.length > 0) showToast("You're on the only thing that needs you", undefined, 'inbox-jump')
+    else showToast('Nothing needs you right now', undefined, 'inbox-jump')
+  }, [inboxModel, focusedTabId, handleOpenInboxItem])
+  // Looking at a tab reads it. Only while this window has focus: a turn
+  // that finishes in a backgrounded window is exactly what the inbox is
+  // for. Re-runs when the focused tab's turn ends while you watch it.
+  // Known gap: keyboard focus inside an embedded browser tab
+  // (WebContentsView) makes document.hasFocus() false, so a turn that
+  // ends beside a focused browser split stays unread until the window
+  // next fires 'focus'. Don't drop the early return below — it's also
+  // what keeps this from calling an older remote that lacks the method.
+  const focusedTurnEndedAt = activeWorktreeId && focusedTabId
+    ? (mergedData.inboxTurns[focusedTabId]?.endedAt ?? 0)
+    : 0
+  const focusedSeenAt = focusedTabId ? (mergedData.inboxSeenAt[focusedTabId] ?? 0) : 0
+  useEffect(() => {
+    if (!activeWorktreeId || !focusedTabId) return
+    if (focusedTurnEndedAt <= focusedSeenAt) return
+    const mark = (): void => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      void backendFor(activeWorktreeId).markInboxSeen(activeWorktreeId, focusedTabId)
+    }
+    mark()
+    window.addEventListener('focus', mark)
+    return () => window.removeEventListener('focus', mark)
+  }, [activeWorktreeId, focusedTabId, focusedTurnEndedAt, focusedSeenAt, backendFor])
+  // Opening a worktree by any route — sidebar, palette, PR badge, Cmd+N —
+  // reads its current PR event, same focus rule as tabs.
+  const activePrFingerprint = activeWorktreeId
+    ? (prEventFor(mergedData.prStatuses[activeWorktreeId], !!mergedData.mergedPaths[activeWorktreeId])
+        ?.fingerprint ?? null)
+    : null
+  const activePrSeen = activeWorktreeId ? mergedData.inboxPrSeen[activeWorktreeId] : undefined
+  useEffect(() => {
+    if (!activeWorktreeId || !activePrFingerprint || activePrSeen === activePrFingerprint) return
+    const mark = (): void => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      void backendFor(activeWorktreeId).markInboxPrSeen(activeWorktreeId, activePrFingerprint)
+    }
+    mark()
+    window.addEventListener('focus', mark)
+    return () => window.removeEventListener('focus', mark)
+  }, [activeWorktreeId, activePrFingerprint, activePrSeen, backendFor])
+
+
   const handleOpenSubscriptionGraph = useCallback(
     (repoRoot?: string) => {
       const repo =
@@ -1215,7 +1284,8 @@ function DesktopApp(): JSX.Element {
     historyBack: showNewWorktree ? undefined : goBack,
     historyForward: showNewWorktree ? undefined : goForward,
     setShowSettings,
-    onStartAliasEdit: setEditingAliasPath
+    onStartAliasEdit: setEditingAliasPath,
+    onJumpToInbox: jumpToNextInboxItem
   })
 
   // File → Close Tab (Cmd+W). The accelerator lives on the menu item
@@ -2059,6 +2129,10 @@ function DesktopApp(): JSX.Element {
             editingAliasPath={editingAliasPath}
             onStartAliasEdit={setEditingAliasPath}
             onEndAliasEdit={handleEndAliasEdit}
+            view={sidebarView}
+            onViewChange={setSidebarView}
+            inboxModel={inboxModel}
+            onOpenInboxItem={handleOpenInboxItem}
           /></div></div>
         )}
         {!singleScreenMode && !sidebarVisible && (

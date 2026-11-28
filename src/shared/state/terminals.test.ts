@@ -186,6 +186,21 @@ describe('terminalsReducer', () => {
     expect(next.pendingTools['term-1']).toBeNull()
   })
 
+  it('statusChanged stamps statusSince only when the status value changes', () => {
+    const ev = (status: 'processing' | 'waiting', at: number) => ({
+      type: 'terminals/statusChanged' as const,
+      payload: { id: 'term-1', status, pendingTool: null, at }
+    })
+    let s = apply(initialTerminals, ev('processing', 10))
+    expect(s.statusSince['term-1']).toBe(10)
+    const same = apply(s, ev('processing', 20))
+    expect(same.statusSince).toBe(s.statusSince)
+    s = apply(same, ev('waiting', 30))
+    expect(s.statusSince['term-1']).toBe(30)
+    s = apply(s, { type: 'terminals/removed', payload: 'term-1' })
+    expect(s.statusSince).toEqual({})
+  })
+
   it('statusChanged with needs-approval keeps pendingTool', () => {
     const tool = { name: 'Bash', input: { command: 'rm -rf /tmp/x' } }
     const next = apply(initialTerminals, {
@@ -233,6 +248,7 @@ describe('terminalsReducer', () => {
   it('removed clears all maps for that id', () => {
     const start: TerminalsState = {
       statuses: { 'term-1': 'processing', 'term-2': 'idle' },
+      statusSince: { 'term-1': 5 },
       pendingTools: { 'term-1': { name: 'Bash', input: {} } },
       shellActivity: { 'term-1': { active: true } },
       progress: { 'term-1': { state: 1, value: 50 } },
@@ -242,6 +258,7 @@ describe('terminalsReducer', () => {
     }
     const next = apply(start, { type: 'terminals/removed', payload: 'term-1' })
     expect(next.statuses).toEqual({ 'term-2': 'idle' })
+    expect(next.statusSince).toEqual({})
     expect(next.pendingTools).toEqual({})
     expect(next.shellActivity).toEqual({})
     expect(next.progress).toEqual({})
@@ -250,6 +267,7 @@ describe('terminalsReducer', () => {
   it('removed on an unknown id is a no-op (returns same reference)', () => {
     const start: TerminalsState = {
       statuses: { 'term-1': 'idle' },
+      statusSince: {},
       pendingTools: {},
       shellActivity: {},
       progress: {},

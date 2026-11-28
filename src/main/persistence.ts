@@ -21,6 +21,7 @@ import {
 } from './persistence-migrations'
 import type { CostsState } from '../shared/state/costs'
 import type { SnoozeEntry } from '../shared/state/snooze'
+import type { InboxState } from '../shared/state/inbox'
 import type { WorktreeReview } from '../shared/state/reviews'
 import type { WorktreeSubscription } from '../shared/state/subscriptions'
 import type { WorktreeOrigin } from '../shared/state/origins'
@@ -385,6 +386,8 @@ export interface Config {
   // Snoozed worktrees keyed by absolute path. Wakes when wakeAt is reached
   // or when the worktree's effective state transitions to 'processing'.
   snooze?: Record<string, SnoozeEntry>
+  /** Inbox turn summaries + read marks (see shared/state/inbox.ts). */
+  inbox?: InboxState
   /** Worktree paths the user has pinned to the top of the sidebar. */
   pinned?: Record<string, true>
   // Default duration (days) for plain-click snooze. Min 1, default 7.

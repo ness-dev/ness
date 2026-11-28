@@ -27,6 +27,7 @@ import { initialPermissions } from '../shared/state/permissions'
 import { initialSubscriptions, type WorktreeSubscription } from '../shared/state/subscriptions'
 import { initialOrigins, type WorktreeOrigin } from '../shared/state/origins'
 import { initialNotifications } from '../shared/state/notifications'
+import { initialInbox } from '../shared/state/inbox'
 import {
   initialReviews,
   type ReviewAuthor,
@@ -275,6 +276,13 @@ export function buildInitialAppState(
       ? { byPath: sanitizeOrigins(config.worktreeOrigins) }
       : initialOrigins,
     notifications: initialNotifications,
+    inbox: config.inbox
+      ? {
+          turns: { ...config.inbox.turns },
+          seenAt: { ...config.inbox.seenAt },
+          prSeen: { ...config.inbox.prSeen }
+        }
+      : initialInbox,
     settings: {
       ...initialSettings,
       themeMode:

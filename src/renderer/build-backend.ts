@@ -493,6 +493,10 @@ export function buildBackend(
     pinWorktree: (path: string) => req('pinned:pin', path),
     unpinWorktree: (path: string) => req('pinned:unpin', path),
     unsnooze: (path: string) => req('snooze:unsnooze', path),
+    markInboxSeen: (worktreePath: string, tabId: string) =>
+      req('inbox:markSeen', worktreePath, tabId),
+    markInboxPrSeen: (worktreePath: string, fingerprint: string) =>
+      req('inbox:markPrSeen', worktreePath, fingerprint),
     setSnoozeDefaultDays: (days: number) => reqConfig('config:setSnoozeDefaultDays', days),
     setCiNotifyOverride: (path: string, enabled: boolean | null) =>
       req('ciNotify:setOverride', path, enabled),

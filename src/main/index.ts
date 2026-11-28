@@ -103,6 +103,7 @@ import { WakeLockController } from './wake-lock-controller'
 import { WorktreeWatcher } from './worktree-watcher'
 import { FileContentWatcher } from './file-content-watcher'
 import { SnoozeTimer } from './snooze-timer'
+import { InboxDeriver } from './inbox-deriver'
 import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
@@ -951,6 +952,19 @@ store.subscribe((event) => {
 // Lives in its own module — see src/main/json-claude-status-deriver.ts.
 const jsonClaudeStatusDeriver = new JsonClaudeStatusDeriver(store)
 jsonClaudeStatusDeriver.start()
+
+// Turn-end summaries + read marks for the sidebar inbox. Subscribes after
+// JsonClaudeStatusDeriver so a chat's busy→false has already become a
+// 'waiting' status by the time it's seen here.
+const inboxDeriver = new InboxDeriver(store)
+inboxDeriver.start()
+
+store.subscribe((event) => {
+  if (!event.type.startsWith('inbox/')) return
+  const { turns, seenAt, prSeen } = store.getSnapshot().state.inbox
+  config.inbox = { turns, seenAt, prSeen }
+  saveConfig(config)
+})
 
 /** Resolve the GitHub login of whoever owns the configured token, and
  *  dispatch it so the sidebar can route PRs they didn't author into the
@@ -5816,6 +5830,24 @@ function registerIpcHandlers(): void {
     })
     return true
   })
+
+  // Stamped here, not by the client, so two clients with skewed clocks
+  // agree on what's unread.
+  transport.onRequest('inbox:markSeen', (_ctx, worktreePath: string, tabId: string) => {
+    if (typeof worktreePath !== 'string' || typeof tabId !== 'string' || !tabId) return false
+    store.dispatch({ type: 'inbox/seen', payload: { tabId, ts: Date.now() } })
+    return true
+  })
+
+  transport.onRequest(
+    'inbox:markPrSeen',
+    (_ctx, worktreePath: string, fingerprint: string) => {
+      if (typeof worktreePath !== 'string' || !worktreePath) return false
+      if (typeof fingerprint !== 'string') return false
+      store.dispatch({ type: 'inbox/prSeen', payload: { worktreePath, fingerprint } })
+      return true
+    }
+  )
 
   transport.onRequest('snooze:unsnooze', (_ctx, path: string) => {
     if (typeof path !== 'string' || !path) return false

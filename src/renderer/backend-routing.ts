@@ -51,6 +51,8 @@ export type WorktreeScopedMethod =
   | 'deleteReviewComment'
   | 'dismissPendingDeletion'
   | 'getBranchCommits'
+  | 'markInboxPrSeen'
+  | 'markInboxSeen'
   | 'getChangedFiles'
   | 'getCommitChangedFiles'
   | 'getCommitDiff'

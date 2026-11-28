@@ -122,7 +122,7 @@ export class JsonClaudeStatusDeriver {
     this.lastStatus.set(sessionId, fingerprint)
     this.store.dispatch({
       type: 'terminals/statusChanged',
-      payload: { id: sessionId, status, pendingTool }
+      payload: { id: sessionId, status, pendingTool, at: Date.now() }
     })
   }
 }

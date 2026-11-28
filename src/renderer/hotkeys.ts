@@ -50,6 +50,7 @@ export type Action =
   | 'approveToolUse'
   | 'denyToolUse'
   | 'cyclePreventSleep'
+  | 'jumpToInbox'
 
 export interface Modifiers {
   cmd?: boolean
@@ -125,6 +126,7 @@ export const DEFAULT_HOTKEYS: Record<Action, HotkeyBinding> = {
   approveToolUse: { key: 'y', modifiers: { cmd: true, shift: true } },
   denyToolUse: { key: 'n', modifiers: { cmd: true, shift: true } },
   cyclePreventSleep: { key: 'u', modifiers: { cmd: true, shift: true } },
+  jumpToInbox: { key: 'j', modifiers: { cmd: true } },
 }
 
 /** Actions triggered by a gesture (e.g. double-tap Shift) rather than a
@@ -359,7 +361,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   aliasWorktree: 'Alias worktree',
   approveToolUse: 'Approve pending tool use (Chat)',
   denyToolUse: 'Deny pending tool use (Chat)',
-  cyclePreventSleep: 'Cycle prevent-sleep mode'
+  cyclePreventSleep: 'Cycle prevent-sleep mode',
+  jumpToInbox: 'Jump to next thing that needs you'
 }
 
 export type CategoryId =
@@ -408,7 +411,7 @@ export const ACTION_CATEGORIES: HotkeyCategory[] = [
   {
     id: 'worktree-mgmt',
     label: 'Worktree management',
-    actions: ['newWorktree', 'refreshWorktrees', 'aliasWorktree']
+    actions: ['newWorktree', 'refreshWorktrees', 'aliasWorktree', 'jumpToInbox']
   },
   {
     id: 'tabs',

@@ -497,6 +497,7 @@ export function backendStateEntryDeps(source: {
     source.state.worktrees.repoRemotes,
     source.state.terminals.panes,
     source.state.terminals.statuses,
+    source.state.terminals.statusSince,
     source.state.terminals.pendingTools,
     source.state.terminals.shellActivity,
     source.state.prs.byPath,
@@ -505,6 +506,7 @@ export function backendStateEntryDeps(source: {
     source.state.pinned.byPath,
     source.state.aliases.byPath,
     source.state.assignedPRs.byRepo,
+    source.state.inbox,
     // selectHistoryPromptRepos
     source.state.loch,
     source.state.settings.lochBlameEnabled,

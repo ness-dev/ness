@@ -1,10 +1,14 @@
-import { Trash2, Layers, Plus, Rows3, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { Trash2, Layers, Plus, Rows3, PanelLeftClose, RefreshCw, Inbox, BellDot } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { GroupKey } from '../../shared/worktree-sort'
 import type { SectionRepoRoot, WorktreeListModel } from '../worktree-list-model'
 import { WorktreeList } from './WorktreeList'
 import { BackendChipStrip } from './BackendChipStrip'
 import { BottomIconStrip } from './BottomIconStrip'
+import { InboxView } from './InboxView'
+import type { InboxItem, InboxModel } from '../inbox-model'
+
+export type SidebarView = 'projects' | 'inbox'
 
 /** The desktop shell around the shared worktree list: fixed-width panel,
  *  header controls, backend chip strip and bottom icon strip. The list
@@ -54,6 +58,10 @@ interface SidebarProps {
   editingAliasPath: string | null
   onStartAliasEdit: (path: string) => void
   onEndAliasEdit: () => void
+  view: SidebarView
+  onViewChange: (view: SidebarView) => void
+  inboxModel: InboxModel
+  onOpenInboxItem: (item: InboxItem) => void
 }
 
 export function Sidebar({
@@ -97,8 +105,13 @@ export function Sidebar({
   onCollapseSidebar,
   editingAliasPath,
   onStartAliasEdit,
-  onEndAliasEdit
+  onEndAliasEdit,
+  view,
+  onViewChange,
+  inboxModel,
+  onOpenInboxItem
 }: SidebarProps): JSX.Element {
+  const needsYouCount = inboxModel.needsYou.length
   return (
     <div className="shrink-0 bg-panel flex flex-col h-full" style={{ width }}>
       {/* Sidebar header */}
@@ -122,6 +135,29 @@ export function Sidebar({
               aria-label="New worktree"
             >
               <Plus className="icon-xs" />
+            </button>
+          </Tooltip>
+          {/* Swaps the list below for the Inbox. Kept as a quiet icon:
+              a bell only when something actually needs you. */}
+          <Tooltip
+            label={
+              view === 'inbox'
+                ? 'Back to projects'
+                : needsYouCount > 0
+                  ? `Inbox: ${needsYouCount} need${needsYouCount === 1 ? 's' : ''} you`
+                  : 'Inbox'
+            }
+            side="bottom"
+          >
+            <button
+              onClick={() => onViewChange(view === 'inbox' ? 'projects' : 'inbox')}
+              aria-pressed={view === 'inbox'}
+              aria-label={needsYouCount > 0 ? `Inbox, ${needsYouCount} need you` : 'Inbox'}
+              className={`rounded p-0.5 transition-colors cursor-pointer hover:bg-surface ${
+                view === 'inbox' ? 'bg-surface text-fg' : needsYouCount > 0 ? 'text-accent' : 'text-dim hover:text-fg'
+              }`}
+            >
+              {needsYouCount > 0 ? <BellDot className="icon-xs" /> : <Inbox className="icon-xs" />}
             </button>
           </Tooltip>
           <Tooltip label="Clean up old worktrees" side="bottom">
@@ -162,35 +198,44 @@ export function Sidebar({
       </div>
 
       <div data-sidebar-scroll className="flex-1 overflow-y-auto py-1">
-        <WorktreeList
-          model={model}
-          variant="desktop"
-          activeWorktreeId={activeWorktreeId}
-          activeTabId={activeTabId}
-          snoozeDefaultDays={snoozeDefaultDays}
-          agentCount={agentCount}
-          editingAliasPath={editingAliasPath}
-          onStartAliasEdit={onStartAliasEdit}
-          onEndAliasEdit={onEndAliasEdit}
-          onSelectWorktree={onSelectWorktree}
-          pathBackendId={pathBackendId}
-          originByPath={originByPath}
-          onSelectTab={onSelectTab}
-          onCloseTab={onCloseTab}
-          onToggleGroup={onToggleGroup}
-          onTogglePinnedOpen={onTogglePinnedOpen}
-          onNewWorktree={onNewWorktree}
-          onDismissPendingWorktree={onDismissPendingWorktree}
-          onContinueWorktree={onContinueWorktree}
-          onDeleteWorktree={onDeleteWorktree}
-          onPruneWorktrees={onPruneWorktrees}
-          onRemoveRepo={onRemoveRepo}
-          onOpenGraph={onOpenSubscriptionGraph}
-          onOpenAssignedPR={onOpenAssignedPR}
-          historyPromptRepos={historyPromptRepos}
-          onOpenHistoryTracking={onOpenHistoryTracking}
-          onDismissHistoryPrompt={onDismissHistoryPrompt}
-        />
+        {view === 'inbox' ? (
+          <InboxView
+            model={inboxModel}
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeTabId}
+            onOpen={onOpenInboxItem}
+          />
+        ) : (
+          <WorktreeList
+            model={model}
+            variant="desktop"
+            activeWorktreeId={activeWorktreeId}
+            activeTabId={activeTabId}
+            snoozeDefaultDays={snoozeDefaultDays}
+            agentCount={agentCount}
+            editingAliasPath={editingAliasPath}
+            onStartAliasEdit={onStartAliasEdit}
+            onEndAliasEdit={onEndAliasEdit}
+            onSelectWorktree={onSelectWorktree}
+            pathBackendId={pathBackendId}
+            originByPath={originByPath}
+            onSelectTab={onSelectTab}
+            onCloseTab={onCloseTab}
+            onToggleGroup={onToggleGroup}
+            onTogglePinnedOpen={onTogglePinnedOpen}
+            onNewWorktree={onNewWorktree}
+            onDismissPendingWorktree={onDismissPendingWorktree}
+            onContinueWorktree={onContinueWorktree}
+            onDeleteWorktree={onDeleteWorktree}
+            onPruneWorktrees={onPruneWorktrees}
+            onRemoveRepo={onRemoveRepo}
+            onOpenGraph={onOpenSubscriptionGraph}
+            onOpenAssignedPR={onOpenAssignedPR}
+            historyPromptRepos={historyPromptRepos}
+            onOpenHistoryTracking={onOpenHistoryTracking}
+            onDismissHistoryPrompt={onDismissHistoryPrompt}
+          />
+        )}
       </div>
 
       {/* Backend chip strip — multi-backend UX (Tier 1). Auto-hides

@@ -267,7 +267,8 @@ export function tailLog(terminalId: string, store: Store): void {
           payload: {
             id: terminalId,
             status: update.status,
-            pendingTool: update.pendingTool
+            pendingTool: update.pendingTool,
+            at: Date.now()
           }
         })
       }
