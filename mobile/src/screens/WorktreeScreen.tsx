@@ -351,6 +351,10 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
               setPickerOpen(false)
               router.push('/backends')
             }}
+            onOpenSettings={() => {
+              setPickerOpen(false)
+              router.push('/settings')
+            }}
           />
         )}
       </View>

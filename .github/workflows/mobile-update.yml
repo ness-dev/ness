@@ -65,6 +65,10 @@ jobs:
       - name: Publish update
         if: steps.token.outputs.present == 'true'
         working-directory: mobile
+        # Inlined into the bundle by Metro; Settings → About shows it.
+        # Not a fingerprint input (env vars aren't), unlike app config.
+        env:
+          EXPO_PUBLIC_GIT_COMMIT: ${{ github.sha }}
         run: >
           eas update
           --channel production
