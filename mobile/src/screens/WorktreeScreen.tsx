@@ -115,6 +115,16 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
     [wtPath]
   )
 
+  // A nested tab in the picker: remember it for its worktree first, so the
+  // worktree opens (or stays) on that tab.
+  const handlePickTab = useCallback(
+    (path: string, tabId: string) => {
+      rememberTab(path, tabId)
+      handleSelectWorktree(path)
+    },
+    [handleSelectWorktree]
+  )
+
   const handleSelectTab = useCallback(
     (tabId: string) => {
       if (!activeWorktree) return
@@ -356,7 +366,9 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
             fleet={fleet}
             merged={merged}
             activeWorktreeId={activeWorktree?.path ?? null}
+            activeTabId={selectedTabId}
             onSelect={handleSelectWorktree}
+            onSelectTab={handlePickTab}
             onClose={() => setPickerOpen(false)}
             // One overlay at a time: the picker is accessibilityViewIsModal,
             // so leaving it open under Backends hid Backends from VoiceOver.

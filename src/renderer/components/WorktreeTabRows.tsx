@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react'
 import { FileText, GitCompare, Globe, Loader2, SquareTerminal } from 'lucide-react'
-import { getLeaves, type TerminalTab } from '../../shared/state/terminals'
+import type { TerminalTab } from '../../shared/state/terminals'
+import { worktreeTabEntries } from '../worktree-tab-entries'
 import { useAppStateFor, useShellActivity, useTerminalStatus } from '../store'
 import { STATUS_LABELS } from '../worktree-row-style'
 import { middleClickToClose } from '../middle-click'
@@ -33,11 +34,7 @@ export const WorktreeTabRows = memo(function WorktreeTabRows({
   onCloseTab
 }: WorktreeTabRowsProps): JSX.Element | null {
   const tree = useAppStateFor(backendId, (st) => st.terminals.panes[worktreePath] ?? null)
-  const entries = useMemo(
-    () =>
-      tree ? getLeaves(tree).flatMap((leaf) => leaf.tabs.map((tab) => ({ paneId: leaf.id, tab }))) : [],
-    [tree]
-  )
+  const entries = useMemo(() => worktreeTabEntries(tree), [tree])
   if (entries.length === 0) return null
   // Same rule as the tab strip's × (`pane.tabs.length > 1 || paneCount > 1`):
   // equivalent because a committed pane tree never holds an empty leaf.

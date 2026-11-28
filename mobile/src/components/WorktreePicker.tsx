@@ -8,7 +8,7 @@
 // One addition over the web picker: with more than one backend enabled,
 // rows show the desktop sidebar's origin badge (Server icon + host label),
 // which the web's single-backend picker never needs.
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import {
   AlarmClock,
@@ -17,7 +17,10 @@ import {
   ChevronRight,
   CircleAlert,
   CircleCheck,
+  FileDiff,
+  FileText,
   Ghost,
+  Globe,
   GitPullRequest,
   Layers,
   ListChecks,
@@ -31,6 +34,7 @@ import {
   Rows3,
   Server,
   Settings,
+  SquareTerminal,
   Tag,
   TriangleAlert,
   X
@@ -54,6 +58,12 @@ import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
 import { projectRowA11y, projectTap } from '../picker-selection'
+import { nestedTabA11yLabel, nestedTabStatus, visibleTabEntries } from '../picker-tabs'
+import { usePickerTabs } from '../prefs'
+import { useNess, type NessClient } from '../ness'
+import { AgentIcon } from './AgentIcon'
+import { worktreeTabEntries } from '../../../src/renderer/worktree-tab-entries'
+import type { TerminalTab } from '../../../src/shared/state/terminals'
 import { Connecting } from './Connecting'
 
 const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
@@ -110,13 +120,19 @@ interface Ctx {
   onSelect: (path: string) => void
   /** First tap on a project focuses (expands) it; a second opens main. */
   onProjectPress: (section: WorktreeRepoSectionModel, homePath: string) => void
+  /** Experimental Settings toggle: list each visible worktree's tabs under it. */
+  showTabs: boolean
+  activeTabId: string | null
+  onSelectTab: (path: string, tabId: string) => void
 }
 
 export function WorktreePicker({
   fleet,
   merged,
   activeWorktreeId,
+  activeTabId,
   onSelect,
+  onSelectTab,
   onClose,
   onOpenBackends,
   onOpenSettings
@@ -124,7 +140,12 @@ export function WorktreePicker({
   fleet: Fleet
   merged: MergedWorktreeData
   activeWorktreeId: string | null
+  /** The active worktree's selected tab, highlighted among nested tabs. */
+  activeTabId: string | null
   onSelect: (path: string) => void
+  /** Open `path` with `tabId` selected. Must be stable: nested tab rows
+   *  are memoised on it. */
+  onSelectTab: (path: string, tabId: string) => void
   onClose: () => void
   onOpenBackends: () => void
   onOpenSettings: () => void
@@ -138,6 +159,7 @@ export function WorktreePicker({
   const loading = entries.some((e) => e.state.prs.loading)
   const snoozeDays = Math.max(1, Math.floor(entries[0]?.state.settings.snoozeDefaultDays ?? 7))
   const [editingAlias, setEditingAlias] = useState<string | null>(null)
+  const showTabs = usePickerTabs()
   const [sheet, setSheet] = useState<{ title: string; subtitle?: string; actions: Action[] } | null>(null)
   const repoCount = merged.repoRoots.length
 
@@ -156,7 +178,10 @@ export function WorktreePicker({
       const tap = projectTap(section, homePath)
       if (tap.kind === 'open') onSelect(tap.path)
       else setFocusPath(tap.path)
-    }
+    },
+    showTabs,
+    activeTabId,
+    onSelectTab
   }
 
   return (
@@ -230,6 +255,7 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
               pinnedOpen={section.pinnedOpen}
               onTogglePinned={() => ctx.collapse.togglePinnedOpen(section.scope)}
             />
+            {!section.collapsed && <RowTabs row={home} ctx={ctx} />}
           </Block>
         ) : (
           <BareRepoHeader section={section} onPress={() => ctx.collapse.togglePinnedOpen(section.scope)} />
@@ -239,6 +265,7 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
           {section.homes.map((h) => (
             <Block key={h.path} active={ctx.activeWorktreeId === h.path} context={false}>
               <ProjectRow row={h} ctx={ctx} section={section} name={repoLabelFor(h.worktree.repoRoot)} repoRoot={h.worktree.repoRoot} />
+              <RowTabs row={h} ctx={ctx} />
             </Block>
           ))}
         </View>
@@ -249,6 +276,7 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
             section.homes.slice(1).map((h) => (
               <Block key={h.path} active={ctx.activeWorktreeId === h.path}>
                 <Row row={h} ctx={ctx} />
+                <RowTabs row={h} ctx={ctx} />
               </Block>
             ))}
           {section.pending.map((p) => (
@@ -274,6 +302,7 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
                     {g.rows.map((r) => (
                       <Block key={r.path} active={ctx.activeWorktreeId === r.path}>
                         <Row row={r} ctx={ctx} />
+                        <RowTabs row={r} ctx={ctx} />
                       </Block>
                     ))}
                     {g.phantomPRs.map((pr) => (
@@ -298,6 +327,7 @@ function Group({ group, scope, ctx, showRepoLabels }: { group: WorktreeListGroup
           {group.rows.map((r) => (
             <Block key={r.path} active={ctx.activeWorktreeId === r.path}>
               <Row row={r} ctx={ctx} />
+              <RowTabs row={r} ctx={ctx} />
             </Block>
           ))}
           {group.phantomPRs.map((pr) => (
@@ -765,6 +795,157 @@ function PhantomRow({ pr, showRepo }: { pr: AssignedPR; showRepo: boolean }) {
   )
 }
 
+// ── nested tabs (experimental; desktop WorktreeTabRows.tsx) ─────────────
+
+/** Unpacks ctx into the stable props NestedTabs memoises on, so a picker
+ *  re-render (any state frame, streamed tokens included) doesn't reach the
+ *  tab rows. Only rows the picker draws get here, i.e. worktrees of an
+ *  expanded project — collapsing a project hides its tabs with it. */
+function RowTabs({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {
+  const client = clientFor(ctx, row.path)
+  if (!ctx.showTabs || row.deleting || !client) return null
+  return (
+    <NestedTabs
+      client={client}
+      path={row.path}
+      activeTabId={ctx.activeWorktreeId === row.path ? ctx.activeTabId : null}
+      onSelectTab={ctx.onSelectTab}
+    />
+  )
+}
+
+const NestedTabs = memo(function NestedTabs({
+  client,
+  path,
+  activeTabId,
+  onSelectTab
+}: {
+  client: NessClient
+  path: string
+  activeTabId: string | null
+  onSelectTab: (path: string, tabId: string) => void
+}) {
+  // Per-worktree selector: the pane tree keeps its identity until this
+  // worktree's tabs change.
+  const tree = useNess(client, (st) => st.terminals.panes[path])
+  const entries = useMemo(() => worktreeTabEntries(tree), [tree])
+  const [showAll, setShowAll] = useState(false)
+  if (entries.length === 0) return null
+  const { shown, hidden } = showAll ? { shown: entries, hidden: 0 } : visibleTabEntries(entries, activeTabId)
+  return (
+    <View style={{ paddingBottom: 4 }}>
+      {shown.map(({ tab }) => (
+        <NestedTabRow key={tab.id} client={client} path={path} tab={tab} active={tab.id === activeTabId} onSelectTab={onSelectTab} />
+      ))}
+      {hidden > 0 && (
+        <Pressable
+          onPress={() => setShowAll(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${hidden} more ${hidden === 1 ? 'tab' : 'tabs'}`}
+          accessibilityHint="Lists the rest of this worktree's tabs"
+          style={({ pressed }) => [s.tabRow, pressed && { backgroundColor: c.panelRaised }]}
+        >
+          <MoreHorizontal color={c.faint} size={12} />
+          <Text style={s.faintXs}>{hidden} more</Text>
+        </Pressable>
+      )}
+    </View>
+  )
+})
+
+const NestedTabRow = memo(function NestedTabRow({
+  client,
+  path,
+  tab,
+  active,
+  onSelectTab
+}: {
+  client: NessClient
+  path: string
+  tab: TerminalTab
+  active: boolean
+  onSelectTab: (path: string, tabId: string) => void
+}) {
+  // Per-tab primitives: only this tab's own status changes re-render it.
+  const pty = useNess(client, (st) => st.terminals.statuses[tab.id])
+  const shellRunning = useNess(client, (st) => tab.type === 'shell' && !!st.terminals.shellActivity[tab.id]?.active)
+  const exited = useNess(client, (st) => tab.type === 'json-claude' && st.jsonClaude.sessions[tab.id]?.state === 'exited')
+  const status = nestedTabStatus(tab, pty, shellRunning, exited)
+  const title = tab.customLabel ?? tab.label
+  const asleep = tab.mode === 'asleep'
+  return (
+    <Pressable
+      onPress={() => onSelectTab(path, tab.id)}
+      accessibilityRole="button"
+      accessibilityLabel={nestedTabA11yLabel(tab, title, status)}
+      accessibilityHint="Opens this tab"
+      accessibilityState={{ selected: active }}
+      style={({ pressed }) => [s.tabRow, active && { backgroundColor: alpha(c.panelRaised, 0.8) }, pressed && !active && { backgroundColor: c.panelRaised }]}
+    >
+      <TabKindIcon tab={tab} />
+      <TabStatusMark status={status} />
+      <Text
+        style={[{ fontSize: fs.sm, color: active ? c.fgBright : c.muted, flexShrink: 1 }, asleep && { fontStyle: 'italic', color: c.dim }]}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+    </Pressable>
+  )
+})
+
+function TabKindIcon({ tab }: { tab: TerminalTab }) {
+  switch (tab.type) {
+    case 'agent':
+    case 'json-claude':
+      return <AgentIcon kind={tab.agentKind ?? 'claude'} size={12} color={c.dim} />
+    case 'shell':
+      return <SquareTerminal color={c.dim} size={12} />
+    case 'diff':
+      return <FileDiff color={c.dim} size={12} />
+    case 'file':
+      return <FileText color={c.dim} size={12} />
+    case 'browser':
+      return <Globe color={c.dim} size={12} />
+    case 'review':
+      return <ListChecks color={c.dim} size={12} />
+  }
+}
+
+/** Desktop TabStatus: spinners for work in progress, dots for waiting /
+ *  needs approval; plus a hollow dot for an exited chat and a moon for
+ *  asleep, which the desktop conveys elsewhere. */
+function TabStatusMark({ status }: { status: ReturnType<typeof nestedTabStatus> }) {
+  switch (status) {
+    case 'working':
+      return (
+        <Spin>
+          <Loader2 color={c.success} size={10} />
+        </Spin>
+      )
+    case 'running':
+      return (
+        <Spin>
+          <Loader2 color={c.fgBright} size={10} />
+        </Spin>
+      )
+    case 'waiting':
+      return <View style={[s.tabDot, { backgroundColor: c.warning }]} />
+    case 'needs-approval':
+      return (
+        <Pulse>
+          <View style={[s.tabDot, { backgroundColor: c.danger }]} />
+        </Pulse>
+      )
+    case 'exited':
+      return <View style={[s.tabDot, { borderWidth: 1, borderColor: c.danger }]} />
+    case 'asleep':
+      return <Moon color={c.faint} size={10} />
+    default:
+      return null
+  }
+}
+
 // ── action sheet (WorktreeActionSheet.tsx) ──────────────────────────────
 
 function ActionSheet({ sheet, onClose }: { sheet: { title: string; subtitle?: string; actions: Action[] } | null; onClose: () => void }) {
@@ -835,6 +1016,9 @@ const s = themed(() => StyleSheet.create({
   branchPill: { maxWidth: '50%', backgroundColor: c.surface, borderRadius: 3, paddingHorizontal: 4, fontSize: fs.xs, color: c.dim, fontFamily: mono },
   pendingTool: { color: c.danger, fontSize: fs.xs, fontFamily: mono, marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, minHeight: 44, paddingVertical: 12 },
+  // Indented under the row's label, past its status dot; 44pt tall.
+  tabRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 32, paddingRight: 8, minHeight: 44 },
+  tabDot: { width: 6, height: 6, borderRadius: 3 },
   rowLabel: { fontSize: fs.sm, fontWeight: '500', flexShrink: 1 },
   stale: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 2, backgroundColor: alpha(c.warning, 0.15) },
   prPill: { flexShrink: 0, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, backgroundColor: c.panel, borderWidth: 1, borderColor: c.borderStrong },
