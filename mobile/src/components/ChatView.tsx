@@ -15,7 +15,6 @@ import type { NessClient } from '../ness'
 import { useNess } from '../ness'
 import { alpha, c } from '../theme'
 import { Markdown } from './Markdown'
-import { CopyMessageButton } from '../chat/CopyMessageButton'
 import { Spin } from './Spin'
 import {
   AuthCard,
@@ -233,11 +232,7 @@ function AssistantText({ text, streaming }: { text: string; streaming: boolean }
   return (
     <View>
       <Markdown text={text} size={d.body} />
-      {streaming ? (
-        <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />
-      ) : (
-        <CopyMessageButton text={text} />
-      )}
+      {streaming && <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />}
     </View>
   )
 }

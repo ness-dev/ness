@@ -26,7 +26,6 @@ import { Spin } from '../components/Spin'
 import { ROW_HIT_GROW, useDensity, usePersistedChoice } from './density'
 import { hitArea } from '../hit'
 import { ImageStrip } from './ChatImage'
-import { CopyMessageButton } from './CopyMessageButton'
 
 export interface ToolResultView {
   content: string
@@ -651,10 +650,7 @@ export function ThinkingCard({ id, text, isPartial }: { id?: string; text: strin
       {open && (
         <View style={{ paddingLeft: 20, paddingBottom: 6 }}>
           {text ? (
-            <>
-              <Markdown text={text} size={12} color={c.muted} italic />
-              {!isPartial && <CopyMessageButton text={text} />}
-            </>
+            <Markdown text={text} size={12} color={c.muted} italic />
           ) : (
             <Text style={{ color: c.dim, fontSize: 12, fontStyle: 'italic' }}>(hidden)</Text>
           )}
@@ -797,7 +793,6 @@ export function UserBubble({ text, queued, onCancel, images }: { text: string; q
           </View>
         )}
       </View>
-      {!queued && <CopyMessageButton text={text} align="flex-end" />}
     </View>
   )
 }
