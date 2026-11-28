@@ -34,6 +34,14 @@ export const STATUS_LABEL: Record<ChangedFile['status'], string> = {
   renamed: 'R',
   untracked: 'U'
 }
+/** What VoiceOver says for the status letter. */
+export const STATUS_WORD: Record<ChangedFile['status'], string> = {
+  added: 'Added',
+  modified: 'Modified',
+  deleted: 'Deleted',
+  renamed: 'Renamed',
+  untracked: 'Untracked'
+}
 export const STATUS_COLOR: Record<ChangedFile['status'], string> = themed(() => ({
   added: c.success,
   modified: c.warning,
@@ -171,6 +179,8 @@ export function DirRow({
       onPress={onToggle}
       accessibilityRole="button"
       accessibilityState={{ expanded: open }}
+      // The dot's own label is hidden inside this element; say it here.
+      accessibilityLabel={`${name} folder${hasChangedDescendant ? ', contains changes in this PR' : ''}`}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',
@@ -188,7 +198,6 @@ export function DirRow({
       </Text>
       {hasChangedDescendant && (
         <View
-          accessibilityLabel="Contains changes in this PR"
           style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: alpha(c.accent, 0.5), marginLeft: 4 }}
         />
       )}
@@ -201,6 +210,7 @@ export function AtButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       accessibilityLabel="Reference in Claude"
       style={({ pressed }) => ({
         width: 44,
@@ -406,6 +416,13 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent }: Panel
 }
 
 
+function fileA11yLabel(file: ChangedFile, path: string): string {
+  const parts = [`${STATUS_WORD[file.status]}: ${path}`]
+  if (file.additions) parts.push(`${file.additions} added`)
+  if (file.deletions) parts.push(`${file.deletions} removed`)
+  return parts.join(', ')
+}
+
 function FileRow({
   file,
   depth,
@@ -425,9 +442,12 @@ function FileRow({
 
   return (
     // Row tap opens a diff tab on desktop (omitted); long-press stands in
-    // for the full-path hover tooltip.
+    // for the full-path hover tooltip. The row isn't one VoiceOver element
+    // (that would swallow the @ button); the file info is, and its label
+    // already gives the full path.
     <Pressable
       onLongPress={() => Alert.alert(file.path)}
+      accessible={false}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',
@@ -437,26 +457,32 @@ function FileRow({
         backgroundColor: pressed ? c.panelRaised : 'transparent'
       })}
     >
-      <Text style={{ width: 12, fontFamily: mono, fontSize: fs.xs, textAlign: inTree ? 'center' : 'left', color: STATUS_COLOR[file.status] }}>
-        {STATUS_LABEL[file.status]}
-      </Text>
-      {inTree ? (
-        <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs, color: c.fg }} numberOfLines={1}>
-          {name}
+      <View
+        accessible
+        accessibilityLabel={fileA11yLabel(file, shown)}
+        style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: inTree ? 4 : 8 }}
+      >
+        <Text style={{ width: 12, fontFamily: mono, fontSize: fs.xs, textAlign: inTree ? 'center' : 'left', color: STATUS_COLOR[file.status] }}>
+          {STATUS_LABEL[file.status]}
         </Text>
-      ) : (
-        // Desktop truncates from the left (rtl + bdi) so the name stays visible.
-        <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs }} numberOfLines={1} ellipsizeMode="head">
-          {dir ? <Text style={{ color: c.faint }}>{dir}</Text> : null}
-          <Text style={{ color: c.fg }}>{name}</Text>
-        </Text>
-      )}
-      {(file.additions !== undefined || file.deletions !== undefined) && (
-        <Text style={{ fontFamily: mono, fontSize: fs.xs, fontVariant: ['tabular-nums'] }}>
-          {file.additions !== undefined && file.additions > 0 && <Text style={{ color: c.success }}>+{file.additions}</Text>}
-          {file.deletions !== undefined && file.deletions > 0 && <Text style={{ color: c.danger }}> −{file.deletions}</Text>}
-        </Text>
-      )}
+        {inTree ? (
+          <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs, color: c.fg }} numberOfLines={1}>
+            {name}
+          </Text>
+        ) : (
+          // Desktop truncates from the left (rtl + bdi) so the name stays visible.
+          <Text style={{ flex: 1, minWidth: 0, fontSize: fs.xs }} numberOfLines={1} ellipsizeMode="head">
+            {dir ? <Text style={{ color: c.faint }}>{dir}</Text> : null}
+            <Text style={{ color: c.fg }}>{name}</Text>
+          </Text>
+        )}
+        {(file.additions !== undefined || file.deletions !== undefined) && (
+          <Text style={{ fontFamily: mono, fontSize: fs.xs, fontVariant: ['tabular-nums'] }}>
+            {file.additions !== undefined && file.additions > 0 && <Text style={{ color: c.success }}>+{file.additions}</Text>}
+            {file.deletions !== undefined && file.deletions > 0 && <Text style={{ color: c.danger }}> −{file.deletions}</Text>}
+          </Text>
+        )}
+      </View>
       <AtButton onPress={() => onSendToAgent(`@${file.path} `)} />
       {/* "Open file in editor" (openInEditor) — desktop-only, omitted. */}
     </Pressable>

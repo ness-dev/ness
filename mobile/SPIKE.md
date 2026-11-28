@@ -118,9 +118,9 @@ code paths follow the SDK 58 docs.
 
 - A worktree's chat is a `json-claude` tab in its pane tree. The tab id is
   the session id.
-- Terminal (xterm) agent tabs still give a status dot. Their transcript
-  can't be read from a phone: it's PTY bytes, and the needs-approval prompt
-  is in the TUI. **Mobile is effectively json-mode-only.**
+- Terminal (xterm) agent tabs give a status dot, and since §9 they render
+  as real terminals. Their approvals are still in the TUI, so they can't
+  drive approval pushes or the approval card.
 - `jsonClaude:send` is a signal and `WebSocketClientTransport.send`
   **silently drops it while reconnecting**. On flaky mobile networks that
   loses messages. A mobile client should use a request variant with an ack,
@@ -310,7 +310,6 @@ How that works:
 
 **Not ported yet:**
 
-- **Terminal tabs.** Deferred to its own worktree, as agreed.
 - **New worktree screen and the details panel.** The details panel is PR
   status, merge, commits and cost: about 1,750 lines of desktop UI.
 - **Composer extras.** @-mentions, image attachments, prompt suggestions,
@@ -399,6 +398,58 @@ web client's old four-panel subset.
 - **React Native's `Alert` is a no-op on react-native-web**, so the app's
   long-press detail popups and confirmations only appear on native.
 
+## 9. Terminal tabs
+
+Claude Code and Shell tabs run in xterm.js inside a `react-native-webview`
+(`src/terminal/`). The PTY flow is XTerminal's, step for step, through
+`client.api`:
+
+1. join the terminal, then wait for the page's first fit;
+2. replay the scrollback (`getTerminalHistory`) and reset reporting modes;
+3. `createTerminal` at the fitted size, then stream `terminal:data`;
+4. leave on unmount. Main owns the PTY's lifetime.
+
+How it's built:
+
+- **Assets:** xterm.js and the fit addon are inlined into the page's HTML
+  at `postinstall` (`scripts/gen-xterm-vendor.mjs`, gitignored output). It
+  needs no CDN, works offline and ships in an OTA. The bundle grows by
+  about 0.5MB.
+- **Output:** coalesced for one tick, with one injection in flight; the
+  next waits for xterm's write callback (`OutputQueue`).
+  - `yes | head -5000` arrives in 3 injections.
+  - `yes | head -200000` finishes within about 6s on the simulator.
+- **Input** follows the web's MobileTerminal, with one difference. Typing
+  goes into a hidden textarea in the page, and each keystroke is read
+  from `InputEvent.data` / `inputType`. The web instead clears the value
+  per keystroke, which made iOS drop characters under fast typing. A touch
+  layer over xterm turns drags into scrollback scrolling (with momentum)
+  and taps into focus.
+- **Key row:** one horizontally scrolling row, 44pt targets. It holds
+  esc, tab, sticky ctrl, ^C, arrows, ⏎, ⇧⏎ (agent tabs), ⌫, paste, and a
+  keyboard show/hide toggle. The web phone UI uses two rows instead.
+- **Resize:** follows the frame (the keyboard opening, via the root KAV).
+  The PTY only hears the settled size, debounced 150ms, so a TUI doesn't
+  redraw for every animation frame. The app is portrait-locked, so
+  rotation isn't reachable.
+- **Theme:** the active palette plus the desktop's `--term-*` ANSI
+  palettes, which `gen-themes.mjs` now emits as `TERM_PALETTES`.
+- **Font:** the host's terminal font settings, as on the web client.
+- **Same as desktop:**
+  - the Spectating / Take control chip;
+  - the "Claude Code exited · Start a new session" overlay;
+  - no terminal while a shell is asleep (selection wakes it, and a Wake
+    button covers a slept tab);
+  - alt-screen and mouse-tracking modes are stripped, as on every touch
+    client.
+- **Switch to Chat mode:** only through the tab menu, as on the web phone
+  UI. The selection follows the converted tab, which gets a new id.
+- **Reconnect:** re-syncs by reloading the page, which replays history,
+  because `terminal:data` sent while the socket was down is lost.
+
+**Not tested:** Android, a physical device, rotation, and paste from the
+iOS edit menu (the Paste key is wired the same way, through `term.paste`).
+
 ## Driving the simulator (agent testing)
 
 - **What works:** Xcode 27 ships an MCP server, `xcode-tools`
@@ -462,12 +513,8 @@ Each item is meant for its own worktree.
   changed (`grownKey`). A `patches/` fix (assign the frame first, or reset
   `textContainer.size` after it) would let that go, and would keep a
   selection alive inside a block that's still streaming.
-- **Terminal and Shell tabs.** Currently a "terminal tabs don't work
-  yet" placeholder.
 - **File and diff viewer** from Changed Files, All Files and commits.
   Wanted before launch.
-- **"Switch to Chat mode" button** on the terminal placeholder. Wanted
-  before launch.
 - **Paged history loading.** A server change so long transcripts arrive
   in pages instead of one `getEntries` response.
 - **Polish:**

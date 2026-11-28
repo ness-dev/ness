@@ -3,7 +3,7 @@
 // from the renderer's own tool-display / tool-timeline / turn-collapse
 // modules (served to RN via the lucide shim), so they match the web
 // client exactly; only the React-DOM layer is re-written.
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 import { structuredPatch } from 'diff'
 import { Bot, Brain, ChevronDown, ChevronRight, ListChecks, Loader2, RotateCcw, Sparkles, X, Wrench } from 'lucide-react-native'
@@ -23,7 +23,8 @@ import { NessIcon, McpGenericIcon } from '../../../src/renderer/components/json-
 import { NESS_MARK_PATHS } from '../../../src/renderer/components/NessMark'
 import { Markdown } from '../components/Markdown'
 import { Spin } from '../components/Spin'
-import { ROW_HIT_SLOP, useDensity, usePersistedChoice } from './density'
+import { ROW_HIT_GROW, useDensity, usePersistedChoice } from './density'
+import { hitArea } from '../hit'
 import { ImageStrip } from './ChatImage'
 import { CopyMessageButton } from './CopyMessageButton'
 
@@ -98,13 +99,21 @@ export function ToolIcon({ icon, className = 'icon-xs text-muted' }: { icon: Des
 }
 
 /** CHAT_ROW_CLASS + CHAT_ROW_STYLE: a full-width muted row. */
-export function ChatRow({ onPress, children }: { onPress?: () => void; children: ReactNode }) {
+export function ChatRow({ onPress, expanded, children }: { onPress?: () => void; expanded?: boolean; children: ReactNode }) {
   const d = useDensity()
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={ROW_HIT_SLOP}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: d.chromePy, opacity: pressed ? 0.7 : 1 })}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityState={expanded === undefined ? undefined : { expanded }}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: d.chromePy + ROW_HIT_GROW,
+        marginVertical: -ROW_HIT_GROW,
+        opacity: pressed ? 0.7 : 1
+      })}
     >
       {children}
     </Pressable>
@@ -154,7 +163,7 @@ export function ToolCardChrome({
   const isOpen = expanded ?? autoExpand
   return (
     <View>
-      <ChatRow onPress={() => setExpanded(!isOpen)}>
+      <ChatRow onPress={() => setExpanded(!isOpen)} expanded={isOpen}>
         <Chevron open={isOpen} />
         <ToolIcon icon={icon} />
         <Text style={{ fontSize: d.chrome, fontWeight: '500', fontFamily: d.toolFamily, color: isError ? c.danger : brand ? c.brand : c.fg }}>
@@ -342,7 +351,8 @@ function ReadCard(p: ToolCardProps) {
             )
           })}
           {!all && lines.length > 500 && (
-            <Pressable onPress={() => setAll(true)} hitSlop={ROW_HIT_SLOP} style={{ padding: 8 }}>
+            // Grown upward only: the ScrollView clips anything past its content.
+            <Pressable onPress={() => setAll(true)} accessibilityRole="button" style={{ padding: 8, paddingTop: 8 + 14, marginTop: -14 }}>
               <Text style={{ color: c.accent, fontSize: 12 }}>+ {lines.length - 500} more lines</Text>
             </Pressable>
           )}
@@ -393,7 +403,14 @@ function GenericToolCard(p: ToolCardProps) {
     >
       {args.length > 0 && (
         <View style={{ padding: 8, gap: 4 }}>
-          <Pressable onPress={() => setRaw(!raw)} hitSlop={ROW_HIT_SLOP} style={{ alignSelf: 'flex-end' }}>
+          <Pressable
+            onPress={() => setRaw(!raw)}
+            accessibilityRole="button"
+            // zIndex: the grown area overlaps the args below, which come
+            // later. Only 8pt fits above (the parent's padding, inside the
+            // card body's overflow:hidden), so the rest goes downward.
+            style={[{ alignSelf: 'flex-end', zIndex: 1 }, hitArea(8, 12), { paddingBottom: 23, marginBottom: -23 }]}
+          >
             <Text style={{ color: c.dim, fontSize: 11 }}>{raw ? 'show parsed' : 'show raw'}</Text>
           </Pressable>
           {raw ? (
@@ -438,7 +455,7 @@ function TaskCard(p: ToolCardProps) {
   const usage = count > 0 ? `${count} entr${count === 1 ? 'y' : 'ies'}` : inFlight ? 'starting…' : 'no activity'
   return (
     <View>
-      <ChatRow onPress={() => setUserChoice(!open)}>
+      <ChatRow onPress={() => setUserChoice(!open)} expanded={open}>
         <Chevron open={open} />
         <Sparkles color={c.muted} size={12} />
         <Text style={{ fontSize: d.chrome, fontWeight: '500', fontFamily: d.toolFamily, color: p.result?.isError ? c.danger : c.fg }}>Task</Text>
@@ -525,6 +542,9 @@ export interface GroupRow {
   node: ReactNode
 }
 
+// ~16rem of 12px text, the web chip's max width.
+const CHIP_MAX = 36
+
 export function ToolGroup({ rows }: { rows: GroupRow[] }) {
   // Keyed by the first row, the same key the group itself renders under.
   const d = useDensity()
@@ -542,21 +562,26 @@ export function ToolGroup({ rows }: { rows: GroupRow[] }) {
   const countLabel = [thinkingLabel, ...summarizeTools(toolRows as never)].filter(Boolean).join(' · ')
   return (
     <View>
-      <ChatRow onPress={() => setUserChoice(!expanded)}>
+      <ChatRow onPress={() => setUserChoice(!expanded)} expanded={expanded}>
         <Chevron open={expanded} />
         {thinkingCount > 0 && <Brain color={c.muted} size={12} />}
-        <Text style={{ fontSize: d.chrome, color: c.muted }}>{countLabel}</Text>
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, overflow: 'hidden', opacity: 0.7 }}>
+        <Text style={{ fontSize: d.chrome, color: c.muted, flexShrink: 1 }} numberOfLines={1}>
+          {countLabel}
+        </Text>
+        {/* One Text, so the whole chip strip ends in a single ellipsis
+            (the web fades it out). Icons ride inline. The cut on each chip
+            stands in for the web's per-chip max-w-[16rem] truncate. The
+            inline icons make this line ~1pt taller than plain text; the
+            negative margin keeps the row the height it was. */}
+        <Text style={{ flex: 1, fontSize: d.chrome, color: c.muted, opacity: 0.7, marginVertical: -2 }} numberOfLines={1}>
           {displays.slice(0, 6).map((x, i) => (
-            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              {i > 0 && <Text style={{ color: c.muted, opacity: 0.4, fontSize: d.chrome }}>·</Text>}
+            <Fragment key={i}>
+              {i > 0 && <Text style={{ opacity: 0.4 }}>{'  ·  '}</Text>}
               <ToolIcon icon={x.icon} />
-              <Text style={{ fontSize: d.chrome, color: c.muted, maxWidth: 160 }} numberOfLines={1}>
-                {x.text}
-              </Text>
-            </View>
+              {` ${x.text.length > CHIP_MAX ? `${x.text.slice(0, CHIP_MAX - 1)}…` : x.text}`}
+            </Fragment>
           ))}
-        </View>
+        </Text>
         {hasPending && <Meta color={c.warning}>needs approval</Meta>}
         {hasError && <Meta color={c.danger}>error</Meta>}
       </ChatRow>
@@ -585,7 +610,7 @@ export function TurnGroup({ id, summary, hasError, images, children }: { id: str
   if (summary.editedFileCount > 0) parts.push(`${summary.editedFileCount} file${summary.editedFileCount === 1 ? '' : 's'} edited`)
   return (
     <View>
-      <ChatRow onPress={() => setOpen(!open)}>
+      <ChatRow onPress={() => setOpen(!open)} expanded={open}>
         <Chevron open={open} />
         <Text style={{ fontSize: d.chrome, color: c.muted }}>{parts.join(' · ')}</Text>
         {hasError && <Meta color={alpha(c.danger, 0.8)}>errors</Meta>}
@@ -613,7 +638,7 @@ export function ThinkingCard({ id, text, isPartial }: { id?: string; text: strin
   }, [isPartial])
   return (
     <View>
-      <ChatRow onPress={() => setOpen(!open)}>
+      <ChatRow onPress={() => setOpen(!open)} expanded={open}>
         <Chevron open={open} />
         <Brain color={c.muted} size={12} />
         <Text style={{ fontSize: d.chrome, color: c.muted }}>{isPartial ? 'Thinking' : 'Thought'}</Text>

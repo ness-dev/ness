@@ -10,6 +10,7 @@ import { Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDi
 import { Redirect, router } from 'expo-router'
 import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
 import { supportsChat } from '../../../src/shared/agent-registry'
+import { makeTerminalId } from '../../../src/shared/terminal-id'
 import type { PtyStatus, TerminalTab } from '../../../src/shared/state/terminals'
 import { haptic } from '../haptics'
 import { firstLeafId, newChatTab } from '../tabs'
@@ -23,10 +24,12 @@ import { AgentIcon } from '../components/AgentIcon'
 import { ChatView } from '../components/ChatView'
 import { WorktreePicker } from '../components/WorktreePicker'
 import { Spin } from '../components/Spin'
+import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
+import { TerminalView } from '../terminal/TerminalView'
 
 export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
-  const { fleet } = useWorkspace()
+  const { fleet, backends } = useWorkspace()
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -130,9 +133,41 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
     setPickerOpen(false)
   }, [activeWorktree, client, merged.panes])
 
+  // Converting swaps the tab for one with a new id (PanesFSM picks it), so
+  // the remembered selection would go stale and fall back to another tab.
+  // Follow the replacement, which lands at the same strip position.
+  const followConvert = useRef<{ wt: string; oldId: string; index: number } | null>(null)
+  useEffect(() => {
+    const f = followConvert.current
+    if (!f || !activeWorktree || f.wt !== activeWorktree.path) return
+    if (tabs.some((t) => t.id === f.oldId)) return
+    followConvert.current = null
+    const next = tabs[f.index]
+    if (next) rememberTab(f.wt, next.id)
+  }, [tabs, activeWorktree])
+
   const handleConvertTabType = useCallback(
     (tabId: string, newType: 'agent' | 'json-claude') => {
-      if (activeWorktree && client) void client.api.panesConvertTabType(activeWorktree.path, tabId, newType)
+      if (!activeWorktree || !client) return
+      haptic.select()
+      followConvert.current = { wt: activeWorktree.path, oldId: tabId, index: tabs.findIndex((t) => t.id === tabId) }
+      void client.api.panesConvertTabType(activeWorktree.path, tabId, newType)
+    },
+    [activeWorktree, client, tabs]
+  )
+
+  // useTabHandlers.handleRestartAgentTab's terminal branch: the old PTY and
+  // its scrollback go, and the tab gets a fresh id so a new XTerminal (here,
+  // TerminalView) mounts and spawns. Remembered so the selection follows.
+  const handleRestartAgent = useCallback(
+    (tabId: string) => {
+      if (!activeWorktree || !client) return
+      const wt = activeWorktree.path
+      client.api.killTerminal(tabId)
+      void client.api.clearTerminalHistory(tabId)
+      const newId = `${makeTerminalId('agent', wt)}-${Date.now()}`
+      rememberTab(wt, newId)
+      void client.api.panesRestartAgentTab(wt, tabId, newId)
     },
     [activeWorktree, client]
   )
@@ -229,15 +264,37 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
             mode={selectedTab.mode ?? 'awake'}
           />
         )}
-        {activeWorktree && selectedTab && (selectedTab.type === 'agent' || selectedTab.type === 'shell') && (
-          <Empty message={`${selectedTab.customLabel ?? selectedTab.label} — terminal tabs aren't in the app yet`} />
-        )}
+        {activeWorktree && client && selectedTab && (selectedTab.type === 'agent' || selectedTab.type === 'shell') &&
+          (selectedTab.type === 'shell' && (selectedTab.mode ?? 'awake') === 'asleep' ? (
+            // Like WorkspaceView: no terminal while asleep (mounting would
+            // spawn a PTY). The rising-edge wake above normally lands
+            // before this is seen; the button covers a tab another client
+            // slept while it was selected here.
+            <View style={s.empty}>
+              <Text style={{ color: c.dim, fontSize: fs.sm }}>{selectedTab.customLabel ?? selectedTab.label} is asleep</Text>
+              <Pressable
+                onPress={() => void client.api.panesWakeTab(activeWorktree.path, selectedTab.id)}
+                style={({ pressed }) => [s.wakeBtn, pressed && { backgroundColor: c.surface }]}
+                accessibilityRole="button"
+              >
+                <Text style={{ color: c.fgBright, fontSize: fs.sm }}>Wake</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <TerminalView
+              key={`${client.id}:${selectedTab.id}`}
+              client={client}
+              worktreePath={activeWorktree.path}
+              tab={selectedTab as TerminalTab & { type: 'agent' | 'shell' }}
+              onRestartAgent={selectedTab.type === 'agent' ? () => handleRestartAgent(selectedTab.id) : undefined}
+            />
+          ))}
         {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell'].includes(selectedTab.type) && (
           <NonRunnablePlaceholder tab={selectedTab} />
         )}
         {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
-        {!activeWorktree && worktrees.length === 0 && <Empty message={fleet.getEntries().length ? 'No worktrees yet.' : 'Connecting…'} />}
-        {!activeWorktree && worktrees.length > 0 && <Empty message="Connecting…" />}
+        {!activeWorktree && worktrees.length === 0 && fleet.getEntries().length > 0 && <Empty message="No worktrees yet." />}
+        {!activeWorktree && (worktrees.length > 0 || fleet.getEntries().length === 0) && <Connecting clients={backends.clients} />}
 
         {convertMenu && (
           <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
@@ -383,5 +440,6 @@ const s = themed(() => StyleSheet.create({
     borderRadius: 4,
     paddingVertical: 4
   },
-  menuItem: { paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }
+  menuItem: { paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' },
+  wakeBtn: { paddingHorizontal: 16, minHeight: 44, justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: c.border, backgroundColor: c.panel }
 }))

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Pressable } from 'react-native'
 import { Check, Copy } from 'lucide-react-native'
 import { copyText } from '../clipboard'
+import { hitArea } from '../hit'
 import { c } from '../theme'
 
 export function CopyMessageButton({ text, align = 'flex-start' }: { text: string; align?: 'flex-start' | 'flex-end' }) {
@@ -27,10 +28,12 @@ export function CopyMessageButton({ text, align = 'flex-start' }: { text: string
           timer.current = setTimeout(() => setCopied(false), 1200)
         })
       }}
-      hitSlop={12}
       accessibilityRole="button"
       accessibilityLabel={copied ? 'Copied' : 'Copy message'}
-      style={{ alignSelf: align, paddingVertical: 4, paddingHorizontal: 2 }}
+      // A 14pt icon grown to a 44pt frame (hit.ts), so VoiceOver and touch
+      // both get a full-size target. The margins leave 4pt/2pt of the
+      // padding in layout, the spacing the icon had before.
+      style={[{ alignSelf: align, zIndex: 1 }, hitArea(15, 15), { marginVertical: -11, marginHorizontal: -13 }]}
     >
       <Icon color={copied ? c.accent : c.muted} size={14} />
     </Pressable>
