@@ -53,6 +53,7 @@ import { DemoBadge } from '../demo/DemoUI'
 import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
+import { projectRowA11y, projectTap } from '../picker-selection'
 import { Connecting } from './Connecting'
 
 const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
@@ -107,6 +108,8 @@ interface Ctx {
   setEditingAlias: (p: string | null) => void
   openSheet: (title: string, subtitle: string | undefined, actions: Action[]) => void
   onSelect: (path: string) => void
+  /** First tap on a project focuses (expands) it; a second opens main. */
+  onProjectPress: (section: WorktreeRepoSectionModel, homePath: string) => void
 }
 
 export function WorktreePicker({
@@ -127,7 +130,10 @@ export function WorktreePicker({
   onOpenSettings: () => void
 }) {
   const collapse = useCollapse()
-  const model = useListModel(fleet, merged, collapse, activeWorktreeId)
+  // The worktree whose project is expanded. Starts at the active one; a tap
+  // on another project moves it there (picker-selection.ts). Per-client.
+  const [focusPath, setFocusPath] = useState(activeWorktreeId)
+  const model = useListModel(fleet, merged, collapse, focusPath)
   const entries = useFleetEntries(fleet)
   const loading = entries.some((e) => e.state.prs.loading)
   const snoozeDays = Math.max(1, Math.floor(entries[0]?.state.settings.snoozeDefaultDays ?? 7))
@@ -145,7 +151,12 @@ export function WorktreePicker({
     editingAlias,
     setEditingAlias,
     openSheet: (title, subtitle, actions) => setSheet({ title, subtitle, actions }),
-    onSelect
+    onSelect,
+    onProjectPress: (section, homePath) => {
+      const tap = projectTap(section, homePath)
+      if (tap.kind === 'open') onSelect(tap.path)
+      else setFocusPath(tap.path)
+    }
   }
 
   return (
@@ -206,10 +217,11 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
     <View>
       {!section.unified &&
         (home ? (
-          <Block active={ctx.activeWorktreeId === home.path} context={section.holdsActive}>
+          <Block active={ctx.activeWorktreeId === home.path} context={section.holdsActive} selected={section.holdsActive}>
             <ProjectRow
               row={home}
               ctx={ctx}
+              section={section}
               name={section.repoName}
               repoRoot={section.repoRoot}
               collapsed={section.collapsed}
@@ -226,7 +238,7 @@ function Section({ section, ctx, showRepoLabels }: { section: WorktreeRepoSectio
         <View style={{ marginBottom: 8 }}>
           {section.homes.map((h) => (
             <Block key={h.path} active={ctx.activeWorktreeId === h.path} context={false}>
-              <ProjectRow row={h} ctx={ctx} name={repoLabelFor(h.worktree.repoRoot)} repoRoot={h.worktree.repoRoot} />
+              <ProjectRow row={h} ctx={ctx} section={section} name={repoLabelFor(h.worktree.repoRoot)} repoRoot={h.worktree.repoRoot} />
             </Block>
           ))}
         </View>
@@ -308,10 +320,22 @@ function GroupHeader({ label, count, collapsed, onPress }: { label: string; coun
   )
 }
 
-/** RowBlock: mx-1.5 rounded-md, bg-surface when active, /50 for context. */
-function Block({ active, context, children }: { active: boolean; context?: boolean; children: ReactNode }) {
+/** RowBlock: mx-1.5 rounded-md, bg-surface when active, /50 for context.
+ *  `selected` outlines the project the picker has expanded, so it reads
+ *  apart from the active worktree. Only project blocks pass it (true or
+ *  false) and so reserve the 1px border; other rows keep main's metrics. */
+function Block({ active, context, selected, children }: { active: boolean; context?: boolean; selected?: boolean; children: ReactNode }) {
   return (
-    <View style={{ marginHorizontal: 6, borderRadius: 6, overflow: 'hidden', backgroundColor: active ? c.surface : context ? alpha(c.surface, 0.5) : 'transparent' }}>
+    <View
+      style={{
+        marginHorizontal: 6,
+        borderRadius: 6,
+        overflow: 'hidden',
+        backgroundColor: active ? c.surface : context ? alpha(c.surface, 0.5) : 'transparent',
+        borderWidth: selected === undefined ? 0 : 1,
+        borderColor: selected ? alpha(c.accent, 0.5) : 'transparent'
+      }}
+    >
       {children}
     </View>
   )
@@ -343,7 +367,10 @@ function RepoIcon({ name, status, diamond }: { name: string; status?: DisplaySta
                 width: 9,
                 height: 9,
                 borderRadius: diamond ? 1 : 5,
-                transform: diamond ? [{ rotate: '45deg' }] : undefined,
+                // Always set: dropping the prop on a live re-render (a project
+                // expanding in place loses its needs-approval diamond) diffs
+                // to transform: null, which RN's validator throws on.
+                transform: [{ rotate: diamond ? '45deg' : '0deg' }],
                 backgroundColor: STATUS[status].color,
                 borderWidth: 2,
                 borderColor: c.panel
@@ -415,6 +442,7 @@ function MoreBtn({ onPress }: { onPress: () => void }) {
 const ProjectRow = memo(function ProjectRow({
   row,
   ctx,
+  section,
   name,
   repoRoot,
   collapsed,
@@ -425,6 +453,7 @@ const ProjectRow = memo(function ProjectRow({
 }: {
   row: WorktreeRowModel
   ctx: Ctx
+  section: WorktreeRepoSectionModel
   name: string
   repoRoot: string
   collapsed?: boolean
@@ -436,9 +465,16 @@ const ProjectRow = memo(function ProjectRow({
   const active = ctx.activeWorktreeId === row.path
   const title = row.alias ?? name
   const actions = rowActions(row, ctx, true)
+  const a11y = projectRowA11y(section)
   void repoRoot
   return (
-    <Pressable onPress={() => ctx.onSelect(row.path)} style={({ pressed }) => [s.projectRow, pressed && !active && { backgroundColor: c.panelRaised }]}>
+    <Pressable
+      onPress={() => ctx.onProjectPress(section, row.path)}
+      style={({ pressed }) => [s.projectRow, pressed && !active && { backgroundColor: c.panelRaised }]}
+      accessibilityRole="button"
+      accessibilityHint={a11y.hint}
+      accessibilityState={{ expanded: a11y.expanded, selected: active }}
+    >
       <RepoIcon name={name} status={collapsedStatus ?? row.displayStatus} diamond={collapsedStatus === 'needs-approval'} />
       <View style={{ flex: 1, minWidth: 0 }}>
         {ctx.editingAlias === row.path ? (
@@ -491,6 +527,8 @@ const Row = memo(function Row({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx })
     <Pressable
       onPress={() => ctx.onSelect(row.path)}
       style={({ pressed }) => [s.row, row.deleting && { opacity: 0.6 }, pressed && !active && { backgroundColor: c.panelRaised }]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
     >
       {row.deleting ? (
         <Spin>
