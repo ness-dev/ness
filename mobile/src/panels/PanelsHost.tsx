@@ -38,7 +38,7 @@ export function PanelsHost({
   focusedTabId: string | null
   onSendToAgent: (text: string) => void
   onClose: () => void
-  openers?: Pick<PanelProps, 'onOpenFile' | 'onOpenDiff' | 'onOpenCommitFileDiff'>
+  openers?: Pick<PanelProps, 'onOpenFile' | 'onOpenDiff' | 'onOpenCommitFileDiff' | 'onOpenReview'>
 }) {
   const repoRoot = worktree.repoRoot
   const repoConfig = useNess(client, (s) => s.repoConfigs.byRepo[repoRoot] ?? null)

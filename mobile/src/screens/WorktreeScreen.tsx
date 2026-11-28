@@ -28,6 +28,9 @@ import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
 import { TerminalView } from '../terminal/TerminalView'
 import { ViewerTab } from '../viewer/ViewerTab'
+import { ReviewTab } from '../review/ReviewTab'
+import { ReviewStatusIcon } from '../review/ReviewStatusIcon'
+import { useFollowOpenedReview } from '../viewer/open-tab'
 import { DemoBadge, DemoMenu } from '../demo/DemoUI'
 
 export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
@@ -69,6 +72,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
   }, [activeWorktree?.path, client])
 
   const tabs = activeWorktree ? merged.tabsByWorktree[activeWorktree.path] ?? [] : []
+  useFollowOpenedReview(client?.id ?? null, activeWorktree?.path ?? null, tabs)
   const selectedTabId = useSelectedTabId(activeWorktree?.path ?? null, tabs)
   const selectedTab = tabs.find((t) => t.id === selectedTabId) ?? null
 
@@ -236,6 +240,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
                   key={tab.id}
                   client={client}
                   tab={tab}
+                  worktreePath={wtPath}
                   active={tab.id === selectedTabId}
                   onSelect={() => handleSelectTab(tab.id)}
                   onLayout={(x, w) => (tabLayouts.current[tab.id] = { x, w })}
@@ -306,7 +311,10 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
         {activeWorktree && client && selectedTab && (selectedTab.type === 'file' || selectedTab.type === 'diff') && (
           <ViewerTab key={`${client.id}:${selectedTab.id}`} client={client} worktreePath={activeWorktree.path} tab={selectedTab} />
         )}
-        {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell', 'file', 'diff'].includes(selectedTab.type) && (
+        {activeWorktree && client && selectedTab && selectedTab.type === 'review' && (
+          <ReviewTab key={`${client.id}:${selectedTab.id}`} client={client} worktreePath={activeWorktree.path} tab={selectedTab} />
+        )}
+        {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell', 'file', 'diff', 'review'].includes(selectedTab.type) && (
           <NonRunnablePlaceholder tab={selectedTab} />
         )}
         {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
@@ -387,6 +395,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
 function TabChip({
   client,
   tab,
+  worktreePath,
   active,
   onSelect,
   onOpenMenu,
@@ -394,6 +403,7 @@ function TabChip({
 }: {
   client: NessClient
   tab: TerminalTab
+  worktreePath: string
   active: boolean
   onSelect: () => void
   /** Tap the active tab → convert menu (mobile's right-click). */
@@ -416,7 +426,7 @@ function TabChip({
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
     >
-      <TabIcon client={client} tab={tab} />
+      <TabIcon client={client} tab={tab} worktreePath={worktreePath} />
       <Text style={[s.tabText, active && { color: c.fgBright }]} numberOfLines={1}>
         {tab.customLabel ?? tab.label}
       </Text>
@@ -424,7 +434,7 @@ function TabChip({
   )
 }
 
-function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
+function TabIcon({ client, tab, worktreePath }: { client: NessClient; tab: TerminalTab; worktreePath: string }) {
   const status = useNess(client, (st) => (st.terminals.statuses[tab.id] ?? 'idle') as PtyStatus)
   const shellActive = useNess(client, (st) => !!st.terminals.shellActivity[tab.id]?.active)
   if (tab.type === 'agent' || tab.type === 'json-claude') {
@@ -442,6 +452,8 @@ function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
   if (tab.type === 'diff') return <FileDiff color={c.dim} size={12} />
   if (tab.type === 'file') return <FileText color={c.dim} size={12} />
   if (tab.type === 'browser') return <Globe color={c.dim} size={12} />
+  // WorktreeTabRows' kind icon: the review's status, or a plain checklist.
+  if (tab.type === 'review') return <ReviewStatusIcon client={client} worktreePath={worktreePath} size={12} showNone />
   return null
 }
 

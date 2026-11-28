@@ -29,6 +29,9 @@ export interface PanelProps {
   onOpenFile?: (filePath: string) => void
   onOpenDiff?: (filePath: string, staged: boolean, mode: 'working' | 'branch') => void
   onOpenCommitFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
+  /** ChangedFilesPanel's "Review": the worktree's review tab, opened if
+   *  it isn't yet (PanesFSM.openReviewTab), shown in the worktree. */
+  onOpenReview?: () => void
 }
 
 export type PanelComponent = ComponentType<PanelProps>

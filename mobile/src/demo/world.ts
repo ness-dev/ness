@@ -7,9 +7,14 @@
 // unless the demo is on.
 import { rootReducer, type AppState, type StateEvent } from '../../../src/shared/state'
 import { getLeaves, mapLeaves, type PaneNode, type PtyStatus, type TerminalTab } from '../../../src/shared/state/terminals'
-import { isJsonClaudePermissionMode, type JsonClaudePendingApproval } from '../../../src/shared/state/json-claude'
+import { isJsonClaudePermissionMode, parseUserTurn, type JsonClaudePendingApproval } from '../../../src/shared/state/json-claude'
 import type { RepoConfig } from '../../../src/shared/state/repo-configs'
 import type { ToolRunResult, ToolSpec } from '../../../src/shared/tools'
+import { listChatTabs } from '../../../src/shared/agent-tabs'
+import { formatReviewSubmission } from '../../../src/shared/review-format'
+import { snippetAt, splitLines } from '../../../src/shared/review-anchor'
+import { wrapAutomatedMessage } from '../../../src/shared/state/json-claude'
+import type { ReviewComment, ReviewCommentStatus, ReviewSide, ReviewVerdict } from '../../../src/shared/state/reviews'
 import { DemoGit } from './git'
 import { buildDemoState } from './fixture'
 import { TAB, UNITS_REQUEST_ID } from './conversations'
@@ -221,7 +226,7 @@ export class DemoWorld {
     }
     // Typed mid-turn: shown queued now, delivered when the turn ends.
     const entryId = `${sessionId}-q${this.now().toString(36)}${turn}`
-    this.dispatch({ type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId, kind: 'user', text, timestamp: this.now(), isQueued: true } } })
+    this.dispatch({ type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId, kind: 'user', ...parseUserTurn(text), timestamp: this.now(), isQueued: true } } })
     this.enqueue(sessionId, {
       make: () => {
         const steps = replySteps(sessionId, text, turn, this.now)
@@ -305,6 +310,74 @@ export class DemoWorld {
     this.out(id, note + shell.start())
   }
 
+  // ── reviews: review-comments.ts and review-service.ts, in memory ─────
+
+  private reviewId = 0
+
+  private addReviewComment(
+    wt: string,
+    input: { filePath: string; line: number; side: ReviewSide; body: string; view?: { fromCommit?: string; toCommit?: string } }
+  ): ReviewComment | { error: string } {
+    const body = typeof input?.body === 'string' ? input.body.trim() : ''
+    if (!body) return { error: 'Comment body is empty' }
+    if (input.side !== 'new') return { error: DEMO_UNAVAILABLE }
+    const sha = input.view?.toCommit ?? this.git.headSha(wt)
+    const content = this.git.fileAt(wt, sha, input.filePath)
+    if (content === undefined) return { error: `${input.filePath} does not exist at ${sha.slice(0, 7)} (new side)` }
+    const snippet = snippetAt(splitLines(content), input.line)
+    if (snippet === null) return { error: `line ${input.line} is out of range` }
+    const comment: ReviewComment = {
+      id: `demo-rc-${this.now().toString(36)}-${this.reviewId++}`,
+      filePath: input.filePath,
+      side: 'new',
+      line: input.line,
+      anchoredSha: sha,
+      anchor: { commitSha: sha, line: input.line, snippet },
+      author: { kind: 'human' },
+      status: 'open',
+      body,
+      createdAt: this.now()
+    }
+    this.dispatch({ type: 'reviews/commentAdded', payload: { worktreePath: wt, comment } })
+    return comment
+  }
+
+  /** sendReviewSubmission: delivered to the author's chat, which answers
+   *  with one of its scripted replies. */
+  private sendReview(wt: string, id: string, targetTabId?: string): { ok: true; tabId: string; woke: boolean } | { ok: false; error: string } {
+    const review = this.state.reviews.byPath[wt]
+    const submission = review?.submissions?.find((x) => x.id === id)
+    if (!submission) return { ok: false, error: 'Review not found' }
+    const reviewer = submission.author.kind === 'agent' ? submission.author.tabId : null
+    const target = targetTabId || submission.targetTabId || listChatTabs(this.state, wt).find((t) => t.id !== reviewer && !t.reviewOf)?.id
+    const record = (ok: boolean, error?: string) =>
+      this.dispatch({ type: 'reviews/submissionDelivered', payload: { worktreePath: wt, id, state: ok ? 'sent' : 'failed', targetTabId: target ?? null, at: this.now(), error } })
+    if (!target || !this.state.jsonClaude.sessions[target]) {
+      record(false, 'No other Chat tab in this worktree to send it to')
+      return { ok: false, error: 'No other Chat tab in this worktree to send it to' }
+    }
+    if (target === reviewer) {
+      record(false, "A review can't be sent to the tab that wrote it")
+      return { ok: false, error: "A review can't be sent to the tab that wrote it" }
+    }
+    const message = wrapAutomatedMessage('review', formatReviewSubmission(submission, review?.comments ?? []), {
+      from: submission.author.kind === 'agent' ? submission.author.label : undefined
+    })
+    this.send(target, message)
+    record(true)
+    return { ok: true, tabId: target, woke: false }
+  }
+
+  private openReviewTab(wt: string): boolean {
+    const tree = this.state.terminals.panes[wt]
+    if (!tree) return false
+    for (const l of getLeaves(tree)) {
+      const existing = l.tabs.find((t) => t.type === 'review')
+      if (existing) return this.setPanes(wt, (t) => mapLeaves(t, (x) => (x.id === l.id && x.activeTabId !== existing.id ? { ...x, activeTabId: existing.id } : x)))
+    }
+    return this.addTab(wt, { id: `review-${wt.replace(/[^a-zA-Z0-9]/g, '-')}-${this.now()}`, type: 'review', label: 'Review' })
+  }
+
   // ── tables ───────────────────────────────────────────────────────────
 
   private buildHandlers(): Record<string, Handler> {
@@ -335,6 +408,8 @@ export class DemoWorld {
       'worktree:commitDiff': (wt: string, hash: string) => git.commitDiff(wt, hash),
       'worktree:commitChangedFiles': (wt: string, hash: string) => git.commitChangedFiles(wt, hash),
       'worktree:commitFileDiffSides': (wt: string, hash: string, file: string) => git.commitFileSides(wt, hash, file),
+      'worktree:commitRangeChangedFiles': (wt: string, from: string, to: string) => git.commitRangeChangedFiles(wt, from, to),
+      'worktree:commitRangeFileDiffSides': (wt: string, from: string, to: string, file: string) => git.commitRangeFileSides(wt, from, to, file),
       'worktree:listFiles': (wt: string) => git.listFiles(wt),
       'worktree:readFile': (wt: string, file: string) => {
         const content = git.readFile(wt, file)
@@ -369,6 +444,11 @@ export class DemoWorld {
         return true
       },
       'panes:reorderTabs': ok,
+      'panes:openReview': (wt: string) => this.openReviewTab(wt),
+      'panes:setReviewSelection': (wt: string, tabId: string, fromCommit?: string, toCommit?: string) => {
+        this.dispatch({ type: 'terminals/reviewSelectionChanged', payload: { worktreePath: wt, tabId, fromCommit, toCommit } })
+        return true
+      },
       'panes:convertTabType': () => {
         this.notice()
         return false
@@ -455,6 +535,41 @@ export class DemoWorld {
       'pr:merge': () => unavailable,
       'pr:approve': () => unavailable,
       'reviews:requestForWorktree': () => unavailable,
+      'reviews:addComment': (wt: string, input: Parameters<DemoWorld['addReviewComment']>[1]) => this.addReviewComment(wt, input),
+      'reviews:deleteComment': (wt: string, id: string) => {
+        this.dispatch({ type: 'reviews/commentDeleted', payload: { worktreePath: wt, id } })
+        return true
+      },
+      'reviews:setCommentStatus': (wt: string, id: string, status: ReviewCommentStatus) => {
+        if (status !== 'open' && status !== 'resolved' && status !== 'outdated') return false
+        this.dispatch({ type: 'reviews/commentStatusChanged', payload: { worktreePath: wt, id, status, by: { kind: 'human' }, at: this.now() } })
+        return true
+      },
+      'reviews:addReply': (wt: string, commentId: string, body: string) => {
+        const text = typeof body === 'string' ? body.trim() : ''
+        if (!text || !this.state.reviews.byPath[wt]?.comments.some((x) => x.id === commentId)) return false
+        const reply = { id: `demo-rr-${this.now().toString(36)}-${this.reviewId++}`, author: { kind: 'human' as const }, body: text, createdAt: this.now() }
+        this.dispatch({ type: 'reviews/replyAdded', payload: { worktreePath: wt, commentId, reply } })
+        return true
+      },
+      'reviews:editComment': (wt: string, id: string, body: string) => {
+        if (typeof body !== 'string' || !body.trim()) return false
+        this.dispatch({ type: 'reviews/commentEdited', payload: { worktreePath: wt, id, body: body.trim() } })
+        return true
+      },
+      // Demo comments are anchored at HEAD, and the demo's HEAD never moves.
+      'reviews:refreshAnchors': ok,
+      'reviews:listChatTabs': (wt: string) => listChatTabs(this.state, wt),
+      'reviews:editSubmission': (wt: string, id: string, summary: string, verdict: ReviewVerdict) => {
+        if (typeof summary !== 'string' || !['approve', 'changes-requested', 'comment'].includes(verdict)) return false
+        this.dispatch({ type: 'reviews/submissionEdited', payload: { worktreePath: wt, id, summary: summary.trim(), verdict } })
+        return true
+      },
+      'reviews:deleteSubmission': (wt: string, id: string) => {
+        this.dispatch({ type: 'reviews/submissionDeleted', payload: { worktreePath: wt, id } })
+        return true
+      },
+      'reviews:sendSubmission': (wt: string, id: string, targetTabId?: string) => this.sendReview(wt, id, targetTabId),
       'prs:requestConflictFix': () => unavailable,
       'ciNotify:setOverride': (path: string, enabled: boolean | null) => {
         this.dispatch(enabled === null ? { type: 'ciNotify/clear', payload: path } : { type: 'ciNotify/set', payload: { path, enabled } })

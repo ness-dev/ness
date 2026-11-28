@@ -1,13 +1,21 @@
 // The WebView that shows code-html.ts's pages. Read-only: any navigation
-// away from the page itself (a link inside a file) is refused.
-import { memo } from 'react'
-import { WebView } from 'react-native-webview'
+// away from the page itself (a link inside a file) is refused. The Review
+// tab also listens to the page's taps (onMessage) and drives it through
+// the ref's injectJavaScript.
+import { forwardRef, memo, type ComponentRef } from 'react'
+import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { c } from '../theme'
 
-export const CodeWebView = memo(function CodeWebView({ html }: { html: string }) {
+/** What the ref holds: the WebView's handle (injectJavaScript etc.). */
+export type CodeWebViewHandle = ComponentRef<typeof WebView>
+
+export const CodeWebView = memo(forwardRef<CodeWebViewHandle, { html: string; onMessage?: (data: string) => void; onLoadEnd?: () => void }>(function CodeWebView({ html, onMessage, onLoadEnd }, ref) {
   return (
     <WebView
+      ref={ref}
       source={{ html }}
+      onMessage={onMessage ? (e: WebViewMessageEvent) => onMessage(e.nativeEvent.data) : undefined}
+      onLoadEnd={onLoadEnd}
       originWhitelist={['*']}
       // Only the page's own load; a link inside a file must not navigate
       // the viewer away. navigationType is iOS-only (the initial html load
@@ -27,4 +35,4 @@ export const CodeWebView = memo(function CodeWebView({ html }: { html: string })
       contentInsetAdjustmentBehavior="never"
     />
   )
-})
+}))

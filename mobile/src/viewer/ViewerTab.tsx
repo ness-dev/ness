@@ -81,7 +81,7 @@ const Detail = ({ children }: { children: ReactNode }) => <Text style={{ fontSiz
 
 /** Re-runs `load` whenever the file changes on disk, via the same
  *  worktree:watchFile signal the desktop's FileView listens on. */
-function useFileWatch(client: NessClient, worktreePath: string, filePath: string | null, onChange: () => void): void {
+export function useFileWatch(client: NessClient, worktreePath: string, filePath: string | null, onChange: () => void): void {
   useEffect(() => {
     if (!filePath) return
     client.api.watchFile(worktreePath, filePath)

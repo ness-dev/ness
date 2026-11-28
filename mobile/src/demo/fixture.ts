@@ -13,6 +13,7 @@ import {
   darkTranscript,
   hourlyTranscript,
   MODEL,
+  reviewerTranscript,
   TAB,
   unitsApproval,
   unitsEditInput,
@@ -20,6 +21,7 @@ import {
 } from './conversations'
 import type { DemoGit } from './git'
 import { REPO, WORKTREES, WT } from './project'
+import { reviewEvents } from './review'
 
 export const VIEWER = 'riley-chen'
 const avatar = ''
@@ -28,6 +30,10 @@ const prUrl = (n: number) => `https://${ORIGIN}/pull/${n}`
 
 const chatTab = (id: string): TerminalTab => ({ id, type: 'json-claude', label: 'Chat', sessionId: id })
 const shellTab = (id: string): TerminalTab => ({ id, type: 'shell', label: 'Shell' })
+// What PanesFSM.openReviewerTab adds: the reviewer's Chat tab, then the
+// worktree's Review tab.
+const reviewerTab = (id: string, of: string): TerminalTab => ({ id, type: 'json-claude', label: 'Reviewer', sessionId: id, reviewOf: of })
+const reviewTab = (id: string): TerminalTab => ({ id, type: 'review', label: 'Review' })
 const leaf = (id: string, tabs: TerminalTab[]): PaneLeaf => ({ type: 'leaf', id, tabs, activeTabId: tabs[0].id })
 
 function pr(p: Partial<PRStatus> & Pick<PRStatus, 'number' | 'title' | 'state' | 'branch'>): PRStatus {
@@ -201,7 +207,12 @@ export function fixtureEvents(now: number, git: DemoGit): StateEvent[] {
     type: 'terminals/panesReplaced',
     payload: {
       [WT.main]: leaf('demo-pane-main', [shellTab(TAB.mainShell)]),
-      [WT.hourly]: leaf('demo-pane-hourly', [chatTab(TAB.hourlyChat), shellTab(TAB.hourlyShell)]),
+      [WT.hourly]: leaf('demo-pane-hourly', [
+        chatTab(TAB.hourlyChat),
+        shellTab(TAB.hourlyShell),
+        reviewerTab(TAB.hourlyReviewer, TAB.hourlyChat),
+        reviewTab(TAB.hourlyReview)
+      ]),
       [WT.units]: leaf('demo-pane-units', [chatTab(TAB.unitsChat), shellTab(TAB.unitsShell)]),
       [WT.dark]: leaf('demo-pane-dark', [chatTab(TAB.darkChat)]),
       [WT.air]: leaf('demo-pane-air', [chatTab(TAB.airChat)])
@@ -212,7 +223,8 @@ export function fixtureEvents(now: number, git: DemoGit): StateEvent[] {
     [TAB.hourlyChat, WT.hourly, hourlyTranscript(min(80))],
     [TAB.unitsChat, WT.units, unitsTranscript(min(3))],
     [TAB.darkChat, WT.dark, darkTranscript(min(2))],
-    [TAB.airChat, WT.air, airTranscript(min(60 * 24 * 5))]
+    [TAB.airChat, WT.air, airTranscript(min(60 * 24 * 5))],
+    [TAB.hourlyReviewer, WT.hourly, reviewerTranscript(min(44))]
   ]
   for (const [sessionId, worktreePath, entries] of chats) {
     ev.push({ type: 'jsonClaude/sessionStarted', payload: { sessionId, worktreePath } })
@@ -232,11 +244,13 @@ export function fixtureEvents(now: number, git: DemoGit): StateEvent[] {
   ev.push({ type: 'terminals/statusChanged', payload: { id: TAB.unitsChat, status: 'needs-approval', pendingTool: { name: 'Edit', input: unitsEditInput() } } })
   ev.push({ type: 'terminals/statusChanged', payload: { id: TAB.darkChat, status: 'processing', pendingTool: null } })
   ev.push({ type: 'terminals/statusChanged', payload: { id: TAB.airChat, status: 'idle', pendingTool: null } })
+  ev.push({ type: 'terminals/statusChanged', payload: { id: TAB.hourlyReviewer, status: 'waiting', pendingTool: null } })
   for (const id of [TAB.mainShell, TAB.hourlyShell, TAB.unitsShell]) {
     ev.push({ type: 'terminals/statusChanged', payload: { id, status: 'idle', pendingTool: null } })
   }
 
   ev.push({ type: 'prs/bulkStatusChanged', payload: prs(now, git) })
+  ev.push(...reviewEvents(now, git))
 
   ev.push({ type: 'contextWindow/snapshotUpdated', payload: { terminalId: TAB.hourlyChat, snapshot: context(TAB.hourlyChat, 61_400, now) } })
   ev.push({ type: 'contextWindow/snapshotUpdated', payload: { terminalId: TAB.unitsChat, snapshot: context(TAB.unitsChat, 28_900, now) } })
