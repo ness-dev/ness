@@ -87,7 +87,9 @@ export class WebSocketClientTransport implements ClientTransport {
   private readonly connectTimeoutMs: number
   private readonly handshakeTimeoutMs: number
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  /** Consecutive handshake timeouts; scales the handshake budget. */
+  /** Consecutive handshake timeouts; scales the handshake budget. Reset
+   *  only by a completed handshake, deliberately not by reconnectNow(): a
+   *  Retry tap on a slow link should keep the larger budget it earned. */
   private handshakeTimeouts = 0
   /** Ends the in-flight attempt (CONNECTING or mid-handshake) as a failure
    *  without scheduling a retry. Null once the handshake has finished. */
