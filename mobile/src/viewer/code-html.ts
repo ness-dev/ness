@@ -14,7 +14,7 @@ import type { UnifiedDiff } from './diff-model'
  *  shown plain rather than freezing the JS thread for seconds. */
 const HIGHLIGHT_LIMIT = 256 * 1024
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
@@ -25,7 +25,7 @@ export function highlightedLines(text: string, filePath: string): string[] {
   return highlightToLines(text, lang)
 }
 
-function page(body: string, digits: number): string {
+function page(body: string, digits: number, extra: { css?: string; script?: string } = {}): string {
   const gutterCh = digits + 2
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1">
@@ -56,7 +56,8 @@ body { font: 12px/18px ${mono}, ui-monospace, monospace; padding: 4px 0 40px; }
 .hljs-deletion { color: ${c.syntaxDeletion}; } .hljs-addition { color: ${c.syntaxAddition}; }
 .hljs-link { text-decoration: underline; } .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
 .g { width: ${gutterCh}ch; } .d .g { width: ${gutterCh * 2 + 2}ch; }
-</style></head><body><div class="w">${body}</div></body></html>`
+${extra.css ?? ''}
+</style></head><body><div class="w">${body}</div>${extra.script ? `<script>${extra.script}</script>` : ''}</body></html>`
 }
 
 /** A file, one row per line with its number. */
@@ -71,24 +72,103 @@ export function fileHtml(text: string, filePath: string): string {
 /** A unified diff: hunk headers, then each line with its old and new
  *  numbers and a +/− marker in one sticky gutter. Lines are highlighted
  *  from the full side they came from, so context is never lost mid-hunk. */
-export function diffHtml(diff: UnifiedDiff, sides?: { original: string; modified: string; filePath: string }): string {
+export function diffHtml(
+  diff: UnifiedDiff,
+  sides?: { original: string; modified: string; filePath: string },
+  opts?: { review?: ReviewPageOptions }
+): string {
   const oldLines = sides ? highlightedLines(sides.original, sides.filePath) : []
   const newLines = sides ? highlightedLines(sides.modified, sides.filePath) : []
   let maxNo = 1
   for (const r of diff.rows) if (r.kind === 'line') maxNo = Math.max(maxNo, r.oldNo ?? 0, r.newNo ?? 0)
   const digits = String(maxNo).length
   const pad = (n: number | null) => (n === null ? '' : String(n)).padStart(digits, ' ')
+  const review = opts?.review
   const body = diff.rows
-    .map((r) => {
+    .map((r, i) => {
       if (r.kind === 'file') return `<div class="r f"><span class="t">${esc(r.path)}</span></div>`
       if (r.kind === 'hunk') return `<div class="r h"><span class="t">${esc(r.header)}</span></div>`
       const html = (r.type === 'del' ? oldLines[(r.oldNo ?? 1) - 1] : newLines[(r.newNo ?? 1) - 1]) ?? esc(r.text)
       const mark = r.type === 'add' ? '+' : r.type === 'del' ? '−' : ' '
-      return `<div class="r ${r.type}"><span class="g">${pad(r.oldNo)} ${pad(r.newNo)} ${mark}</span><span class="t">${html}</span></div>`
+      // In a review, every row can carry comment cards (id), and new-side
+      // rows take a tap to comment (data-n), as Monaco's glyph margin does.
+      const attrs = review ? ` id="r${i}"${r.newNo !== null ? ` data-n="${r.newNo}"` : ''}` : ''
+      return `<div class="r ${r.type}"${attrs}><span class="g">${pad(r.oldNo)} ${pad(r.newNo)} ${mark}</span><span class="t">${html}</span></div>`
     })
     .join('')
-  return page(`<div class="d">${body}</div>`, digits)
+  if (!review) return page(`<div class="d">${body}</div>`, digits)
+  return page(`<div class="d">${body}</div>`, digits, { css: reviewCss(), script: reviewScript(review.threads) })
 }
+
+/** One row's comment cards, as review-html.ts builds them. */
+export interface ThreadBlock {
+  row: number
+  html: string
+}
+
+export interface ReviewPageOptions {
+  /** Cards present at first paint. Later changes go through
+   *  `setThreadsJs` so the page (and its scroll) isn't rebuilt. */
+  threads: ThreadBlock[]
+}
+
+/** Messages the review page posts to RN. */
+export type ReviewPageMessage = { type: 'line'; line: number; row: number } | { type: 'thread'; id: string }
+
+function reviewCss(): string {
+  return `
+.r[data-n] { cursor: pointer; }
+.r.sel, .r.sel .g { background: ${blend(c.app, c.accent, 0.28)}; }
+.cm { position: sticky; left: 0; box-sizing: border-box; width: calc(100vw - 12px); margin: 3px 6px 5px;
+      padding: 6px 10px; border-left: 3px solid ${c.info}; background: ${blend(c.app, c.info, 0.1)};
+      border-radius: 0 4px 4px 0; white-space: normal; font: 14px/19px -apple-system, system-ui, sans-serif;
+      color: ${c.fg}; cursor: pointer; }
+.cm.resolved { border-left-color: ${c.success}; background: ${blend(c.app, c.success, 0.08)}; opacity: .65; }
+.cm.outdated { border-left-color: ${c.faint}; background: ${c.panel}; opacity: .65; }
+.cm-h { font-size: 12px; line-height: 17px; color: ${c.faint}; }
+.cm-a { color: ${c.fgBright}; font-weight: 600; } .cm-a.agent { color: ${c.accent}; }
+.cm-b { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical;
+        -webkit-line-clamp: 6; overflow: hidden; margin-top: 1px; }
+.cm.outdated .cm-b { text-decoration: line-through; }
+.cm-f { font-size: 12px; line-height: 17px; color: ${c.faint}; margin-top: 2px; }`
+}
+
+/** Taps become messages (a tap that ends a text selection doesn't count),
+ *  and three hooks let RN change the page in place: cards, the selected
+ *  line, and scrolling a card into view. */
+function reviewScript(initial: ThreadBlock[]): string {
+  return `(function(){
+function post(m){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(m)); }
+document.addEventListener('click', function(e){
+  var s = window.getSelection(); if (s && !s.isCollapsed) return;
+  var t = e.target.closest('[data-c]');
+  if (t) { post({ type: 'thread', id: t.getAttribute('data-c') }); return; }
+  var r = e.target.closest('[data-n]');
+  if (r) post({ type: 'line', line: Number(r.getAttribute('data-n')), row: Number(r.id.slice(1)) });
+});
+window.__setThreads = function(list){
+  document.querySelectorAll('.cm').forEach(function(n){ n.remove(); });
+  list.forEach(function(b){ var r = document.getElementById('r' + b.row); if (r) r.insertAdjacentHTML('afterend', b.html); });
+};
+window.__mark = function(row){
+  document.querySelectorAll('.r.sel').forEach(function(n){ n.classList.remove('sel'); });
+  var r = row == null ? null : document.getElementById('r' + row); if (r) r.classList.add('sel');
+};
+window.__reveal = function(id){
+  var n = document.querySelector('[data-c="' + id + '"]'); if (n) n.scrollIntoView({ block: 'center' });
+};
+window.__setThreads(${scriptJson(initial)});
+})();true;`
+}
+
+/** JSON that's safe inside a <script> and an injected string. */
+function scriptJson(v: unknown): string {
+  return JSON.stringify(v).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+}
+
+export const setThreadsJs = (threads: ThreadBlock[]): string => `window.__setThreads && window.__setThreads(${scriptJson(threads)});true;`
+export const markRowJs = (row: number | null): string => `window.__mark && window.__mark(${row === null ? 'null' : row});true;`
+export const revealThreadJs = (id: string): string => `window.__reveal && window.__reveal(${scriptJson(id)});true;`
 
 function hex(h: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})/i.exec(h)

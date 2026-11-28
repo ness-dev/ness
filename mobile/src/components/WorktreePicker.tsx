@@ -15,14 +15,10 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
-  CircleAlert,
-  CircleCheck,
   Ghost,
   GitPullRequest,
   Layers,
-  ListChecks,
   Loader2,
-  MessageSquare,
   Moon,
   MoreHorizontal,
   Pin,
@@ -40,8 +36,6 @@ import type { WorktreeListGroupModel, WorktreeRepoSectionModel, WorktreeRowModel
 import { repoLabelFor } from '../../../src/renderer/worktree-list-model'
 import { detachedLikeTooltip, prIconStyle, type DisplayStatus } from '../../../src/renderer/worktree-row-style'
 import { formatPendingTool } from '../../../src/renderer/pending-tool'
-import { latestAgentReviewStatus } from '../../../src/shared/review-status'
-import { findLeafByTabId } from '../../../src/shared/state/terminals'
 import { formatWakeAt } from '../../../src/shared/state/snooze'
 import { DEFAULT_SIDEBAR_DETAILS } from '../../../src/shared/state/settings'
 import type { PendingWorktree } from '../../../src/shared/state/worktrees'
@@ -53,6 +47,8 @@ import { DemoBadge } from '../demo/DemoUI'
 import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
+import { ReviewStatusGlyph } from '../review/ReviewStatusIcon'
+import { reviewIconSpec, worktreeReviewStatus } from '../review/review-model'
 import { Connecting } from './Connecting'
 
 const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
@@ -615,40 +611,15 @@ function Subtitle({ row, ctx, active, prunable }: { row: WorktreeRowModel; ctx: 
   )
 }
 
-// The lucide shim's wrapIcon maps the desktop's class names to RN props.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { wrapIcon } = require('../shims/lucide-react.js') as { wrapIcon: (name: string, icon: unknown) => (p: { className: string; size: number }) => ReactNode }
-const REVIEW_ICONS = {
-  Loader2: wrapIcon('Loader2', Loader2),
-  ListChecks: wrapIcon('ListChecks', ListChecks),
-  CircleCheck: wrapIcon('CircleCheck', CircleCheck),
-  CircleAlert: wrapIcon('CircleAlert', CircleAlert),
-  MessageSquare: wrapIcon('MessageSquare', MessageSquare)
-}
-
+/** The worktree's latest agent review, drawn by the same mapping as the
+ *  Review tab's icon (review/review-model.ts). Read without subscribing:
+ *  the picker re-renders on every merged-state change anyway. */
 function ReviewIcon({ row, ctx, size }: { row: WorktreeRowModel; ctx: Ctx; size: number }) {
   const state = ctx.fleet.client(ctx.merged.pathBackendId[row.path])?.getState()
   if (!state) return null
-  const tree = state.terminals.panes[row.path]
-  const { kind, unsent, reviewerTabId } = latestAgentReviewStatus(state.reviews.byPath[row.path], (id) => !!tree && !!findLeafByTabId(tree, id))
-  if (kind === 'none') return null
-  const reviewer = reviewerTabId ? state.terminals.statuses[reviewerTabId] : undefined
-  let cls: string
-  let IconName: keyof typeof REVIEW_ICONS
-  if (kind === 'reviewing') {
-    if (reviewer === 'processing') [IconName, cls] = ['Loader2', 'text-accent animate-spin']
-    else if (reviewer === 'needs-approval') [IconName, cls] = ['ListChecks', 'text-danger animate-pulse']
-    else [IconName, cls] = ['ListChecks', 'text-accent opacity-60']
-  } else if (kind === 'approve') [IconName, cls] = ['CircleCheck', 'text-success']
-  else if (kind === 'changes-requested') [IconName, cls] = ['CircleAlert', 'text-warning']
-  else [IconName, cls] = ['MessageSquare', 'text-info']
-  const Icon = REVIEW_ICONS[IconName]
-  return (
-    <View>
-      <Icon className={cls} size={size} />
-      {unsent && <View style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: 3, backgroundColor: c.warning }} />}
-    </View>
-  )
+  const status = worktreeReviewStatus(state, row.path)
+  const spec = reviewIconSpec(status, status.reviewerStatus)
+  return spec ? <ReviewStatusGlyph spec={spec} size={size} /> : null
 }
 
 function AliasEditor({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {

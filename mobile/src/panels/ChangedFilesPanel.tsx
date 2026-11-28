@@ -3,13 +3,12 @@
 // FileTree.tsx (view toggle, dir rows, indent), useFileListView,
 // changed-files-request (in-flight dedup) and useChangedFilesSet.
 //
-// Desktop-only, omitted: the "Review"
-// header button (onOpenReview opens a review tab), "Open file in editor"
-// (openInEditor), and drag-a-row-into-the-composer (the @ button covers it).
+// Desktop-only, omitted: "Open file in editor" (openInEditor) and
+// drag-a-row-into-the-composer (the @ button covers it).
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Pressable, ScrollView, Text, View, StyleSheet } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { AtSign, ChevronRight, Folder, FolderOpen, List, ListTree, RefreshCw } from 'lucide-react-native'
+import { AtSign, ChevronRight, ClipboardCheck, Folder, FolderOpen, List, ListTree, RefreshCw } from 'lucide-react-native'
 import type { ChangedFile } from '../../../src/renderer/types'
 import { buildTree, sortChildren as sortByName, type FileListView, type TreeNode } from '../../../src/renderer/file-tree'
 import { destOf } from '../../../src/shared/git-paths'
@@ -247,7 +246,7 @@ type Row =
   | { key: string; kind: 'file'; list: ListId; file: ChangedFile; depth?: number }
   | { key: string; kind: 'dir'; list: ListId; node: TreeNode; depth: number; open: boolean }
 
-export function ChangedFilesPanel({ client, worktreePath, onSendToAgent, onOpenDiff }: PanelProps) {
+export function ChangedFilesPanel({ client, worktreePath, onSendToAgent, onOpenDiff, onOpenReview }: PanelProps) {
   const fetcher = useCallback(
     async (path: string, opts: { force: boolean }): Promise<ChangedFilesData> => {
       const [working, branch] = await Promise.all([
@@ -340,10 +339,24 @@ export function ChangedFilesPanel({ client, worktreePath, onSendToAgent, onOpenD
   ])
 
   const actions = (
-    // "Review" (onOpenReview) opens a review tab — desktop-only, omitted.
-    <PanelAction onPress={() => refresh()} label="Refresh">
-      <RefreshCw color={c.faint} size={12} />
-    </PanelAction>
+    <>
+      {onOpenReview && branchFiles.length > 0 && (
+        <Pressable
+          onPress={onOpenReview}
+          accessibilityRole="button"
+          accessibilityLabel="Review changes"
+          style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 26, paddingHorizontal: 8, borderRadius: 4, backgroundColor: c.accent }}>
+            <ClipboardCheck color={c.app} size={12} />
+            <Text style={{ color: c.app, fontSize: fs.xs }}>Review</Text>
+          </View>
+        </Pressable>
+      )}
+      <PanelAction onPress={() => refresh()} label="Refresh">
+        <RefreshCw color={c.faint} size={12} />
+      </PanelAction>
+    </>
   )
 
   const renderRow = (item: Row) => {

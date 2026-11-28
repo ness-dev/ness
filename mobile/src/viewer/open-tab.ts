@@ -3,6 +3,7 @@
 // handleOpenCommitFileDiff do (renderer/hooks/useTabHandlers.ts): same ids,
 // labels and fields, so a tab opened on the phone is the desktop's tab and
 // vice versa, and opening one that's already there just selects it.
+import { useEffect, useSyncExternalStore } from 'react'
 import type { PaneNode, TerminalTab } from '../../../src/shared/state/terminals'
 import type { NessClient } from '../ness'
 import { rememberTab } from '../navState'
@@ -45,4 +46,43 @@ export function openViewerTab(
     void client.api.panesAddTab(worktreePath, tab, tree ? firstLeafId(tree) : undefined)
   }
   rememberTab(worktreePath, tab.id)
+}
+
+// A review tab's id is minted by main (PanesFSM.openReviewTab, one per
+// worktree), so the phone can't remember it up front. It remembers that it
+// asked, and the worktree screen selects the tab once it lands.
+const awaitingReview = new Set<string>()
+const reviewListeners = new Set<() => void>()
+let reviewVersion = 0
+
+/** The desktop's "Review changes": select the worktree's review tab,
+ *  opening one if there isn't one yet. */
+export function openReviewTab(client: NessClient, worktreePath: string, openTabs: readonly TerminalTab[]): void {
+  const existing = openTabs.find((t) => t.type === 'review')
+  if (existing) {
+    rememberTab(worktreePath, existing.id)
+    return
+  }
+  awaitingReview.add(worktreePath)
+  reviewVersion++
+  reviewListeners.forEach((l) => l())
+  void client.api.panesOpenReview(worktreePath)
+}
+
+/** Selects the review tab openReviewTab asked for, once it's in `tabs`. */
+export function useFollowOpenedReview(worktreePath: string | null, tabs: readonly TerminalTab[]): void {
+  const version = useSyncExternalStore(
+    (l) => {
+      reviewListeners.add(l)
+      return () => reviewListeners.delete(l)
+    },
+    () => reviewVersion
+  )
+  useEffect(() => {
+    if (!worktreePath || !awaitingReview.has(worktreePath)) return
+    const review = tabs.find((t) => t.type === 'review')
+    if (!review) return
+    awaitingReview.delete(worktreePath)
+    rememberTab(worktreePath, review.id)
+  }, [worktreePath, tabs, version])
 }

@@ -5,7 +5,7 @@ import { useWorkspace } from '../../../workspace'
 import { useMerged } from '../../../fleet'
 import { rememberTab, useSelectedTabId } from '../../../navState'
 import { agentTargetFor } from '../../../tabs'
-import { commitFileDiffTab, diffTab, fileTab, openViewerTab } from '../../../viewer/open-tab'
+import { commitFileDiffTab, diffTab, fileTab, openReviewTab, openViewerTab } from '../../../viewer/open-tab'
 import type { TerminalTab } from '../../../../../src/shared/state/terminals'
 import { PanelsHost } from '../../../panels/PanelsHost'
 import { Empty } from '../../../components/Empty'
@@ -50,7 +50,11 @@ export default function ToolsRoute() {
       openers={{
         onOpenFile: (path) => open(fileTab(path)),
         onOpenDiff: (path, staged, mode) => open(diffTab(path, staged, mode)),
-        onOpenCommitFileDiff: (hash, short, path) => open(commitFileDiffTab(hash, short, path))
+        onOpenCommitFileDiff: (hash, short, path) => open(commitFileDiffTab(hash, short, path)),
+        onOpenReview: () => {
+          openReviewTab(client, wt, tabs)
+          router.back()
+        }
       }}
     />
   )
