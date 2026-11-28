@@ -236,6 +236,55 @@ describe('PanesFSM.restoreFromConfig', () => {
     const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
     expect(leaf.tabs[0].providerSessionId).toBe('thread-1')
   })
+
+  it('reuses a restored review tab instead of opening a second one', async () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/restore-review'
+    await fsm.restoreFromConfig({
+      _ignored: {
+        [wtPath]: {
+          type: 'leaf',
+          id: 'pane-1',
+          tabs: [
+            { id: 'sh-1', type: 'shell', label: 'Shell' },
+            { id: 'review-1', type: 'review', label: 'Review', reviewFromCommit: 'abc', reviewToCommit: 'abc' }
+          ],
+          activeTabId: 'sh-1'
+        }
+      }
+    })
+    fsm.ensureInitialized(wtPath)
+    fsm.openReviewTab(wtPath)
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    const reviews = leaf.tabs.filter((t) => t.type === 'review')
+    expect(reviews).toEqual([
+      { id: 'review-1', type: 'review', label: 'Review', reviewFromCommit: 'abc', reviewToCommit: 'abc' }
+    ])
+    expect(leaf.activeTabId).toBe('review-1')
+  })
+
+  it('restores a worktree whose only tabs are viewers without adding an agent tab', async () => {
+    const { fsm, store } = buildFSM()
+    const wtPath = '/wt/restore-viewers'
+    await fsm.restoreFromConfig({
+      _ignored: {
+        [wtPath]: {
+          type: 'leaf',
+          id: 'pane-1',
+          tabs: [
+            { id: 'file-a.ts', type: 'file', label: 'a.ts', filePath: 'a.ts' },
+            { id: 'd-1', type: 'diff', label: 'a.ts', filePath: 'a.ts', staged: true }
+          ],
+          activeTabId: 'd-1'
+        }
+      }
+    })
+    fsm.ensureInitialized(wtPath)
+    const leaf = store.getSnapshot().state.terminals.panes[wtPath] as PaneLeaf
+    expect(leaf.tabs.map((t) => t.id)).toEqual(['file-a.ts', 'd-1'])
+    expect(leaf.tabs.every((t) => t.mode === undefined && t.sessionId === undefined)).toBe(true)
+    expect(leaf.activeTabId).toBe('d-1')
+  })
 })
 
 describe('PanesFSM.ensureInitialized', () => {

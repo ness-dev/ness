@@ -18,7 +18,7 @@ import type { AgentKind } from '../shared/state/terminals'
 
 export interface PersistedTab {
   id: string
-  type: 'agent' | 'shell' | 'browser' | 'json-claude'
+  type: 'agent' | 'shell' | 'browser' | 'json-claude' | 'review' | 'file' | 'diff'
   label: string
   agentKind?: AgentKind
   sessionId?: string
@@ -43,6 +43,15 @@ export interface PersistedTab {
   customLabelSource?: 'agent'
   /** For a reviewer Chat tab: the tab that requested the review. */
   reviewOf?: string
+  /** For file + diff tabs: worktree-relative path. */
+  filePath?: string
+  /** For diff tabs: which diff the tab shows. */
+  staged?: boolean
+  branchDiff?: boolean
+  commitHash?: string
+  /** For review tabs: the commit selection. Both unset = whole branch. */
+  reviewFromCommit?: string
+  reviewToCommit?: string
 }
 
 export interface PersistedPane {

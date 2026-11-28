@@ -32,12 +32,12 @@ const TAB_FIELDS: Record<keyof TerminalTab, 'persisted' | string> = {
   mode: 'restored tabs are asleep until focused',
   initialPrompt: 'one-shot kickoff, already delivered',
   teleportSessionId: 'one-shot teleport, already consumed',
-  filePath: 'diff/file tabs are not persisted',
-  staged: 'diff tabs are not persisted',
-  branchDiff: 'diff tabs are not persisted',
-  commitHash: 'diff tabs are not persisted',
-  reviewFromCommit: 'review tabs are not persisted',
-  reviewToCommit: 'review tabs are not persisted'
+  filePath: 'persisted',
+  staged: 'persisted',
+  branchDiff: 'persisted',
+  commitHash: 'persisted',
+  reviewFromCommit: 'persisted',
+  reviewToCommit: 'persisted'
 }
 
 const persistedKeys = (Object.keys(TAB_FIELDS) as (keyof TerminalTab)[]).filter(
@@ -62,12 +62,12 @@ function fullyPopulatedTab(): TerminalTab {
     mode: 'awake',
     initialPrompt: 'kick off',
     teleportSessionId: 'teleport-1',
-    filePath: 'a.ts',
+    filePath: 'persisted',
     staged: true,
     branchDiff: true,
-    commitHash: 'abc123',
-    reviewFromCommit: 'abc',
-    reviewToCommit: 'def'
+    commitHash: 'persisted',
+    reviewFromCommit: 'persisted',
+    reviewToCommit: 'persisted'
   }
 }
 
@@ -112,17 +112,35 @@ describe('tab persistence round trip', () => {
     expect(restored?.url).toBe('https://navigated.example')
   })
 
-  it('leaves tab types that are rebuilt on demand out of the saved layout', () => {
-    const leaf: PaneLeaf = {
-      type: 'leaf',
-      id: 'pane-1',
-      tabs: [
-        { id: 'd-1', type: 'diff', label: 'Diff', filePath: 'a.ts' },
-        { id: 'r-1', type: 'review', label: 'Review' },
-        { id: 'f-1', type: 'file', label: 'a.ts', filePath: 'a.ts' }
-      ],
-      activeTabId: 'd-1'
-    }
-    expect(treeToPersistedNode(leaf, () => null)).toBeNull()
+  it.each<[string, TerminalTab]>([
+    ['review tab with a commit selection', { id: 'r-1', type: 'review', label: 'Review', reviewFromCommit: 'abc', reviewToCommit: 'def' }],
+    ['file tab', { id: 'file-a.ts', type: 'file', label: 'a.ts', filePath: 'src/a.ts' }],
+    ['staged diff tab', { id: 'd-1', type: 'diff', label: 'a.ts', filePath: 'src/a.ts', staged: true }],
+    ['branch diff tab', { id: 'd-2', type: 'diff', label: 'a.ts', filePath: 'src/a.ts', branchDiff: true }],
+    ['commit diff tab', { id: 'd-3', type: 'diff', label: 'abc123', commitHash: 'abc123' }]
+  ])('restores a %s as it was saved', async (_name, tab) => {
+    expect(await roundTrip(tab)).toEqual(tab)
+  })
+
+  it('loads a saved layout from before viewer tabs were persisted', async () => {
+    const store = new Store(initialState)
+    const fsm = new PanesFSM(store, {
+      persist: () => {},
+      getRepoRootForWorktree: () => undefined,
+      getLatestClaudeSessionId: async () => null
+    })
+    await fsm.restoreFromConfig({
+      repo: {
+        '/wt': {
+          type: 'leaf',
+          id: 'pane-1',
+          tabs: [{ id: 's-1', type: 'shell', label: 'Shell' }],
+          activeTabId: 's-1'
+        }
+      }
+    })
+    fsm.ensureInitialized('/wt')
+    const leaf = store.getSnapshot().state.terminals.panes['/wt'] as PaneLeaf
+    expect(leaf.tabs).toEqual([{ id: 's-1', type: 'shell', label: 'Shell', mode: 'asleep' }])
   })
 })

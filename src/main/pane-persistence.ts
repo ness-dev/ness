@@ -1,7 +1,15 @@
 import type { PaneNode, TerminalTab } from '../shared/state/terminals'
 import type { PersistedPaneNode, PersistedTab } from './persistence'
 
-const PERSISTED_TAB_TYPES = new Set<TerminalTab['type']>(['agent', 'shell', 'browser', 'json-claude'])
+const PERSISTED_TAB_TYPES = new Set<TerminalTab['type']>([
+  'agent',
+  'shell',
+  'browser',
+  'json-claude',
+  'review',
+  'file',
+  'diff'
+])
 
 /** The tab fields that survive a restart. Saving and restoring both copy
  *  through here, so a field added here round-trips without a second edit
@@ -20,7 +28,13 @@ export function persistedTabFields(t: PersistedTab | TerminalTab): PersistedTab 
     model: t.model,
     ...(t.customLabel ? { customLabel: t.customLabel } : {}),
     ...(t.customLabel && t.customLabelSource ? { customLabelSource: t.customLabelSource } : {}),
-    ...(t.reviewOf ? { reviewOf: t.reviewOf } : {})
+    ...(t.reviewOf ? { reviewOf: t.reviewOf } : {}),
+    ...(t.filePath ? { filePath: t.filePath } : {}),
+    ...(t.staged ? { staged: t.staged } : {}),
+    ...(t.branchDiff ? { branchDiff: t.branchDiff } : {}),
+    ...(t.commitHash ? { commitHash: t.commitHash } : {}),
+    ...(t.reviewFromCommit ? { reviewFromCommit: t.reviewFromCommit } : {}),
+    ...(t.reviewToCommit ? { reviewToCommit: t.reviewToCommit } : {})
   }
 }
 
