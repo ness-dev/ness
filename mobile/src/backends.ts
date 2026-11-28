@@ -46,11 +46,12 @@ export function useBackends(): Backends {
   }, [saved])
 
   // Back in the foreground the network may well have changed (home Wi-Fi
-  // again), so don't sit out a backoff that started while away. Clients
-  // that are connected ignore this.
+  // again), so don't sit out a backoff that started while away. Connected
+  // clients ignore this, and keepOpen spares one already mid-handshake
+  // (iOS drops sockets while suspended; its own retry may have raced us).
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') live.current.forEach((c) => c.retry())
+      if (st === 'active') live.current.forEach((c) => c.retry({ keepOpen: true }))
     })
     return () => sub.remove()
   }, [])

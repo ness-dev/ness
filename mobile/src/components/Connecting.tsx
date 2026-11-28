@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { Loader2, RefreshCw, Server, WifiOff } from 'lucide-react-native'
-import { hostOf, useConns, type NessClient } from '../ness'
+import { hostOf, useConns, waitingView, type NessClient } from '../ness'
 import { Spin } from './Spin'
 import { alpha, c, fs, mono, themed } from '../theme'
 
@@ -22,11 +22,7 @@ export function Connecting({
   inline?: boolean
 }) {
   const conns = useConns(clients)
-  const waiting = clients.filter((_, i) => !conns[i].hasSnapshot)
-  const failed = waiting.filter((cl) => {
-    const cn = conns[clients.indexOf(cl)]
-    return !cn.connected && !!cn.error
-  })
+  const view = waitingView(conns)
   // A tapped Retry shows as in progress until some backend reports back
   // (a new ConnState, even with the same error) or the attempt would have
   // timed out anyway.
@@ -40,7 +36,7 @@ export function Connecting({
 
   const wrap = inline ? s.inline : s.screen
 
-  if (clients.length === 0) {
+  if (view.kind === 'none-enabled') {
     return (
       <View style={wrap}>
         <Server color={c.dim} size={28} />
@@ -54,8 +50,19 @@ export function Connecting({
     )
   }
 
-  if (waiting.length === 0 || failed.length < waiting.length) {
-    const pending = waiting.filter((cl) => !failed.includes(cl))
+  if (view.kind === 'all-connected') {
+    // Only WorktreeScreen gets here: its worktree (saved, or deep-linked)
+    // isn't on any backend, e.g. it was deleted. The worktree menu is in
+    // that screen's header.
+    return (
+      <View style={wrap}>
+        <Text style={s.body}>That worktree isn't on any connected backend. Pick another from the worktree menu.</Text>
+      </View>
+    )
+  }
+
+  if (view.kind === 'connecting') {
+    const pending = view.pending.map((i) => clients[i])
     return (
       <View style={wrap}>
         <Text style={s.body}>
@@ -65,8 +72,9 @@ export function Connecting({
     )
   }
 
+  const failed = view.failed.map((i) => clients[i])
   const one = failed.length === 1 ? failed[0] : null
-  const reason = one ? conns[clients.indexOf(one)].error : null
+  const reason = one ? conns[view.failed[0]].error : null
   return (
     <View style={wrap} accessibilityLiveRegion="polite">
       <WifiOff color={c.warning} size={28} />

@@ -63,8 +63,11 @@ export interface WebSocketClientTransportOptions {
    *  LAN its backend lives on) can hang until the OS gives up, firing
    *  neither `open` nor `close`. */
   connectTimeoutMs?: number
-  /** How long the post-open handshake (snapshot + clientId) may take
-   *  before the socket is closed and retried. */
+  /** How long the post-open handshake (snapshot + clientId) may go without
+   *  receiving anything before the socket is closed and retried. Any frame
+   *  re-arms it, and each consecutive handshake timeout doubles it (up to
+   *  8x), so a slow link still gets there eventually: the snapshot is one
+   *  frame and the WebSocket API reports no progress inside a frame. */
   handshakeTimeoutMs?: number
 }
 
@@ -84,6 +87,8 @@ export class WebSocketClientTransport implements ClientTransport {
   private readonly connectTimeoutMs: number
   private readonly handshakeTimeoutMs: number
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /** Consecutive handshake timeouts; scales the handshake budget. */
+  private handshakeTimeouts = 0
   /** Ends the in-flight attempt (CONNECTING or mid-handshake) as a failure
    *  without scheduling a retry. Null once the handshake has finished. */
   private abortAttempt: ((reason: string) => void) | null = null
@@ -112,10 +117,12 @@ export class WebSocketClientTransport implements ClientTransport {
   /** Retry now instead of waiting out the backoff (a user's Retry tap, the
    *  app returning to the foreground). Abandons an attempt that's still
    *  connecting, since it may be stuck on a network that's gone. No-op
-   *  while connected or after close(). */
-  reconnectNow(): void {
+   *  while connected or after close(). `keepOpen` also leaves a socket
+   *  that's open but mid-handshake alone (it's evidently reachable), for
+   *  automatic kicks that shouldn't throw away a snapshot in flight. */
+  reconnectNow({ keepOpen = false }: { keepOpen?: boolean } = {}): void {
     if (this.closed) return
-    if (this.ws && this.ws.readyState === this.WebSocketCtor.OPEN && !this.abortAttempt) return
+    if (this.ws && this.ws.readyState === this.WebSocketCtor.OPEN && (keepOpen || !this.abortAttempt)) return
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.abortAttempt?.('reconnecting')
@@ -201,6 +208,8 @@ export class WebSocketClientTransport implements ClientTransport {
       let opened = false
       let ended = false
       let timer: ReturnType<typeof setTimeout> | null = null
+      /** Set while the handshake runs; any incoming frame re-arms it. */
+      let armHandshake: (() => void) | null = null
       const clearTimer = () => {
         if (timer) clearTimeout(timer)
         timer = null
@@ -256,7 +265,15 @@ export class WebSocketClientTransport implements ClientTransport {
         clearTimer()
         this.backoffMs = this.initialBackoffMs
         this.opts.onConnectionChange?.(true)
-        timer = setTimeout(() => timeOut('backend did not respond'), this.handshakeTimeoutMs)
+        const budget = this.handshakeTimeoutMs * 2 ** Math.min(this.handshakeTimeouts, 3)
+        armHandshake = () => {
+          clearTimer()
+          timer = setTimeout(() => {
+            this.handshakeTimeouts++
+            timeOut('backend did not respond')
+          }, budget)
+        }
+        armHandshake()
         // Reconcile any state gap before telling UI subscribers to re-run
         // join-on-connect side effects. If a delayed snapshot landed after
         // terminal:join, it could overwrite the restored controller roster
@@ -265,13 +282,16 @@ export class WebSocketClientTransport implements ClientTransport {
         this.finishOpenHandshake()
           .then(() => {
             if (ended) return
+            armHandshake = null
             clearTimer()
+            this.handshakeTimeouts = 0
             if (this.abortAttempt === abort) this.abortAttempt = null
             resolve()
           })
           .catch((err) => {
             // A dropped socket already failed the attempt via `close`.
             if (ended) return
+            armHandshake = null
             clearTimer()
             if (this.abortAttempt === abort) this.abortAttempt = null
             reject(err instanceof Error ? err : new Error(String(err)))
@@ -280,6 +300,7 @@ export class WebSocketClientTransport implements ClientTransport {
 
       ws.addEventListener('message', (evt) => {
         if (ended) return
+        armHandshake?.()
         let frame: ServerFrame
         try {
           frame = JSON.parse(String(evt.data)) as ServerFrame

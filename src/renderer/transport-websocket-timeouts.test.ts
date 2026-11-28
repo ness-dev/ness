@@ -143,6 +143,61 @@ describe('WebSocketClientTransport timeouts', () => {
     t.close()
   })
 
+  it('any frame during the handshake re-arms its timeout', async () => {
+    const { t, changes } = make()
+    const p = t.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    // A server streaming state events while the snapshot is still on its
+    // way is alive, however long the whole handshake takes.
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(9000)
+      ws.reply({ t: 'state', event: { type: 'settings/themeChanged', payload: 'dracula' }, seq: i })
+    }
+    ws.answerHandshake()
+    await flush()
+    const idReq = ws.sent.find((f) => f.name === 'transport:getClientId')!
+    ws.reply({ t: 'res', id: idReq.id, ok: true, value: 'c1' })
+    await p
+    expect(changes).toEqual([[true, undefined]])
+    t.close()
+  })
+
+  it('doubles the handshake budget after each handshake timeout, resetting on success', async () => {
+    const { t, changes } = make()
+    t.connect().catch(() => {})
+    FakeWebSocket.instances[0].open()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(changes.at(-1)).toEqual([false, 'backend did not respond'])
+
+    // Second attempt gets 20s.
+    await vi.advanceTimersByTimeAsync(100)
+    const second = FakeWebSocket.instances[1]
+    second.open()
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(changes.at(-1)).toEqual([true, undefined])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(changes.at(-1)).toEqual([false, 'backend did not respond'])
+
+    // Third attempt (40s budget) succeeds late, which resets the budget.
+    await vi.advanceTimersByTimeAsync(100)
+    const third = FakeWebSocket.instances[2]
+    third.open()
+    await vi.advanceTimersByTimeAsync(30_000)
+    third.answerHandshake()
+    await flush()
+    const idReq = third.sent.find((f) => f.name === 'transport:getClientId')!
+    third.reply({ t: 'res', id: idReq.id, ok: true, value: 'c1' })
+    await flush()
+    third.serverClose()
+    await vi.advanceTimersByTimeAsync(100)
+    const fourth = FakeWebSocket.instances[3]
+    fourth.open()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(changes.at(-1)).toEqual([false, 'backend did not respond'])
+    t.close()
+  })
+
   it('a completed handshake clears the timers and later drops still reconnect', async () => {
     const { t, changes } = make()
     const p = t.connect()
@@ -228,6 +283,25 @@ describe('WebSocketClientTransport timeouts', () => {
       [true, undefined],
       [false, 'reconnecting']
     ])
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    t.close()
+  })
+
+  it('reconnectNow({ keepOpen }) leaves a socket mid-handshake alone', async () => {
+    const { t, changes } = make()
+    t.connect().catch(() => {})
+    FakeWebSocket.instances[0].open()
+    t.reconnectNow({ keepOpen: true })
+    await flush()
+    expect(changes).toEqual([[true, undefined]])
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    t.close()
+  })
+
+  it('reconnectNow({ keepOpen }) still restarts an attempt stuck connecting', async () => {
+    const { t } = make()
+    t.connect().catch(() => {})
+    t.reconnectNow({ keepOpen: true })
     expect(FakeWebSocket.instances).toHaveLength(2)
     t.close()
   })
