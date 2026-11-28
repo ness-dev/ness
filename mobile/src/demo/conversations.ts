@@ -11,7 +11,10 @@ export const TAB = {
   unitsChat: 'demo-chat-units',
   unitsShell: 'demo-shell-units',
   darkChat: 'demo-chat-dark',
-  airChat: 'demo-chat-air'
+  airChat: 'demo-chat-air',
+  /** The agent reviewer of the hourly branch, and the Review tab it opened. */
+  hourlyReviewer: 'demo-chat-hourly-reviewer',
+  hourlyReview: 'demo-review-hourly'
 } as const
 
 export const MODEL = 'claude-opus-5-5'
@@ -262,5 +265,41 @@ export function airTranscript(start: number): JsonClaudeChatEntry[] {
   t.user('PR #39 is merged — anything left to clean up?').assistant(
     text('Nothing left: the branch is merged and the badge shipped in **v0.4.0**. You can delete this worktree whenever you like.')
   )
+  return t.entries
+}
+
+// ── hourly-forecast: the agent reviewer that CI going green opened ─────
+
+export function reviewerTranscript(start: number): JsonClaudeChatEntry[] {
+  const wt = WT.hourly
+  const t = new Transcript(TAB.hourlyReviewer, start)
+  t.user(
+    'Review the changes on this branch for the Chat tab that wrote them. Its checks just went green.\n\nRead the whole branch diff against main, leave a comment on each line that needs work with add_review_comment, then submit_review with your verdict.'
+  )
+    .assistant(
+      text("I'll read the branch diff first, then the new component in full."),
+      tool('tu_r1', 'Bash', { command: 'git diff main...HEAD --stat', description: 'Summarize the branch diff' }),
+      tool('tu_r2', 'Read', { file_path: file(wt, 'src/components/HourlyForecast.tsx') }),
+      tool('tu_r3', 'Read', { file_path: file(wt, 'src/api/forecast.ts') })
+    )
+    .result('tu_r1', ' src/App.tsx                        |  2 ++\n src/api/forecast.ts                | 19 ++++++++++++++++---\n src/components/HourlyForecast.tsx  | 18 ++++++++++++++++++\n tests/forecast.test.ts             | 14 ++++++++++++++\n 4 files changed, 50 insertions(+), 3 deletions(-)')
+    .result('tu_r2', "     1\timport type { Hour } from '../api/forecast'\n…")
+    .result('tu_r3', "     1\timport { useEffect, useState } from 'react'\n…")
+    .assistant(
+      thinking('The fetch and the strip are both clean. Two things a user would notice: VoiceOver reads each column as a bare time, and the 20% cutoff is written in two places. The 24-hour request is worth a question, not a block.'),
+      tool('tu_r4', 'mcp__ness-control__add_review_comment', { file: 'src/components/HourlyForecast.tsx', line: 9, body: 'VoiceOver reads each column as just “3 PM”…' }),
+      tool('tu_r5', 'mcp__ness-control__add_review_comment', { file: 'src/components/HourlyForecast.tsx', line: 12, body: 'Magic number…' }),
+      tool('tu_r6', 'mcp__ness-control__add_review_comment', { file: 'src/api/forecast.ts', line: 30, body: 'This asks for 24 hours…' })
+    )
+    .result('tu_r4', 'Comment added')
+    .result('tu_r5', 'Comment added')
+    .result('tu_r6', 'Comment added')
+    .assistant(tool('tu_r7', 'mcp__ness-control__submit_review', { verdict: 'changes-requested', summary: 'Two fixes before merge…' }))
+    .result('tu_r7', 'Review saved as a draft for the user to send.')
+    .assistant(
+      text(
+        '**Changes requested.** The strip works and the parallel fetch is right, but it isn\'t usable with VoiceOver yet and the 20% rain cutoff is a magic number. Three inline comments; the review is waiting in the Review tab for you to send.'
+      )
+    )
   return t.entries
 }

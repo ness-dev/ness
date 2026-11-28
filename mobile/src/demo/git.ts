@@ -136,6 +136,35 @@ export class DemoGit {
     )
   }
 
+  /** A file as committed at HEAD. */
+  headFile(path: string, file: string): string | undefined {
+    return this.tree(path)?.head[file]
+  }
+
+  /** A file as of `hash` on this branch (HEAD's files for an unknown
+   *  hash), what `git show <hash>:<file>` would print. */
+  fileAt(path: string, hash: string, file: string): string | undefined {
+    const c = this.commit(path, hash)
+    return c ? c.after[file] : this.headFile(path, file)
+  }
+
+  /** getCommitRangeChangedFiles: fromHash^..toHash. */
+  commitRangeChangedFiles(path: string, fromHash: string, toHash: string): ChangedFile[] {
+    const range = this.range(path, fromHash, toHash)
+    return range ? compare(range.before, range.after, false) : []
+  }
+
+  commitRangeFileSides(path: string, fromHash: string, toHash: string, file: string): FileDiffSides {
+    const range = this.range(path, fromHash, toHash)
+    return range ? sides(range.before[file], range.after[file]) : { ...sides(undefined, undefined), error: 'Not found' }
+  }
+
+  private range(path: string, fromHash: string, toHash: string): { before: Files; after: Files } | null {
+    const from = this.commit(path, fromHash)
+    const to = this.commit(path, toHash)
+    return from && to ? { before: from.before, after: to.after } : null
+  }
+
   readFile(path: string, file: string): string | undefined {
     return this.tree(path)?.work[file]
   }
