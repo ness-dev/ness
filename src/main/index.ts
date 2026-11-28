@@ -42,6 +42,7 @@ import {
   writeAttachmentImage
 } from './json-claude-attachments'
 import { JsonClaudeStatusDeriver } from './json-claude-status-deriver'
+import { CopyDraftBroker, type CopyDraftOutcome } from './copy-draft-broker'
 import { Store } from './store'
 import { WebSocketServerTransport } from './transport-websocket'
 import { CompoundServerTransport } from './transport-compound'
@@ -515,6 +516,11 @@ const approvalBridge = new ApprovalBridge(store, {
     return store.getSnapshot().state.worktrees.repoRoots.includes(want)
   }
 })
+const copyDraftBroker = new CopyDraftBroker(
+  store,
+  (terminalId) => terminalId in store.getSnapshot().state.jsonClaude.sessions,
+  (terminalId) => findTabById(store.getSnapshot().state.terminals.panes, terminalId) !== null
+)
 const composerVisibility = new ComposerVisibility()
 const jsonClaudeManager = new JsonClaudeManager(store, {
   getClaudeCommand: () =>
@@ -951,6 +957,7 @@ store.subscribe((event) => {
 // Lives in its own module — see src/main/json-claude-status-deriver.ts.
 const jsonClaudeStatusDeriver = new JsonClaudeStatusDeriver(store)
 jsonClaudeStatusDeriver.start()
+copyDraftBroker.start()
 
 /** Resolve the GitHub login of whoever owns the configured token, and
  *  dispatch it so the sidebar can route PRs they didn't author into the
@@ -3540,6 +3547,20 @@ function registerIpcHandlers(): void {
     return true
   })
 
+  transport.onRequest('config:setCopyEditingEnabled', (_ctx, enabled: boolean) => {
+    if (enabled) {
+      config.copyEditingEnabled = true
+    } else {
+      delete config.copyEditingEnabled
+    }
+    saveConfig(config)
+    store.dispatch({
+      type: 'settings/copyEditingEnabledChanged',
+      payload: config.copyEditingEnabled === true
+    })
+    return true
+  })
+
   transport.onRequest('config:setNameClaudeSessions', (_ctx, enabled: boolean) => {
     if (enabled) {
       config.nameClaudeSessions = true
@@ -4548,6 +4569,35 @@ function registerIpcHandlers(): void {
   // The request surfaces in the store as jsonClaude/approvalRequested; the
   // renderer UI calls this handler once the user clicks Allow/Deny, which
   // writes the PermissionResult back out over the same socket.
+  transport.onRequest(
+    'copyDrafts:resolve',
+    (_ctx, id: string, outcome: Exclude<CopyDraftOutcome, { kind: 'cancelled' }>) => {
+      if (outcome?.kind === 'submitted' && typeof outcome.text === 'string') {
+        return copyDraftBroker.resolve(id, {
+          kind: 'submitted',
+          text: outcome.text,
+          note: outcome.note?.trim() || undefined
+        })
+      }
+      if (outcome?.kind === 'dismissed') {
+        return copyDraftBroker.resolve(id, {
+          kind: 'dismissed',
+          note: outcome.note?.trim() || undefined
+        })
+      }
+      return false
+    }
+  )
+
+  transport.onRequest('copyDrafts:clearWithdrawn', (_ctx, id: string) =>
+    copyDraftBroker.clearWithdrawn(id)
+  )
+
+  transport.onRequest('copyDrafts:markEdited', (_ctx, id: string) => {
+    copyDraftBroker.markEdited(id)
+    return true
+  })
+
   transport.onRequest(
     'jsonClaude:resolveApproval',
     (
@@ -6352,6 +6402,11 @@ async function runBoot(): Promise<void> {
       // response should not be able to arrive before the sidebar agrees.
       if (result.ok && result.renamed) await worktreesFSM.refreshList()
       return result
+    },
+    copyDrafts: {
+      isEnabled: () => config.copyEditingEnabled === true,
+      request: (input) => copyDraftBroker.request(input),
+      cancel: (id) => copyDraftBroker.cancel(id)
     },
     messaging: {
       isEnabled: () => config.worktreeMessagingEnabled !== false,

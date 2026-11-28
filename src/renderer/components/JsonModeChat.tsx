@@ -37,7 +37,16 @@ import {
   Loader2
 } from 'lucide-react'
 import { openForkIntoWorktree } from './NewWorktreeScreen'
-import { useAliases, useAppState, useJsonClaudeSession, useSettings, useWorktrees } from '../store'
+import {
+  useAliases,
+  useAppState,
+  useCopyDraftForTerminal,
+  useWithdrawnCopyDraftForTerminal,
+  useJsonClaudeSession,
+  useSettings,
+  useWorktrees
+} from '../store'
+import { CopyDraftCard } from './CopyDraftOverlay'
 import { AgentIcon } from './AgentIcon'
 import { listChatMentionTargets, matchChatMentions } from '../../shared/chat-mention'
 import { ChatAgentColumn } from './ChatAgentColumn'
@@ -98,6 +107,7 @@ import {
   resolveLocalImageSrc
 } from '../../shared/chat-image-src'
 import {
+  EDIT_COPY_TOOL_NAME,
   QUESTION_TOOL_NAME,
   type HeldNotice,
   type JsonClaudeAutomationSource,
@@ -1497,6 +1507,8 @@ export function JsonModeChat({
   const backend = useBackend()
   const session = useJsonClaudeSession(sessionId)
   const { pending, resolve } = useJsonClaudeApprovals(sessionId)
+  const copyDraft = useCopyDraftForTerminal(sessionId)
+  const withdrawnCopyDraft = useWithdrawnCopyDraftForTerminal(sessionId)
   const {
     jsonModeChatDensity: density,
     jsonModeChatWidth,
@@ -1963,6 +1975,36 @@ export function JsonModeChat({
     }, 500)
   }
 
+  // The draft carries no tool_use id (it arrives over the control server, not
+  // the permission bridge), so pin it to the newest edit_copy call whose input
+  // matches and that has no result yet — an agent retrying the same text after
+  // a dismissal must not land on the old, answered call. No match yet — the
+  // block hasn't streamed — and it renders at the bottom of the log instead.
+  const copyDraftToolUseId = useMemo(() => {
+    const all = session?.entries
+    if (!copyDraft || !all) return null
+    // Results follow their call, so walking backwards sees them first.
+    const answered = new Set<string>()
+    for (let i = all.length - 1; i >= 0; i--) {
+      const blocks = all[i].blocks
+      if (!blocks) continue
+      for (let j = blocks.length - 1; j >= 0; j--) {
+        const b = blocks[j]
+        if (b.type === 'tool_result' && b.toolUseId) answered.add(b.toolUseId)
+        if (
+          b.type === 'tool_use' &&
+          b.id &&
+          !answered.has(b.id) &&
+          b.name === EDIT_COPY_TOOL_NAME &&
+          b.input?.draft === copyDraft.draft
+        ) {
+          return b.id
+        }
+      }
+    }
+    return null
+  }, [copyDraft, session?.entries])
+
   const approvalByToolUseId = useMemo(() => {
     const map = new Map<string, (typeof pending)[number]>()
     for (const a of pending) {
@@ -1973,6 +2015,9 @@ export function JsonModeChat({
 
   const renderApprovalForToolUseId = (toolUseId: string | undefined): ReactNode => {
     if (!toolUseId) return null
+    if (copyDraft && toolUseId === copyDraftToolUseId) {
+      return <CopyDraftCard draft={copyDraft} />
+    }
     const approval = approvalByToolUseId.get(toolUseId)
     if (!approval) return null
     if (approval.toolName === QUESTION_TOOL_NAME) {
@@ -1991,15 +2036,13 @@ export function JsonModeChat({
     )
   }
 
-  const pendingToolUseIds = useMemo(
-    () =>
-      new Set(
-        pending
-          .map((a) => a.toolUseId)
-          .filter((x): x is string => typeof x === 'string')
-      ),
-    [pending]
-  )
+  const pendingToolUseIds = useMemo(() => {
+    const ids = new Set(
+      pending.map((a) => a.toolUseId).filter((x): x is string => typeof x === 'string')
+    )
+    if (copyDraftToolUseId) ids.add(copyDraftToolUseId)
+    return ids
+  }, [pending, copyDraftToolUseId])
 
   const autoApprovedDecisions = session?.autoApprovedDecisions ?? {}
   const sessionAllowedDecisions = session?.sessionAllowedDecisions ?? {}
@@ -2163,6 +2206,7 @@ export function JsonModeChat({
     windowSize,
     approvalByToolUseId,
     pendingToolUseIds,
+    copyDraft,
     autoApprovedDecisions,
     sessionAllowedDecisions,
     backgroundAgents,
@@ -3133,7 +3177,7 @@ export function JsonModeChat({
                 container childless — the RO is never attached and streaming
                 tokens after entries hydrate don't snap to bottom. */}
             <div className="min-h-full flex flex-col">
-            {entries.length === 0 && orphanApprovals.length === 0 && !busy ? (
+            {entries.length === 0 && orphanApprovals.length === 0 && !copyDraft && !busy ? (
               // Empty-state is only safe to show once we've confirmed there's
               // nothing to display. The wire snapshot ships entries stripped
               // (entriesHydrated=false) and the lazy-fetch above seeds them
@@ -3206,6 +3250,8 @@ export function JsonModeChat({
                   onResolve={(result) => resolve(a.requestId, result)}
                 />
               ))}
+              {copyDraft && !copyDraftToolUseId && <CopyDraftCard draft={copyDraft} />}
+              {withdrawnCopyDraft && <CopyDraftCard draft={withdrawnCopyDraft} withdrawn />}
               {(() => {
                 // In-chat "agent is working" indicator. Visible whenever the
                 // turn is in flight and no other UI element already signals

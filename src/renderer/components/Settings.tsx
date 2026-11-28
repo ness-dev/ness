@@ -59,6 +59,7 @@ type SubSectionId =
   | 'agent-tools-browser-control'
   | 'agent-tools-conversation-fork'
   | 'agent-tools-worktree-messaging'
+  | 'agent-tools-copy-editing'
   | 'agent-tools-agent-reviews'
   | 'agent-tools-auto-approve'
   | 'hotkeys-navigation'
@@ -102,6 +103,7 @@ const SECTIONS: Section[] = [
     { id: 'agent-tools-browser-control', label: 'Browser control' },
     { id: 'agent-tools-conversation-fork', label: 'Conversation fork' },
     { id: 'agent-tools-worktree-messaging', label: 'Worktree messaging' },
+    { id: 'agent-tools-copy-editing', label: 'Copy editing' },
     { id: 'agent-tools-agent-reviews', label: 'Agent reviews' },
     { id: 'agent-tools-auto-approve', label: 'Auto-approve' }
   ]},
@@ -205,6 +207,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     'agent-tools-browser-control': null,
     'agent-tools-conversation-fork': null,
     'agent-tools-worktree-messaging': null,
+    'agent-tools-copy-editing': null,
     'agent-tools-agent-reviews': null,
     'agent-tools-auto-approve': null,
     'hotkeys-navigation': null,
@@ -405,6 +408,7 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
     browserToolsMode,
     conversationForkEnabled,
     worktreeMessagingEnabled,
+    copyEditingEnabled,
     lochBlameEnabled,
     lochRecordNewRepos,
     agentTabNamingEnabled,
@@ -3189,6 +3193,37 @@ export function Settings({ onClose, onOpenGuide, onOpenMyWeek, initialSection }:
                     <div className="text-xs text-dim mt-0.5">
                       Exposes the <code className="bg-panel px-1 rounded text-xs">send_message</code> MCP tool. Senders can&apos;t forge who a message came from — the name is taken from the calling worktree.
                       Also lets agents follow each other: a Chat tab that creates a worktree is told about its PR and CI status, and the agent there sends it progress reports.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Copy editing sub-card */}
+              <div
+                ref={(el) => { subSectionRefs.current['agent-tools-copy-editing'] = el }}
+                id="agent-tools-copy-editing"
+                className="bg-panel-raised border border-border rounded-lg p-4 mb-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-fg-bright">Copy editing</h3>
+                </div>
+                <p className="text-xs text-dim mb-3">
+                  Lets an agent hand you a draft of copy it&apos;s writing (UI text,
+                  release notes, a post) so you can rewrite it before it goes
+                  anywhere. The agent waits while you edit, then uses your version
+                  word for word. Only takes effect on the next agent session.
+                </p>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={copyEditingEnabled}
+                    onChange={(e) => { void backend.setCopyEditingEnabled(e.target.checked) }}
+                    className="mt-0.5 cursor-pointer icon-base" />
+                  <div className="flex-1">
+                    <div className="text-sm text-fg-bright">Enable copy editing</div>
+                    <div className="text-xs text-dim mt-0.5">
+                      Exposes the <code className="bg-panel px-1 rounded text-xs">edit_copy</code> MCP tool. In Chat tabs the draft shows up in the conversation; in Terminal tabs it opens over the bottom of the tab.
                     </div>
                   </div>
                 </label>

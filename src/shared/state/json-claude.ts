@@ -56,6 +56,10 @@ export const EDIT_TOOL_NAMES = [
  *  skip this tool and let the question card handle it. */
 export const QUESTION_TOOL_NAME = 'AskUserQuestion'
 
+/** Ness's own `edit_copy` tool, as Claude names it. Chat tabs look for it in
+ *  the transcript to place the draft editor under its call. */
+export const EDIT_COPY_TOOL_NAME = 'mcp__ness-control__edit_copy'
+
 /** An image held on disk rather than in state. Tool results (browser
  *  screenshots) and pasted user attachments can both carry megabytes of
  *  base64; keeping only the path means state events stay small enough to

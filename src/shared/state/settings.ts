@@ -424,6 +424,9 @@ export interface SettingsState {
    *  message into another worktree's chat — the one capability that
    *  deliberately crosses the worktree boundary. Default on. */
   worktreeMessagingEnabled: boolean
+  /** When true, agents get the `edit_copy` MCP tool and can hand the user a
+   *  draft of copy to rewrite before using it. Default off. */
+  copyEditingEnabled: boolean
   /** Show loch's per-line conversation blame in the file viewer's gutter,
    *  with an action to open a Chat on a fork of the conversation that wrote
    *  a line. Without loch (on PATH, or the copy Ness installs on opt-in) the
@@ -659,6 +662,7 @@ export type SettingsEvent =
   | { type: 'settings/conversationForkEnabledChanged'; payload: boolean }
   | { type: 'settings/browserToolsModeChanged'; payload: BrowserToolsMode }
   | { type: 'settings/worktreeMessagingEnabledChanged'; payload: boolean }
+  | { type: 'settings/copyEditingEnabledChanged'; payload: boolean }
   | { type: 'settings/lochBlameEnabledChanged'; payload: boolean }
   | { type: 'settings/lochRecordingReposChanged'; payload: string[] }
   | { type: 'settings/lochPromptDismissedReposChanged'; payload: string[] }
@@ -755,6 +759,7 @@ export const initialSettings: SettingsState = {
   conversationForkEnabled: true,
   browserToolsMode: 'full',
   worktreeMessagingEnabled: true,
+  copyEditingEnabled: false,
   lochBlameEnabled: true,
   lochRecordingRepos: [],
   lochPromptDismissedRepos: [],
@@ -1086,6 +1091,8 @@ export function settingsReducer(state: SettingsState, event: SettingsEvent): Set
       return { ...state, browserToolsMode: event.payload }
     case 'settings/worktreeMessagingEnabledChanged':
       return { ...state, worktreeMessagingEnabled: event.payload }
+    case 'settings/copyEditingEnabledChanged':
+      return { ...state, copyEditingEnabled: event.payload }
     case 'settings/lochBlameEnabledChanged':
       return { ...state, lochBlameEnabled: event.payload }
     case 'settings/lochRecordingReposChanged':

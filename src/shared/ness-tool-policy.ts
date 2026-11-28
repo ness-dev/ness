@@ -100,7 +100,10 @@ export const NESS_AUTO_ALLOWED_TOOLS: readonly string[] = [
   // Shell tabs (reading and stopping; starting one is create_shell)
   'list_shells',
   'read_shell_output',
-  'kill_shell'
+  'kill_shell',
+  // Asking the user: the tool's whole job is to put a draft in front of a
+  // human, so approving it first would ask them twice.
+  'edit_copy'
 ]
 
 export const NESS_ASK_TOOLS: readonly string[] = ['eval_tab', 'create_shell', 'add_repo']

@@ -282,4 +282,25 @@ describe('JsonClaudeStatusDeriver', () => {
     expect(events.removed).toEqual(['A'])
     expect(events.statusChanged).toHaveLength(0)
   })
+  it('flags a pending edit_copy draft as needs-approval and clears it on resolve', () => {
+    const store = makeStore({ sessions: { A: makeSession('A', { busy: true }) }, pendingApprovals: {} })
+    const { events } = startDeriverWithCapture(store)
+    const draft = { id: 'd1', terminalId: 'A', worktreePath: '/tmp/wt-A', draft: 'hi', timestamp: 1 }
+
+    store.dispatch({ type: 'copyDrafts/requested', payload: draft })
+    expect(events.statusChanged.at(-1)).toMatchObject({ id: 'A', status: 'needs-approval' })
+
+    store.dispatch({ type: 'copyDrafts/resolved', payload: { id: 'd1', terminalId: 'A' } })
+    expect(events.statusChanged.at(-1)).toMatchObject({ id: 'A', status: 'processing' })
+  })
+
+  it('ignores copy drafts from terminal tabs', () => {
+    const store = makeStore({ sessions: { A: makeSession('A') }, pendingApprovals: {} })
+    const { events } = startDeriverWithCapture(store)
+    store.dispatch({
+      type: 'copyDrafts/requested',
+      payload: { id: 'd1', terminalId: 'xterm-1', worktreePath: '/wt', draft: 'hi', timestamp: 1 }
+    })
+    expect(events.statusChanged).toEqual([])
+  })
 })

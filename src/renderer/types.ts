@@ -388,6 +388,7 @@ export interface ElectronAPI {
   setBrowserToolsMode(mode: 'view' | 'full'): Promise<boolean>
   setConversationForkEnabled(enabled: boolean): Promise<boolean>
   setWorktreeMessagingEnabled(enabled: boolean): Promise<boolean>
+  setCopyEditingEnabled(enabled: boolean): Promise<boolean>
   setLochBlameEnabled(enabled: boolean): Promise<boolean>
   /** The standing answer for repos added from now on: `true` turns loch
    *  recording on for each as it's added. */
@@ -752,6 +753,20 @@ export interface ElectronAPI {
     }
   ): Promise<boolean>
   rerunJsonClaudeAutoApprovalReview(requestId: string): Promise<boolean>
+
+  /** Answer an agent's `edit_copy` call. False when the draft is already
+   *  gone (answered elsewhere, or the agent stopped waiting). */
+  resolveCopyDraft(
+    id: string,
+    outcome:
+      | { kind: 'submitted'; text: string; note?: string }
+      | { kind: 'dismissed'; note?: string }
+  ): Promise<boolean>
+  /** Close the "the agent stopped waiting" notice for a withdrawn draft. */
+  clearWithdrawnCopyDraft(id: string): Promise<boolean>
+  /** Tell main a pending draft has been touched, so a withdrawal keeps it
+   *  around as a "not sent" notice instead of dropping it. */
+  markCopyDraftEdited(id: string): Promise<boolean>
   startJsonClaude(id: string, cwd: string): Promise<boolean>
   sendJsonClaudeMessage(
     id: string,

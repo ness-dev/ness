@@ -92,8 +92,16 @@ function send(msg) {
 const CALL_TIMEOUT_MS = Number(process.env.HARNESS_CALL_TIMEOUT_MS) || 60_000
 // Worktree creation legitimately blocks on git fetch / PR checkout.
 const WORKTREE_CREATE_TIMEOUT_MS = 300_000
+// edit_copy waits on a person, not on Ness, and a person may leave a draft
+// open over lunch. Claude Code (2.1.301) aborts a stdio tool call after 30 min
+// with no response *or progress notification*
+// (CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT), and hard-caps it at MCP_TOOL_TIMEOUT,
+// default 1e8 ms (~27.8 h). So the bridge sends a progress heartbeat while it
+// waits, and its own limit sits just under Claude's cap.
+const COPY_DRAFT_TIMEOUT_MS = 24 * 60 * 60 * 1000
+const COPY_DRAFT_HEARTBEAT_MS = Number(process.env.HARNESS_PROGRESS_HEARTBEAT_MS) || 60_000
 
-function callControl(method, path, body, timeoutMs) {
+function callControl(method, path, body, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : undefined
     const limit = timeoutMs || CALL_TIMEOUT_MS
@@ -108,7 +116,8 @@ function callControl(method, path, body, timeoutMs) {
           'Content-Type': 'application/json',
           'X-Harness-Terminal-Id': TERMINAL_ID,
           ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {})
-        }
+        },
+        ...(signal ? { signal } : {})
       },
       (res) => {
         let chunks = ''
@@ -904,6 +913,32 @@ const TOOLS = [
     }
   },
   {
+    name: 'edit_copy',
+    description:
+      "Hand a draft of human-facing copy to the user so they can rewrite it themselves before you use it. Use this for prose where the user's voice matters more than yours: UI strings and microcopy, onboarding or empty-state text, marketing/landing-page copy, release notes, announcements, social posts, emails. Ness opens your draft in an editor next to this conversation and the call blocks until the user submits. The result is their final text — use it VERBATIM wherever the copy is going (don't polish, reformat, or 'fix' it), and treat any note they add as direction for related copy. If they dismiss the draft, don't ship it; read their note and either try again or ask. Send one coherent piece per call (a headline + subhead is fine together); for many unrelated strings, make separate calls so each can be judged on its own.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        draft: {
+          type: 'string',
+          description:
+            'Your draft, exactly as it would appear to readers. Plain text; keep line breaks meaningful because the user edits it as-is.'
+        },
+        title: {
+          type: 'string',
+          description:
+            'Short label for what this copy is, shown as the editor heading (e.g. "Settings empty-state headline", "v2.4 release notes").'
+        },
+        context: {
+          type: 'string',
+          description:
+            'Optional: where the copy lands and any constraints the user should keep in mind while editing (length limits, tone, placeholders like {count} that must survive).'
+        }
+      },
+      required: ['draft']
+    }
+  },
+  {
     name: 'list_shells',
     description:
       "List shell tabs in the caller's worktree. Each entry includes id, label, command (if started with one), cwd, and alive (whether its PTY is still running). Use the returned id with read_shell_output/kill_shell. Prefer reading an existing shell over spawning a new one when you just want to inspect recent output.",
@@ -1026,6 +1061,7 @@ async function getToolPerms() {
     // default — and matching the browser gates' permissive-on-failure
     // posture rather than hiding a feature the user has enabled.
     tabNaming: s.tabNaming || { enabled: true },
+    copyEditing: s.copyEditing || { enabled: false },
     reviews: s.reviews || { enabled: false }
   }
 }
@@ -1047,6 +1083,7 @@ async function getRendersMarkdown() {
 function filterToolsByPerms(tools, perms) {
   return tools.filter((t) => {
     if (MESSAGING_TOOLS.has(t.name)) return perms.messaging.enabled
+    if (t.name === 'edit_copy') return perms.copyEditing.enabled
     if (t.name === 'set_tab_name') return perms.tabNaming.enabled !== false
     if (t.name === 'request_review') return perms.reviews.enabled === true
     const isView = VIEW_BROWSER_TOOLS.has(t.name)
@@ -1080,7 +1117,48 @@ function stripForkAffordance(tools) {
   })
 }
 
-async function handleToolCall(name, args) {
+function formatCopyDraftResult(original, r) {
+  const note = r.note ? '\n\nNote from the user: ' + r.note : ''
+  if (r.kind === 'dismissed') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'The user dismissed the draft without approving it. Do not use it.' + note
+        }
+      ],
+      isError: true
+    }
+  }
+  const text = typeof r.text === 'string' ? r.text : ''
+  if (text === original) {
+    return 'The user approved the draft unchanged. Use it verbatim.' + note
+  }
+  return (
+    'The user edited the draft. Use this text verbatim (between the markers, exclusive):\n<<<COPY\n' +
+    text +
+    '\nCOPY>>>' +
+    note
+  )
+}
+
+/** Keep the client's idle timer from firing while a call waits on a human.
+ *  Without a progressToken the client isn't listening for progress, so
+ *  there's nothing to send. */
+function startHeartbeat(progressToken) {
+  if (progressToken === undefined || progressToken === null) return () => {}
+  let progress = 0
+  const timer = setInterval(() => {
+    send({
+      jsonrpc: '2.0',
+      method: 'notifications/progress',
+      params: { progressToken, progress: ++progress, message: 'waiting for the user to edit the draft' }
+    })
+  }, COPY_DRAFT_HEARTBEAT_MS)
+  return () => clearInterval(timer)
+}
+
+async function handleToolCall(name, args, signal, progressToken) {
   if (name === 'create_worktree') {
     const prNumber = args && args.prNumber
     if (!args || (!args.branchName && !prNumber)) {
@@ -1605,6 +1683,24 @@ async function handleToolCall(name, args) {
       (r.viewport.deviceScaleFactor !== 1 ? ' @' + r.viewport.deviceScaleFactor + 'x' : '')
     )
   }
+  if (name === 'edit_copy') {
+    if (!args || typeof args.draft !== 'string' || !args.draft.trim()) {
+      throw new Error('draft is required')
+    }
+    const stopHeartbeat = startHeartbeat(progressToken)
+    try {
+      const r = await callControl(
+        'POST',
+        '/copy-drafts',
+        { draft: args.draft, title: args.title, context: args.context },
+        COPY_DRAFT_TIMEOUT_MS,
+        signal
+      )
+      return formatCopyDraftResult(args.draft, r)
+    } finally {
+      stopHeartbeat()
+    }
+  }
   if (name === 'list_shells') {
     const r = await callControl('GET', '/shells')
     return JSON.stringify((r && r.shells) || [], null, 2)
@@ -1641,6 +1737,11 @@ async function handleToolCall(name, args) {
   throw new Error('unknown tool: ' + name)
 }
 
+// In-flight tool calls by JSON-RPC id, so a `notifications/cancelled` from
+// the client (turn interrupted) can hang up on Ness — which is what tells the
+// control server to withdraw a pending edit_copy card.
+const inflight = new Map()
+
 async function handle(msg) {
   const { id, method, params } = msg
   try {
@@ -1659,6 +1760,11 @@ async function handle(msg) {
     if (method === 'notifications/initialized' || method === 'initialized') {
       return null
     }
+    if (method === 'notifications/cancelled') {
+      const controller = params && inflight.get(params.requestId)
+      if (controller) controller.abort()
+      return null
+    }
     if (method === 'tools/list') {
       logErr('tools/list received')
       const perms = await getToolPerms()
@@ -1669,10 +1775,19 @@ async function handle(msg) {
     }
     if (method === 'tools/call') {
       logErr('tools/call received name=' + (params && params.name))
-      const result = await handleToolCall(
-        params && params.name,
-        (params && params.arguments) || {}
-      )
+      const controller = new AbortController()
+      inflight.set(id, controller)
+      let result
+      try {
+        result = await handleToolCall(
+          params && params.name,
+          (params && params.arguments) || {},
+          controller.signal,
+          params && params._meta ? params._meta.progressToken : undefined
+        )
+      } finally {
+        inflight.delete(id)
+      }
       const content =
         result && typeof result === 'object' && Array.isArray(result.content)
           ? result.content
@@ -1680,7 +1795,7 @@ async function handle(msg) {
       return {
         jsonrpc: '2.0',
         id,
-        result: { content }
+        result: { content, ...(result && result.isError ? { isError: true } : {}) }
       }
     }
     return {
@@ -1691,6 +1806,8 @@ async function handle(msg) {
   } catch (err) {
     const message = (err && err.message) || String(err)
     logErr('error', method, message)
+    // The client cancelled this call; MCP says not to answer it.
+    if (method === 'tools/call' && err && err.name === 'AbortError') return null
     if (method === 'tools/call') {
       return {
         jsonrpc: '2.0',

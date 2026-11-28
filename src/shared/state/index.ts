@@ -133,6 +133,12 @@ import {
   type PermissionsEvent,
   type PermissionsState
 } from './permissions'
+import {
+  initialCopyDrafts,
+  copyDraftsReducer,
+  type CopyDraftsEvent,
+  type CopyDraftsState
+} from './copy-drafts'
 import { initialConfigHealth, type ConfigHealthState } from './config-health'
 import {
   initialAliases,
@@ -288,6 +294,11 @@ export type {
   PermissionRule,
   StoredPermissionRule
 } from './permissions'
+export type {
+  CopyDraftsState,
+  CopyDraftsEvent,
+  CopyDraftRequest
+} from './copy-drafts'
 
 export interface AppState {
   settings: SettingsState
@@ -313,6 +324,7 @@ export interface AppState {
   configHealth: ConfigHealthState
   aliases: AliasesState
   permissions: PermissionsState
+  copyDrafts: CopyDraftsState
   reviews: ReviewsState
   subscriptions: SubscriptionsState
   origins: OriginsState
@@ -342,6 +354,7 @@ export type StateEvent =
   | AssignedPRsEvent
   | AliasesEvent
   | PermissionsEvent
+  | CopyDraftsEvent
   | ReviewsEvent
   | SubscriptionsEvent
   | OriginsEvent
@@ -371,6 +384,7 @@ export const initialState: AppState = {
   configHealth: initialConfigHealth,
   aliases: initialAliases,
   permissions: initialPermissions,
+  copyDrafts: initialCopyDrafts,
   reviews: initialReviews,
   subscriptions: initialSubscriptions,
   origins: initialOrigins,
@@ -495,6 +509,12 @@ export function rootReducer(state: AppState, event: StateEvent): AppState {
       permissions: permissionsReducer(state.permissions, event as PermissionsEvent)
     }
   }
+  if (event.type.startsWith('copyDrafts/')) {
+    return {
+      ...state,
+      copyDrafts: copyDraftsReducer(state.copyDrafts, event as CopyDraftsEvent)
+    }
+  }
   if (event.type.startsWith('reviews/')) {
     return {
       ...state,
@@ -576,6 +596,7 @@ export function mergeWireSnapshot(state: WireSnapshotState): AppState {
     configHealth: { ...initialState.configHealth, ...state.configHealth },
     aliases: { ...initialState.aliases, ...state.aliases },
     permissions: { ...initialState.permissions, ...state.permissions },
+    copyDrafts: { ...initialState.copyDrafts, ...state.copyDrafts },
     reviews: { ...initialState.reviews, ...state.reviews },
     subscriptions: { ...initialState.subscriptions, ...state.subscriptions },
     origins: { ...initialState.origins, ...state.origins },

@@ -54,6 +54,10 @@ export function formatPendingTool(tool: PendingTool): string {
       const [first] = parseQuestions(input)
       return first ? truncate(first.question) : 'Question'
     }
+    case 'edit_copy': {
+      const title = str(input, 'title')
+      return title ? `Edit copy: ${truncate(title)}` : 'Edit copy'
+    }
     default:
       return prettyToolName(tool.name)
   }

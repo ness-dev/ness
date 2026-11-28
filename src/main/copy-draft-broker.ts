@@ -1,0 +1,140 @@
+// Holds the agent side of the `edit_copy` MCP tool. The control server's
+// HTTP handler parks on `request()` until a human submits or dismisses the
+// draft from whichever client is showing it; the slice entry is what every
+// client renders, and the waiter map is what turns the human's click back
+// into the HTTP response the agent is blocked on.
+//
+// Status dots: Chat tabs get needs-approval from JsonClaudeStatusDeriver,
+// which reads the copyDrafts slice. Terminal tabs have no deriver — their
+// status comes from Claude Code hooks, which only know a tool is running —
+// so the broker sets needs-approval itself and hands back to processing once
+// the human answers (the tool is still finishing; PostToolUse follows). A
+// withdrawal goes to waiting instead: it's usually an Esc in the TUI, which
+// ends the turn without another hook event to correct the dot.
+//
+// Withdrawn drafts only outlive their tab long enough to be noticed: a tab
+// closing is itself a withdrawal (the bridge dies with it), and nothing would
+// ever render that notice, so it's dropped on the spot or once panes change.
+// A draft nobody edited is dropped too — usually the user pressed Stop on
+// purpose. Clients report their first edit via markEdited, since only main
+// sees every client and can tell "untouched here" from "untouched anywhere".
+
+import { randomUUID } from 'crypto'
+import type { Store } from './store'
+import type { CopyDraftRequest } from '../shared/state/copy-drafts'
+import { log } from './debug'
+
+export type CopyDraftOutcome =
+  | { kind: 'submitted'; text: string; note?: string }
+  | { kind: 'dismissed'; note?: string }
+  | { kind: 'cancelled' }
+
+export type CopyDraftInput = Omit<CopyDraftRequest, 'id' | 'timestamp'>
+
+export class CopyDraftBroker {
+  private waiters = new Map<string, (outcome: CopyDraftOutcome) => void>()
+  private edited = new Set<string>()
+
+  private unsubscribe: (() => void) | null = null
+
+  constructor(
+    private store: Store,
+    private isChatSession: (terminalId: string) => boolean,
+    private tabExists: (terminalId: string) => boolean
+  ) {}
+
+  start(): void {
+    if (this.unsubscribe) return
+    this.unsubscribe = this.store.subscribe((event) => {
+      if (!event.type.startsWith('terminals/panes')) return
+      // Sweeping is fine here: withdrawn holds a handful of entries at most,
+      // and pane events are user-paced, not streaming.
+      for (const req of Object.values(this.store.getSnapshot().state.copyDrafts.withdrawn)) {
+        if (!this.tabExists(req.terminalId)) this.clearWithdrawn(req.id)
+      }
+    })
+  }
+
+  stop(): void {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+  }
+
+  request(input: CopyDraftInput): { id: string; result: Promise<CopyDraftOutcome> } {
+    const id = randomUUID()
+    const req: CopyDraftRequest = { ...input, id, timestamp: Date.now() }
+    const result = new Promise<CopyDraftOutcome>((resolve) => {
+      this.waiters.set(id, resolve)
+    })
+    this.store.dispatch({ type: 'copyDrafts/requested', payload: req })
+    if (!this.isChatSession(req.terminalId)) {
+      this.store.dispatch({
+        type: 'terminals/statusChanged',
+        payload: {
+          id: req.terminalId,
+          status: 'needs-approval',
+          pendingTool: { name: 'edit_copy', input: { title: req.title, draft: req.draft } }
+        }
+      })
+    }
+    log('copy-drafts', `requested id=${id} terminal=${req.terminalId}`)
+    return { id, result }
+  }
+
+  /** Returns false when the draft is already gone — answered from another
+   *  client, or the agent's call was abandoned. */
+  resolve(id: string, outcome: Exclude<CopyDraftOutcome, { kind: 'cancelled' }>): boolean {
+    return this.settle(id, outcome)
+  }
+
+  /** The agent stopped waiting (call timed out, turn interrupted, process
+   *  exited). The draft moves to `withdrawn` rather than vanishing, so a
+   *  half-finished edit can still be copied out. */
+  cancel(id: string): void {
+    this.settle(id, { kind: 'cancelled' })
+  }
+
+  markEdited(id: string): void {
+    if (this.waiters.has(id)) this.edited.add(id)
+  }
+
+  clearWithdrawn(id: string): boolean {
+    const req = this.store.getSnapshot().state.copyDrafts.withdrawn[id]
+    if (!req) return false
+    this.store.dispatch({
+      type: 'copyDrafts/withdrawnCleared',
+      payload: { id, terminalId: req.terminalId }
+    })
+    return true
+  }
+
+  private settle(id: string, outcome: CopyDraftOutcome): boolean {
+    const waiter = this.waiters.get(id)
+    const req = this.store.getSnapshot().state.copyDrafts.pending[id]
+    if (!waiter || !req) return false
+    this.waiters.delete(id)
+    const wasEdited = this.edited.delete(id)
+    const withdrawn =
+      outcome.kind === 'cancelled' && wasEdited && this.tabExists(req.terminalId)
+    this.store.dispatch({
+      type: withdrawn ? 'copyDrafts/withdrawn' : 'copyDrafts/resolved',
+      payload: { id, terminalId: req.terminalId }
+    })
+    if (!this.isChatSession(req.terminalId)) {
+      const current = this.store.getSnapshot().state.terminals.statuses[req.terminalId]
+      if (current === 'needs-approval') {
+        this.store.dispatch({
+          type: 'terminals/statusChanged',
+          payload: {
+            id: req.terminalId,
+            status: outcome.kind === 'cancelled' ? 'waiting' : 'processing',
+            pendingTool: null
+          }
+        })
+      }
+    }
+    log('copy-drafts', `settled id=${id} outcome=${outcome.kind}`)
+    waiter(outcome)
+    return true
+  }
+}

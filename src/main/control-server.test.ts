@@ -9,6 +9,7 @@ import type { ChatDeliveryResult, TabDeliveryResult } from './chat-delivery'
 import type { ChatTabInfo } from '../shared/agent-tabs'
 import type { ReviewComment } from '../shared/state/reviews'
 import type { CaptureResult } from './browser-manager-types'
+import type { CopyDraftInput, CopyDraftOutcome } from './copy-draft-broker'
 import { parseAutomatedMessage } from '../shared/state/json-claude'
 import { followedByCreatorNote } from './control-server'
 import { createNewProject } from './repo-create'
@@ -192,6 +193,15 @@ let domResult: () => Promise<string | null> = async () => null
 let browserMode: 'view' | 'full' = 'full'
 const evalTab = vi.fn<ControlServerDeps['browser']['evalTab']>(async () => null)
 
+/** Drafts the fake broker is holding, keyed by id, so a test can answer
+ * one the way the renderer would. */
+const heldDrafts = new Map<
+  string,
+  { input: CopyDraftInput; answer: (o: CopyDraftOutcome) => void }
+>()
+const cancelDraft = vi.fn<(id: string) => void>()
+let nextDraftId = 0
+let copyEditingEnabled = true
 /** Mutable so the add_repo / create_project tests can register roots; reset
  *  after each of those so the rest of the file still sees one repo. */
 let repoRoots = ['/repo']
@@ -279,6 +289,21 @@ const deps: ControlServerDeps = {
   getWorktreeDetail: async (path) => ({ worktreePath: path, branch: 'b' }),
   reviews,
   listChatTabs: (path) => tabsByWorktree[path] ?? [],
+  copyDrafts: {
+    isEnabled: () => copyEditingEnabled,
+    request: (input) => {
+      const id = `draft-${++nextDraftId}`
+      const result = new Promise<CopyDraftOutcome>((answer) => {
+        heldDrafts.set(id, { input, answer })
+      })
+      return { id, result }
+    },
+    cancel: (id) => {
+      cancelDraft(id)
+      heldDrafts.get(id)?.answer({ kind: 'cancelled' })
+      heldDrafts.delete(id)
+    }
+  },
   renameBranch: (worktreePath, newBranch) => renameBranch(worktreePath, newBranch)
 }
 
@@ -1265,6 +1290,93 @@ describe('control-server subscription endpoints', () => {
   it('reports worktree status for a named worktree or the caller', async () => {
     expect((await get('/worktree-status?worktree=Other%20Tree')).json.worktreePath).toBe(EXPLICIT_WORKTREE)
     expect((await get('/worktree-status')).json.worktreePath).toBe(CALLER_WORKTREE)
+  })
+})
+
+describe('control-server /copy-drafts endpoint', () => {
+  async function waitForDraft(): Promise<string> {
+    for (let i = 0; i < 100 && heldDrafts.size === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const [id] = heldDrafts.keys()
+    if (!id) throw new Error('draft never reached the broker')
+    return id
+  }
+
+  it('holds the response until the human submits, then returns their text', async () => {
+    heldDrafts.clear()
+    const pending = call('POST', '/copy-drafts', {
+      draft: 'Get started now!',
+      title: 'Empty state',
+      context: '  '
+    })
+    const id = await waitForDraft()
+    expect(heldDrafts.get(id)?.input).toEqual({
+      terminalId: CALLER_TERMINAL,
+      worktreePath: CALLER_WORKTREE,
+      draft: 'Get started now!',
+      title: 'Empty state',
+      context: undefined
+    })
+    heldDrafts.get(id)?.answer({ kind: 'submitted', text: 'Start here', note: 'calmer' })
+    heldDrafts.delete(id)
+    const r = await pending
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ kind: 'submitted', text: 'Start here', note: 'calmer' })
+  })
+
+  it('returns 409 when the draft is withdrawn', async () => {
+    heldDrafts.clear()
+    const pending = call('POST', '/copy-drafts', { draft: 'x' })
+    const id = await waitForDraft()
+    heldDrafts.get(id)?.answer({ kind: 'cancelled' })
+    heldDrafts.delete(id)
+    const r = await pending
+    expect(r.status).toBe(409)
+  })
+
+  it('withdraws the draft when the caller hangs up', async () => {
+    heldDrafts.clear()
+    cancelDraft.mockClear()
+    const controller = new AbortController()
+    const pending = fetch(`${baseUrl}/copy-drafts`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Harness-Terminal-Id': CALLER_TERMINAL
+      },
+      body: JSON.stringify({ draft: 'x' }),
+      signal: controller.signal
+    }).catch(() => null)
+    const id = await waitForDraft()
+    controller.abort()
+    await pending
+    for (let i = 0; i < 100 && cancelDraft.mock.calls.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    expect(cancelDraft).toHaveBeenCalledWith(id)
+  })
+
+  it('refuses when copy editing is disabled', async () => {
+    copyEditingEnabled = false
+    try {
+      const r = await call('POST', '/copy-drafts', { draft: 'x' })
+      expect(r.status).toBe(403)
+      expect(heldDrafts.size).toBe(0)
+    } finally {
+      copyEditingEnabled = true
+    }
+  })
+
+  it('rejects an empty draft', async () => {
+    const r = await call('POST', '/copy-drafts', { draft: '   ' })
+    expect(r.status).toBe(400)
+  })
+
+  it('rejects a caller with no worktree', async () => {
+    const r = await call('POST', '/copy-drafts', { draft: 'x' }, { terminalId: 'unknown' })
+    expect(r.status).toBe(404)
   })
 })
 

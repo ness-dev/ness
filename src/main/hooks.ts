@@ -13,6 +13,7 @@ import type { Store } from './store'
 import { log } from './debug'
 import { getAgent } from './agents'
 import { findTabById } from '../shared/state/terminals'
+import { firstDraftForTerminal } from '../shared/state/copy-drafts'
 
 // This path is also the signature we use to recognize Ness-installed
 // hook entries when deduping at install time. If you change it, update
@@ -261,7 +262,12 @@ export function tailLog(terminalId: string, store: Store): void {
       }
       emitStopIfRelevant(terminalId, ev)
       const update = deriveStatus(terminalId, ev)
-      if (update) {
+      // edit_copy's PreToolUse can land after the broker already flagged the
+      // tab as waiting on the human; don't let it paper over that.
+      const awaitingCopyEdit =
+        update?.status === 'processing' &&
+        firstDraftForTerminal(store.getSnapshot().state.copyDrafts, terminalId) !== null
+      if (update && !awaitingCopyEdit) {
         store.dispatch({
           type: 'terminals/statusChanged',
           payload: {
