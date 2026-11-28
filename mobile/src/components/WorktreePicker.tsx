@@ -17,10 +17,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleCheck,
-  FileDiff,
-  FileText,
   Ghost,
-  Globe,
   GitPullRequest,
   Layers,
   ListChecks,
@@ -34,13 +31,12 @@ import {
   Rows3,
   Server,
   Settings,
-  SquareTerminal,
   Tag,
   TriangleAlert,
   X
 } from 'lucide-react-native'
 import type { MergedWorktreeData } from '../../../src/renderer/merge-backend-states'
-import type { WorktreeListGroupModel, WorktreeRepoSectionModel, WorktreeRowModel } from '../../../src/renderer/worktree-list-model'
+import type { WorktreeListGroupModel, WorktreeListModel, WorktreeRepoSectionModel, WorktreeRowModel } from '../../../src/renderer/worktree-list-model'
 import { repoLabelFor } from '../../../src/renderer/worktree-list-model'
 import { detachedLikeTooltip, prIconStyle, type DisplayStatus } from '../../../src/renderer/worktree-row-style'
 import { formatPendingTool } from '../../../src/renderer/pending-tool'
@@ -58,10 +54,10 @@ import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
 import { projectRowA11y, projectTap } from '../picker-selection'
-import { nestedTabA11yLabel, nestedTabStatus, visibleTabEntries } from '../picker-tabs'
+import { nestedTabA11yLabel, nestedTabStatus, showsNestedTabs, visibleTabEntries } from '../picker-tabs'
 import { usePickerTabs } from '../prefs'
 import { useNess, type NessClient } from '../ness'
-import { AgentIcon } from './AgentIcon'
+import { TabKindIcon } from './TabKindIcon'
 import { worktreeTabEntries } from '../../../src/renderer/worktree-tab-entries'
 import type { TerminalTab } from '../../../src/shared/state/terminals'
 import { Connecting } from './Connecting'
@@ -122,6 +118,8 @@ interface Ctx {
   onProjectPress: (section: WorktreeRepoSectionModel, homePath: string) => void
   /** Experimental Settings toggle: list each visible worktree's tabs under it. */
   showTabs: boolean
+  /** The picker's list model, for showsNestedTabs. */
+  model: WorktreeListModel
   activeTabId: string | null
   onSelectTab: (path: string, tabId: string) => void
 }
@@ -180,6 +178,7 @@ export function WorktreePicker({
       else setFocusPath(tap.path)
     },
     showTabs,
+    model,
     activeTabId,
     onSelectTab
   }
@@ -800,11 +799,11 @@ function PhantomRow({ pr, showRepo }: { pr: AssignedPR; showRepo: boolean }) {
 
 /** Unpacks ctx into the stable props NestedTabs memoises on, so a picker
  *  re-render (any state frame, streamed tokens included) doesn't reach the
- *  tab rows. Only rows the picker draws get here, i.e. worktrees of an
- *  expanded project — collapsing a project hides its tabs with it. */
+ *  tab rows. Which rows get tabs: showsNestedTabs (desktop 'selected'). */
 function RowTabs({ row, ctx }: { row: WorktreeRowModel; ctx: Ctx }) {
+  if (!ctx.showTabs || !showsNestedTabs(ctx.model, row, ctx.activeWorktreeId)) return null
   const client = clientFor(ctx, row.path)
-  if (!ctx.showTabs || row.deleting || !client) return null
+  if (!client) return null
   return (
     <NestedTabs
       client={client}
@@ -894,24 +893,6 @@ const NestedTabRow = memo(function NestedTabRow({
     </Pressable>
   )
 })
-
-function TabKindIcon({ tab }: { tab: TerminalTab }) {
-  switch (tab.type) {
-    case 'agent':
-    case 'json-claude':
-      return <AgentIcon kind={tab.agentKind ?? 'claude'} size={12} color={c.dim} />
-    case 'shell':
-      return <SquareTerminal color={c.dim} size={12} />
-    case 'diff':
-      return <FileDiff color={c.dim} size={12} />
-    case 'file':
-      return <FileText color={c.dim} size={12} />
-    case 'browser':
-      return <Globe color={c.dim} size={12} />
-    case 'review':
-      return <ListChecks color={c.dim} size={12} />
-  }
-}
 
 /** Desktop TabStatus: spinners for work in progress, dots for waiting /
  *  needs approval; plus a hollow dot for an exited chat and a moon for

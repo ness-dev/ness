@@ -4,6 +4,18 @@
 // it's unit-tested without React Native.
 import type { PtyStatus, TerminalTab } from '../../src/shared/state/terminals'
 import type { WorktreeTabEntry } from '../../src/renderer/worktree-tab-entries'
+import { homeShowsTabs, type WorktreeListModel, type WorktreeRowModel } from '../../src/renderer/worktree-list-model'
+
+/** Which rows list their tabs: the desktop's 'selected' mode
+ *  (WorktreeList.tsx showTabsFor). The active worktree, plus the main of
+ *  the project you're in and of every pinned-open project. The picker's
+ *  model is built around its focus, so after a tap on another project
+ *  "the project you're in" is that one, and its main's chats are one tap
+ *  away. Other worktrees stay single rows. */
+export function showsNestedTabs(model: WorktreeListModel, row: WorktreeRowModel, activeWorktreeId: string | null): boolean {
+  if (row.deleting) return false
+  return row.path === activeWorktreeId || homeShowsTabs(model, row)
+}
 
 /** Tabs shown per worktree before a "N more" row. A phone screen holds
  *  ~12 rows; past this the list stops being a list of worktrees. */
