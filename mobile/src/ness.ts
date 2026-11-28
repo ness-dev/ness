@@ -4,7 +4,11 @@
 // multi-backend registry is the same idea — one (transport, store) pair
 // per backend, no cross-backend event routing.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { WebSocketClientTransport } from '../../src/shared/transport/transport-websocket'
+import {
+  WebSocketClientTransport,
+  type ProbeResult,
+  type WebSocketClientTransportOptions
+} from '../../src/shared/transport/transport-websocket'
 import {
   initialState,
   mergeWireSnapshot,
@@ -15,7 +19,7 @@ import type { PaneNode, PtyStatus, TerminalTab } from '../../src/shared/state/te
 import { ROLLUP_STATUS_RANK } from '../../src/shared/status-rollup'
 import { buildBackend } from '../../src/renderer/build-backend'
 import type { ElectronAPI } from '../../src/renderer/types'
-import type { LocalTransportHandle } from '../../src/shared/transport/transport'
+import type { ClientTransport, LocalTransportHandle } from '../../src/shared/transport/transport'
 
 type Listener = () => void
 
@@ -29,11 +33,23 @@ export interface ConnState {
   error?: string
 }
 
+/** What NessClient needs from a connection: the shared ClientTransport
+ *  contract plus WebSocketClientTransport's lifecycle. The demo's in-memory
+ *  backend (demo/DemoTransport.ts) is the other implementation. */
+export interface NessTransport extends ClientTransport {
+  connect(): Promise<void>
+  reconnectNow(opts?: { keepOpen?: boolean }): void
+  probe(timeoutMs: number, opts?: { ifIdleMs?: number }): Promise<ProbeResult>
+  close(): void
+}
+
+export type TransportCallbacks = Pick<WebSocketClientTransportOptions, 'onSnapshot' | 'onConnectionChange'>
+
 export class NessClient {
   private state: AppState = initialState
   private conn: ConnState = { connected: false, hasSnapshot: false }
   private listeners = new Set<Listener>()
-  readonly transport: WebSocketClientTransport
+  readonly transport: NessTransport
   /** The desktop renderer's own typed backend API (build-backend.ts), bound
    *  to this connection. Every request and signal goes through it — never a
    *  hand-written channel string — so a server-side rename or signature
@@ -45,11 +61,13 @@ export class NessClient {
     readonly id: string,
     readonly label: string,
     readonly wsUrl: string,
-    readonly token: string
+    readonly token: string,
+    /** Builds the transport; defaults to a WebSocket to `wsUrl`. */
+    makeTransport?: (callbacks: TransportCallbacks) => NessTransport,
+    /** The demo workspace (demo/), not a real backend. */
+    readonly demo = false
   ) {
-    this.transport = new WebSocketClientTransport({
-      url: wsUrl,
-      token,
+    const callbacks: TransportCallbacks = {
       onSnapshot: (snap) => {
         this.state = mergeWireSnapshot(snap.state)
         this.conn = { ...this.conn, hasSnapshot: true }
@@ -59,7 +77,8 @@ export class NessClient {
         this.conn = { ...this.conn, connected, error: connected ? undefined : reason }
         this.emit()
       }
-    })
+    }
+    this.transport = makeTransport ? makeTransport(callbacks) : new WebSocketClientTransport({ url: wsUrl, token, ...callbacks })
     const t = this.transport
     // Rejections are logged, not thrown: a fire-and-forget UI tap on a
     // dropped connection shouldn't become an unhandled promise.
