@@ -505,13 +505,14 @@ Each item is meant for its own worktree.
   but only reach EAS-built apps. Needs `ios.bundleIdentifier` /
   `android.package` (permanent once on a store) and Apple / Google
   credentials.
-- **Inline text selection** (needs the development build). Swap chat
-  `<Text>` for Bluesky's `react-native-uitextview`, which gives real
-  iOS range selection in place, keeps nested styling and tappable links.
-  Today a long-press opens the message in a Select Text sheet
-  (`src/chat/CopyText.tsx`), because RN's iOS `selectable` copies only a
-  whole Text block. Selection still won't cross paragraph or code-block
-  boundaries.
+- **Fix uitextview's clipped-growth bug natively** (rides along with the
+  next native build). When a selectable text block grows a line, the
+  library's `drawRect` assigns `attributedText` before the new frame, and
+  the text container can keep the old height, so the last line is never
+  drawn. Markdown works around it by remounting a text view whose length
+  changed (`grownKey`). A `patches/` fix (assign the frame first, or reset
+  `textContainer.size` after it) would let that go, and would keep a
+  selection alive inside a block that's still streaming.
 - **File and diff viewer** from Changed Files, All Files and commits.
   Wanted before launch.
 - **Paged history loading.** A server change so long transcripts arrive

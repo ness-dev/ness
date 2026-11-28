@@ -5,7 +5,6 @@
 // Desktop-only, omitted: "Open diff in tab" on a commit's files
 // (onOpenCommitFileDiff), and drag-a-commit-into-the-composer.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as ExpoClipboard from 'expo-clipboard'
 import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { ArrowUp, Check, ChevronDown, ChevronUp, Copy, GitCommitHorizontal, RefreshCw, X } from 'lucide-react-native'
 import type { BranchCommit, ChangedFile, CommitMeta } from '../../../src/renderer/types'
@@ -16,13 +15,7 @@ import { PanelAction, RightPanel } from './RightPanel'
 import { useWatchedQuery } from './useWatchedQuery'
 import { STATUS_COLOR, STATUS_LABEL } from './ChangedFilesPanel'
 import type { PanelProps } from './types'
-
-/** navigator.clipboard.writeText stand-in (expo-clipboard; ships in Expo
- *  Go). Fire-and-forget like the desktop's copy. */
-function copyText(text: string): boolean {
-  ExpoClipboard.setStringAsync(text).catch(() => Alert.alert('Copy failed', text))
-  return true
-}
+import { copyText } from '../clipboard'
 
 export function CommitsPanel({ client, worktreePath }: PanelProps) {
   const fetcher = useCallback((path: string) => client.api.getBranchCommits(path), [client])
@@ -102,7 +95,7 @@ function CommitRow({ commit: cm, isFirst, isLast, onPress }: { commit: BranchCom
       // Long-press = the desktop's hover tooltip + right-click "Copy commit SHA".
       onLongPress={() =>
         Alert.alert(`${cm.shortHash} · ${cm.author} · ${cm.relativeDate} · ${tipSuffix}`, cm.subject, [
-          { text: 'Copy commit SHA', onPress: () => copyText(cm.hash) },
+          { text: 'Copy commit SHA', onPress: () => void copyText(cm.hash) },
           { text: 'Cancel', style: 'cancel' }
         ])
       }
@@ -182,10 +175,12 @@ function CommitInfoSheet({
   }, [])
 
   const copyPath = (path: string): void => {
-    if (!copyText(path)) return
-    setCopiedPath(path)
-    if (pathTimer.current !== null) clearTimeout(pathTimer.current)
-    pathTimer.current = setTimeout(() => setCopiedPath(null), 1200)
+    void copyText(path).then((ok) => {
+      if (!ok) return
+      setCopiedPath(path)
+      if (pathTimer.current !== null) clearTimeout(pathTimer.current)
+      pathTimer.current = setTimeout(() => setCopiedPath(null), 1200)
+    })
   }
 
   useEffect(() => {
@@ -214,9 +209,11 @@ function CommitInfoSheet({
   }, [client, worktreePath, sha])
 
   const copySha = (): void => {
-    if (!copyText(meta?.hash ?? sha)) return
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1200)
+    void copyText(meta?.hash ?? sha).then((ok) => {
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
   }
 
   const shortSha = meta?.shortHash ?? sha.slice(0, 10)

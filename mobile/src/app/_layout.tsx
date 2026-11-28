@@ -8,8 +8,8 @@
 //   /pair?url=      pairing link → adds the backend, then back (or home)
 //   /open?wt=&tab=  link alias, rewritten to /w/[wt]?tab= by +native-intent
 //
-// Per-client UI focus that isn't a route (the picker dropdown, Select
-// Text, the convert menu) stays component state on its screen.
+// Per-client UI focus that isn't a route (the picker dropdown, the
+// convert menu) stays component state on its screen.
 import { Fragment } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'

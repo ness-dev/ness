@@ -3,7 +3,7 @@
 // results map → tail window → renderEntries → foldFinishedTurns →
 // groupConsecutiveToolRows) and the composer rules follow that file, and
 // the pure steps are imported from it rather than re-implemented.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppState as RNAppState, FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import { ChevronDown, Loader2, Sparkles, X } from 'lucide-react-native'
 import type { JsonClaudeChatEntry, JsonClaudePendingApproval, JsonClaudeSession } from '../../../src/shared/state/json-claude'
@@ -15,6 +15,7 @@ import type { NessClient } from '../ness'
 import { useNess } from '../ness'
 import { alpha, c } from '../theme'
 import { Markdown } from './Markdown'
+import { CopyMessageButton } from '../chat/CopyMessageButton'
 import { Spin } from './Spin'
 import {
   AuthCard,
@@ -36,7 +37,6 @@ import {
 import { ApprovalSlot } from '../chat/ApprovalCard'
 import { ChatClientContext } from '../chat/ChatImage'
 import { Composer } from '../chat/Composer'
-import { CopyableMessage, CopyMenuHost } from '../chat/CopyText'
 import { haptic } from '../haptics'
 import { DENSITY, DensityContext, ExpandStoreContext } from '../chat/density'
 
@@ -231,10 +231,14 @@ function GroupedNode({ item }: { item: GroupedItem }) {
 function AssistantText({ text, streaming }: { text: string; streaming: boolean }) {
   const d = DENSITY.compact
   return (
-    <CopyableMessage text={streaming ? '' : text}>
+    <View>
       <Markdown text={text} size={d.body} />
-      {streaming && <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />}
-    </CopyableMessage>
+      {streaming ? (
+        <View style={{ width: 7, height: 14, backgroundColor: c.muted, marginTop: 2, opacity: 0.7 }} />
+      ) : (
+        <CopyMessageButton text={text} />
+      )}
+    </View>
   )
 }
 
@@ -252,7 +256,12 @@ export function ChatView({
   mode: 'awake' | 'asleep'
 }) {
   const session = useNess(client, (s) => s.jsonClaude.sessions[sessionId])
-  const allApprovals = useNess(client, (s) => s.jsonClaude.pendingApprovals)
+  // Deferred with `entries` (below) so the transcript memo always pairs
+  // an approval with the entries it arrived with: React commits a
+  // component's deferred values in the same background render. Read live,
+  // an approval could land a render before its tool_use entry and flash as
+  // an orphan at the bottom before jumping inline.
+  const allApprovals = useDeferredValue(useNess(client, (s) => s.jsonClaude.pendingApprovals))
   const settings = useNess(client, (s) => s.settings)
   const density = DENSITY[settings.jsonModeChatDensity === 'comfy' ? 'comfy' : 'compact']
 
@@ -332,7 +341,12 @@ export function ChatView({
     })()
   }, [client, sessionId, worktreePath])
 
-  const entries = session?.entries
+  // Deferred, as on the desktop (JsonModeChat): the transcript re-renders
+  // for each streamed token at transition priority, so a tap or keystroke
+  // can interrupt one instead of queueing behind it. It doesn't make a
+  // token's render cheaper (Markdown's block memo does that), and measured
+  // on a dev build it doesn't hold text back: every update still commits.
+  const entries = useDeferredValue(session?.entries)
   const { rows, hidden, renderedToolUseIds } = useMemo(() => {
     if (!session || !entries) return { rows: [] as RenderedRow[], hidden: 0, renderedToolUseIds: new Set<string>() }
     const { topLevelEntries, childrenByParentToolUseId } = buildChildrenMap(entries)
@@ -425,7 +439,6 @@ export function ChatView({
 
   return (
     <ExpandStoreContext.Provider value={expandStore}>
-      <CopyMenuHost>
     <ChatClientContext.Provider value={client}>
     <DensityContext.Provider value={density}>
       <View style={{ flex: 1 }}>
@@ -522,7 +535,6 @@ export function ChatView({
       />
     </DensityContext.Provider>
     </ChatClientContext.Provider>
-      </CopyMenuHost>
     </ExpandStoreContext.Provider>
   )
 }
