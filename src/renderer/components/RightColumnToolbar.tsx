@@ -8,7 +8,6 @@ import type {
 } from '../../shared/state/repo-configs'
 
 const LABELS: Record<BuiltinRightPanelKey, string> = {
-  merge: 'Merge Locally',
   pr: 'PR Status',
   todos: 'Todos',
   agents: 'Agents',
@@ -89,7 +88,7 @@ export function RightColumnToolbar({
   }
 
   return (
-    <div className="px-3 py-3 flex items-center gap-2 shrink-0">
+    <div className="px-3 py-3 pointer-coarse:py-0 flex items-center gap-2 shrink-0">
       <span className="text-xs font-medium text-dim">TOOLS</span>
       <div className="ml-auto flex items-center gap-1">
         <div className="no-drag relative" ref={menuRef}>
@@ -97,7 +96,7 @@ export function RightColumnToolbar({
             <button
               onClick={() => canConfigure && setMenuOpen((v) => !v)}
               disabled={!canConfigure}
-              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-dim"
+              className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 pointer-coarse:p-4 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-dim"
               aria-label="Panel visibility"
             >
               <SlidersHorizontal className="icon-xs" />
@@ -118,11 +117,11 @@ export function RightColumnToolbar({
               return (
                 <div
                   key={key}
-                  className="flex items-center gap-1 px-2 py-1 hover:bg-panel/60"
+                  className="flex items-center gap-1 px-2 py-1 pointer-coarse:min-h-11 hover:bg-panel/60"
                 >
                   <button
                     onClick={() => togglePanel(key)}
-                    className="flex-1 flex items-center gap-2 px-1 py-0.5 text-xs text-fg-bright cursor-pointer text-left rounded"
+                    className="flex-1 flex items-center gap-2 px-1 py-0.5 pointer-coarse:min-h-11 text-xs text-fg-bright cursor-pointer text-left rounded"
                     role="menuitemcheckbox"
                     aria-checked={visible}
                   >
@@ -134,7 +133,7 @@ export function RightColumnToolbar({
                   <button
                     onClick={() => movePanel(index, -1)}
                     disabled={isFirst}
-                    className="flex items-center justify-center w-5 h-5 rounded text-muted hover:bg-panel/80 hover:text-fg-bright disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    className="flex items-center justify-center w-5 h-5 pointer-coarse:w-11 pointer-coarse:h-11 rounded text-muted hover:bg-panel/80 hover:text-fg-bright disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     aria-label={`Move ${labelFor(key)} up`}
                   >
                     <ChevronUp className="icon-xs" />
@@ -142,7 +141,7 @@ export function RightColumnToolbar({
                   <button
                     onClick={() => movePanel(index, 1)}
                     disabled={isLast}
-                    className="flex items-center justify-center w-5 h-5 rounded text-muted hover:bg-panel/80 hover:text-fg-bright disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    className="flex items-center justify-center w-5 h-5 pointer-coarse:w-11 pointer-coarse:h-11 rounded text-muted hover:bg-panel/80 hover:text-fg-bright disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     aria-label={`Move ${labelFor(key)} down`}
                   >
                     <ChevronDown className="icon-xs" />
@@ -156,7 +155,7 @@ export function RightColumnToolbar({
                 setMenuOpen(false)
                 onBuildCustomTool()
               }}
-              className="w-full flex items-start gap-2 px-3 py-1.5 hover:bg-panel/60 cursor-pointer text-left"
+              className="w-full flex items-start gap-2 px-3 py-1.5 pointer-coarse:py-3 hover:bg-panel/60 cursor-pointer text-left"
               role="menuitem"
             >
               <Wrench className="icon-xs text-dim shrink-0 mt-0.5" />
@@ -171,7 +170,7 @@ export function RightColumnToolbar({
         <Tooltip label="Collapse right sidebar" action="toggleRightColumn">
           <button
             onClick={onCollapse}
-            className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 transition-colors cursor-pointer"
+            className="text-dim hover:text-fg hover:bg-surface rounded p-0.5 pointer-coarse:p-4 transition-colors cursor-pointer"
             aria-label="Collapse right sidebar"
           >
             <PanelRightClose className="icon-xs" />

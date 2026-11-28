@@ -20,7 +20,8 @@ const LIST_VIEW_LIMIT = 1000
 
 interface AllFilesPanelProps {
   worktreePath: string | null
-  onOpenFile: (filePath: string) => void
+  /** Absent on the phone web client (no file tabs there). */
+  onOpenFile?: (filePath: string) => void
   onSendToAgent?: (text: string) => void
 }
 
@@ -72,7 +73,7 @@ export function AllFilesPanel({
     onOpenFileRef.current = onOpenFile
     onSendToAgentRef.current = onSendToAgent
   })
-  const openFile = useCallback((path: string) => onOpenFileRef.current(path), [])
+  const openFile = useCallback((path: string) => onOpenFileRef.current?.(path), [])
   const sendToAgent = useCallback((text: string) => onSendToAgentRef.current?.(text), [])
   const rowSendToAgent = onSendToAgent ? sendToAgent : undefined
   const [view, toggleView] = useFileListView('all-files', 'tree')

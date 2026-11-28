@@ -51,10 +51,12 @@ function RedundantBadge({ rule }: { rule: StoredPermissionRule }): JSX.Element |
       title={
         why === 'built-in'
           ? 'Ness allows this tool without asking now, so this grant does nothing'
-          : "Granted under Ness's old MCP server name, which nothing uses any more, so this grant does nothing"
+          : why === 'input-checked'
+            ? 'Ness checks what this tool is asked to do and asks when it needs to, whatever is saved here, so this grant does nothing'
+            : "Granted under Ness's old MCP server name, which nothing uses any more, so this grant does nothing"
       }
     >
-      {why === 'built-in' ? 'built in' : 'old name'}
+      {why === 'built-in' ? 'built in' : why === 'input-checked' ? 'checked by Ness' : 'old name'}
     </span>
   )
 }
@@ -243,7 +245,7 @@ export function PermissionRulesList({
         <div className="flex items-center gap-3 mb-2 px-3 py-2 rounded border border-border bg-panel">
           <div className="text-xs text-dim flex-1">
             {redundant.length === 1 ? '1 grant is' : `${redundant.length} grants are`} for Ness tools
-            that are now allowed without asking, or use Ness&apos;s old server name, so{' '}
+            that Ness now decides about itself, or use Ness&apos;s old server name, so{' '}
             {redundant.length === 1 ? 'it does' : 'they do'} nothing.
           </div>
           <button
@@ -369,5 +371,49 @@ export function PermissionRulesList({
         className="mt-2"
       />
     </>
+  )
+}
+
+/** Setup commands the user allowed an agent's create_worktree to run, one
+ *  per repo. While a repo's .ness.json still has that command, new
+ *  worktrees there run it without asking; Forget makes the next one ask. */
+export function ApprovedSetupCommandsList({
+  commands,
+  onForget
+}: {
+  commands: Record<string, string>
+  onForget: (repoRoot: string) => void
+}): JSX.Element | null {
+  const entries = Object.entries(commands).sort(([a], [b]) => a.localeCompare(b))
+  if (entries.length === 0) return null
+  return (
+    <div className="mt-4">
+      <label className="block text-xs font-medium text-fg mb-1">Approved setup commands</label>
+      <div className="text-xs text-dim mb-2">
+        Each repo&apos;s <code className="bg-panel px-1 rounded">.ness.json</code> setup command
+        you allowed when an agent created a worktree. If the command changes, Ness asks again.
+      </div>
+      <div className="border border-border rounded divide-y divide-border bg-panel">
+        {entries.map(([repoRoot, command]) => (
+          <div key={repoRoot} className="flex items-center gap-2 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-fg-bright truncate" title={repoRoot}>
+                {repoRoot.split('/').pop() || repoRoot}
+              </div>
+              <code className="block text-xs text-dim font-mono truncate" title={command}>
+                {command}
+              </code>
+            </div>
+            <button
+              onClick={() => onForget(repoRoot)}
+              title={`Forget the approved setup command for ${repoRoot}`}
+              className="text-xs text-dim hover:text-danger shrink-0 cursor-pointer"
+            >
+              Forget
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }

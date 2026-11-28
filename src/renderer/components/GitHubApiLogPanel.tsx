@@ -257,13 +257,13 @@ function statusColorClass(entry: GitHubApiEntry): string {
   const k = classifyStatus(entry)
   if (k === 'ok') return 'text-success'
   if (k === 'client-error') return 'text-warning'
-  return 'text-error'
+  return 'text-danger'
 }
 
 function durationColorClass(ms: number): string {
   if (ms < 500) return 'text-fg'
   if (ms < 2000) return 'text-warning'
-  return 'text-error'
+  return 'text-danger'
 }
 
 function formatRelative(pastMs: number, now: number): string {
@@ -379,7 +379,7 @@ function DetailRow({
     <div className="flex gap-3">
       <span className="text-faint w-24 flex-shrink-0">{label}</span>
       <span
-        className={`flex-1 break-all font-mono ${tone === 'error' ? 'text-error' : 'text-fg'}`}
+        className={`flex-1 break-all font-mono ${tone === 'error' ? 'text-danger' : 'text-fg'}`}
       >
         {value}
       </span>
@@ -407,7 +407,7 @@ function RateLimitCard({
   const pct =
     rateLimit.limit > 0 ? Math.max(0, rateLimit.remaining / rateLimit.limit) : 0
   const remainingTone =
-    pct < 0.05 ? 'text-error' : pct < 0.2 ? 'text-warning' : 'text-success'
+    pct < 0.05 ? 'text-danger' : pct < 0.2 ? 'text-warning' : 'text-success'
   const used = Math.max(0, rateLimit.limit - rateLimit.remaining)
   return (
     <div className="min-w-[240px]">
@@ -464,7 +464,7 @@ function VolumeChart({
         <span className="text-muted normal-case tracking-normal">
           {totalCalls} calls
           {totalErrors > 0 && (
-            <span className="text-error"> · {totalErrors} errors</span>
+            <span className="text-danger"> · {totalErrors} errors</span>
           )}
           {maxCount > 0 && ` · peak ${maxCount}/min`}
         </span>
@@ -547,7 +547,7 @@ function FilterChip({
       : tone === 'warning'
         ? 'text-warning'
         : tone === 'error'
-          ? 'text-error'
+          ? 'text-danger'
           : 'text-fg'
   return (
     <button

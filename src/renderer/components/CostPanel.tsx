@@ -56,7 +56,7 @@ function Bar({
       <span className="text-faint tabular-nums w-10 text-right shrink-0">
         {pct >= 1 ? `${Math.round(pct)}%` : '<1%'}
       </span>
-      <span className="text-text tabular-nums w-12 text-right shrink-0">
+      <span className="text-fg tabular-nums w-12 text-right shrink-0">
         {formatCost(row.cost)}
       </span>
     </div>
@@ -168,7 +168,7 @@ export function CostPanel({ worktreePath }: CostPanelProps): JSX.Element | null 
           <>
             <div className="flex items-baseline justify-between gap-2">
               <span
-                className="text-base font-medium text-text tabular-nums"
+                className="text-base font-medium text-fg tabular-nums"
                 title={`${total.messages} assistant messages`}
               >
                 {formatCost(total.cost)}

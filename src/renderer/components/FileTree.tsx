@@ -18,7 +18,7 @@ export function FileListViewToggle({
           e.stopPropagation()
           onToggle()
         }}
-        className="text-faint hover:text-fg transition-colors cursor-pointer"
+        className="text-faint hover:text-fg transition-colors cursor-pointer pointer-coarse:p-4 pointer-coarse:-my-4 pointer-coarse:-mr-4"
         aria-label={label}
       >
         {view === 'list' ? <ListTree className="icon-xs" /> : <List className="icon-xs" />}

@@ -246,16 +246,6 @@ export function buildBackend(
       toHash: string,
       filePath: string
     ) => req('worktree:commitRangeFileDiffSides', worktreePath, fromHash, toHash, filePath),
-    getMainWorktreeStatus: (repoRoot: string) => req('worktree:mainStatus', repoRoot),
-    prepareMainForMerge: (repoRoot: string) => req('worktree:prepareMain', repoRoot),
-    previewMergeConflicts: (repoRoot: string, sourceBranch: string, worktreePath?: string) =>
-      req('worktree:previewMerge', repoRoot, sourceBranch, worktreePath),
-    mergeWorktreeLocally: (
-      repoRoot: string,
-      sourceBranch: string,
-      strategy: 'squash' | 'merge-commit' | 'fast-forward',
-      worktreePath?: string
-    ) => req('worktree:mergeLocal', repoRoot, sourceBranch, strategy, worktreePath),
 
     refreshPRsAll: () => req('prs:refreshAll'),
     refreshPRsAllIfStale: () => req('prs:refreshAllIfStale'),
@@ -375,6 +365,7 @@ export function buildBackend(
     revokePermission: (id: string) => req('permissions:revoke', id),
     revokePermissions: (ids: string[]) => req('permissions:revokeMany', ids),
     clearPermissions: () => req('permissions:clear'),
+    forgetSetupCommand: (repoRoot: string) => req('permissions:forgetSetupCommand', repoRoot),
     setNewWorktreeAdvancedOpen: (open: boolean) =>
       reqConfig('config:setNewWorktreeAdvancedOpen', open),
     setStarterTasksDismissed: (dismissed: boolean) =>

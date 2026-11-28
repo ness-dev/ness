@@ -262,9 +262,12 @@ export function buildInitialAppState(
     aliases: config.aliases
       ? { byPath: { ...config.aliases } }
       : initialAliases,
-    permissions: config.permissionRules
-      ? { rules: sanitizePermissionRules(config.permissionRules) }
-      : initialPermissions,
+    permissions: {
+      rules: config.permissionRules
+        ? sanitizePermissionRules(config.permissionRules)
+        : initialPermissions.rules,
+      approvedSetupCommands: sanitizeApprovedSetupCommands(config.approvedSetupCommands)
+    },
     reviews: config.reviews ? { byPath: sanitizeReviews(config.reviews) } : initialReviews,
     subscriptions: Array.isArray(config.worktreeSubscriptions)
       ? { list: config.worktreeSubscriptions.filter(isStoredSubscription) }
@@ -448,6 +451,17 @@ function sanitizeBottomIconOrder(input: unknown): BottomIconKey[] {
     if (typeof k === 'string' && (BOTTOM_ICON_KEYS as readonly string[]).includes(k)) {
       out.push(k as BottomIconKey)
     }
+  }
+  return out
+}
+
+/** Drops anything that isn't a non-empty string command keyed by an
+ *  absolute repo path, so a hand-edited config can't widen the gate. */
+export function sanitizeApprovedSetupCommands(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [root, cmd] of Object.entries(raw as Record<string, unknown>)) {
+    if (root.startsWith('/') && typeof cmd === 'string' && cmd.trim()) out[root] = cmd
   }
   return out
 }

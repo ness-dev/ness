@@ -35,7 +35,11 @@ import { log } from './debug'
 import { autoReview, checkDenyList } from './auto-approver'
 import type { AutoReviewStatus } from '../shared/state/json-claude'
 import { findMatchingRule, ruleKey } from '../shared/permission-match'
-import { isAutoAllowedNessCall } from '../shared/ness-tool-policy'
+import {
+  isAutoAllowedNessCall,
+  nessControlToolName,
+  nessGrantsMayAnswer
+} from '../shared/ness-tool-policy'
 
 export interface ApprovalResult {
   behavior: 'allow' | 'deny'
@@ -66,6 +70,10 @@ interface PendingResponse {
    *  approval card after the user edits steering guidance) can rebuild
    *  the prompt without crossing slice boundaries. */
   payload: JsonClaudePendingApproval
+  /** Set when this create_worktree asked only because of the repo's setup
+   *  command; allowing it remembers that command. Snapshotted at request
+   *  time so an edit to .ness.json while the card is open isn't approved. */
+  approvesSetup?: { repoRoot: string; command: string }
 }
 
 interface SessionEntry {
@@ -86,9 +94,16 @@ export interface ApprovalBridgeDeps {
    *  guidance. Empty string when unset. */
   getAutoApproveSteerInstructions: () => string
   /** The repo's own (.ness.json) setup command an MCP create_worktree from
-   *  this session would run (repoRoot undefined = the session's own repo):
-   *  '' for none, null when unknown. */
-  repoSetupCommandFor?: (sessionId: string, repoRoot: string | undefined) => string | null
+   *  this session would run, with the repo it resolved to (repoRoot
+   *  undefined = the session's own repo). command is '' for none; null
+   *  when the repo can't be resolved. */
+  repoSetupFor?: (
+    sessionId: string,
+    repoRoot: string | undefined
+  ) => { repoRoot: string; command: string } | null
+  /** The user allowed a create_worktree whose only reason to ask was this
+   *  repo setup command. The host records and persists it. */
+  onSetupCommandApproved?: (repoRoot: string, command: string) => void
   /** True when `repoRoot` is a repo already open in Ness. */
   isOpenRepo?: (repoRoot: string) => boolean
 }
@@ -244,6 +259,10 @@ export class ApprovalBridge {
       type: 'jsonClaude/approvalResolved',
       payload: { requestId }
     })
+    if (result.behavior === 'allow' && pending.approvesSetup) {
+      const { repoRoot, command } = pending.approvesSetup
+      this.deps?.onSetupCommandApproved?.(repoRoot, command)
+    }
     return true
   }
 
@@ -405,13 +424,30 @@ export class ApprovalBridge {
     // a human; see shared/ness-tool-policy.ts for what's excluded and why.
     // No approvalSessionAllowed dispatch either: these calls fire every
     // turn, and an "auto-allowed" chip on each would be noise.
-    const repoSetupCommandFor = this.deps?.repoSetupCommandFor
+    // Resolve each repoRoot's setup command once per request, so the
+    // policy check, the remembered-command check and the card all see the
+    // same snapshot.
+    const repoSetupFor = this.deps?.repoSetupFor
+    const setups = new Map<string, { repoRoot: string; command: string } | null>()
+    const setupFor = (repoRoot: string | undefined): { repoRoot: string; command: string } | null => {
+      const key = repoRoot ?? ''
+      if (!setups.has(key)) setups.set(key, repoSetupFor?.(basePayload.sessionId, repoRoot) ?? null)
+      return setups.get(key) ?? null
+    }
+    const approved = this.store.getSnapshot().state.permissions.approvedSetupCommands
+    const nessCtx = {
+      repoSetupCommandFor: repoSetupFor
+        ? (repoRoot: string | undefined): string | null => setupFor(repoRoot)?.command ?? null
+        : undefined,
+      isOpenRepo: this.deps?.isOpenRepo
+    }
     if (
       isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
-        repoSetupCommandFor: repoSetupCommandFor
-          ? (repoRoot) => repoSetupCommandFor(basePayload.sessionId, repoRoot)
-          : undefined,
-        isOpenRepo: this.deps?.isOpenRepo
+        ...nessCtx,
+        isSetupCommandApproved: (repoRoot, command) => {
+          const resolved = setupFor(repoRoot)
+          return resolved !== null && approved[resolved.repoRoot] === command
+        }
       })
     ) {
       respond({ behavior: 'allow', updatedInput: basePayload.input })
@@ -421,6 +457,10 @@ export class ApprovalBridge {
       )
       return
     }
+    // The policy said ask. For an input-gated Ness tool, a bare saved or
+    // session-wide grant mustn't overrule that wholesale; see
+    // nessGrantsMayAnswer for what it may still cover.
+    const grantsApply = !isQuestion && nessGrantsMayAnswer(basePayload.toolName, basePayload.input)
 
     // Two explicit-user-grant paths, both checked before the LLM
     // auto-reviewer because a grant the user made by hand is cheaper and
@@ -432,7 +472,7 @@ export class ApprovalBridge {
     //      is what this replaced.
     //   2. The session-scoped set ("Allow {tool} this session").
     const rootState = this.store.getSnapshot().state
-    if (!isQuestion) {
+    if (grantsApply) {
       const matched = findMatchingRule(
         rootState.permissions.rules,
         basePayload.toolName,
@@ -451,7 +491,7 @@ export class ApprovalBridge {
 
     const slice = rootState.jsonClaude
     const session = slice.sessions[basePayload.sessionId]
-    if (!isQuestion && session?.sessionToolApprovals.includes(basePayload.toolName)) {
+    if (grantsApply && session?.sessionToolApprovals.includes(basePayload.toolName)) {
       this.resolveAllowed(respond, basePayload)
       log(
         'approval-bridge',
@@ -475,12 +515,34 @@ export class ApprovalBridge {
         : { state: 'pending' }
     }
 
-    const payload: JsonClaudePendingApproval = { ...basePayload, autoReview }
+    // Any create_worktree card shows the repo setup command that Allow
+    // would run, whatever else it's asking about (a PR checkout or an
+    // unopened clone runs it too). Remembering it is narrower: only when
+    // the command was the sole reason to ask.
+    let shownSetup: { repoRoot: string; command: string } | null = null
+    if (nessControlToolName(basePayload.toolName) === 'create_worktree') {
+      const rawRoot = basePayload.input['repoRoot']
+      shownSetup = setupFor(typeof rawRoot === 'string' && rawRoot ? rawRoot : undefined)
+    }
+    const approvesSetup =
+      shownSetup?.command &&
+      isAutoAllowedNessCall(basePayload.toolName, basePayload.input, {
+        ...nessCtx,
+        isSetupCommandApproved: () => true
+      })
+        ? shownSetup
+        : undefined
+    const payload: JsonClaudePendingApproval = {
+      ...basePayload,
+      autoReview,
+      ...(shownSetup?.command ? { setupCommand: shownSetup.command } : {})
+    }
     this.pendingResponses.set(payload.requestId, {
       respond,
       socket,
       sessionId: payload.sessionId,
-      payload
+      payload,
+      ...(approvesSetup ? { approvesSetup } : {})
     })
     this.store.dispatch({ type: 'jsonClaude/approvalRequested', payload })
     log(

@@ -33,8 +33,14 @@
 //   .claude/settings.json hooks and .mcp.json load in the new session),
 //   and an explicit repoRoot that isn't open in Ness (the same as add_repo,
 //   which asks). It is auto-allowed only with no prNumber, a repoRoot that
-//   is omitted or already open, and no repo setupCommand; otherwise it asks.
-//   The global setup command from Settings isn't gated: the user typed it,
+//   is omitted or already open, and no repo setupCommand (or the one the
+//   user last allowed for that repo, see isSetupCommandApproved); otherwise
+//   it asks. Allowing one of those prompts remembers that repo's command,
+//   so only a changed command asks again. Known gap: the card shows the
+//   command as it was when the card opened, but worktree creation re-reads
+//   .ness.json after Allow, so an edit made while the card is open runs
+//   once unseen (the next call then asks, since it differs from the
+//   remembered one). The global setup command from Settings isn't gated: the user typed it,
 //   and gating it would prompt on every worktree for anyone who set one.
 // - create_worktree and send_message start or message other agents with
 //   text the calling agent wrote. They are auto-allowed because
@@ -128,6 +134,9 @@ export interface NessCallContext {
    *  means the caller's own repo): '' when none, null when it can't be
    *  determined. Absent means unknown, so create_worktree asks. */
   repoSetupCommandFor?: (repoRoot: string | undefined) => string | null
+  /** True when the user already allowed `command` to run for `repoRoot`
+   *  (undefined = the caller's own repo). Absent means nothing is approved. */
+  isSetupCommandApproved?: (repoRoot: string | undefined, command: string) => boolean
   /** True when `repoRoot` is a repo already open in Ness. Absent means
    *  unknown, so a create_worktree naming a repoRoot asks. */
   isOpenRepo?: (repoRoot: string) => boolean
@@ -155,7 +164,9 @@ export function isAutoAllowedNessCall(
     if (rawRoot !== undefined && typeof rawRoot !== 'string') return false
     const repoRoot = rawRoot === undefined || rawRoot === '' ? undefined : rawRoot
     if (repoRoot !== undefined && ctx.isOpenRepo?.(repoRoot) !== true) return false
-    return ctx.repoSetupCommandFor?.(repoRoot) === ''
+    const command = ctx.repoSetupCommandFor?.(repoRoot)
+    if (command === '') return true
+    return typeof command === 'string' && ctx.isSetupCommandApproved?.(repoRoot, command) === true
   }
   if (!URL_GATED_TOOLS.has(bare)) return true
   const url = input['url']
@@ -170,7 +181,47 @@ export function isAutoAllowedNessCall(
  *  agent load arbitrary URLs or create a worktree that runs a setup script. */
 export function isAlwaysAutoAllowedNessTool(toolName: string): boolean {
   const bare = nessControlToolName(toolName)
-  return bare !== null && AUTO_ALLOWED.has(bare) && !URL_GATED_TOOLS.has(bare) && bare !== 'create_worktree'
+  return bare !== null && AUTO_ALLOWED.has(bare) && !isInputGatedNessTool(toolName)
+}
+
+/** Ness tools whose approval depends on their input (the URL-gated tools
+ *  and create_worktree). */
+export function isInputGatedNessTool(toolName: string): boolean {
+  const bare = nessControlToolName(toolName)
+  return bare !== null && (URL_GATED_TOOLS.has(bare) || bare === 'create_worktree')
+}
+
+/** A Ness tool no saved or session grant ever answers for, whatever the
+ *  call's input. */
+export function isGrantIgnoredNessTool(toolName: string): boolean {
+  return nessControlToolName(toolName) === 'create_worktree'
+}
+
+/** Whether a saved ("Always allow") or session-wide grant may answer a
+ *  call that isAutoAllowedNessCall said to ask about. A bare grant has no
+ *  input of its own, so for input-gated tools it would otherwise skip every
+ *  input check from then on:
+ *  - create_worktree: never. A grant would let prNumber checkouts, unopened
+ *    repos and any later setup command through.
+ *  - navigate_tab / create_browser_tab: only for http(s) URLs. A grant is
+ *    how someone lets an agent browse real sites without a prompt per page,
+ *    but it must never open file:, data: or javascript: URLs.
+ *  Everything else: yes. */
+export function nessGrantsMayAnswer(toolName: string, input: Record<string, unknown>): boolean {
+  const bare = nessControlToolName(toolName)
+  if (bare === null || !isInputGatedNessTool(toolName)) return true
+  if (isGrantIgnoredNessTool(toolName)) return false
+  const url = input['url']
+  if (url === undefined && bare === 'create_browser_tab') return true
+  if (typeof url !== 'string') return false
+  const normalized = normalizeBrowserUrl(url)
+  if (normalized === null) return false
+  try {
+    const { protocol } = new URL(normalized)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 /** Value for Claude's `--allowedTools`, for terminal tabs where Claude

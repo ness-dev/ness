@@ -1,0 +1,77 @@
+name: Mobile OTA update
+
+# Publishes the Expo app's JS (mobile/) as an EAS Update on the production
+# channel, on the same tag push that fires release.yml and
+# headless-release.yml, so the phone's code ships in lockstep with the
+# desktop / server release it talks to.
+#
+# EAS project: @mikepersonal/ness (projectId in mobile/app.json).
+# runtimeVersion uses the "fingerprint" policy: an update only reaches
+# store / internal builds whose native code matches it exactly, so a JS
+# change that needs a new native module waits for a new build instead of
+# crashing an old one.
+#
+# Needs the EXPO_TOKEN repo secret: a robot token from the mikepersonal
+# account (expo.dev → mikepersonal → Settings → Access tokens). Without
+# it the job logs a notice and skips, so a release never fails on it.
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: mobile-update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Check for EXPO_TOKEN
+        id: token
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::notice::EXPO_TOKEN is not set; skipping the mobile OTA update."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.present == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      # The app imports shared code from ../src, but Metro resolves every
+      # bare import through mobile/node_modules (mobile/metro.config.js),
+      # so the root install isn't needed.
+      - name: Install mobile dependencies
+        if: steps.token.outputs.present == 'true'
+        run: npm ci --prefix mobile
+
+      - uses: expo/expo-github-action@v8
+        if: steps.token.outputs.present == 'true'
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish update
+        if: steps.token.outputs.present == 'true'
+        working-directory: mobile
+        # Inlined into the bundle by Metro; Settings → About shows it.
+        # Not a fingerprint input (env vars aren't), unlike app config.
+        env:
+          EXPO_PUBLIC_GIT_COMMIT: ${{ github.sha }}
+        run: >
+          eas update
+          --channel production
+          --platform all
+          --message "Ness ${{ github.ref_name }}"
+          --non-interactive

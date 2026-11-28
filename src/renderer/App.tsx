@@ -29,6 +29,8 @@ import { NewWorktreeScreen, onOpenForkIntoWorktree } from './components/NewWorkt
 import { CreatingWorktreeScreen } from './components/CreatingWorktreeScreen'
 import { DeletingWorktreeScreen } from './components/DeletingWorktreeScreen'
 import { FirstRunTour } from './components/FirstRunTour'
+import { CenterEmptyState, centerEmptyMode } from './components/CenterEmptyState'
+import { pickInitialWorktree } from './initial-worktree'
 import { WorkspaceView } from './components/WorkspaceView'
 import { QuakeTerminal } from './components/QuakeTerminal'
 import { RightColumn } from './components/RightColumn'
@@ -313,7 +315,7 @@ function DesktopApp(): JSX.Element {
   // Pane trees across ALL backends. `usePanes()` would be the active
   // backend's slice only, which silently breaks every cross-backend lookup
   // below: `activeWorkspaceVisible` would find no tree for a remote
-  // worktree and render the "Select a worktree to begin" fallback at the
+  // worktree and render the empty-center fallback at the
   // same time as the workspace it claims isn't there.
   const panes = mergedData.panes
   const [activePaneId, setActivePaneId] = useState<Record<string, string>>({})
@@ -596,6 +598,14 @@ function DesktopApp(): JSX.Element {
         : null,
     [tour, worktrees]
   )
+  // Shared by the tour popout and the center empty state (main keeps the
+  // tour's home workspace tab-less while popout 1 is up, so the center is
+  // what's showing) so both drive the same kickoff and tour transition.
+  const handleTourStart = useCallback(async () => {
+    const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
+    if (result.ok) setActiveWorktreeId(result.worktreePath)
+  }, [backend])
+  const handleTourDismiss = useCallback(() => void backend.tourDismiss().catch(() => {}), [backend])
 
   const configLoadError = useConfigLoadError()
 
@@ -777,12 +787,6 @@ function DesktopApp(): JSX.Element {
     ? repoConfigs[activeRepoRoot] ?? null
     : null
 
-  // After a local merge, kick the poller so the merged flag and PR state
-  // propagate to the UI without waiting for the 5-min interval.
-  const refreshMergedStatus = useCallback(() => {
-    void backend.refreshPRsAll()
-  }, [])
-
   // Ask main for a single-worktree PR refresh. Used by the activity observer
   // when a terminal enters the "waiting" state (likely just pushed).
   const fetchPRStatus = useCallback((wtPath: string) => {
@@ -876,8 +880,21 @@ function DesktopApp(): JSX.Element {
   // finished deletion, a dismissed pending creation, a stale focus after
   // a refresh — route focus to a neighbor so the center pane doesn't
   // collapse into an empty region.
+  // Nothing selected yet is the same problem: a fresh install mounts with
+  // an empty list, so once the wizard adds projects (one or many), open the
+  // one the tour is about rather than leaving the center empty.
   useEffect(() => {
-    if (!activeWorktreeId) return
+    if (!activeWorktreeId) {
+      // `tour` is the active backend's slice; `worktrees` is merged.
+      const pick = pickInitialWorktree({
+        tourStep: tour.step,
+        tourHomePath,
+        worktreePaths: worktrees.map((w) => w.path),
+        tourBackendHasRows: worktrees.some((w) => fleetData.pathBackendId[w.path] === activeBackendId)
+      })
+      if (pick) setActiveWorktreeId(pick)
+      return
+    }
     if (isPendingId(activeWorktreeId)) {
       if (pendingWorktrees.some((p) => p.id === activeWorktreeId)) return
     } else {
@@ -885,7 +902,7 @@ function DesktopApp(): JSX.Element {
       if (pendingDeletions.some((d) => d.path === activeWorktreeId)) return
     }
     setActiveWorktreeId(worktrees[0]?.path ?? null)
-  }, [activeWorktreeId, worktrees, pendingWorktrees, pendingDeletions])
+  }, [activeWorktreeId, worktrees, pendingWorktrees, pendingDeletions, tourHomePath, tour.step, fleetData.pathBackendId, activeBackendId])
 
   const handleAcceptHooks = useCallback(() => {
     void backend.acceptHooks()
@@ -2320,8 +2337,14 @@ function DesktopApp(): JSX.Element {
             >
               {singleScreenMode && <AppTitleSegment />}
             </div>
-            <div className="flex-1 flex items-center justify-center text-dim">
-              {worktrees.length === 0 ? 'Create a worktree to get started' : 'Select a worktree to begin'}
+            <div className="flex-1 flex items-center justify-center">
+              <CenterEmptyState
+                mode={centerEmptyMode({ onboardingVisible, tourHomePath })}
+                newWorktreeBinding={resolvedHotkeys.newWorktree}
+                onTourStart={handleTourStart}
+                onSkipTour={handleTourDismiss}
+                onNewWorktree={() => setShowNewWorktree(true)}
+              />
             </div>
           </div>
         )}
@@ -2347,11 +2370,8 @@ function DesktopApp(): JSX.Element {
           <FirstRunTour
             tour={tour}
             homePath={tourHomePath}
-            onStart={async () => {
-              const result = await backend.tourStartSomethingNew().catch(() => ({ ok: false as const }))
-              if (result.ok) setActiveWorktreeId(result.worktreePath)
-            }}
-            onDismiss={() => void backend.tourDismiss().catch(() => {})}
+            onStart={handleTourStart}
+            onDismiss={handleTourDismiss}
           />
         )}
         {/* Right panel — hidden on the new-worktree screen so the form gets the full width.
@@ -2377,8 +2397,6 @@ function DesktopApp(): JSX.Element {
             activeRepoConfig={activeRepoConfig}
             onRefreshPRs={fetchAllPRStatuses}
             onOpenGithubSettings={handleOpenGithubSettings}
-            onMerged={refreshMergedStatus}
-            onRemoveWorktree={handleDeleteWorktree}
             onOpenDiff={handleOpenDiff}
             onOpenCommitFileDiff={handleOpenCommitFileDiff}
             onOpenFile={handleOpenFile}

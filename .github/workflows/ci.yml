@@ -48,6 +48,22 @@ jobs:
       - name: Typecheck + build site
         run: npm run typecheck:site && npm run build:site
 
+      # The Expo app (mobile/) imports shared state, transport and renderer
+      # modules from src/ and calls the server through the desktop's typed
+      # buildBackend API, so a desktop or server change can break it
+      # without touching mobile/. Typecheck catches signature and state
+      # shape drift; the iOS export catches a shared module growing an
+      # import Metro can't bundle (Node / DOM / Electron-only).
+      - name: Install mobile dependencies
+        run: npm ci --prefix mobile
+
+      - name: Mobile typecheck + unit tests
+        run: npm run typecheck:mobile && npm run test:mobile
+
+      - name: Mobile bundle
+        working-directory: mobile
+        run: npx expo export --platform ios --output-dir "$RUNNER_TEMP/mobile-export"
+
       # The headless server bundle is built separately from the Electron
       # build above (different vite config, different output dir). Builds
       # both `dist-headless/main` and `dist-headless/web-client`.
@@ -64,3 +80,11 @@ jobs:
       # runnable locally and not buried in YAML.
       - name: Headless smoke test
         run: bash scripts/smoke-headless.sh
+
+      # The mobile client's own NessClient / Fleet / list model driving the
+      # freshly-built headless server over WebSocket: snapshot, repo + worktree
+      # listing, aliases / pins / snoozes, panes and Chat tabs, tools-panel
+      # data. A renamed handler or changed state shape fails here. Logic in
+      # mobile/test/contract.test.ts.
+      - name: Mobile contract test
+        run: npm run test:mobile:contract

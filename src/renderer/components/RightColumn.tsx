@@ -11,7 +11,7 @@ import {
 import { BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT } from '../../shared/tools'
 import { useWatchedQuery } from '../hooks/useWatchedQuery'
 import { CustomToolPanel } from './CustomToolPanel'
-import { PRStatusPanel, MergeLocallyPanel } from './PRStatusPanel'
+import { PRStatusPanel } from './PRStatusPanel'
 import { BranchCommitsPanel } from './BranchCommitsPanel'
 import { ChangedFilesPanel } from './ChangedFilesPanel'
 import { AllFilesPanel } from './AllFilesPanel'
@@ -27,8 +27,10 @@ import { useBackend } from '../backend'
 type ChangedFilesPanelProps = React.ComponentProps<typeof ChangedFilesPanel>
 type AllFilesPanelProps = React.ComponentProps<typeof AllFilesPanel>
 
-interface RightColumnProps {
-  width: number
+/** Everything a stack of right-column panels needs. Shared by the desktop
+ *  RightColumn and the phone web client's MobileRightPanel, so both show
+ *  the same panels in the repo's configured order. */
+export interface RightPanelStackProps {
   activeWorktreeId: string | null
   activeRepoRoot: string | null
   /** Id of the currently focused tab in the active worktree's focused
@@ -42,47 +44,33 @@ interface RightColumnProps {
   activeRepoConfig: RepoConfig | null
   onRefreshPRs: () => void
   onOpenGithubSettings: () => void
-  onMerged: () => void
-  onRemoveWorktree: (path: string) => void
-  onOpenDiff: ChangedFilesPanelProps['onOpenDiff']
-  onOpenCommitFileDiff: (commitHash: string, shortHash: string, filePath: string) => void
-  onOpenFile: AllFilesPanelProps['onOpenFile']
+  /** The three openers below are desktop-only (diff/file tabs); the phone
+   *  web client leaves them out and the panels hide or no-op them. */
+  onOpenDiff?: ChangedFilesPanelProps['onOpenDiff']
+  onOpenCommitFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
+  onOpenFile?: AllFilesPanelProps['onOpenFile']
   onSendToAgent: (worktreePath: string, text: string) => void
   onOpenPR: (url: string) => void
-  onOpenReview: () => void
+  onOpenReview?: () => void
+}
+
+interface RightColumnProps extends RightPanelStackProps {
+  width: number
   onCollapse: () => void
   /** Opens the new-worktree screen pre-filled with a branch name and the
    * custom-tool authoring contract as the kickoff prompt. */
   onBuildCustomTool: (branch: string, prompt: string) => void
 }
 
-/** Memoized so the sidebar's first-frame highlight render (see
- *  `sidebarActiveId` in App) can skip it; App keeps its props stable. */
-export const RightColumn = memo(function RightColumn({
-  width,
-  activeWorktreeId,
-  activeRepoRoot,
-  focusedTabId,
-  worktrees,
-  prStatuses,
-  prLoading,
-  hasGithubToken,
-  activeRepoConfig,
-  onRefreshPRs,
-  onOpenGithubSettings,
-  onMerged,
-  onRemoveWorktree,
-  onOpenDiff,
-  onOpenCommitFileDiff,
-  onOpenFile,
-  onSendToAgent,
-  onOpenPR,
-  onOpenReview,
-  onCollapse,
-  onBuildCustomTool
-}: RightColumnProps): JSX.Element {
+/** Tools list, effective order/visibility and the repo-config writers for
+ *  the active repo — the state both RightColumn's toolbar and the panel
+ *  stack read. */
+export function useRightPanelConfig(
+  activeWorktreeId: string | null,
+  activeRepoRoot: string | null,
+  activeRepoConfig: RepoConfig | null
+) {
   const backend = useBackend()
-
   const toolsFetcher = useCallback(
     (path: string) => backend.listTools(path),
     [backend]
@@ -104,11 +92,10 @@ export const RightColumn = memo(function RightColumn({
 
   const handleChangeHidden = (next: HiddenRightPanels): void => {
     if (!activeRepoRoot) return
-    // Send the full hiddenRightPanels object; also null out legacy
-    // fields so old values don't leak back in via effective migration.
+    // Send the full hiddenRightPanels object; also null out the legacy
+    // field so an old value doesn't leak back in via effective migration.
     void backend.setRepoConfig(activeRepoRoot, {
       hiddenRightPanels: next,
-      hideMergePanel: null,
       hidePrPanel: null
     } as unknown as Partial<RepoConfig>)
   }
@@ -120,6 +107,56 @@ export const RightColumn = memo(function RightColumn({
     } as unknown as Partial<RepoConfig>)
   }
 
+  return { tools, toolLabels, hidden, order, handleChangeHidden, handleChangeOrder }
+}
+
+/** Memoized so the sidebar's first-frame highlight render (see
+ *  `sidebarActiveId` in App) can skip it; App keeps its props stable. */
+export const RightColumn = memo(function RightColumn(props: RightColumnProps): JSX.Element {
+  const { width, activeWorktreeId, activeRepoRoot, activeRepoConfig, onCollapse, onBuildCustomTool } = props
+  const config = useRightPanelConfig(activeWorktreeId, activeRepoRoot, activeRepoConfig)
+  return (
+    <div
+      data-right-sidebar
+      className="shrink-0 h-full flex flex-col bg-panel"
+      style={{ width }}
+    >
+      <RightColumnToolbar
+        hidden={config.hidden}
+        order={config.order}
+        customLabels={config.toolLabels}
+        onChangeHidden={config.handleChangeHidden}
+        onChangeOrder={config.handleChangeOrder}
+        onCollapse={onCollapse}
+        onBuildCustomTool={() =>
+          onBuildCustomTool(BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT)
+        }
+        canConfigure={!!activeRepoRoot}
+      />
+      <RightPanelStack {...props} config={config} />
+    </div>
+  )
+})
+
+/** The configured panels, in order, minus hidden ones. */
+export function RightPanelStack({
+  config,
+  activeWorktreeId,
+  focusedTabId,
+  worktrees,
+  prStatuses,
+  prLoading,
+  hasGithubToken,
+  onRefreshPRs,
+  onOpenGithubSettings,
+  onOpenDiff,
+  onOpenCommitFileDiff,
+  onOpenFile,
+  onSendToAgent,
+  onOpenPR,
+  onOpenReview
+}: RightPanelStackProps & { config: ReturnType<typeof useRightPanelConfig> }): JSX.Element {
+  const { tools, hidden, order } = config
   const renderPanel = (key: RightPanelKey): JSX.Element | null => {
     if (hidden[key]) return null
     if (isCustomToolPanelKey(key)) {
@@ -138,17 +175,6 @@ export const RightColumn = memo(function RightColumn({
       )
     }
     switch (key) {
-      case 'merge':
-        return (
-          <MergeLocallyPanel
-            key="merge"
-            pr={activeWorktreeId ? prStatuses[activeWorktreeId] : null}
-            worktree={worktrees.find((w) => w.path === activeWorktreeId) || null}
-            hasGithubToken={hasGithubToken}
-            onMerged={onMerged}
-            onRemoveWorktree={onRemoveWorktree}
-          />
-        )
       case 'pr':
         return (
           <PRStatusPanel
@@ -214,25 +240,5 @@ export const RightColumn = memo(function RightColumn({
     }
   }
 
-  return (
-    <div
-      data-right-sidebar
-      className="shrink-0 h-full flex flex-col bg-panel"
-      style={{ width }}
-    >
-      <RightColumnToolbar
-        hidden={hidden}
-        order={order}
-        customLabels={toolLabels}
-        onChangeHidden={handleChangeHidden}
-        onChangeOrder={handleChangeOrder}
-        onCollapse={onCollapse}
-        onBuildCustomTool={() =>
-          onBuildCustomTool(BUILD_CUSTOM_TOOL_BRANCH, BUILD_CUSTOM_TOOL_PROMPT)
-        }
-        canConfigure={!!activeRepoRoot}
-      />
-      {order.map((key) => renderPanel(key))}
-    </div>
-  )
-})
+  return <>{order.map((key) => renderPanel(key))}</>
+}

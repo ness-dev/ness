@@ -17,6 +17,7 @@ import { AgentIcon } from './AgentIcon'
 import { randomUUID } from '../uuid'
 import { HotkeysProvider } from './Tooltip'
 import { resolveHotkeys } from '../hotkeys'
+import { pickInitialTab } from '../pick-initial-tab'
 
 type RunnableTab = TerminalTab & { type: 'agent' | 'shell' | 'json-claude' }
 
@@ -35,15 +36,6 @@ function flatTabs(panes: ReturnType<typeof usePanes>, wtPath: string): TerminalT
 
 function isRunnable(tab: TerminalTab): tab is RunnableTab {
   return tab.type === 'agent' || tab.type === 'shell' || tab.type === 'json-claude'
-}
-
-function pickInitialTab(tabs: TerminalTab[]): string | null {
-  return (
-    tabs.find((t) => t.type === 'agent')?.id ??
-    tabs.find((t) => t.type === 'shell')?.id ??
-    tabs[0]?.id ??
-    null
-  )
 }
 
 /** Mobile has no CreatingWorktreeScreen to drop onto, so a failed creation is
@@ -84,6 +76,8 @@ export function MobileApp(): JSX.Element {
   const [newWorktreeRepo, setNewWorktreeRepo] = useState<string | undefined>(undefined)
   const [showNewWorktree, setShowNewWorktree] = useState(false)
   const [newWorktreeFocusPath, setNewWorktreeFocusPath] = useState<string | null>(null)
+  // "Build a custom tool…" prefill, same as the desktop's newWorktreePrefill.
+  const [newWorktreePrefill, setNewWorktreePrefill] = useState<{ branch: string; prompt: string } | null>(null)
 
   useEffect(() => {
     if (!activeWorktreeId) return
@@ -197,7 +191,37 @@ export function MobileApp(): JSX.Element {
     [activeWorktree]
   )
 
+  // Same routing as the desktop's handleSendToAgent: the phone's selected
+  // tab if it takes messages, else a pane's active one, else the first.
+  const handleSendToAgent = useCallback(
+    (wtPath: string, text: string) => {
+      const tree = panes[wtPath]
+      const leaves = tree ? getLeaves(tree) : []
+      const sendable = (t: TerminalTab): boolean => t.type === 'agent' || t.type === 'json-claude'
+      const all = leaves.flatMap((l) => l.tabs)
+      const claimed = all.find((t) => t.id === selectedTabByWorktree[wtPath])
+      const target =
+        (claimed && sendable(claimed) ? claimed : undefined) ??
+        leaves.map((l) => l.tabs.find((t) => t.id === l.activeTabId)).find((t): t is TerminalTab => !!t && sendable(t)) ??
+        all.find(sendable)
+      if (!target) return
+      setSelectedTabByWorktree((prev) => ({ ...prev, [wtPath]: target.id }))
+      setRightPanelOpen(false)
+      if (target.type === 'json-claude') backend.sendJsonClaudeMessage(target.id, text)
+      else backend.writeTerminal(target.id, '\x1b[200~' + text + '\x1b[201~')
+    },
+    [panes, selectedTabByWorktree]
+  )
+
+  const handleBuildCustomTool = useCallback((branch: string, prompt: string) => {
+    setNewWorktreePrefill({ branch, prompt })
+    setNewWorktreeRepo(undefined)
+    setShowNewWorktree(true)
+    setRightPanelOpen(false)
+  }, [])
+
   const handleOpenNewWorktree = useCallback((repoRoot?: string) => {
+    setNewWorktreePrefill(null)
     setNewWorktreeRepo(repoRoot)
     setShowNewWorktree(true)
     setPickerOpen(false)
@@ -344,6 +368,8 @@ export function MobileApp(): JSX.Element {
               onCancel={() => setShowNewWorktree(false)}
               repoRoots={wtState.repoRoots}
               defaultRepoRoot={newWorktreeRepo ?? activeWorktree?.repoRoot}
+              initialBranch={newWorktreePrefill?.branch}
+              initialPrompt={newWorktreePrefill?.prompt}
             />
           </div>
         )}
@@ -351,8 +377,12 @@ export function MobileApp(): JSX.Element {
         {rightPanelOpen && (
           <MobileRightPanel
             activeWorktree={activeWorktree}
+            worktrees={worktrees}
+            focusedTabId={selectedTabId}
             prStatuses={prs.byPath}
             prLoading={prs.loading}
+            onSendToAgent={handleSendToAgent}
+            onBuildCustomTool={handleBuildCustomTool}
             onClose={() => setRightPanelOpen(false)}
           />
         )}
@@ -574,10 +604,12 @@ function TabIcon({ tab, shellActivity, status }: { tab: TerminalTab; shellActivi
     )
   }
   if (tab.type === 'json-claude') {
+    // Live status, same as agent tabs and the desktop tab strip — a fixed
+    // accent dot hid whether a chat was working or waiting on you.
     return (
       <span className="inline-flex items-center gap-1">
         <AgentIcon kind={tab.agentKind ?? 'claude'} className="icon-xs" />
-        <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+        <span className={'w-1.5 h-1.5 rounded-full ' + STATUS_DOT[status]} />
       </span>
     )
   }

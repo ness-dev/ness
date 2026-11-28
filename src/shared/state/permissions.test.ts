@@ -173,4 +173,54 @@ describe('permissionsReducer', () => {
       permissionsReducer(initialPermissions, { type: 'permissions/cleared' })
     ).toBe(initialPermissions)
   })
+
+  it('setupCommandApproved records the command per repo and replaces it', () => {
+    const a = apply(initialPermissions, {
+      type: 'permissions/setupCommandApproved',
+      payload: { repoRoot: '/r', command: 'npm install' }
+    })
+    expect(a.approvedSetupCommands).toEqual({ '/r': 'npm install' })
+    const b = apply(a, {
+      type: 'permissions/setupCommandApproved',
+      payload: { repoRoot: '/r', command: 'npm ci' }
+    })
+    expect(b.approvedSetupCommands).toEqual({ '/r': 'npm ci' })
+    expect(
+      permissionsReducer(b, {
+        type: 'permissions/setupCommandApproved',
+        payload: { repoRoot: '/r', command: 'npm ci' }
+      })
+    ).toBe(b)
+  })
+
+  it('cleared removes grants but keeps approved setup commands', () => {
+    const seeded = apply(
+      initialPermissions,
+      { type: 'permissions/granted', payload: { rule: rule('Read') } },
+      {
+        type: 'permissions/setupCommandApproved',
+        payload: { repoRoot: '/r', command: 'npm install' }
+      }
+    )
+    const cleared = apply(seeded, { type: 'permissions/cleared' })
+    expect(cleared.rules).toEqual([])
+    expect(cleared.approvedSetupCommands).toEqual({ '/r': 'npm install' })
+  })
+
+  it('setupCommandForgotten drops one repo and ignores unknown ones', () => {
+    const seeded = apply(initialPermissions, {
+      type: 'permissions/setupCommandApproved',
+      payload: { repoRoot: '/r', command: 'npm install' }
+    })
+    expect(
+      apply(seeded, { type: 'permissions/setupCommandForgotten', payload: { repoRoot: '/r' } })
+        .approvedSetupCommands
+    ).toEqual({})
+    expect(
+      permissionsReducer(seeded, {
+        type: 'permissions/setupCommandForgotten',
+        payload: { repoRoot: '/other' }
+      })
+    ).toBe(seeded)
+  })
 })

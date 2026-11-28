@@ -108,8 +108,7 @@ import { getWeeklyStats } from './weekly-stats'
 import { discoverTools, runTool } from './tools'
 import type { TerminalTab, PaneNode, PaneLeaf } from '../shared/state/terminals'
 import { findTabById, getLeaves, mapLeaves } from '../shared/state/terminals'
-import { createLocalMergeOps } from './local-merge'
-import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getMainWorktreeStatus, prepareMainForMerge, mergeWorktreeLocally, getBranchSha, previewMergeConflicts, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees, type MergeStrategy } from './worktree'
+import { resolveCommitSha, listWorktrees, listBranches, continueWorktree, isWorktreeDirty, defaultWorktreeDir, getChangedFiles, getFileDiff, getBranchCommits, getCommitDiff, getCommitMeta, getCommitChangedFiles, getCommitFileDiffSides, getCommitRangeChangedFiles, getCommitRangeFileDiffSides, getBranchDiffStats, listAllFiles, listRecentCommitShas, readWorktreeFile, readWorktreeFileBinary, writeWorktreeFile, getFileDiffSides, getCurrentBranch, renameWorktreeBranch, unsymlinkClaudeSettings, readClaudeAllowEntries, pruneWorktrees } from './worktree'
 import { listOpenPRs, getPRByNumber, testToken, starRepo, unstarRepo, isRepoStarred, mergePR, approvePR, getRepoInfo, type GitHubMergeMethod, type MergePRResult, type PRLookupResult } from './github'
 import { AVAILABLE_EDITORS, DEFAULT_EDITOR_ID, openInEditor } from './editor'
 import { resolveEditorId } from '../shared/editor-resolve'
@@ -499,12 +498,18 @@ const approvalBridge = new ApprovalBridge(store, {
     store.getSnapshot().state.settings.autoApprovePermissions === true,
   getAutoApproveSteerInstructions: () =>
     store.getSnapshot().state.settings.autoApproveSteerInstructions || '',
-  repoSetupCommandFor: (sessionId, repoRoot) => {
+  repoSetupFor: (sessionId, repoRoot) => {
     const state = store.getSnapshot().state
     const sessionPath = state.jsonClaude.sessions[sessionId]?.worktreePath
     const root =
-      repoRoot ?? state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
-    return root ? loadRepoConfig(root).setupCommand?.trim() || '' : null
+      repoRoot?.replace(/\/+$/, '') ??
+      state.worktrees.list.find((w) => w.path === sessionPath)?.repoRoot
+    if (!root) return null
+    return { repoRoot: root, command: loadRepoConfig(root).setupCommand?.trim() || '' }
+  },
+  onSetupCommandApproved: (repoRoot, command) => {
+    store.dispatch({ type: 'permissions/setupCommandApproved', payload: { repoRoot, command } })
+    persistPermissionRules()
   },
   isOpenRepo: (repoRoot) => {
     const want = repoRoot.replace(/\/+$/, '')
@@ -1617,7 +1622,9 @@ function grantPermissionRules(rules: PermissionRule[], grantedFrom?: string): nu
 }
 
 function persistPermissionRules(): void {
-  config.permissionRules = store.getSnapshot().state.permissions.rules
+  const { rules, approvedSetupCommands } = store.getSnapshot().state.permissions
+  config.permissionRules = rules
+  config.approvedSetupCommands = approvedSetupCommands
   saveConfig(config)
 }
 
@@ -1709,13 +1716,18 @@ function initWorktreePanes(wtPath: string, activated: boolean): void {
     if (activated && importForksPending.has(wtPath)) activatedDuringImportFork.add(wtPath)
     return
   }
+  // The tour's home workspace stays empty until the user acts on popout 1:
+  // seeding the default agent + Shell pair here would put an idle agent
+  // (spawned as soon as the workspace is shown) beside the "Getting
+  // started" chat the kickoff adds. Dismissing the tour seeds it then.
+  const tourHolds = tourHomePath(store.getSnapshot().state) === wtPath
   if (!importedWorktrees.has(wtPath)) {
-    panesFSM.ensureInitialized(wtPath)
+    if (!tourHolds) panesFSM.ensureInitialized(wtPath)
     return
   }
   const session = importedWorktrees.get(wtPath)
   if (!session) {
-    if (activated) panesFSM.ensureInitialized(wtPath)
+    if (activated && !tourHolds) panesFSM.ensureInitialized(wtPath)
     return
   }
   importedWorktrees.set(wtPath, null)
@@ -2884,46 +2896,6 @@ function registerIpcHandlers(): void {
     return getWeeklyStats(snap.prs, snap.worktrees)
   })
 
-  transport.onRequest('worktree:mainStatus', async (_ctx, repoRoot: string) => {
-    if (!repoRoot) throw new Error('No repo root provided')
-    return getMainWorktreeStatus(repoRoot)
-  })
-
-  transport.onRequest('worktree:previewMerge', async (_ctx, repoRoot: string, sourceBranch: string, worktreePath?: string) => {
-    if (!repoRoot) throw new Error('No repo root provided')
-    let branch = sourceBranch
-    if (worktreePath) {
-      const resolved = await getCurrentBranch(worktreePath)
-      if (resolved) branch = resolved
-    }
-    const status = await getMainWorktreeStatus(repoRoot)
-    return previewMergeConflicts(repoRoot, branch, status.baseBranch)
-  })
-
-  const localMerge = createLocalMergeOps({
-    dispatch: (event) => store.dispatch(event),
-    getCurrentBranch,
-    mergeWorktreeLocally,
-    prepareMainForMerge,
-    getBranchSha,
-    recordLocallyMerged: (branch, sha) => {
-      if (!config.locallyMerged) config.locallyMerged = {}
-      config.locallyMerged[branch] = sha
-      saveConfig(config)
-    },
-    refreshAll: () => void prPoller.refreshAll()
-  })
-
-  transport.onRequest('worktree:prepareMain', (_ctx, repoRoot: string) =>
-    localMerge.prepareMain(repoRoot)
-  )
-
-  transport.onRequest(
-    'worktree:mergeLocal',
-    (_ctx, repoRoot: string, sourceBranch: string, strategy: MergeStrategy, worktreePath?: string) =>
-      localMerge.mergeLocal(repoRoot, sourceBranch, strategy, worktreePath)
-  )
-
   // Legacy worktree:mergedStatus handler is gone — the computation is now
   // inlined in PRPoller.refreshAll, which runs across all roots in one pass
   // and dispatches prs/mergedChanged.
@@ -3389,6 +3361,13 @@ function registerIpcHandlers(): void {
 
   transport.onRequest('permissions:clear', (): boolean => {
     store.dispatch({ type: 'permissions/cleared' })
+    persistPermissionRules()
+    return true
+  })
+
+  transport.onRequest('permissions:forgetSetupCommand', (_ctx, repoRoot: string): boolean => {
+    if (typeof repoRoot !== 'string' || !repoRoot) return false
+    store.dispatch({ type: 'permissions/setupCommandForgotten', payload: { repoRoot } })
     persistPermissionRules()
     return true
   })
@@ -3955,7 +3934,11 @@ function registerIpcHandlers(): void {
     return { ok: true as const, worktreePath: homePath, tabId }
   })
   transport.onRequest('onboarding:tourDismiss', () => {
+    const homePath = tourHomePath(store.getSnapshot().state)
     store.dispatch({ type: 'onboarding/tourEnded' })
+    // initWorktreePanes held back the home workspace's default tabs while
+    // popout 1 was up; it's open in front of the user, so give it them now.
+    if (homePath) initWorktreePanes(homePath, true)
     return true
   })
 
@@ -4125,6 +4108,14 @@ function registerIpcHandlers(): void {
     // unconditional side-effect added to either wake path can't silently
     // fire on the wrong tab type.
     const type = panesFSM.getTabType(wtPath, tabId)
+    // A wake is user activity. Without this, AutoSleepMonitor's next
+    // sweep (≤60s) sees the worktree's stale lastActive and sleeps the tab
+    // straight back — every open of an idle chat from a phone (web or
+    // app), where nothing else touches lastActive until a keystroke,
+    // woke the session only to kill it again.
+    if (type === 'json-claude' || type === 'shell') {
+      store.dispatch({ type: 'terminals/lastActiveChanged', payload: { worktreePath: wtPath, ts: Date.now() } })
+    }
     if (type === 'json-claude') {
       panesFSM.wakeJsonClaudeTab(wtPath, await forkIfRunningElsewhere(wtPath, tabId))
     } else if (type === 'shell') panesFSM.wakeShellTab(wtPath, tabId)

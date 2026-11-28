@@ -1,5 +1,4 @@
 export type BuiltinRightPanelKey =
-  | 'merge'
   | 'pr'
   | 'todos'
   | 'agents'
@@ -26,7 +25,6 @@ export function toolPanelKey(toolId: string): CustomToolPanelKey {
 }
 
 export const DEFAULT_RIGHT_PANEL_ORDER: BuiltinRightPanelKey[] = [
-  'merge',
   'pr',
   'commits',
   'changedFiles',
@@ -53,16 +51,16 @@ export interface RepoConfig {
   version?: number
   setupCommand?: string
   teardownCommand?: string
+  /** How the PR panel's merge button merges on GitHub. */
   mergeStrategy?: 'squash' | 'merge-commit' | 'fast-forward'
-  /** @deprecated use hiddenRightPanels.merge. Migrated on load. */
-  hideMergePanel?: boolean
   /** @deprecated use hiddenRightPanels.pr. Migrated on load. */
   hidePrPanel?: boolean
   /** Per-panel visibility. A key set to true hides that panel. */
   hiddenRightPanels?: HiddenRightPanels
   /** Order of right-column panels. Unknown / missing keys fall back to
    * DEFAULT_RIGHT_PANEL_ORDER (any key absent from the saved order is
-   * appended to the end in canonical order). */
+   * appended to the end in canonical order). May still contain 'merge'
+   * from before the Merge Locally panel was removed; readers drop it. */
   rightPanelOrder?: RightPanelKey[]
 }
 
@@ -96,8 +94,7 @@ export function effectiveRightPanelOrder(
   return out
 }
 
-/** Read an effective hidden map, migrating legacy hideMergePanel /
- * hidePrPanel fields. Returns a fresh object — safe to mutate.
+/** Read an effective hidden map, migrating the legacy hidePrPanel field. Returns a fresh object — safe to mutate.
  *
  * DEFAULT_HIDDEN_RIGHT_PANELS is merged UNDER the saved values, so once
  * the user explicitly toggles a default-hidden panel on, their choice wins. */
@@ -106,7 +103,6 @@ export function effectiveHiddenRightPanels(config: RepoConfig | null | undefined
     ...DEFAULT_HIDDEN_RIGHT_PANELS,
     ...(config?.hiddenRightPanels || {})
   }
-  if (config?.hideMergePanel && out.merge === undefined) out.merge = true
   if (config?.hidePrPanel && out.pr === undefined) out.pr = true
   return out
 }
