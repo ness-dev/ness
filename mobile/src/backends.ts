@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import { NessClient } from './ness'
+import { watchLiveness } from './liveness'
 import { labelFor, loadBackends, newId, saveBackends, type SavedBackend } from './storage'
 
 export interface Backends {
@@ -45,16 +46,10 @@ export function useBackends(): Backends {
     setClients(saved.filter((b) => map.has(b.id)).map((b) => map.get(b.id)!))
   }, [saved])
 
-  // Back in the foreground the network may well have changed (home Wi-Fi
-  // again), so don't sit out a backoff that started while away. Connected
-  // clients ignore this, and keepOpen spares one already mid-handshake
-  // (iOS drops sockets while suspended; its own retry may have raced us).
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') live.current.forEach((c) => c.retry({ keepOpen: true }))
-    })
-    return () => sub.remove()
-  }, [])
+  // Probe on foreground + idle heartbeat while there (liveness.ts).
+  // keepOpen in wake() spares a socket already mid-handshake (iOS drops
+  // sockets while suspended; its own retry may have raced us).
+  useEffect(() => watchLiveness(AppState, () => live.current.values()), [])
 
   // Clear the map too: Fast Refresh (and any remount) runs this cleanup and
   // then the reconcile effect again. Leaving closed clients in the map made
