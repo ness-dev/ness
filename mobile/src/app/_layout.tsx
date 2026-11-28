@@ -5,6 +5,7 @@
 //   /w/[wt]         a worktree (path, encoded): header, tab strip, chat
 //   /w/[wt]/tools   the tools panel (the desktop's right column)
 //   /backends       backends sheet (modal)
+//   /settings       phone settings: version, EAS Update check (modal)
 //   /pair?url=      pairing link → adds the backend, then back (or home)
 //   /open?wt=&tab=  link alias, rewritten to /w/[wt]?tab= by +native-intent
 //
@@ -63,6 +64,7 @@ function Shell() {
               worktrees is instant, like the web's picker. */}
           <Stack.Screen name="w/[wt]/index" dangerouslySingular={() => 'worktree'} options={{ animation: 'none' }} />
           <Stack.Screen name="backends" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
         </Stack>
       </KeyboardAvoidingView>
     </SafeAreaView>

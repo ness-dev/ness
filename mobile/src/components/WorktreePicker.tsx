@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Rows3,
   Server,
+  Settings,
   Tag,
   TriangleAlert,
   X
@@ -112,7 +113,8 @@ export function WorktreePicker({
   activeWorktreeId,
   onSelect,
   onClose,
-  onOpenBackends
+  onOpenBackends,
+  onOpenSettings
 }: {
   fleet: Fleet
   merged: MergedWorktreeData
@@ -120,6 +122,7 @@ export function WorktreePicker({
   onSelect: (path: string) => void
   onClose: () => void
   onOpenBackends: () => void
+  onOpenSettings: () => void
 }) {
   const collapse = useCollapse()
   const model = useListModel(fleet, merged, collapse, activeWorktreeId)
@@ -165,6 +168,9 @@ export function WorktreePicker({
           ) : (
             <RefreshCw color={c.dim} size={16} />
           )}
+        </IconBtn>
+        <IconBtn label="Settings" onPress={onOpenSettings}>
+          <Settings color={c.dim} size={16} />
         </IconBtn>
         <IconBtn label="Close" onPress={onClose}>
           <X color={c.dim} size={16} />
