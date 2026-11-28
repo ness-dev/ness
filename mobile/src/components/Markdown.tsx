@@ -19,7 +19,8 @@ import { ASSISTANT_REMARK_PLUGINS, USER_REMARK_PLUGINS } from '../../../src/rend
 import { parseImageAlt, parseImageTitle, resolveLocalImageSrc } from '../../../src/shared/chat-image-src'
 import { c, fs, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
-import { CopyableMessage } from '../chat/CopyText'
+import { SelectableText as T } from './SelectableText'
+import { sameCtx, sameNode, type BlockCtx } from './markdown-memo'
 import { MermaidDiagram } from './MermaidDiagram'
 
 const assistantProcessor = unified().use(remarkParse).use(ASSISTANT_REMARK_PLUGINS).freeze()
@@ -40,10 +41,7 @@ interface Props {
   preserveNewlines?: boolean
 }
 
-interface Ctx {
-  base: TextStyle
-  size: number
-}
+type Ctx = BlockCtx
 
 export const Markdown = memo(function Markdown({ text, size = 14, color = c.fg, italic, preserveNewlines }: Props) {
   const tree = useMemo(() => parse(text, !!preserveNewlines), [text, preserveNewlines])
@@ -58,7 +56,15 @@ function Blocks({ nodes, ctx }: { nodes: readonly RootContent[]; ctx: Ctx }) {
   return <View style={{ gap: 10 }}>{nodes.map((n, i) => <Block key={i} node={n} ctx={ctx} />)}</View>
 }
 
-function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
+// A streamed reply is re-parsed on every token, so every block arrives as a
+// fresh mdast object even though only the last one grew. Skip a block whose
+// node is structurally unchanged (positions aside — they're the only part
+// that moves) so a token re-renders the tail, not the whole message. That
+// matters more with UITextView-backed text, where each span carries its own
+// context provider and a re-render reaches native text measurement.
+const Block = memo(BlockView, (a, b) => sameCtx(a.ctx, b.ctx) && sameNode(a.node, b.node))
+
+function BlockView({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
   switch (node.type) {
     case 'paragraph': {
       // remarkInsight's card: a paragraph renamed via data.hName whose
@@ -73,9 +79,9 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
       return (
         <>
           {hasText && (
-            <Text style={ctx.base}>
+            <T key={grownKey(textOf(node))} style={ctx.base}>
               <Inlines nodes={inline} />
-            </Text>
+            </T>
           )}
           {images.length > 0 && <ImageRow images={images} />}
         </>
@@ -83,9 +89,9 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     }
     case 'heading':
       return (
-        <Text style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
+        <T key={grownKey(textOf(node))} style={[ctx.base, { color: c.fgBright, fontWeight: '600', fontSize: ctx.size + (node.depth <= 2 ? 2 : 0) }]}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'thematicBreak':
       return <View style={{ height: 1, backgroundColor: c.border, marginVertical: 4 }} />
@@ -104,7 +110,7 @@ function Block({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
     case 'table':
       return <TableBlock node={node} ctx={ctx} />
     case 'html':
-      return <Text style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</Text>
+      return <T key={grownKey(node.value)} style={[ctx.base, { fontFamily: mono, fontSize: ctx.size - 1, color: c.dim }]}>{node.value}</T>
     case 'footnoteDefinition':
       return (
         <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -124,44 +130,46 @@ function Inlines({ nodes }: { nodes: readonly PhrasingContent[] }) {
   return <>{nodes.map((n, i) => <Inline key={i} node={n} />)}</>
 }
 
+// Every case renders through T, even bare strings: see SelectableText's
+// nesting rule.
 function Inline({ node }: { node: PhrasingContent }): ReactNode {
   switch (node.type) {
     case 'text':
       // A soft line break inside a paragraph is whitespace, as in HTML.
       // (USER_REMARK_PLUGINS turns them into `break` nodes instead.)
-      return node.value.replace(/\n/g, ' ')
+      return <T>{node.value.replace(/\n/g, ' ')}</T>
     case 'break':
-      return '\n'
+      return <T>{'\n'}</T>
     case 'emphasis':
       return (
-        <Text style={{ fontStyle: 'italic' }}>
+        <T style={{ fontStyle: 'italic' }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'strong':
       return (
-        <Text style={{ fontWeight: '600', color: c.fgBright }}>
+        <T style={{ fontWeight: '600', color: c.fgBright }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'delete':
       return (
-        <Text style={{ textDecorationLine: 'line-through', color: c.dim }}>
+        <T style={{ textDecorationLine: 'line-through', color: c.dim }}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'inlineCode':
-      return <Text style={s.code}>{node.value}</Text>
+      return <T style={s.code}>{node.value}</T>
     case 'link':
       return (
-        <Text style={{ color: c.info, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(node.url)}>
+        <T style={{ color: c.info, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(node.url)}>
           <Inlines nodes={node.children} />
-        </Text>
+        </T>
       )
     case 'footnoteReference':
-      return <Text style={{ color: c.dim, fontSize: fs.xs }}>[{node.label ?? node.identifier}]</Text>
+      return <T style={{ color: c.dim, fontSize: fs.xs }}>[{node.label ?? node.identifier}]</T>
     case 'html':
-      return node.value
+      return <T>{node.value}</T>
     default:
       // image (drawn at paragraph level), imageReference, linkReference.
       return 'children' in node ? <Inlines nodes={(node as { children: PhrasingContent[] }).children} /> : null
@@ -189,17 +197,30 @@ function ListBlock({ node, ctx }: { node: List; ctx: Ctx }) {
 
 function CodeBlock({ code }: { code: string }) {
   return (
-    // Long-press selects just the code (the message's own long-press is
-    // the next one out).
-    <CopyableMessage text={code}>
-      <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
-        <Text style={s.codeBlockText}>{code}</Text>
-      </ScrollView>
-    </CopyableMessage>
+    <ScrollView horizontal style={s.codeBlock} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
+      <T key={grownKey(code)} style={s.codeBlockText}>{code}</T>
+    </ScrollView>
   )
 }
 
-/** Plain text of a node, for sizing table columns. */
+// react-native-uitextview can leave a block clipped when its text grows a
+// line: the native view gets the new text and the taller frame, but its
+// text container keeps the old height, so the new last line is never drawn
+// (and stays missing after the stream ends). A fresh native view lays out
+// correctly, so each selectable root is keyed on its text length — a
+// streamed block only ever grows — and remounts when it changes. With
+// Block memoised that's just the one growing text, not the message; a
+// selection inside the still-streaming text is dropped, which is fine.
+// The key measures source text (textOf), not what's drawn: a soft break
+// is a '\n' in a text value but renders as ' ' (same length), and a hard
+// `break` node adds nothing. Fine for tracking growth, which is all it has
+// to do; keep that in mind before changing either. It doesn't cover a
+// width-only change. The real fix is native (set the frame before the text) — SPIKE.md.
+function grownKey(text: string): string {
+  return String(text.length)
+}
+
+/** Plain text of a node, for sizing table columns and grownKey. */
 function textOf(node: Nodes): string {
   if ('value' in node && typeof node.value === 'string') return node.value
   if ('children' in node) return (node.children as Nodes[]).map(textOf).join('')
@@ -243,9 +264,9 @@ function TableBlock({ node, ctx }: { node: Table; ctx: Ctx }) {
                     borderColor: c.border
                   }}
                 >
-                  <Text style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
+                  <T key={grownKey(cell ? textOf(cell) : '')} style={[ctx.base, { textAlign: align ?? 'left' }, ri === 0 && { fontWeight: '600', color: c.fgBright }]}>
                     {cell && <Inlines nodes={cell.children} />}
-                  </Text>
+                  </T>
                 </View>
               )
             })}

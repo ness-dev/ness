@@ -23,7 +23,6 @@ import { File } from 'expo-file-system'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { Code2, Workflow } from 'lucide-react-native'
 import { c, fs, getThemeMode, themeVersion } from '../theme'
-import { CopyableMessage } from '../chat/CopyText'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PAGE_MODULE: number = require('../../generated/mermaid.html')
@@ -219,8 +218,6 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
   const height = Math.ceil((result.h * shown) / result.w)
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      {/* Long-press selects the diagram's source, as it does on the code. */}
-      <CopyableMessage text={source}>
       <ScrollView
         horizontal
         nestedScrollEnabled
@@ -229,8 +226,8 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
         style={{ borderWidth: 1, borderColor: c.border, borderRadius: 6, backgroundColor: c.panel }}
         contentContainerStyle={{ padding: 12, minWidth: '100%', justifyContent: 'center' }}
       >
-        {/* Touches go to the views around it (the message's long-press,
-            this scroll view), not the page: it's a picture, and strict
+        {/* Touches go to the views around it (this scroll view, the
+            chat list), not the page: it's a picture, and strict
             mode leaves plain links that would navigate the WebView. */}
         <View style={{ width: shown, height }} pointerEvents="none">
           {width > 0 && (
@@ -244,7 +241,6 @@ export const MermaidDiagram = memo(function MermaidDiagram({ source, fallback }:
           )}
         </View>
       </ScrollView>
-      </CopyableMessage>
       <ToggleButton onPress={() => setShowSource(true)} label="Show source">
         <Code2 color={c.faint} size={12} />
       </ToggleButton>
