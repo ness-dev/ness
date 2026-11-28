@@ -3,7 +3,7 @@
 // every state frame through the shared rootReducer. The desktop's
 // multi-backend registry is the same idea — one (transport, store) pair
 // per backend, no cross-backend event routing.
-import { useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { WebSocketClientTransport } from '../../src/shared/transport/transport-websocket'
 import {
   initialState,
@@ -85,6 +85,12 @@ export class NessClient {
     })
   }
 
+  /** Try again now, skipping (and resetting) the reconnect backoff. No-op
+   *  while connected. */
+  retry(): void {
+    this.transport.reconnectNow()
+  }
+
   close(): void {
     this.transport.close()
   }
@@ -109,6 +115,34 @@ export function useNess<T>(client: NessClient, select: (s: AppState) => T): T {
 
 export function useConn(client: NessClient): ConnState {
   return useSyncExternalStore(client.subscribe, client.getConn)
+}
+
+/** ConnState of several clients at once. The returned array keeps its
+ *  identity until one of them changes, so state frames (which also notify
+ *  client subscribers) don't re-render. */
+export function useConns(clients: readonly NessClient[]): readonly ConnState[] {
+  const cache = useRef<readonly ConnState[]>([])
+  const subscribe = useCallback(
+    (l: Listener) => {
+      const unsubs = clients.map((cl) => cl.subscribe(l))
+      return () => unsubs.forEach((u) => u())
+    },
+    [clients]
+  )
+  const get = () => {
+    const next = clients.map((cl) => cl.getConn())
+    const prev = cache.current
+    if (next.length !== prev.length || next.some((cn, i) => cn !== prev[i])) cache.current = next
+    return cache.current
+  }
+  return useSyncExternalStore(subscribe, get)
+}
+
+/** "192.168.1.234" from "ws://192.168.1.234:37292/" — what the user would
+ *  recognise as the machine's address. */
+export function hostOf(wsUrl: string): string {
+  const authority = /^[a-z]+:\/\/([^/?#]+)/i.exec(wsUrl)?.[1] ?? wsUrl
+  return authority.replace(/:\d+$/, '')
 }
 
 export function tabsOf(pane: PaneNode | undefined): TerminalTab[] {

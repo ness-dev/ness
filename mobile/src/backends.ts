@@ -1,6 +1,7 @@
 // Saved backends + one live NessClient per *enabled* backend. Disabling a
 // backend closes its socket; the entry (and its token) stays saved.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AppState } from 'react-native'
 import { NessClient } from './ness'
 import { labelFor, loadBackends, newId, saveBackends, type SavedBackend } from './storage'
 
@@ -43,6 +44,16 @@ export function useBackends(): Backends {
     }
     setClients(saved.filter((b) => map.has(b.id)).map((b) => map.get(b.id)!))
   }, [saved])
+
+  // Back in the foreground the network may well have changed (home Wi-Fi
+  // again), so don't sit out a backoff that started while away. Clients
+  // that are connected ignore this.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') live.current.forEach((c) => c.retry())
+    })
+    return () => sub.remove()
+  }, [])
 
   // Clear the map too: Fast Refresh (and any remount) runs this cleanup and
   // then the reconcile effect again. Leaving closed clients in the map made

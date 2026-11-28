@@ -11,6 +11,7 @@ import { useFleetEntries, useMerged } from '../fleet'
 import { getLastWorktree, useNavStateLoaded } from '../navState'
 import { worktreeHref } from '../routes'
 import { BackendsSheet } from '../components/BackendsSheet'
+import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
 import { c } from '../theme'
 
@@ -22,7 +23,7 @@ export default function Home() {
 }
 
 function PickWorktree() {
-  const { fleet } = useWorkspace()
+  const { fleet, backends } = useWorkspace()
   const worktrees = useMerged(fleet).flatWorktrees
   const navLoaded = useNavStateLoaded()
   const allSnapshotted = useFleetEntries(fleet).length === fleet.getClients().length
@@ -37,5 +38,6 @@ function PickWorktree() {
     if (saved && worktrees.some((w) => w.path === saved)) return <Redirect href={worktreeHref(saved)} />
     if (!saved || allSnapshotted || waitedEnough) return <Redirect href={worktreeHref(worktrees[0].path)} />
   }
-  return <Empty message={fleet.getEntries().length && allSnapshotted ? 'No worktrees yet.' : 'Connecting…'} />
+  if (fleet.getEntries().length && allSnapshotted) return <Empty message="No worktrees yet." />
+  return <Connecting clients={backends.clients} />
 }

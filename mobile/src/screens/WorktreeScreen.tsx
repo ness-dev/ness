@@ -23,10 +23,11 @@ import { AgentIcon } from '../components/AgentIcon'
 import { ChatView } from '../components/ChatView'
 import { WorktreePicker } from '../components/WorktreePicker'
 import { Spin } from '../components/Spin'
+import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
 
 export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
-  const { fleet } = useWorkspace()
+  const { fleet, backends } = useWorkspace()
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -236,8 +237,8 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
           <NonRunnablePlaceholder tab={selectedTab} />
         )}
         {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
-        {!activeWorktree && worktrees.length === 0 && <Empty message={fleet.getEntries().length ? 'No worktrees yet.' : 'Connecting…'} />}
-        {!activeWorktree && worktrees.length > 0 && <Empty message="Connecting…" />}
+        {!activeWorktree && worktrees.length === 0 && fleet.getEntries().length > 0 && <Empty message="No worktrees yet." />}
+        {!activeWorktree && (worktrees.length > 0 || fleet.getEntries().length === 0) && <Connecting clients={backends.clients} />}
 
         {convertMenu && (
           <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
