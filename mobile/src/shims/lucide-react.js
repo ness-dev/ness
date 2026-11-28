@@ -1,14 +1,14 @@
 // Metro serves this for `lucide-react` when the importer lives in ../src
-// (see metro.config.js). lucide-react-native exports the same icon names;
-// each is wrapped so the desktop's `className="icon-sm text-danger"`
-// becomes size/colour props, and animate-spin/pulse still animate.
+// (see metro.config.js). babel-plugin-lucide.js rewrites each named icon
+// import to its lucide-react-native file wrapped in wrapIcon, so the
+// desktop's `className="icon-sm text-danger"` becomes size/colour props
+// and animate-spin/pulse still animate. Only wrapIcon is exported: a
+// lookup of every icon by name is what pulled all of lucide into the
+// bundle.
 const React = require('react')
-const L = require('lucide-react-native')
 const { tw } = require('../tw')
 const { Spin, Pulse } = require('../components/Spin')
 const { c } = require('../theme')
-
-const cache = Object.create(null)
 
 function wrap(name, Icon) {
   function NessIcon({ className, size, color, fill, style, strokeWidth }) {
@@ -30,16 +30,4 @@ function wrap(name, Icon) {
   return NessIcon
 }
 
-module.exports = new Proxy(
-  {},
-  {
-    get(_t, name) {
-      if (name === '__esModule') return true
-      if (typeof name !== 'string') return undefined
-      if (name in cache) return cache[name]
-      const Icon = L[name]
-      cache[name] = Icon ? wrap(name, Icon) : undefined
-      return cache[name]
-    }
-  }
-)
+module.exports = { wrapIcon: wrap }

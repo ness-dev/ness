@@ -42,3 +42,6 @@ yarn-error.*
 
 # Built by metro.config.js (mermaid page asset)
 /generated/
+
+# Inlined xterm.js for the terminal WebView (scripts/gen-xterm-vendor.mjs, postinstall)
+src/terminal/xterm-vendor.generated.ts

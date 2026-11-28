@@ -6,12 +6,8 @@ import { focusTerminalById, markTerminalClosing } from '../components/XTerminal'
 import { useBackend } from '../backend'
 import { useBackendForWorktree } from '../backend-routing'
 import { randomUUID } from '../uuid'
+import { makeTerminalId } from '../../shared/terminal-id'
 import { useSettings } from '../store'
-
-function makeTerminalId(prefix: string, worktreePath: string): string {
-  const safe = worktreePath.replace(/[/\\]/g, '-').replace(/^-+/, '').replace(/-+/g, '-')
-  return `${prefix}-${safe}`
-}
 
 interface UseTabHandlersArgs {
   panes: Record<string, PaneNode>

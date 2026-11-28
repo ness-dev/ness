@@ -66,4 +66,18 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform)
 }
 
+// Metro's transform cache keys on babel.config.js but not on the plugin it
+// loads, nor on lucide's icon files the plugin maps names to. Without this,
+// editing the plugin or bumping lucide-react-native serves stale transforms
+// until someone thinks to run `expo start --clear`.
+const crypto = require('crypto')
+const fs = require('fs')
+const lucideHash = crypto
+  .createHash('sha1')
+  .update(fs.readFileSync(path.join(projectRoot, 'babel-plugin-lucide.js')))
+  // (lucide's exports map hides package.json from require, so read it.)
+  .update(fs.readFileSync(path.join(projectRoot, 'node_modules/lucide-react-native/package.json')))
+  .digest('hex')
+config.cacheVersion = `${config.cacheVersion ?? ''}+lucide-${lucideHash}`
+
 module.exports = config

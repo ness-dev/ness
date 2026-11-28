@@ -16,7 +16,7 @@ import type { CustomTheme } from '../../src/shared/state/settings'
 import { DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, nessieColorById } from '../../src/shared/state/settings'
 import { THEME_OPTIONS } from '../../src/renderer/themes'
 import { customThemeBase, SEMANTIC_KEYS } from '../../src/renderer/theme-apply'
-import { BUILT_IN_PALETTES } from './themes.generated'
+import { BUILT_IN_PALETTES, TERM_PALETTES } from './themes.generated'
 
 export interface Palette {
   app: string
@@ -57,6 +57,10 @@ export const c: Palette = { ...(BUILT_IN_PALETTES.dark as unknown as Palette) }
 let themeMode: 'light' | 'dark' = 'dark'
 /** Resolved mode of the active theme (status bar, keyboard appearance). */
 export const getThemeMode = (): 'light' | 'dark' => themeMode
+let termPalette: Record<string, string> = {}
+/** The active theme's `--term-*` ANSI colours (empty for themes that use
+ *  XTerminal's dark-tuned fallbacks). A custom theme uses its base's. */
+export const getTermPalette = (): Readonly<Record<string, string>> => termPalette
 let version = 0
 export const themeVersion = (): number => version
 
@@ -113,6 +117,7 @@ export function applyTheme(inputs: ThemeInputs): void {
     }
   }
   Object.assign(c, next)
+  termPalette = TERM_PALETTES[baseId] ?? {}
   themeMode = r.mode
   version++
 }
