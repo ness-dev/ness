@@ -490,6 +490,14 @@ export class DemoWorld {
         this.dispatch({ type: 'snooze/clear', payload: path })
         return true
       },
+      'inbox:markSeen': (_path: string, tabId: string) => {
+        this.dispatch({ type: 'inbox/seen', payload: { tabId, ts: this.now() } })
+        return true
+      },
+      'inbox:markPrSeen': (worktreePath: string, fingerprint: string) => {
+        this.dispatch({ type: 'inbox/prSeen', payload: { worktreePath, fingerprint } })
+        return true
+      },
       'repoConfig:set': (repoRoot: string, next: Record<string, unknown>) => {
         const merged: Record<string, unknown> = { ...this.state.repoConfigs.byRepo[repoRoot] }
         for (const [k, v] of Object.entries(next ?? {})) {

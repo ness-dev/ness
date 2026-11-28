@@ -39,13 +39,18 @@ export function InboxView({
   model,
   activeWorktreeId,
   activeTabId,
-  onOpen
+  onOpen,
+  touch = false
 }: {
   model: InboxModel
   activeWorktreeId: string | null
   activeTabId: string | null
   onOpen: (item: InboxItem) => void
+  /** The mobile web picker: 44px targets and a step up in text size,
+   *  matching WorktreeList's touch variant. */
+  touch?: boolean
 }): JSX.Element {
+  const text = touch ? 'text-sm' : 'text-xs'
   // Per-client UI fold state, like the Projects view's group collapse.
   const [open, setOpen] = useState<Partial<Record<InboxSectionKey, boolean>>>({})
   // Ages are minute-granular; re-render on a slow clock so they don't
@@ -71,7 +76,9 @@ export function InboxView({
           <div key={section.key}>
             <button
               onClick={() => setOpen((o) => ({ ...o, [section.key]: !expanded }))}
-              className="w-full flex items-center gap-1 px-3 pt-2 pb-1 text-xs text-faint hover:text-fg transition-colors cursor-pointer"
+              className={`w-full flex items-center gap-1 px-3 text-xs text-faint hover:text-fg transition-colors cursor-pointer ${
+                touch ? 'min-h-11' : 'pt-2 pb-1'
+              }`}
               title={expanded ? `Collapse ${section.label}` : `Expand ${section.label}`}
             >
               {expanded ? (
@@ -93,7 +100,7 @@ export function InboxView({
                     key={item.key}
                     onClick={() => onOpen(item)}
                     data-inbox-item={item.key}
-                    className={`mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-2 py-1.5 flex gap-2 items-start cursor-pointer transition-colors ${
+                    className={`mx-1.5 w-[calc(100%-0.75rem)] rounded-md text-left px-2 flex gap-2 ${touch ? 'min-h-11 py-2.5' : 'py-1.5'} items-start cursor-pointer transition-colors ${
                       active ? 'bg-surface text-fg-bright' : 'text-muted hover:bg-panel-raised hover:text-fg'
                     }`}
                   >
@@ -105,7 +112,7 @@ export function InboxView({
                       <span className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${DOT[item.section]}`} />
                     )}
                     <span className="min-w-0 flex-1 flex flex-col">
-                      <span className="flex items-baseline gap-1 text-xs min-w-0">
+                      <span className={`flex items-baseline gap-1 ${text} min-w-0`}>
                         <span className="truncate">
                           {item.worktreeLabel !== item.repoName && (
                             <span className="text-faint">{item.repoName} · </span>
@@ -119,7 +126,7 @@ export function InboxView({
                       </span>
                       {item.why && (
                         <span
-                          className={`text-xs line-clamp-2 break-words ${
+                          className={`${text} line-clamp-2 break-words ${
                             item.section === 'seen' ? 'text-faint' : 'text-fg'
                           }`}
                           title={item.why}

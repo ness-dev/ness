@@ -6,10 +6,11 @@
 // when changing either. Which worktree is shown is the route (/w/[wt]);
 // the picker is an overlay on this screen, like the web's dropdown.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { AppState as RNAppState, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { Redirect, router } from 'expo-router'
 import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
 import { supportsChat } from '../../../src/shared/agent-registry'
+import { buildInboxModelFromMerged, prEventFor, type InboxItem } from '../../../src/renderer/inbox-model'
 import { makeTerminalId } from '../../../src/shared/terminal-id'
 import type { PtyStatus, TerminalTab } from '../../../src/shared/state/terminals'
 import { haptic } from '../haptics'
@@ -104,6 +105,47 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
     return () => clearTimeout(t)
   }, [selectedTabId, tabs.length])
 
+  // Inbox: the same model the desktop sidebar builds, over the fleet's
+  // merged maps, so every host's tabs are in one list.
+  const inboxModel = useMemo(() => buildInboxModelFromMerged(merged), [merged])
+  const handleOpenInboxItem = useCallback(
+    (item: InboxItem) => {
+      haptic.select()
+      setPickerOpen(false)
+      if (item.tabId) rememberTab(item.worktreePath, item.tabId)
+      if (item.prFingerprint) {
+        void fleet.client(merged.pathBackendId[item.worktreePath])?.api.markInboxPrSeen(item.worktreePath, item.prFingerprint)
+      }
+      if (item.worktreePath !== wtPath) router.replace(worktreeHref(item.worktreePath))
+    },
+    [fleet, merged.pathBackendId, wtPath]
+  )
+
+  // Looking at a tab reads it, as on the desktop — but only while the app
+  // is in the foreground and the picker isn't covering it. Re-runs when the
+  // shown tab's turn ends while you watch, and when the app comes back.
+  const [appActive, setAppActive] = useState(RNAppState.currentState === 'active')
+  useEffect(() => {
+    const sub = RNAppState.addEventListener('change', (st) => setAppActive(st === 'active'))
+    return () => sub.remove()
+  }, [])
+  const shownTurnEndedAt = selectedTabId ? (merged.inboxTurns[selectedTabId]?.endedAt ?? 0) : 0
+  const shownSeenAt = selectedTabId ? (merged.inboxSeenAt[selectedTabId] ?? 0) : 0
+  useEffect(() => {
+    if (!appActive || pickerOpen || !activeWorktree || !client || !selectedTabId) return
+    if (shownTurnEndedAt <= shownSeenAt) return
+    void client.api.markInboxSeen(activeWorktree.path, selectedTabId)
+  }, [appActive, pickerOpen, activeWorktree, client, selectedTabId, shownTurnEndedAt, shownSeenAt])
+  const shownPrFingerprint = activeWorktree
+    ? (prEventFor(merged.prStatuses[activeWorktree.path], !!merged.mergedPaths[activeWorktree.path])?.fingerprint ?? null)
+    : null
+  const shownPrSeen = activeWorktree ? merged.inboxPrSeen[activeWorktree.path] : undefined
+  useEffect(() => {
+    if (!appActive || pickerOpen || !activeWorktree || !client || !shownPrFingerprint) return
+    if (shownPrSeen === shownPrFingerprint) return
+    void client.api.markInboxPrSeen(activeWorktree.path, shownPrFingerprint)
+  }, [appActive, pickerOpen, activeWorktree, client, shownPrFingerprint, shownPrSeen])
+
   // Switching worktrees replaces the route: there's no "back" to the
   // previous worktree, same as the web's picker.
   const handleSelectWorktree = useCallback(
@@ -191,7 +233,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
           }}
           style={({ pressed }) => [s.pickerBtn, (pickerOpen || pressed) && { backgroundColor: c.surface }]}
           accessibilityRole="button"
-          accessibilityLabel="Switch worktree"
+          accessibilityLabel={inboxModel.needsYou.length > 0 ? `Switch worktree. ${inboxModel.needsYou.length} in inbox` : 'Switch worktree'}
         >
           {activeWorktree ? (
             <>
@@ -214,7 +256,12 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
                   {label}
                 </Text>
               </View>
-              <ChevronDown color={c.dim} size={14} style={{ transform: [{ rotate: pickerOpen ? '180deg' : '0deg' }] }} />
+              <View>
+                <ChevronDown color={c.dim} size={14} style={{ transform: [{ rotate: pickerOpen ? '180deg' : '0deg' }] }} />
+                {/* Something in the Inbox needs you — tells you to open the
+                    picker without opening it. */}
+                {inboxModel.needsYou.length > 0 && <View style={s.inboxDot} />}
+              </View>
             </>
           ) : (
             <Text style={{ color: c.fg, fontSize: fs.sm }}>Select a worktree</Text>
@@ -356,6 +403,9 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
             fleet={fleet}
             merged={merged}
             activeWorktreeId={activeWorktree?.path ?? null}
+            inboxModel={inboxModel}
+            activeTabId={selectedTabId}
+            onOpenInboxItem={handleOpenInboxItem}
             onSelect={handleSelectWorktree}
             onClose={() => setPickerOpen(false)}
             // One overlay at a time: the picker is accessibilityViewIsModal,
@@ -461,6 +511,7 @@ function NonRunnablePlaceholder({ tab }: { tab: TerminalTab }) {
 }
 
 const s = themed(() => StyleSheet.create({
+  inboxDot: { position: 'absolute', top: -5, right: -4, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent, borderWidth: 1, borderColor: c.panel },
   // 45 = 44pt tap height + the 1px bottom border.
   header: { height: 45, flexDirection: 'row', borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
   pickerBtn: {

@@ -13,12 +13,14 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import {
   AlarmClock,
   AlertCircle,
+  BellDot,
   ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleCheck,
   Ghost,
   GitPullRequest,
+  Inbox,
   Layers,
   ListChecks,
   Loader2,
@@ -54,6 +56,12 @@ import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
 import { Connecting } from './Connecting'
+import { InboxList } from './InboxList'
+import type { InboxItem, InboxModel } from '../../../src/renderer/inbox-model'
+
+// Survives the picker unmounting on close, so it reopens on the view you
+// left — per-client UI, like the desktop sidebar's localStorage flag.
+let lastView: 'projects' | 'inbox' = 'projects'
 
 const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
   idle: { color: c.faint, pulse: false },
@@ -116,11 +124,17 @@ export function WorktreePicker({
   onSelect,
   onClose,
   onOpenBackends,
-  onOpenSettings
+  onOpenSettings,
+  inboxModel,
+  activeTabId,
+  onOpenInboxItem
 }: {
   fleet: Fleet
   merged: MergedWorktreeData
   activeWorktreeId: string | null
+  inboxModel: InboxModel
+  activeTabId: string | null
+  onOpenInboxItem: (item: InboxItem) => void
   onSelect: (path: string) => void
   onClose: () => void
   onOpenBackends: () => void
@@ -134,6 +148,12 @@ export function WorktreePicker({
   const [editingAlias, setEditingAlias] = useState<string | null>(null)
   const [sheet, setSheet] = useState<{ title: string; subtitle?: string; actions: Action[] } | null>(null)
   const repoCount = merged.repoRoots.length
+  const [view, setViewState] = useState(lastView)
+  const setView = (v: 'projects' | 'inbox'): void => {
+    lastView = v
+    setViewState(v)
+  }
+  const needsYou = inboxModel.needsYou.length
 
   const ctx: Ctx = {
     fleet,
@@ -152,9 +172,18 @@ export function WorktreePicker({
     <View style={s.sheet} accessibilityViewIsModal>
       <View style={s.head}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={s.headTitle}>WORKTREES</Text>
+          <Text style={s.headTitle}>{view === 'inbox' ? 'INBOX' : 'WORKTREES'}</Text>
           {!ctx.multiBackend && fleet.getClients().some((cl) => cl.demo) && <DemoBadge />}
         </View>
+        {/* Same affordance as the desktop header: a quiet inbox icon, a
+            bell only when something needs you. */}
+        <IconBtn
+          label={view === 'inbox' ? 'Back to worktrees' : needsYou > 0 ? `Inbox, ${needsYou} need you` : 'Inbox'}
+          onPress={() => setView(view === 'inbox' ? 'projects' : 'inbox')}
+          active={view === 'inbox'}
+        >
+          {needsYou > 0 ? <BellDot color={view === 'inbox' ? c.fgBright : c.accent} size={16} /> : <Inbox color={view === 'inbox' ? c.fgBright : c.dim} size={16} />}
+        </IconBtn>
         <IconBtn
           label={collapse.unifiedRepos ? 'Split by repo' : 'Merge repos into one list'}
           disabled={repoCount <= 1}
@@ -183,7 +212,10 @@ export function WorktreePicker({
       </View>
       <ScrollView contentContainerStyle={{ paddingVertical: 6, paddingBottom: 40 }} stickyHeaderIndices={undefined} keyboardShouldPersistTaps="handled">
         {entries.length === 0 && <Connecting clients={fleet.getClients()} onOpenBackends={onOpenBackends} inline />}
-        {model.sections.map((section, i) => {
+        {view === 'inbox' && entries.length > 0 && (
+          <InboxList model={inboxModel} activeWorktreeId={activeWorktreeId} activeTabId={activeTabId} onOpen={onOpenInboxItem} />
+        )}
+        {view === 'projects' && model.sections.map((section, i) => {
           const prev = model.sections[i - 1]
           const gap = !prev ? 0 : !prev.unified && !prev.collapsed && !prev.holdsActive ? 12 : 6
           return (
@@ -772,13 +804,14 @@ function ActionSheet({ sheet, onClose }: { sheet: { title: string; subtitle?: st
   )
 }
 
-function IconBtn({ label, onPress, disabled, children }: { label: string; onPress: () => void; disabled?: boolean; children: ReactNode }) {
+function IconBtn({ label, onPress, disabled, active, children }: { label: string; onPress: () => void; disabled?: boolean; active?: boolean; children: ReactNode }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       accessibilityLabel={label}
-      style={({ pressed }) => [s.icon44, { opacity: disabled ? 0.4 : 1 }, pressed && { backgroundColor: c.surface }]}
+      accessibilityState={active === undefined ? undefined : { selected: active }}
+      style={({ pressed }) => [s.icon44, { opacity: disabled ? 0.4 : 1 }, (pressed || active) && { backgroundColor: c.surface }]}
     >
       {children}
     </Pressable>

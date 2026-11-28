@@ -21,7 +21,7 @@ import { applyTheme, effectiveAppBg } from './theme-apply'
 import { getBackend } from './backend'
 import { HotkeysProvider, Tooltip } from './components/Tooltip'
 import { Sidebar, type SidebarView } from './components/Sidebar'
-import { buildInboxModel, nextInboxItem, prEventFor, type InboxItem } from './inbox-model'
+import { buildInboxModelFromMerged, nextInboxItem, prEventFor, type InboxItem } from './inbox-model'
 import { showToast } from './toast'
 import { ResizeHandle } from './components/ResizeHandle'
 import { AppTitleSegment } from './components/AppTitleSegment'
@@ -1050,25 +1050,7 @@ function DesktopApp(): JSX.Element {
   useEffect(() => {
     localStorage.setItem('harness:sidebarView', sidebarView)
   }, [sidebarView])
-  const inboxModel = useMemo(
-    () =>
-      buildInboxModel({
-        worktrees: mergedData.flatWorktrees,
-        panes: mergedData.panes,
-        statuses: mergedData.statuses,
-        statusSince: mergedData.statusSince,
-        pendingTools: mergedData.pendingTools,
-        prStatuses: mergedData.prStatuses,
-        mergedPaths: mergedData.mergedPaths,
-        aliases: mergedData.aliases,
-        inbox: {
-          turns: mergedData.inboxTurns,
-          seenAt: mergedData.inboxSeenAt,
-          prSeen: mergedData.inboxPrSeen
-        }
-      }),
-    [mergedData]
-  )
+  const inboxModel = useMemo(() => buildInboxModelFromMerged(mergedData), [mergedData])
   const handleOpenInboxItem = useCallback(
     (item: InboxItem) => {
       if (item.tabId && item.paneId) handleSidebarSelectTab(item.worktreePath, item.paneId, item.tabId)

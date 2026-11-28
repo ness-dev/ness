@@ -10,6 +10,7 @@ import { getLeaves } from '../shared/state/terminals'
 import type { PRStatus } from '../shared/state/prs'
 import type { Worktree } from '../shared/state/worktrees'
 import type { InboxState } from '../shared/state/inbox'
+import type { MergedWorktreeData } from './merge-backend-states'
 import { QUESTION_TOOL_NAME } from '../shared/state/json-claude'
 import { tabLabel } from '../shared/agent-tabs'
 import { formatPendingTool } from './pending-tool'
@@ -211,6 +212,23 @@ export function buildInboxModel(input: InboxModelInput): InboxModel {
     .filter((s) => INBOX_SECTIONS.find((d) => d.key === s.key)?.needsYou)
     .flatMap((s) => s.items)
   return { sections, needsYou }
+}
+
+/** The model straight from the merged multi-backend maps — the one input
+ *  shape every client already has (desktop App, the mobile web client, and
+ *  the Expo app's fleet), so none of them re-plumbs the fields. */
+export function buildInboxModelFromMerged(merged: MergedWorktreeData): InboxModel {
+  return buildInboxModel({
+    worktrees: merged.flatWorktrees,
+    panes: merged.panes,
+    statuses: merged.statuses,
+    statusSince: merged.statusSince,
+    pendingTools: merged.pendingTools,
+    prStatuses: merged.prStatuses,
+    mergedPaths: merged.mergedPaths,
+    aliases: merged.aliases,
+    inbox: { turns: merged.inboxTurns, seenAt: merged.inboxSeenAt, prSeen: merged.inboxPrSeen }
+  })
 }
 
 /** The item the jump hotkey opens: the top needs-you item that isn't the
