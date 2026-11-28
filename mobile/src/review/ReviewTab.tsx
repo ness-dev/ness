@@ -8,10 +8,10 @@
 //   [✓] path/to/file ▾                            ‹  ›
 //   diff, comments under their lines; tap a line to comment
 //
-// Not ported: commit ranges (the desktop's shift-click; a range picked
-// there still shows and diffs here), the file tree's folders, word wrap,
-// the "r" hotkey, and the tab strip's "(n/m)" progress.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// Not ported: picking a commit range (the desktop's shift-click; a range
+// picked there still shows and diffs here), the file tree's folders, word
+// wrap, the "r" hotkey, and the tab strip's "(n/m)" progress.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { ChevronDown, ChevronLeft, ChevronRight, GitCommitHorizontal, MessageSquare, Send } from 'lucide-react-native'
 import type { BranchCommit, ChangedFile } from '../../../src/renderer/types'
@@ -44,9 +44,25 @@ type SheetState =
   | { kind: 'send' }
   | { kind: 'sendSubmission'; submission: ReviewSubmission }
 
+/** What the desktop keeps by keeping ReviewPane mounted: the phone
+ *  unmounts a tab's body when another tab is selected, so the per-client
+ *  bits (which view, which file, what's ticked as reviewed) are kept here
+ *  per tab for the session. */
+interface TabMemory {
+  view: 'diff' | 'reviews'
+  selectedFile: string | null
+  reviewed: Set<string>
+  /** Selection the reviewed set belongs to. */
+  scopeKey: string
+}
+const memory = new Map<string, TabMemory>()
+
 export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; worktreePath: string; tab: TerminalTab }) {
   const scope = reviewScope(tab)
   const scopeKey = scope.kind === 'branch' ? 'branch' : scope.kind === 'commit' ? scope.hash : `${scope.from}..${scope.to}`
+  const memKey = `${client.id}:${tab.id}`
+  const [saved] = useState(() => memory.get(memKey))
+  const reviewedScope = useRef(saved?.scopeKey ?? scopeKey)
   // Per-worktree selectors: the reducer keeps these arrays' identity until
   // this worktree's reviews change.
   const comments = useNess(client, (s) => s.reviews.byPath[worktreePath]?.comments ?? EMPTY_REVIEW_COMMENTS)
@@ -57,15 +73,20 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
   const reviewerTabId = useNess(client, (s) => worktreeReviewStatus(s, worktreePath).reviewerTabId)
   const reviewerStatus = useNess(client, (s) => worktreeReviewStatus(s, worktreePath).reviewerStatus)
 
-  const [view, setView] = useState<'diff' | 'reviews'>('diff')
+  const [view, setView] = useState<'diff' | 'reviews'>(saved?.view ?? 'diff')
   const [commits, setCommits] = useState<BranchCommit[]>([])
   const [files, setFiles] = useState<ChangedFile[] | null>(null)
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [reviewed, setReviewed] = useState<Set<string>>(() => new Set())
+  const [selectedFile, setSelectedFile] = useState<string | null>(saved?.selectedFile ?? null)
+  const [reviewed, setReviewed] = useState<Set<string>>(() => (saved && saved.scopeKey === scopeKey ? saved.reviewed : new Set()))
+  useEffect(() => {
+    memory.set(memKey, { view, selectedFile, reviewed, scopeKey: reviewedScope.current })
+  }, [memKey, view, selectedFile, reviewed])
   const [sheet, setSheet] = useState<SheetState | null>(null)
   const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [jumpMiss, setJumpMiss] = useState<string | null>(null)
-  const [pendingJump, setPendingJump] = useState<string | null>(null)
+  // File of a jump that had to widen the selection to the whole branch,
+  // checked once that file list arrives.
+  const pendingJump = useRef<string | null>(null)
 
   const tabs = useMemo(() => tabsOf(tree), [tree])
   const tabLabels = useMemo(() => new Map(tabs.map((t) => [t.id, tabLabel(t)])), [tabs])
@@ -106,10 +127,18 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
     request.then(
       (result) => {
         if (cancelled) return
+        const pending = pendingJump.current
+        if (pending && scope.kind === 'branch') {
+          pendingJump.current = null
+          if (!result.some((f) => f.path === pending)) setJumpMiss(pending)
+        }
         setFiles(result)
         setSelectedFile((prev) => (prev && result.some((f) => f.path === prev) ? prev : (result[0]?.path ?? null)))
-        // The reviewed set belongs to the previous file set.
-        setReviewed(new Set())
+        // The reviewed set belongs to the previous selection's files.
+        if (reviewedScope.current !== scopeKey) {
+          reviewedScope.current = scopeKey
+          setReviewed(new Set())
+        }
       },
       () => !cancelled && setFiles([])
     )
@@ -119,14 +148,6 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
     // scopeKey stands in for scope's fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, worktreePath, scopeKey])
-
-  // A jump that had to widen the selection to the whole branch, checked
-  // once that file list arrives.
-  useEffect(() => {
-    if (!pendingJump || !files || scope.kind !== 'branch') return
-    setPendingJump(null)
-    if (!files.some((f) => f.path === pendingJump)) setJumpMiss(pendingJump)
-  }, [pendingJump, files, scope.kind])
 
   // Re-anchor against HEAD on open and whenever a file is opened.
   useEffect(() => {
@@ -193,7 +214,7 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
           setJumpMiss(cm.filePath)
           return
         }
-        setPendingJump(cm.filePath)
+        pendingJump.current = cm.filePath
         void client.api.panesSetReviewSelection(worktreePath, tab.id, undefined, undefined)
       }
       setSelectedFile(cm.filePath)
