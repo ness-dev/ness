@@ -115,20 +115,6 @@ import type {
 } from '../shared/state/terminals'
 export type { AgentKind, PtyStatus, PendingTool, SplitDirection, TerminalTab, WorkspacePane, PaneNode, PaneLeaf, PaneSplit }
 
-export interface PersistedTab {
-  id: string
-  type: 'agent' | 'shell'
-  label: string
-  agentKind?: AgentKind
-  sessionId?: string
-}
-
-export interface PersistedPane {
-  id: string
-  tabs: PersistedTab[]
-  activeTabId: string
-}
-
 import type { UpdaterStatus } from '../shared/state/updater'
 export type { UpdaterStatus }
 
