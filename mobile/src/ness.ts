@@ -99,18 +99,20 @@ export class NessClient {
    *  socket mid-handshake), and check an open socket still answers. */
   wake(): void {
     this.transport.reconnectNow({ keepOpen: true })
-    void this.checkAlive()
+    void this.checkAlive({ hideStale: true })
   }
 
-  /** iOS reports a socket that died while suspended as OPEN. One that
-   *  doesn't answer is dropped and reconnected, and its data no longer
-   *  counts as live: Connecting / "Can't reach" takes over until the new
-   *  snapshot lands, instead of the pre-sleep state passing for current.
-   *  An ordinary drop keeps showing the last state as before; this is the
-   *  case where it's likely stale. */
-  async checkAlive(opts?: { ifIdleMs?: number }): Promise<void> {
-    const r = await this.transport.probe(PROBE_TIMEOUT_MS, opts)
-    if (r !== 'dead' || this.conn.connected) return
+  /** Probe an open socket; one that doesn't answer is dropped and
+   *  reconnected without backoff (iOS reports a socket that died while
+   *  suspended as OPEN). `hideStale` (wake only) also stops its data
+   *  counting as live: Connecting / "Can't reach" takes over until the new
+   *  snapshot lands, instead of hours-old state passing for current. The
+   *  heartbeat leaves it up, like an ordinary drop: that data is seconds
+   *  old, and a missed probe there is as likely a slow hop or a stalled
+   *  Mac as a dead link, which shouldn't throw the user off their screen. */
+  async checkAlive(opts: { ifIdleMs?: number; hideStale?: boolean } = {}): Promise<void> {
+    const r = await this.transport.probe(PROBE_TIMEOUT_MS, { ifIdleMs: opts.ifIdleMs })
+    if (r !== 'dead' || !opts.hideStale || this.conn.connected) return
     this.conn = { connected: false, hasSnapshot: false }
     this.emit()
   }

@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import { NessClient } from './ness'
+import { watchLiveness } from './liveness'
 import { labelFor, loadBackends, newId, saveBackends, type SavedBackend } from './storage'
-
-const HEARTBEAT_MS = 30_000
 
 export interface Backends {
   loaded: boolean
@@ -47,40 +46,10 @@ export function useBackends(): Backends {
     setClients(saved.filter((b) => map.has(b.id)).map((b) => map.get(b.id)!))
   }, [saved])
 
-  // Back in the foreground the network may well have changed (home Wi-Fi
-  // again), so don't sit out a backoff that started while away, and check
-  // that a socket still reading OPEN really is (wake()). keepOpen spares
-  // one already mid-handshake (iOS drops sockets while suspended; its own
-  // retry may have raced us). While foregrounded, a heartbeat catches a
-  // Wi-Fi change with the app open; it only probes a connection that's
-  // received nothing for a whole interval, so it costs one tiny round trip
-  // per idle 30s, and it stops in the background.
-  useEffect(() => {
-    let beat: ReturnType<typeof setInterval> | null = null
-    const startBeat = () => {
-      beat ??= setInterval(
-        () => live.current.forEach((c) => void c.checkAlive({ ifIdleMs: HEARTBEAT_MS })),
-        HEARTBEAT_MS
-      )
-    }
-    const stopBeat = () => {
-      if (beat) clearInterval(beat)
-      beat = null
-    }
-    if (AppState.currentState === 'active') startBeat()
-    const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') {
-        live.current.forEach((c) => c.wake())
-        startBeat()
-      } else if (st === 'background') {
-        stopBeat()
-      }
-    })
-    return () => {
-      sub.remove()
-      stopBeat()
-    }
-  }, [])
+  // Probe on foreground + idle heartbeat while there (liveness.ts).
+  // keepOpen in wake() spares a socket already mid-handshake (iOS drops
+  // sockets while suspended; its own retry may have raced us).
+  useEffect(() => watchLiveness(AppState, () => live.current.values()), [])
 
   // Clear the map too: Fast Refresh (and any remount) runs this cleanup and
   // then the reconcile effect again. Leaving closed clients in the map made
