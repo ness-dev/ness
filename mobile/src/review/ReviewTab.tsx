@@ -34,7 +34,7 @@ import { Empty } from '../components/Empty'
 import { ReviewDiff } from './ReviewDiff'
 import { LatestReviewBanner, ReviewerBanner, ReviewsView } from './ReviewsView'
 import { CommitsSheet, ComposeSheet, FilesSheet, ReviewedBox, SendSheet, ThreadSheet, authorNameFor } from './ReviewSheets'
-import { commentCounts, perFileCounts, reviewScope, worktreeReviewStatus } from './review-model'
+import { commentCounts, jumpPlan, perFileCounts, reviewScope, reviewedCount, worktreeReviewStatus } from './review-model'
 
 type SheetState =
   | { kind: 'files' }
@@ -127,13 +127,12 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
     request.then(
       (result) => {
         if (cancelled) return
-        const pending = pendingJump.current
-        if (pending && scope.kind === 'branch') {
-          pendingJump.current = null
-          if (!result.some((f) => f.path === pending)) setJumpMiss(pending)
-        }
+        const pending = scope.kind === 'branch' ? pendingJump.current : null
+        pendingJump.current = scope.kind === 'branch' ? null : pendingJump.current
+        const jumpHit = !!pending && result.some((f) => f.path === pending)
+        if (pending && !jumpHit) setJumpMiss(pending)
         setFiles(result)
-        setSelectedFile((prev) => (prev && result.some((f) => f.path === prev) ? prev : (result[0]?.path ?? null)))
+        setSelectedFile((prev) => (jumpHit ? pending : prev && result.some((f) => f.path === prev) ? prev : (result[0]?.path ?? null)))
         // The reviewed set belongs to the previous selection's files.
         if (reviewedScope.current !== scopeKey) {
           reviewedScope.current = scopeKey
@@ -209,15 +208,23 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
     (cm: ReviewComment) => {
       setJumpMiss(null)
       setSheet(null)
-      if (!filesInView.has(cm.filePath)) {
-        if (scope.kind === 'branch') {
-          setJumpMiss(cm.filePath)
-          return
-        }
-        pendingJump.current = cm.filePath
-        void client.api.panesSetReviewSelection(worktreePath, tab.id, undefined, undefined)
+      const plan = jumpPlan(cm.filePath, filesInView, scope.kind)
+      if (plan === 'miss') {
+        setJumpMiss(cm.filePath)
+        return
       }
-      setSelectedFile(cm.filePath)
+      if (plan === 'widen') {
+        // The file is selected when the branch's list lands (the fetch
+        // above), not now: until then it isn't in `files`, and the body
+        // would flash "Select a file". The selection lives on the shared
+        // tab, so this widens it on desktop too, as ReviewPane does.
+        pendingJump.current = cm.filePath
+        client.api.panesSetReviewSelection(worktreePath, tab.id, undefined, undefined).catch(() => {
+          if (pendingJump.current === cm.filePath) pendingJump.current = null
+        })
+      } else {
+        setSelectedFile(cm.filePath)
+      }
       setFocus((prev) => ({ id: cm.id, nonce: (prev?.nonce ?? 0) + 1 }))
       setView('diff')
     },
@@ -239,8 +246,9 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
 
   const latest = submissions.at(-1)
   const reviewing = reviewKind === 'reviewing' ? { tabId: reviewerTabId, status: reviewerStatus } : null
-  const allReviewed = !!files && files.length > 0 && reviewed.size === files.length
-  const progress = files && files.length > 0 ? reviewed.size / files.length : 0
+  const reviewedN = files ? reviewedCount(files, reviewed) : 0
+  const allReviewed = !!files && files.length > 0 && reviewedN === files.length
+  const progress = files && files.length > 0 ? reviewedN / files.length : 0
   const scopeLabel =
     scope.kind === 'branch' ? 'All commits' : scope.kind === 'commit' ? shortOf(commits, scope.hash) : `${shortOf(commits, scope.from)}…${shortOf(commits, scope.to)}`
 
@@ -322,7 +330,7 @@ export function ReviewTab({ client, worktreePath, tab }: { client: NessClient; w
             </Text>
             <View style={{ flex: 1 }} />
             <Text style={{ color: allReviewed ? c.success : c.faint, fontSize: fs.xs, fontVariant: ['tabular-nums'], paddingRight: 12 }}>
-              {allReviewed ? 'All reviewed' : `${reviewed.size}/${files?.length ?? 0} reviewed`}
+              {allReviewed ? 'All reviewed' : `${reviewedN}/${files?.length ?? 0} reviewed`}
             </Text>
           </View>
           <View style={{ height: 2, backgroundColor: c.border }}>

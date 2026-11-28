@@ -2,12 +2,16 @@
 // status icon mapping, and the review page's HTML hooks.
 import { describe, expect, it } from 'vitest'
 import type { ReviewComment, ReviewSubmission } from '../../src/shared/state/reviews'
+import { initialState, rootReducer, type AppState } from '../../src/shared/state'
 import { unifiedDiff } from '../src/viewer/diff-model'
 import { diffHtml, markRowJs, revealThreadJs, setThreadsJs } from '../src/viewer/code-html'
 import {
   commentCounts,
   commentLocation,
+  jumpPlan,
   perFileCounts,
+  reviewedCount,
+  worktreeReviewStatus,
   placeCommentsInDiff,
   reviewIconSpec,
   reviewScope,
@@ -202,5 +206,60 @@ describe('review page', () => {
     expect(js).not.toContain('</script>')
     expect(markRowJs(null)).toContain('__mark(null)')
     expect(revealThreadJs('a"b')).toContain('"a\\"b"')
+  })
+})
+
+describe('reviewedCount', () => {
+  it('counts only ticks on files still listed', () => {
+    // a, b, c ticked; a commit drops a and adds d.
+    const ticked = new Set(['a', 'b', 'c'])
+    expect(reviewedCount([{ path: 'b' }, { path: 'c' }, { path: 'd' }], ticked)).toBe(2)
+    expect(reviewedCount([], ticked)).toBe(0)
+  })
+})
+
+describe('jumpPlan', () => {
+  const inView = new Set(['a.ts'])
+  it('shows a file in view, widens a narrowed selection, and gives up on the whole branch', () => {
+    expect(jumpPlan('a.ts', inView, 'commit')).toBe('show')
+    expect(jumpPlan('b.ts', inView, 'commit')).toBe('widen')
+    expect(jumpPlan('b.ts', inView, 'range')).toBe('widen')
+    expect(jumpPlan('b.ts', inView, 'branch')).toBe('miss')
+  })
+})
+
+describe('worktreeReviewStatus', () => {
+  const WT = '/wt'
+  const reviewer = { kind: 'agent' as const, tabId: 'rev' }
+  const withPanes = (s: AppState, tabIds: string[]) =>
+    rootReducer(s, {
+      type: 'terminals/panesForWorktreeChanged',
+      payload: {
+        worktreePath: WT,
+        panes: { type: 'leaf', id: 'p', activeTabId: tabIds[0] ?? '', tabs: tabIds.map((id) => ({ id, type: 'json-claude' as const, label: id })) }
+      }
+    })
+  let s = withPanes(initialState, ['author', 'rev'])
+  s = rootReducer(s, {
+    type: 'reviews/requestRecorded',
+    payload: { worktreePath: WT, request: { id: 'q', requester: { kind: 'agent', tabId: 'author' }, reviewer, context: '', source: 'user', reused: false, createdAt: 1 } }
+  })
+
+  it('follows the reviewer’s live status, without re-deriving on unrelated events', () => {
+    expect(worktreeReviewStatus(s, WT)).toMatchObject({ kind: 'reviewing', reviewerTabId: 'rev', reviewerStatus: undefined })
+    const busy = rootReducer(s, { type: 'terminals/statusChanged', payload: { id: 'rev', status: 'processing', pendingTool: null } })
+    expect(worktreeReviewStatus(busy, WT).reviewerStatus).toBe('processing')
+  })
+
+  it('recomputes when the reviews or the panes change', () => {
+    const submitted = rootReducer(s, {
+      type: 'reviews/submissionAdded',
+      payload: { worktreePath: WT, submission: { id: 's', author: reviewer, verdict: 'approve', summary: '', commentIds: [], createdAt: 2, state: 'sent' } }
+    })
+    expect(worktreeReviewStatus(submitted, WT).kind).toBe('approve')
+    // The reviewer's tab closing ends a round that never finished.
+    const closed = withPanes(s, ['author'])
+    expect(worktreeReviewStatus(closed, WT).kind).toBe('none')
+    expect(worktreeReviewStatus(s, WT).kind).toBe('reviewing')
   })
 })

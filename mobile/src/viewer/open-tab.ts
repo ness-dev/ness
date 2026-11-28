@@ -50,10 +50,25 @@ export function openViewerTab(
 
 // A review tab's id is minted by main (PanesFSM.openReviewTab, one per
 // worktree), so the phone can't remember it up front. It remembers that it
-// asked, and the worktree screen selects the tab once it lands.
-const awaitingReview = new Set<string>()
+// asked, and the worktree screen selects the tab once it lands. The ask
+// expires (or is dropped when the request fails) so a review tab opened
+// later from desktop doesn't pull the phone off what it's showing.
+const AWAIT_REVIEW_MS = 10_000
+const awaitingReview = new Map<string, number>()
 const reviewListeners = new Set<() => void>()
 let reviewVersion = 0
+const bumpReview = () => {
+  reviewVersion++
+  reviewListeners.forEach((l) => l())
+}
+const subscribeReview = (l: () => void) => {
+  reviewListeners.add(l)
+  return () => {
+    reviewListeners.delete(l)
+  }
+}
+const getReviewVersion = () => reviewVersion
+const awaitKey = (clientId: string, worktreePath: string) => `${clientId}::${worktreePath}`
 
 /** The desktop's "Review changes": select the worktree's review tab,
  *  opening one if there isn't one yet. */
@@ -63,26 +78,38 @@ export function openReviewTab(client: NessClient, worktreePath: string, openTabs
     rememberTab(worktreePath, existing.id)
     return
   }
-  awaitingReview.add(worktreePath)
-  reviewVersion++
-  reviewListeners.forEach((l) => l())
-  void client.api.panesOpenReview(worktreePath)
+  const key = awaitKey(client.id, worktreePath)
+  awaitingReview.set(key, Date.now())
+  bumpReview()
+  client.api.panesOpenReview(worktreePath).then(
+    (ok) => {
+      if (ok) return
+      awaitingReview.delete(key)
+      bumpReview()
+    },
+    () => {
+      awaitingReview.delete(key)
+      bumpReview()
+    }
+  )
 }
 
-/** Selects the review tab openReviewTab asked for, once it's in `tabs`. */
-export function useFollowOpenedReview(worktreePath: string | null, tabs: readonly TerminalTab[]): void {
-  const version = useSyncExternalStore(
-    (l) => {
-      reviewListeners.add(l)
-      return () => reviewListeners.delete(l)
-    },
-    () => reviewVersion
-  )
+/** Selects the review tab openReviewTab asked this backend for, once it's
+ *  in `tabs`. */
+export function useFollowOpenedReview(clientId: string | null, worktreePath: string | null, tabs: readonly TerminalTab[]): void {
+  const version = useSyncExternalStore(subscribeReview, getReviewVersion)
   useEffect(() => {
-    if (!worktreePath || !awaitingReview.has(worktreePath)) return
+    if (!clientId || !worktreePath) return
+    const key = awaitKey(clientId, worktreePath)
+    const askedAt = awaitingReview.get(key)
+    if (askedAt === undefined) return
+    if (Date.now() - askedAt > AWAIT_REVIEW_MS) {
+      awaitingReview.delete(key)
+      return
+    }
     const review = tabs.find((t) => t.type === 'review')
     if (!review) return
-    awaitingReview.delete(worktreePath)
+    awaitingReview.delete(key)
     rememberTab(worktreePath, review.id)
-  }, [worktreePath, tabs, version])
+  }, [clientId, worktreePath, tabs, version])
 }

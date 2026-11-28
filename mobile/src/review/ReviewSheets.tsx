@@ -15,7 +15,7 @@ import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
 import { haptic } from '../haptics'
 import { SelectableText } from '../components/SelectableText'
 import { STATUS_COLOR, STATUS_LABEL, STATUS_WORD } from '../panels/ChangedFilesPanel'
-import { commentLocation, type ReviewScope } from './review-model'
+import { commentLocation, reviewedCount, type ReviewScope } from './review-model'
 
 export function Sheet({ title, onClose, children, footer }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   const insets = useSafeAreaInsets()
@@ -298,7 +298,7 @@ export function FilesSheet({
   onClose: () => void
 }) {
   return (
-    <Sheet title={`${files.length} ${files.length === 1 ? 'file' : 'files'} · ${reviewed.size} reviewed`} onClose={onClose}>
+    <Sheet title={`${files.length} ${files.length === 1 ? 'file' : 'files'} · ${reviewedCount(files, reviewed)} reviewed`} onClose={onClose}>
       {files.map((f) => {
         const slash = f.path.lastIndexOf('/')
         const n = counts.get(f.path)

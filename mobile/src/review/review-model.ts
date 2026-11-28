@@ -159,9 +159,40 @@ export function reviewIconSpec(
  *  useLatestAgentReviewStatus rule, a reviewer counts only while its tab
  *  is open. */
 export function worktreeReviewStatus(state: AppState, worktreePath: string): ReviewStatus & { reviewerStatus: PtyStatus | undefined } {
+  const review = state.reviews.byPath[worktreePath]
   const tree = state.terminals.panes[worktreePath]
-  const status = latestAgentReviewStatus(state.reviews.byPath[worktreePath], (id) => !!tree && !!findLeafByTabId(tree, id))
+  // Selectors call this on every state event (chat tokens included), from
+  // the tab chip, the picker row and the Review tab. The answer only moves
+  // when this worktree's reviews or panes do, and the reducers keep both
+  // references stable otherwise, so the tree walk is skipped in between.
+  let hit = statusCache.get(worktreePath)
+  if (!hit || hit.review !== review || hit.tree !== tree) {
+    hit = { review, tree, status: latestAgentReviewStatus(review, (id) => !!tree && !!findLeafByTabId(tree, id)) }
+    statusCache.set(worktreePath, hit)
+  }
+  const status = hit.status
   return { ...status, reviewerStatus: status.reviewerTabId ? state.terminals.statuses[status.reviewerTabId] : undefined }
+}
+
+/** Keyed by path. Two backends serving the same path just alternate
+ *  entries; the identity check keeps the answer right either way. */
+const statusCache = new Map<string, { review: unknown; tree: unknown; status: ReviewStatus }>()
+
+/** How many of the listed files are ticked. The ticks outlive the list (a
+ *  commit can drop a file from the branch diff and add another), so only
+ *  the ones still listed count toward "All reviewed". */
+export function reviewedCount(files: readonly { path: string }[], reviewed: ReadonlySet<string>): number {
+  let n = 0
+  for (const f of files) if (reviewed.has(f.path)) n++
+  return n
+}
+
+/** ReviewPane.handleJumpToComment's decision: show the file, widen the
+ *  selection to the whole branch first, or say the file has left the
+ *  branch's diff. */
+export function jumpPlan(filePath: string, filesInView: ReadonlySet<string>, scopeKind: ReviewScope['kind']): 'show' | 'widen' | 'miss' {
+  if (filesInView.has(filePath)) return 'show'
+  return scopeKind === 'branch' ? 'miss' : 'widen'
 }
 
 /** What the reviewer agent is doing, for the Reviews view's status row. */

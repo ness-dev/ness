@@ -72,7 +72,7 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
   }, [activeWorktree?.path, client])
 
   const tabs = activeWorktree ? merged.tabsByWorktree[activeWorktree.path] ?? [] : []
-  useFollowOpenedReview(activeWorktree?.path ?? null, tabs)
+  useFollowOpenedReview(client?.id ?? null, activeWorktree?.path ?? null, tabs)
   const selectedTabId = useSelectedTabId(activeWorktree?.path ?? null, tabs)
   const selectedTab = tabs.find((t) => t.id === selectedTabId) ?? null
 
