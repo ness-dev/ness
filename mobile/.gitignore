@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Inlined xterm.js for the terminal WebView (scripts/gen-xterm-vendor.mjs, postinstall)
+src/terminal/xterm-vendor.generated.ts

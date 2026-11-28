@@ -6,6 +6,8 @@
     "@expo/metro-runtime": "~58.0.17",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@types/mdast": "^4.0.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "diff": "^9.0.0",
     "expo": "~58.0.26",
     "expo-camera": "~58.0.14",
@@ -57,7 +59,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && node scripts/gen-xterm-vendor.mjs"
   },
   "private": true
 }
