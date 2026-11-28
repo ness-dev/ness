@@ -45,6 +45,6 @@ export function usePersistedChoice(id: string | undefined): [boolean | null, (v:
   return [v, set]
 }
 
-/** Chat rows are visually ~28px tall (that's the web's density); extend
- *  the touch area to ~44pt without changing the layout. */
-export const ROW_HIT_SLOP = { top: 8, bottom: 8, left: 0, right: 0 }
+/** Chat rows are visually ~28px tall (that's the web's density); this
+ *  grows the touch area to ~44pt without changing the layout (hit.ts). */
+export const ROW_HIT_GROW = 9

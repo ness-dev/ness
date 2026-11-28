@@ -15,10 +15,14 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
+  CircleCheck,
   Ghost,
   GitPullRequest,
   Layers,
+  ListChecks,
   Loader2,
+  MessageSquare,
   Moon,
   MoreHorizontal,
   Pin,
@@ -599,6 +603,17 @@ function Subtitle({ row, ctx, active, prunable }: { row: WorktreeRowModel; ctx: 
   )
 }
 
+// The lucide shim's wrapIcon maps the desktop's class names to RN props.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { wrapIcon } = require('../shims/lucide-react.js') as { wrapIcon: (name: string, icon: unknown) => (p: { className: string; size: number }) => ReactNode }
+const REVIEW_ICONS = {
+  Loader2: wrapIcon('Loader2', Loader2),
+  ListChecks: wrapIcon('ListChecks', ListChecks),
+  CircleCheck: wrapIcon('CircleCheck', CircleCheck),
+  CircleAlert: wrapIcon('CircleAlert', CircleAlert),
+  MessageSquare: wrapIcon('MessageSquare', MessageSquare)
+}
+
 function ReviewIcon({ row, ctx, size }: { row: WorktreeRowModel; ctx: Ctx; size: number }) {
   const state = ctx.fleet.client(ctx.merged.pathBackendId[row.path])?.getState()
   if (!state) return null
@@ -607,7 +622,7 @@ function ReviewIcon({ row, ctx, size }: { row: WorktreeRowModel; ctx: Ctx; size:
   if (kind === 'none') return null
   const reviewer = reviewerTabId ? state.terminals.statuses[reviewerTabId] : undefined
   let cls: string
-  let IconName: string
+  let IconName: keyof typeof REVIEW_ICONS
   if (kind === 'reviewing') {
     if (reviewer === 'processing') [IconName, cls] = ['Loader2', 'text-accent animate-spin']
     else if (reviewer === 'needs-approval') [IconName, cls] = ['ListChecks', 'text-danger animate-pulse']
@@ -615,10 +630,7 @@ function ReviewIcon({ row, ctx, size }: { row: WorktreeRowModel; ctx: Ctx; size:
   } else if (kind === 'approve') [IconName, cls] = ['CircleCheck', 'text-success']
   else if (kind === 'changes-requested') [IconName, cls] = ['CircleAlert', 'text-warning']
   else [IconName, cls] = ['MessageSquare', 'text-info']
-  // The lucide shim maps the desktop's class names to RN props.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Icons = require('../shims/lucide-react.js') as Record<string, (p: { className: string; size: number }) => ReactNode>
-  const Icon = Icons[IconName]
+  const Icon = REVIEW_ICONS[IconName]
   return (
     <View>
       <Icon className={cls} size={size} />
