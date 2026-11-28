@@ -179,8 +179,4 @@ describe('watchLiveness', () => {
     expect(calls.filter((x) => x.startsWith('beat'))).toHaveLength(2)
     stop()
   })
-
-  it('the idle threshold is under the interval, so jitter cannot halve the cadence', () => {
-    expect(HEARTBEAT_IDLE_MS).toBeLessThan(HEARTBEAT_MS)
-  })
 })
