@@ -13,7 +13,7 @@
 //    config `extra`, because expoConfig is a fingerprint input and a
 //    per-commit value there would change the runtime version every commit.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { requireOptionalNativeModule } from 'expo'
 import Constants from 'expo-constants'
@@ -33,6 +33,7 @@ import {
 } from '../app-info'
 import { alpha, c, fs, mono, themed } from '../theme'
 import { Spin } from './Spin'
+import { setPickerTabs, usePickerTabs } from '../prefs'
 
 const embeddedConfig = requireOptionalNativeModule<{ manifest?: { version?: string } | string }>('ExponentConstants')?.manifest
 const nativeVersion = (typeof embeddedConfig === 'string' ? safeParse(embeddedConfig)?.version : embeddedConfig?.version) ?? Constants.expoConfig?.version
@@ -64,6 +65,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const phase = updatePhase({ ...u, isEnabled: updatesEnabled }, !!lastCheck)
   const action = updateAction(phase)
   const running = u.currentlyRunning
+  const pickerTabs = usePickerTabs()
   const busy = phase.kind === 'checking' || phase.kind === 'downloading' || phase.kind === 'restarting'
 
   const run = async (a: 'check' | 'download' | 'restart') => {
@@ -141,6 +143,24 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           <Row label="Published" value={formatStamp(running.createdAt)} />
           <Row label="JS commit" value={gitCommit ? gitCommit.slice(0, 8) : 'unknown'} copy={gitCommit} mono />
           <Row label="Updates" value={updatesEnabled ? 'Enabled' : 'Disabled'} last />
+        </Section>
+
+        <Section title="Worktree list">
+          <View style={[s.row, s.rowLast]}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.rowLabel, { color: c.fgBright }]}>Show tabs in worktree list (experimental)</Text>
+              <Text style={[s.rowLabel, { fontSize: fs.xs, marginTop: 2 }]}>
+                List each worktree's chats, terminals and shells under it, like the desktop sidebar. Tap one to open it.
+              </Text>
+            </View>
+            <Switch
+              value={pickerTabs}
+              onValueChange={setPickerTabs}
+              accessibilityLabel="Show tabs in worktree list (experimental)"
+              trackColor={{ true: c.accent, false: c.surface }}
+              thumbColor="#fff"
+            />
+          </View>
         </Section>
 
         <Section title="Connections">

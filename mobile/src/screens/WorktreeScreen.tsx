@@ -8,7 +8,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { Redirect, router } from 'expo-router'
-import { ChevronDown, FileDiff, FileText, Globe, Loader2, PanelRightOpen, Plus, SquareTerminal } from 'lucide-react-native'
+import { ChevronDown, Loader2, PanelRightOpen, Plus } from 'lucide-react-native'
+import { TabKindIcon } from '../components/TabKindIcon'
+import { nestedTabA11yLabel } from '../picker-tabs'
 import { supportsChat } from '../../../src/shared/agent-registry'
 import { makeTerminalId } from '../../../src/shared/terminal-id'
 import type { PtyStatus, TerminalTab } from '../../../src/shared/state/terminals'
@@ -113,6 +115,16 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
       if (path !== wtPath) router.replace(worktreeHref(path))
     },
     [wtPath]
+  )
+
+  // A nested tab in the picker: remember it for its worktree first, so the
+  // worktree opens (or stays) on that tab.
+  const handlePickTab = useCallback(
+    (path: string, tabId: string) => {
+      rememberTab(path, tabId)
+      handleSelectWorktree(path)
+    },
+    [handleSelectWorktree]
   )
 
   const handleSelectTab = useCallback(
@@ -356,7 +368,9 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
             fleet={fleet}
             merged={merged}
             activeWorktreeId={activeWorktree?.path ?? null}
+            activeTabId={selectedTabId}
             onSelect={handleSelectWorktree}
+            onSelectTab={handlePickTab}
             onClose={() => setPickerOpen(false)}
             // One overlay at a time: the picker is accessibilityViewIsModal,
             // so leaving it open under Backends hid Backends from VoiceOver.
@@ -414,6 +428,7 @@ function TabChip({
       onLayout={(e) => onLayout?.(e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
       style={[s.tab, active && s.tabActive]}
       accessibilityRole="tab"
+      accessibilityLabel={nestedTabA11yLabel(tab, tab.customLabel ?? tab.label, null)}
       accessibilityState={{ selected: active }}
     >
       <TabIcon client={client} tab={tab} />
@@ -430,7 +445,7 @@ function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
   if (tab.type === 'agent' || tab.type === 'json-claude') {
     return (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <AgentIcon kind={tab.agentKind ?? 'claude'} size={12} />
+        <TabKindIcon tab={tab} />
         {/* Live status for agent AND chat tabs, like the desktop tab strip
             (TerminalPanel's TAB_STATUS_DOT): chat tabs get processing /
             waiting / needs-approval statuses too. */}
@@ -438,11 +453,9 @@ function TabIcon({ client, tab }: { client: NessClient; tab: TerminalTab }) {
       </View>
     )
   }
-  if (tab.type === 'shell') return shellActive ? <Spin><Loader2 color={c.fgBright} size={12} /></Spin> : <SquareTerminal color={c.dim} size={12} />
-  if (tab.type === 'diff') return <FileDiff color={c.dim} size={12} />
-  if (tab.type === 'file') return <FileText color={c.dim} size={12} />
-  if (tab.type === 'browser') return <Globe color={c.dim} size={12} />
-  return null
+  // The strip swaps a busy shell's icon for a spinner, like the desktop strip.
+  if (tab.type === 'shell' && shellActive) return <Spin><Loader2 color={c.fgBright} size={12} /></Spin>
+  return <TabKindIcon tab={tab} />
 }
 
 function NonRunnablePlaceholder({ tab }: { tab: TerminalTab }) {
