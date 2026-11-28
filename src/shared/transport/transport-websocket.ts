@@ -58,6 +58,17 @@ export interface WebSocketClientTransportOptions {
    *  Tier 1 only distinguishes connected vs disconnected per design
    *  §I; the optional `reason` is surfaced in the chip's tooltip. */
   onConnectionChange?: (connected: boolean, reason?: string) => void
+  /** How long a socket may sit in CONNECTING before it's abandoned and
+   *  retried. Without this a SYN to an unroutable address (a phone off the
+   *  LAN its backend lives on) can hang until the OS gives up, firing
+   *  neither `open` nor `close`. */
+  connectTimeoutMs?: number
+  /** How long the post-open handshake (snapshot + clientId) may go without
+   *  receiving anything before the socket is closed and retried. Any frame
+   *  re-arms it, and each consecutive handshake timeout doubles it (up to
+   *  8x), so a slow link still gets there eventually: the snapshot is one
+   *  frame and the WebSocket API reports no progress inside a frame. */
+  handshakeTimeoutMs?: number
 }
 
 export class WebSocketClientTransport implements ClientTransport {
@@ -73,12 +84,24 @@ export class WebSocketClientTransport implements ClientTransport {
   private readonly initialBackoffMs: number
   private readonly maxBackoffMs: number
   private readonly WebSocketCtor: typeof WebSocket
+  private readonly connectTimeoutMs: number
+  private readonly handshakeTimeoutMs: number
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /** Consecutive handshake timeouts; scales the handshake budget. Reset
+   *  only by a completed handshake, deliberately not by reconnectNow(): a
+   *  Retry tap on a slow link should keep the larger budget it earned. */
+  private handshakeTimeouts = 0
+  /** Ends the in-flight attempt (CONNECTING or mid-handshake) as a failure
+   *  without scheduling a retry. Null once the handshake has finished. */
+  private abortAttempt: ((reason: string) => void) | null = null
 
   constructor(private readonly opts: WebSocketClientTransportOptions) {
     this.initialBackoffMs = opts.initialBackoffMs ?? 250
     this.maxBackoffMs = opts.maxBackoffMs ?? 5000
     this.backoffMs = this.initialBackoffMs
     this.WebSocketCtor = opts.WebSocketCtor ?? WebSocket
+    this.connectTimeoutMs = opts.connectTimeoutMs ?? 8000
+    this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 15000
   }
 
   async connect(): Promise<void> {
@@ -93,8 +116,29 @@ export class WebSocketClientTransport implements ClientTransport {
     return this.connectPromise
   }
 
+  /** Retry now instead of waiting out the backoff (a user's Retry tap, the
+   *  app returning to the foreground). Abandons an attempt that's still
+   *  connecting, since it may be stuck on a network that's gone. No-op
+   *  while connected or after close(). `keepOpen` also leaves a socket
+   *  that's open but mid-handshake alone (it's evidently reachable), for
+   *  automatic kicks that shouldn't throw away a snapshot in flight. */
+  reconnectNow({ keepOpen = false }: { keepOpen?: boolean } = {}): void {
+    if (this.closed) return
+    if (this.ws && this.ws.readyState === this.WebSocketCtor.OPEN && (keepOpen || !this.abortAttempt)) return
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this.abortAttempt?.('reconnecting')
+    this.backoffMs = this.initialBackoffMs
+    this.connect().catch(() => {
+      // the close path reports the failure and schedules the retry
+    })
+  }
+
   close(): void {
     this.closed = true
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this.abortAttempt?.('transport closed')
     this.ws?.close()
     this.ws = null
     for (const p of this.pending.values()) {
@@ -164,24 +208,101 @@ export class WebSocketClientTransport implements ClientTransport {
       this.ws = ws
 
       let opened = false
+      let ended = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      /** Set while the handshake runs; any incoming frame re-arms it. */
+      let armHandshake: (() => void) | null = null
+      const clearTimer = () => {
+        if (timer) clearTimeout(timer)
+        timer = null
+      }
+
+      // The one failure path, reached from the socket's own close event or
+      // from a timeout/abort. Timeouts don't wait for `close`: on a hung
+      // CONNECTING socket it can take as long to arrive as `open` would
+      // have, so the socket is detached here and its late events ignored.
+      const fail = (reason: string, retry: boolean, report = true) => {
+        if (ended) return
+        ended = true
+        clearTimer()
+        if (this.abortAttempt === abort) this.abortAttempt = null
+        if (this.ws === ws) {
+          this.ws = null
+          this.connectPromise = null
+        }
+        for (const p of this.pending.values()) {
+          p.reject(new Error('socket closed before response'))
+        }
+        this.pending.clear()
+        if (report) this.opts.onConnectionChange?.(false, reason)
+        if (!opened) reject(new Error('websocket failed to open'))
+        else reject(new Error(reason))
+        if (retry && !this.closed) this.scheduleReconnect()
+      }
+      // An abort of a socket that never opened leaves the last reported
+      // reason (e.g. "connection timed out") standing: nothing changed.
+      const abort = (reason: string) => {
+        fail(reason, false, opened)
+        try {
+          ws.close()
+        } catch {
+          // already closing
+        }
+      }
+      this.abortAttempt = abort
+
+      const timeOut = (reason: string) => {
+        fail(reason, true)
+        try {
+          ws.close()
+        } catch {
+          // already closing
+        }
+      }
+      timer = setTimeout(() => timeOut('connection timed out'), this.connectTimeoutMs)
 
       ws.addEventListener('open', () => {
+        if (ended) return
         opened = true
+        clearTimer()
         this.backoffMs = this.initialBackoffMs
         this.opts.onConnectionChange?.(true)
+        const budget = this.handshakeTimeoutMs * 2 ** Math.min(this.handshakeTimeouts, 3)
+        armHandshake = () => {
+          clearTimer()
+          timer = setTimeout(() => {
+            this.handshakeTimeouts++
+            timeOut('backend did not respond')
+          }, budget)
+        }
+        armHandshake()
         // Reconcile any state gap before telling UI subscribers to re-run
         // join-on-connect side effects. If a delayed snapshot landed after
         // terminal:join, it could overwrite the restored controller roster
         // with the stale "old client disconnected" state and leave PTY input
         // silently gated off until the user opened a new tab.
         this.finishOpenHandshake()
-          .then(() => resolve())
+          .then(() => {
+            if (ended) return
+            armHandshake = null
+            clearTimer()
+            this.handshakeTimeouts = 0
+            if (this.abortAttempt === abort) this.abortAttempt = null
+            resolve()
+          })
           .catch((err) => {
+            // A dropped socket already failed the attempt via `close`.
+            if (ended) return
+            armHandshake = null
+            clearTimer()
+            if (this.abortAttempt === abort) this.abortAttempt = null
             reject(err instanceof Error ? err : new Error(String(err)))
           })
       })
 
       ws.addEventListener('message', (evt) => {
+        if (ended) return
+        armHandshake?.()
         let frame: ServerFrame
         try {
           frame = JSON.parse(String(evt.data)) as ServerFrame
@@ -196,21 +317,15 @@ export class WebSocketClientTransport implements ClientTransport {
       })
 
       ws.addEventListener('close', (evt) => {
-        this.ws = null
-        this.connectPromise = null
-        for (const p of this.pending.values()) {
-          p.reject(new Error('socket closed before response'))
-        }
-        this.pending.clear()
+        // Already failed by a timeout or abort: this is the abandoned
+        // socket finally closing.
+        if (ended) return
         // CloseEvent.reason is empty for transport-level failures; in
         // that case fall back to the code so users see something
         // actionable in the chip tooltip.
         const closeEvt = evt as CloseEvent | undefined
         const reason = closeEvt?.reason || (closeEvt?.code ? `close code ${closeEvt.code}` : 'connection lost')
-        if (opened) this.opts.onConnectionChange?.(false, reason)
-        else this.opts.onConnectionChange?.(false, 'failed to connect')
-        if (!opened) reject(new Error('websocket failed to open'))
-        if (!this.closed) this.scheduleReconnect()
+        fail(opened ? reason : 'failed to connect', true)
       })
     })
   }
@@ -218,7 +333,9 @@ export class WebSocketClientTransport implements ClientTransport {
   private scheduleReconnect(): void {
     const delay = this.backoffMs
     this.backoffMs = Math.min(this.backoffMs * 2, this.maxBackoffMs)
-    setTimeout(() => {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
       if (this.closed) return
       this.connect().catch(() => {
         // next close handler schedules the retry

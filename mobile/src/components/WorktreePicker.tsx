@@ -46,6 +46,7 @@ import { useCollapse, type CollapseState } from '../collapse'
 import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
+import { Connecting } from './Connecting'
 
 const STATUS: Record<DisplayStatus, { color: string; pulse: boolean }> = themed(() => ({
   idle: { color: c.faint, pulse: false },
@@ -166,7 +167,7 @@ export function WorktreePicker({
         </IconBtn>
       </View>
       <ScrollView contentContainerStyle={{ paddingVertical: 6, paddingBottom: 40 }} stickyHeaderIndices={undefined} keyboardShouldPersistTaps="handled">
-        {entries.length === 0 && <Text style={[s.dimText, { padding: 24 }]}>Connecting to your backends…</Text>}
+        {entries.length === 0 && <Connecting clients={fleet.getClients()} onOpenBackends={onOpenBackends} inline />}
         {model.sections.map((section, i) => {
           const prev = model.sections[i - 1]
           const gap = !prev ? 0 : !prev.unified && !prev.collapsed && !prev.holdsActive ? 12 : 6
