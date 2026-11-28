@@ -77,8 +77,7 @@ function prs(now: number, git: DemoGit): Record<string, PRStatus | null> {
         }
       ],
       reviewDecision: 'approved',
-      additions: 96,
-      deletions: 7,
+      ...git.branchStats(WT.hourly),
       labels: [{ name: 'feature', color: '1f883d' }],
       linkedIssues: [{ number: 17, title: 'Show the forecast by hour', state: 'open', url: `https://${ORIGIN}/issues/17` }]
     }),
@@ -100,8 +99,7 @@ function prs(now: number, git: DemoGit): Record<string, PRStatus | null> {
         { name: 'lint', state: 'success', description: 'No problems', startedAt: ago(12) }
       ],
       reviewDecision: 'review_required',
-      additions: 21,
-      deletions: 4,
+      ...git.branchStats(WT.units),
       labels: [{ name: 'bug', color: 'd73a4a' }]
     }),
     [WT.air]: pr({
@@ -112,8 +110,7 @@ function prs(now: number, git: DemoGit): Record<string, PRStatus | null> {
       checksOverall: 'success',
       checks: [{ name: 'test', state: 'success', description: '5 tests passed' }],
       reviewDecision: 'approved',
-      additions: 48,
-      deletions: 2,
+      ...git.branchStats(WT.air),
       firstReleaseTag: 'v0.4.0'
     })
   }
@@ -160,7 +157,8 @@ function usage(sessionId: string, messages: number, scale: number, now: number):
         cost: 0.42 * scale
       }
     },
-    breakdown: { text: 3_100 * scale, thinking: 1_200 * scale, toolUse: 2_900 * scale, userPrompt: 400 * scale, assistantEcho: 0, toolResults: { Read: 8_000 * scale, Bash: 2_400 * scale } },
+    // Dollars, split of the model total above.
+    breakdown: { text: 0.09 * scale, thinking: 0.04 * scale, toolUse: 0.08 * scale, userPrompt: 0.01 * scale, assistantEcho: 0, toolResults: { Read: 0.14 * scale, Bash: 0.06 * scale } },
     currentModel: MODEL,
     updatedAt: now
   }

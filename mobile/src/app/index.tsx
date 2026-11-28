@@ -1,4 +1,4 @@
-// Home: first-run pairing when there are no backends; otherwise straight
+// Home: first-run pairing (or the demo) when there are no backends; otherwise straight
 // to a worktree — the one the phone was last on if it still exists, else
 // the first. Backends snapshot at different times, so don't fall back to
 // the first worktree while the saved one's host may still be connecting
@@ -18,7 +18,7 @@ import { c } from '../theme'
 export default function Home() {
   const { backends } = useWorkspace()
   if (!backends.loaded) return <ActivityIndicator color={c.muted} style={{ flex: 1 }} />
-  if (backends.saved.length === 0) return <BackendsSheet backends={backends} />
+  if (backends.saved.length === 0 && !backends.demo) return <BackendsSheet backends={backends} />
   return <PickWorktree />
 }
 

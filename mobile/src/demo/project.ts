@@ -558,16 +558,8 @@ export interface DemoWorktreeDef {
   unstaged: Record<string, string | null>
 }
 
+// Listed showcase-first: home opens the first one.
 export const WORKTREES: DemoWorktreeDef[] = [
-  {
-    path: WT.main,
-    branch: 'main',
-    isMain: true,
-    createdAgoMin: 60 * 24 * 40,
-    commits: [],
-    staged: {},
-    unstaged: {}
-  },
   {
     path: WT.hourly,
     branch: 'feat/hourly-forecast',
@@ -629,6 +621,15 @@ export const WORKTREES: DemoWorktreeDef[] = [
         changes: { 'src/components/AirQualityBadge.tsx': AQI_TSX }
       }
     ],
+    staged: {},
+    unstaged: {}
+  },
+  {
+    path: WT.main,
+    branch: 'main',
+    isMain: true,
+    createdAgoMin: 60 * 24 * 40,
+    commits: [],
     staged: {},
     unstaged: {}
   }

@@ -30,6 +30,8 @@ export interface ShellContext {
   cwd: string
   branch: string
   git: DemoGit
+  /** Terminal width, for laying out `ls`. */
+  cols?: number
 }
 
 export const COMMANDS = ['help', 'ls', 'git status', 'git log --oneline', 'npm test', 'pwd', 'clear'] as const
@@ -46,7 +48,8 @@ export function runCommand(line: string, ctx: ShellContext): string | null {
         bold('Ness demo shell'),
         'This is a pretend terminal. On your own machine, this tab is a real shell.',
         '',
-        `Try: ${COMMANDS.filter((c) => c !== 'help').map(cyan).join(', ')}`
+        'Try:',
+        ...COMMANDS.filter((c) => c !== 'help').map((c) => `  ${cyan(c)}`)
       )
     case 'pwd':
       return lines(ctx.cwd)
@@ -73,7 +76,21 @@ function lsOutput(ctx: ShellContext): string {
   const top = new Set<string>()
   for (const f of ctx.git.listFiles(ctx.cwd)) top.add(f.includes('/') ? `${f.split('/')[0]}/` : f)
   const names = [...top].sort((a, b) => Number(b.endsWith('/')) - Number(a.endsWith('/')) || a.localeCompare(b))
-  return lines(names.map((n) => (n.endsWith('/') ? bold(color('34', n)) : n)).join('  '))
+  // Columns like ls: as many as fit, filled down then across.
+  const width = Math.max(...names.map((n) => n.length)) + 2
+  const perRow = Math.max(1, Math.floor((ctx.cols ?? 80) / width))
+  const rows = Math.ceil(names.length / perRow)
+  const out: string[] = []
+  for (let r = 0; r < rows; r++) {
+    let line = ''
+    for (let col = 0; col * rows + r < names.length; col++) {
+      const n = names[col * rows + r]
+      const shown = n.endsWith('/') ? bold(color('34', n)) : n
+      line += shown + ' '.repeat(width - n.length)
+    }
+    out.push(line.trimEnd())
+  }
+  return lines(...out)
 }
 
 function gitStatus(ctx: ShellContext): string {
@@ -140,13 +157,17 @@ export class DemoShell {
 
   constructor(private readonly ctx: ShellContext) {}
 
+  resize(cols: number): void {
+    if (cols > 0) this.ctx.cols = cols
+  }
+
   prompt(): string {
     const dir = this.ctx.cwd.split('/').pop()
     return `${cyan(dir ?? '~')} ${magenta(this.ctx.branch)} ${bold('$')} `
   }
 
   start(): string {
-    return lines(dim('Ness demo shell. Type ') + cyan('help') + dim(' to see what works here.')) + this.prompt()
+    return lines(dim('Demo shell. Type ') + cyan('help') + dim(' to see what works.')) + this.prompt()
   }
 
   /** Feed PTY input; returns the bytes to print. */

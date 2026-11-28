@@ -80,7 +80,7 @@ The strip sits under current conditions and shows the next **12 hours**, with ra
 ### How the data flows
 
 \`\`\`mermaid
-flowchart LR
+flowchart TD
   App --> useForecast
   useForecast --> fetchForecast
   fetchForecast --> D["/forecast"]

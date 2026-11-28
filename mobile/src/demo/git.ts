@@ -116,15 +116,24 @@ export class DemoGit {
   changedFiles(path: string, mode: 'working' | 'branch' = 'working'): ChangedFile[] {
     const t = this.tree(path)
     if (!t) return []
-    if (mode === 'branch') return compare(BASE, t.work, false)
+    // Branch mode is `git diff base...HEAD`: committed work only.
+    if (mode === 'branch') return compare(BASE, t.head, false)
     return [...compare(t.head, t.index, true), ...compare(t.index, t.work, false, t.index)]
   }
 
   diffSides(path: string, file: string, staged: boolean, mode: 'working' | 'branch' = 'working'): FileDiffSides {
     const t = this.tree(path)
     if (!t) return { ...sides(undefined, undefined), error: 'Not found' }
-    if (mode === 'branch') return sides(BASE[file], t.work[file])
+    if (mode === 'branch') return sides(BASE[file], t.head[file])
     return staged ? sides(t.head[file], t.index[file]) : sides(t.index[file], t.work[file])
+  }
+
+  /** The PR's +/− totals: everything committed on the branch. */
+  branchStats(path: string): { additions: number; deletions: number } {
+    return this.changedFiles(path, 'branch').reduce(
+      (acc, f) => ({ additions: acc.additions + (f.additions ?? 0), deletions: acc.deletions + (f.deletions ?? 0) }),
+      { additions: 0, deletions: 0 }
+    )
   }
 
   readFile(path: string, file: string): string | undefined {

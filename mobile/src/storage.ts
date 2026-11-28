@@ -17,12 +17,12 @@ export interface SavedBackend {
   enabled: boolean
 }
 
-async function read(key: string): Promise<string | null> {
+export async function read(key: string): Promise<string | null> {
   if (Platform.OS === 'web') return globalThis.localStorage?.getItem(key) ?? null
   return SecureStore.getItemAsync(key)
 }
 
-async function write(key: string, value: string | null): Promise<void> {
+export async function write(key: string, value: string | null): Promise<void> {
   if (Platform.OS === 'web') {
     if (value === null) globalThis.localStorage?.removeItem(key)
     else globalThis.localStorage?.setItem(key, value)

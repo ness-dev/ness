@@ -275,10 +275,14 @@ export class DemoWorld {
     this.hooks.emitSignal('terminal:data', id, data)
   }
 
-  private createPty(id: string, cwd: string, agentKind?: string): void {
-    if (this.shells.has(id)) return
+  private createPty(id: string, cwd: string, agentKind?: string, cols?: number): void {
+    const existing = this.shells.get(id)
+    if (existing) {
+      if (cols) existing.resize(cols)
+      return
+    }
     const wt = this.worktreeOf(id, cwd)
-    const shell = new DemoShell({ cwd: wt.path, branch: wt.branch, git: this.git })
+    const shell = new DemoShell({ cwd: wt.path, branch: wt.branch, git: this.git, cols })
     this.shells.set(id, shell)
     const note = agentKind ? `\x1b[33mClaude Code in a terminal isn't part of the demo; the Chat tabs show what it does.\x1b[0m\r\n` : ''
     this.out(id, note + shell.start())
@@ -507,12 +511,13 @@ export class DemoWorld {
   private buildSignals(): Record<string, Handler> {
     const noop = () => {}
     return {
-      'pty:create': (id: string, cwd: string, _cmd: string, _args: string[], agentKind?: string) => this.createPty(id, cwd, agentKind),
+      'pty:create': (id: string, cwd: string, _cmd: string, _args: string[], agentKind?: string, cols?: number) =>
+        this.createPty(id, cwd, agentKind, cols),
       'pty:write': (id: string, data: string) => {
         const shell = this.shells.get(id)
         if (shell) this.out(id, shell.input(data))
       },
-      'pty:resize': noop,
+      'pty:resize': (id: string, cols: number) => this.shells.get(id)?.resize(cols),
       'pty:kill': (id: string) => {
         this.shells.delete(id)
       },
