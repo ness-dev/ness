@@ -4,29 +4,26 @@ import type { Worktree } from '../../src/shared/state/worktrees'
 import { projectRowA11y, projectTap } from '../src/picker-selection'
 
 describe('projectTap', () => {
-  it('focuses a project that is not focused, without opening it', () => {
-    expect(projectTap({ unified: false, holdsActive: false }, '/r/a')).toEqual({ kind: 'focus', path: '/r/a' })
+  it('expands a collapsed project, without opening it', () => {
+    expect(projectTap({ unified: false, collapsed: true }, '/r/a')).toEqual({ kind: 'focus', path: '/r/a' })
   })
-  it('opens main on a tap on the focused project', () => {
-    expect(projectTap({ unified: false, holdsActive: true }, '/r/a')).toEqual({ kind: 'open', path: '/r/a' })
+  it('opens main on a tap on an expanded project', () => {
+    expect(projectTap({ unified: false, collapsed: false }, '/r/a')).toEqual({ kind: 'open', path: '/r/a' })
   })
   it('opens straight away in the unified list, which never collapses', () => {
-    expect(projectTap({ unified: true, holdsActive: false }, '/r/a')).toEqual({ kind: 'open', path: '/r/a' })
+    expect(projectTap({ unified: true, collapsed: false }, '/r/a')).toEqual({ kind: 'open', path: '/r/a' })
   })
 })
 
 describe('projectRowA11y', () => {
   it('a collapsed project reads collapsed, and its hint says it expands', () => {
-    expect(projectRowA11y({ unified: false, holdsActive: false, collapsed: true })).toEqual({ expanded: false, hint: 'Shows its worktrees' })
+    expect(projectRowA11y({ unified: false, collapsed: true })).toEqual({ expanded: false, hint: 'Shows its worktrees' })
   })
-  it('a focused project reads expanded, and its hint says a second tap opens main', () => {
-    expect(projectRowA11y({ unified: false, holdsActive: true, collapsed: false })).toEqual({
-      expanded: true,
-      hint: 'Double-tap again to open main'
-    })
+  it('an expanded project reads expanded, and its hint says it opens main', () => {
+    expect(projectRowA11y({ unified: false, collapsed: false })).toEqual({ expanded: true, hint: 'Opens main' })
   })
   it('a unified-list project has no expanded state', () => {
-    expect(projectRowA11y({ unified: true, holdsActive: false, collapsed: false }).expanded).toBeUndefined()
+    expect(projectRowA11y({ unified: true, collapsed: false }).expanded).toBeUndefined()
   })
 })
 
@@ -78,9 +75,17 @@ describe('picker focus through applyProjectAccordion', () => {
     expect(projectTap(byRepo(m, '/r/b'), '/r/b')).toEqual({ kind: 'open', path: '/r/b' })
   })
 
-  it('a pinned-open project is expanded but still needs a first tap to select it', () => {
+  it('a pinned-open project is already expanded, so the first tap opens it', () => {
     const m = applyProjectAccordion(base, '/r/a-wt/feat', { [byRepo(applyProjectAccordion(base, null, {}), '/r/b').scope]: true })
     expect(byRepo(m, '/r/b').collapsed).toBe(false)
-    expect(projectTap(byRepo(m, '/r/b'), '/r/b').kind).toBe('focus')
+    expect(projectTap(byRepo(m, '/r/b'), '/r/b')).toEqual({ kind: 'open', path: '/r/b' })
+  })
+
+  it('with no focus nothing collapses, so the first tap on any project opens it', () => {
+    const m = applyProjectAccordion(base, null, {})
+    for (const root of ['/r/a', '/r/b']) {
+      expect(byRepo(m, root).collapsed).toBe(false)
+      expect(projectTap(byRepo(m, root), root)).toEqual({ kind: 'open', path: root })
+    }
   })
 })
