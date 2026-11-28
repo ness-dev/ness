@@ -78,8 +78,11 @@ describe('demo review', () => {
     flush()
     expect(world.state.reviews.byPath[WT.hourly]!.submissions![0]).toMatchObject({ state: 'sent', targetTabId: TAB.hourlyChat })
     const entries = world.state.jsonClaude.sessions[TAB.hourlyChat]!.entries.slice(before)
-    expect(entries[0]).toMatchObject({ kind: 'user' })
+    // Labelled as an automated review turn, as main's parseUserTurn does,
+    // not the raw <ness-automated-message> wrapper.
+    expect(entries[0]).toMatchObject({ kind: 'user', automation: 'review', automationFrom: 'Reviewer' })
     expect(entries[0].text).toContain('Verdict: Changes requested')
+    expect(entries[0].text).not.toContain('<ness-automated-message')
     expect(entries.some((e) => e.kind === 'assistant')).toBe(true)
     expect(latestAgentReviewStatus(world.state.reviews.byPath[WT.hourly]).unsent).toBe(false)
   })

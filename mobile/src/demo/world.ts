@@ -7,7 +7,7 @@
 // unless the demo is on.
 import { rootReducer, type AppState, type StateEvent } from '../../../src/shared/state'
 import { getLeaves, mapLeaves, type PaneNode, type PtyStatus, type TerminalTab } from '../../../src/shared/state/terminals'
-import { isJsonClaudePermissionMode, type JsonClaudePendingApproval } from '../../../src/shared/state/json-claude'
+import { isJsonClaudePermissionMode, parseUserTurn, type JsonClaudePendingApproval } from '../../../src/shared/state/json-claude'
 import type { RepoConfig } from '../../../src/shared/state/repo-configs'
 import type { ToolRunResult, ToolSpec } from '../../../src/shared/tools'
 import { listChatTabs } from '../../../src/shared/agent-tabs'
@@ -226,7 +226,7 @@ export class DemoWorld {
     }
     // Typed mid-turn: shown queued now, delivered when the turn ends.
     const entryId = `${sessionId}-q${this.now().toString(36)}${turn}`
-    this.dispatch({ type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId, kind: 'user', text, timestamp: this.now(), isQueued: true } } })
+    this.dispatch({ type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId, kind: 'user', ...parseUserTurn(text), timestamp: this.now(), isQueued: true } } })
     this.enqueue(sessionId, {
       make: () => {
         const steps = replySteps(sessionId, text, turn, this.now)

@@ -4,7 +4,7 @@
 // results), so the phone renders it through its ordinary streaming path.
 // Pure: DemoTransport plays the steps; the tests read them.
 import type { StateEvent } from '../../../src/shared/state'
-import type { JsonClaudeMessageBlock } from '../../../src/shared/state/json-claude'
+import { parseUserTurn, type JsonClaudeMessageBlock } from '../../../src/shared/state/json-claude'
 import { DARK_RUNNING_TOOL_USE_ID, TAB, UNITS_EDIT_TOOL_USE_ID, UNITS_REQUEST_ID, text, tool } from './conversations'
 import { UNITS_TS_FIXED, WT } from './project'
 
@@ -87,7 +87,7 @@ export function replySteps(sessionId: string, userText: string, turn: number, no
     {
       delay: 0,
       events: [
-        { type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId: nextId(sessionId), kind: 'user', text: userText, timestamp: t } } },
+        { type: 'jsonClaude/entryAppended', payload: { sessionId, entry: { entryId: nextId(sessionId), kind: 'user', ...parseUserTurn(userText), timestamp: t } } },
         { type: 'jsonClaude/promptSuggestionChanged', payload: { sessionId, suggestion: null } },
         busy(sessionId, true, t)
       ]
