@@ -289,6 +289,13 @@ describe('DemoTransport channel coverage', () => {
     await expect(transport.request('pr:merge', WT.hourly, 'squash')).resolves.toEqual({ ok: false, error: DEMO_UNAVAILABLE })
   })
 
+  it('a reset keeps the theme it was given', async () => {
+    const transport = new DemoTransport({}, { theme: { mode: 'light', light: 'solarized-light', dark: 'dark' } })
+    const { state } = await transport.getStateSnapshot()
+    expect(state.settings.themeMode).toBe('light')
+    expect(state.settings.themeLight).toBe('solarized-light')
+  })
+
   it('connects with a snapshot and no network', async () => {
     const changes: boolean[] = []
     let snapshot: AppState | null = null

@@ -4,12 +4,20 @@
 import { NessClient } from '../ness'
 import { read, write } from '../storage'
 import { DemoTransport } from './DemoTransport'
+import type { DemoTheme } from './world'
 import { DEMO_BACKEND_ID, DEMO_LABEL } from './constants'
 
 const KEY = 'ness.demo'
 
-export function createDemoClient(): NessClient {
-  return new NessClient(DEMO_BACKEND_ID, DEMO_LABEL, 'demo://acme-weather', '', (callbacks) => new DemoTransport(callbacks), true)
+export function createDemoClient(theme?: DemoTheme): NessClient {
+  return new NessClient(DEMO_BACKEND_ID, DEMO_LABEL, 'demo://acme-weather', '', (callbacks) => new DemoTransport(callbacks, { theme }), true)
+}
+
+/** The demo's current theme, to carry across a reset. */
+export function demoThemeOf(client: NessClient | undefined): DemoTheme | undefined {
+  if (!client?.getConn().hasSnapshot) return undefined
+  const { themeMode, themeLight, themeDark } = client.getState().settings
+  return { mode: themeMode, light: themeLight, dark: themeDark }
 }
 
 export async function loadDemoEnabled(): Promise<boolean> {

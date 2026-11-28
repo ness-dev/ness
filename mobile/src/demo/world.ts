@@ -26,7 +26,15 @@ export class DemoUnavailableError extends Error {
 
 type Handler = (...args: never[]) => unknown
 
+export interface DemoTheme {
+  mode: 'light' | 'dark' | 'system'
+  light: string
+  dark: string
+}
+
 export interface WorldHooks {
+  /** Carried over from a previous demo (Reset keeps the user's theme). */
+  theme?: DemoTheme
   emitEvent(event: StateEvent, seq: number): void
   emitSignal(name: string, ...args: unknown[]): void
   now?: () => number
@@ -71,6 +79,15 @@ export class DemoWorld {
     const start = this.now()
     this.git = new DemoGit(start)
     this.state = buildDemoState(start, this.git)
+    const theme = hooks.theme
+    if (theme) {
+      const events: StateEvent[] = [
+        { type: 'settings/themeModeChanged', payload: theme.mode },
+        { type: 'settings/themeLightChanged', payload: theme.light },
+        { type: 'settings/themeDarkChanged', payload: theme.dark }
+      ]
+      this.state = events.reduce(rootReducer, this.state)
+    }
     // The dark-mode turn is already running when the demo opens.
     this.playing.set(TAB.darkChat, () => {})
     for (const id of Object.keys(this.state.jsonClaude.sessions)) {

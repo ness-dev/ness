@@ -21,7 +21,7 @@ export class DemoTransport implements NessTransport {
 
   constructor(
     private readonly callbacks: TransportCallbacks = {},
-    private readonly hooks: Pick<WorldHooks, 'now' | 'schedule'> = {}
+    private readonly hooks: Pick<WorldHooks, 'now' | 'schedule' | 'theme'> = {}
   ) {}
 
   private load(): Promise<DemoWorld> {

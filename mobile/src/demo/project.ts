@@ -618,7 +618,14 @@ export const WORKTREES: DemoWorktreeDef[] = [
         subject: 'Show an air quality badge next to current conditions',
         agoMin: 60 * 24 * 5,
         pushed: true,
-        changes: { 'src/components/AirQualityBadge.tsx': AQI_TSX }
+        changes: {
+          'src/components/AirQualityBadge.tsx': AQI_TSX,
+          'src/components/CurrentConditions.tsx': CURRENT_TSX.replace(
+            "import type { Conditions } from '../api/forecast'\n",
+            "import type { AirQuality } from '../api/air'\nimport type { Conditions } from '../api/forecast'\nimport { AirQualityBadge } from './AirQualityBadge'\n"
+          ).replace('export function CurrentConditions({ now, unit }: { now: Conditions; unit: Unit }) {', 'export function CurrentConditions({ now, unit, aq }: { now: Conditions; unit: Unit; aq?: AirQuality }) {')
+            .replace('      <strong>{formatTemp(now.tempC, unit)}</strong>\n', '      <strong>{formatTemp(now.tempC, unit)}</strong>\n      {aq && <AirQualityBadge aq={aq} />}\n')
+        }
       }
     ],
     staged: {},

@@ -120,7 +120,7 @@ function gitLog(ctx: ShellContext): string {
 
 function npmTest(ctx: ShellContext): string {
   const broken = ctx.git.readFile(ctx.cwd, 'src/units.ts') === UNITS_TS_BUGGY
-  const head = ['', `> acme-weather@0.4.0 test`, '> vitest run', '', ` ${color('46;30', ' RUN ')} ${dim(ctx.cwd)}`, '']
+  const head = ['', `> acme-weather@0.4.0 test`, '> vitest run', '', ` ${bold(cyan('RUN'))} ${dim(ctx.cwd)}`, '']
   if (broken) {
     return lines(
       ...head,

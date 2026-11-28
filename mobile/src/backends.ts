@@ -5,7 +5,8 @@ import { AppState } from 'react-native'
 import { NessClient } from './ness'
 import { watchLiveness } from './liveness'
 import { labelFor, loadBackends, newId, saveBackends, type SavedBackend } from './storage'
-import { createDemoClient, loadDemoEnabled, saveDemoEnabled } from './demo/client'
+import { createDemoClient, demoThemeOf, loadDemoEnabled, saveDemoEnabled } from './demo/client'
+import type { DemoTheme } from './demo/world'
 import { DEMO_BACKEND_ID } from './demo/constants'
 
 export interface Backends {
@@ -28,6 +29,7 @@ export function useBackends(): Backends {
   const [demo, setDemoState] = useState<boolean | null>(null)
   const [demoGeneration, setDemoGeneration] = useState(0)
   const live = useRef(new Map<string, NessClient>())
+  const demoTheme = useRef<DemoTheme | undefined>(undefined)
 
   useEffect(() => {
     void loadBackends().then(setSaved)
@@ -59,7 +61,7 @@ export function useBackends(): Backends {
       demoClient.close()
       map.delete(DEMO_BACKEND_ID)
     } else if (demo && !demoClient) {
-      const client = createDemoClient()
+      const client = createDemoClient(demoTheme.current)
       client.connect()
       map.set(DEMO_BACKEND_ID, client)
     }
@@ -98,6 +100,7 @@ export function useBackends(): Backends {
   }, [])
 
   const resetDemo = useCallback(() => {
+    demoTheme.current = demoThemeOf(live.current.get(DEMO_BACKEND_ID))
     live.current.get(DEMO_BACKEND_ID)?.close()
     live.current.delete(DEMO_BACKEND_ID)
     setDemoGeneration((g) => g + 1)
