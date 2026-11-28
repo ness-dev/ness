@@ -5,6 +5,8 @@ import { AppState } from 'react-native'
 import { NessClient } from './ness'
 import { labelFor, loadBackends, newId, saveBackends, type SavedBackend } from './storage'
 
+const HEARTBEAT_MS = 30_000
+
 export interface Backends {
   loaded: boolean
   saved: SavedBackend[]
@@ -46,14 +48,38 @@ export function useBackends(): Backends {
   }, [saved])
 
   // Back in the foreground the network may well have changed (home Wi-Fi
-  // again), so don't sit out a backoff that started while away. Connected
-  // clients ignore this, and keepOpen spares one already mid-handshake
-  // (iOS drops sockets while suspended; its own retry may have raced us).
+  // again), so don't sit out a backoff that started while away, and check
+  // that a socket still reading OPEN really is (wake()). keepOpen spares
+  // one already mid-handshake (iOS drops sockets while suspended; its own
+  // retry may have raced us). While foregrounded, a heartbeat catches a
+  // Wi-Fi change with the app open; it only probes a connection that's
+  // received nothing for a whole interval, so it costs one tiny round trip
+  // per idle 30s, and it stops in the background.
   useEffect(() => {
+    let beat: ReturnType<typeof setInterval> | null = null
+    const startBeat = () => {
+      beat ??= setInterval(
+        () => live.current.forEach((c) => void c.checkAlive({ ifIdleMs: HEARTBEAT_MS })),
+        HEARTBEAT_MS
+      )
+    }
+    const stopBeat = () => {
+      if (beat) clearInterval(beat)
+      beat = null
+    }
+    if (AppState.currentState === 'active') startBeat()
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') live.current.forEach((c) => c.retry({ keepOpen: true }))
+      if (st === 'active') {
+        live.current.forEach((c) => c.wake())
+        startBeat()
+      } else if (st === 'background') {
+        stopBeat()
+      }
     })
-    return () => sub.remove()
+    return () => {
+      sub.remove()
+      stopBeat()
+    }
   }, [])
 
   // Clear the map too: Fast Refresh (and any remount) runs this cleanup and

@@ -71,6 +71,11 @@ export interface WebSocketClientTransportOptions {
   handshakeTimeoutMs?: number
 }
 
+/** `dead`: the socket was dropped and a reconnect started. `skipped`: there
+ *  was no settled socket to test (closed, connecting, mid-handshake) or it
+ *  had traffic recently enough. */
+export type ProbeResult = 'alive' | 'dead' | 'skipped'
+
 export class WebSocketClientTransport implements ClientTransport {
   private ws: WebSocket | null = null
   private nextRequestId = 1
@@ -94,6 +99,11 @@ export class WebSocketClientTransport implements ClientTransport {
   /** Ends the in-flight attempt (CONNECTING or mid-handshake) as a failure
    *  without scheduling a retry. Null once the handshake has finished. */
   private abortAttempt: ((reason: string) => void) | null = null
+  /** Fails the current socket (handshake finished) and retries immediately.
+   *  Null when there's no settled socket to drop. */
+  private dropSocket: ((reason: string) => void) | null = null
+  private probing: Promise<ProbeResult> | null = null
+  private lastFrameAt = 0
 
   constructor(private readonly opts: WebSocketClientTransportOptions) {
     this.initialBackoffMs = opts.initialBackoffMs ?? 250
@@ -132,6 +142,48 @@ export class WebSocketClientTransport implements ClientTransport {
     this.connect().catch(() => {
       // the close path reports the failure and schedules the retry
     })
+  }
+
+  /** Check that a socket reading OPEN still reaches the server. iOS keeps
+   *  reporting OPEN for a socket that died while the app was suspended (the
+   *  Mac slept, the phone changed networks), and nothing notices until a
+   *  request hangs. `transport:getClientId` is the round trip: every server
+   *  answers it and it costs nothing, so no new frame is needed. With no
+   *  answer within `timeoutMs` the socket is failed as 'connection lost'
+   *  (rejecting whatever else was pending) and reconnected without backoff.
+   *  `ifIdleMs` skips the probe when a frame arrived that recently, for a
+   *  heartbeat that shouldn't add traffic to a busy connection. Only sockets
+   *  past their handshake are probed: before that the connect and handshake
+   *  timeouts already cover a dead link. */
+  probe(timeoutMs: number, { ifIdleMs }: { ifIdleMs?: number } = {}): Promise<ProbeResult> {
+    if (this.probing) return this.probing
+    const ws = this.ws
+    const drop = this.dropSocket
+    if (this.closed || !ws || !drop || ws.readyState !== this.WebSocketCtor.OPEN) return Promise.resolve('skipped')
+    if (ifIdleMs !== undefined && Date.now() - this.lastFrameAt < ifIdleMs) return Promise.resolve('skipped')
+    const id = String(this.nextRequestId++)
+    const done = new Promise<ProbeResult>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        if (this.ws === ws) drop('connection lost')
+        resolve('dead')
+      }, timeoutMs)
+      const settle = (r: ProbeResult) => {
+        clearTimeout(timer)
+        resolve(r)
+      }
+      // An error response still proves the server is there. A rejection
+      // after the socket went means the close path already took over.
+      this.pending.set(id, {
+        resolve: () => settle('alive'),
+        reject: () => settle(this.ws === ws ? 'alive' : 'skipped')
+      })
+      this.sendFrame({ t: 'req', id, name: 'transport:getClientId', args: [] })
+    }).finally(() => {
+      this.probing = null
+    })
+    this.probing = done
+    return done
   }
 
   close(): void {
@@ -226,6 +278,7 @@ export class WebSocketClientTransport implements ClientTransport {
         ended = true
         clearTimer()
         if (this.abortAttempt === abort) this.abortAttempt = null
+        if (this.dropSocket === drop) this.dropSocket = null
         if (this.ws === ws) {
           this.ws = null
           this.connectPromise = null
@@ -250,6 +303,22 @@ export class WebSocketClientTransport implements ClientTransport {
         }
       }
       this.abortAttempt = abort
+      // A failed probe: the link is evidently gone, but the network may be
+      // fine again (the phone is back on its Wi-Fi), so retry without the
+      // backoff rather than after it.
+      const drop = (reason: string) => {
+        fail(reason, false)
+        try {
+          ws.close()
+        } catch {
+          // already closing
+        }
+        if (this.closed) return
+        this.backoffMs = this.initialBackoffMs
+        this.connect().catch(() => {
+          // the close path reports the failure and schedules the retry
+        })
+      }
 
       const timeOut = (reason: string) => {
         fail(reason, true)
@@ -288,6 +357,7 @@ export class WebSocketClientTransport implements ClientTransport {
             clearTimer()
             this.handshakeTimeouts = 0
             if (this.abortAttempt === abort) this.abortAttempt = null
+            this.dropSocket = drop
             resolve()
           })
           .catch((err) => {
@@ -303,6 +373,7 @@ export class WebSocketClientTransport implements ClientTransport {
       ws.addEventListener('message', (evt) => {
         if (ended) return
         armHandshake?.()
+        this.lastFrameAt = Date.now()
         let frame: ServerFrame
         try {
           frame = JSON.parse(String(evt.data)) as ServerFrame

@@ -19,6 +19,10 @@ import type { LocalTransportHandle } from '../../src/shared/transport/transport'
 
 type Listener = () => void
 
+/** A LAN round trip is milliseconds; a suspended-then-dead socket never
+ *  answers. Short enough that the stale state isn't up for long. */
+export const PROBE_TIMEOUT_MS = 3500
+
 export interface ConnState {
   connected: boolean
   hasSnapshot: boolean
@@ -89,6 +93,26 @@ export class NessClient {
    *  while connected; `keepOpen` also spares a socket that's mid-handshake. */
   retry(opts?: { keepOpen?: boolean }): void {
     this.transport.reconnectNow(opts)
+  }
+
+  /** Back in the foreground: retry without the backoff (keepOpen spares a
+   *  socket mid-handshake), and check an open socket still answers. */
+  wake(): void {
+    this.transport.reconnectNow({ keepOpen: true })
+    void this.checkAlive()
+  }
+
+  /** iOS reports a socket that died while suspended as OPEN. One that
+   *  doesn't answer is dropped and reconnected, and its data no longer
+   *  counts as live: Connecting / "Can't reach" takes over until the new
+   *  snapshot lands, instead of the pre-sleep state passing for current.
+   *  An ordinary drop keeps showing the last state as before; this is the
+   *  case where it's likely stale. */
+  async checkAlive(opts?: { ifIdleMs?: number }): Promise<void> {
+    const r = await this.transport.probe(PROBE_TIMEOUT_MS, opts)
+    if (r !== 'dead' || this.conn.connected) return
+    this.conn = { connected: false, hasSnapshot: false }
+    this.emit()
   }
 
   close(): void {

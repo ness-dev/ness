@@ -322,6 +322,145 @@ describe('WebSocketClientTransport timeouts', () => {
     t.close()
   })
 
+  /** Connect and finish the handshake on a fresh socket. */
+  async function connected(extra: Parameters<typeof make>[0] = {}) {
+    const made = make(extra)
+    const p = made.t.connect()
+    const ws = FakeWebSocket.instances.at(-1)!
+    ws.open()
+    ws.answerHandshake()
+    await flush()
+    const idReq = ws.sent.find((f) => f.name === 'transport:getClientId')!
+    ws.reply({ t: 'res', id: idReq.id, ok: true, value: 'c1' })
+    await p
+    return { ...made, ws }
+  }
+
+  const lastProbe = (ws: FakeWebSocket) => ws.sent.filter((f) => f.name === 'transport:getClientId').at(-1)!
+
+  it('probe keeps a socket that answers', async () => {
+    const { t, changes, ws } = await connected()
+    const p = t.probe(3000)
+    const req = lastProbe(ws)
+    expect(req.t).toBe('req')
+    ws.reply({ t: 'res', id: req.id, ok: true, value: 'c1' })
+    await expect(p).resolves.toBe('alive')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(changes).toEqual([[true, undefined]])
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(ws.closeCalls).toBe(0)
+    t.close()
+  })
+
+  it('probe counts an error response as alive', async () => {
+    const { t, ws } = await connected()
+    const p = t.probe(3000)
+    ws.reply({ t: 'res', id: lastProbe(ws).id, ok: false, error: 'unknown request' })
+    await expect(p).resolves.toBe('alive')
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    t.close()
+  })
+
+  it('probe timeout drops the socket, fails pending requests and reconnects without backoff', async () => {
+    const { t, changes, ws } = await connected({ initialBackoffMs: 5000, maxBackoffMs: 5000 })
+    const hung = expect(t.request('worktrees:list')).rejects.toThrow(/closed before response/)
+    await flush()
+    const p = t.probe(3000)
+    await vi.advanceTimersByTimeAsync(2999)
+    expect(changes).toEqual([[true, undefined]])
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(p).resolves.toBe('dead')
+    await hung
+    expect(changes).toEqual([
+      [true, undefined],
+      [false, 'connection lost']
+    ])
+    expect(ws.closeCalls).toBe(1)
+    // Straight away, not after the 5s backoff.
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    // The dead socket's late close is ignored; the new one carries on.
+    ws.serverClose()
+    const next = FakeWebSocket.instances[1]
+    next.open()
+    next.answerHandshake()
+    await flush()
+    expect(changes).toEqual([
+      [true, undefined],
+      [false, 'connection lost'],
+      [true, undefined]
+    ])
+    t.close()
+  })
+
+  it('a timed-out probe whose answer arrives late changes nothing more', async () => {
+    const { t, changes, ws } = await connected()
+    const p = t.probe(3000)
+    const req = lastProbe(ws)
+    await vi.advanceTimersByTimeAsync(3000)
+    await p
+    ws.reply({ t: 'res', id: req.id, ok: true, value: 'c1' })
+    await flush()
+    expect(changes).toEqual([
+      [true, undefined],
+      [false, 'connection lost']
+    ])
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    t.close()
+  })
+
+  it('concurrent probes share one round trip', async () => {
+    const { t, ws } = await connected()
+    const before = ws.sent.length
+    const a = t.probe(3000)
+    const b = t.probe(3000)
+    expect(ws.sent.length).toBe(before + 1)
+    ws.reply({ t: 'res', id: lastProbe(ws).id, ok: true, value: 'c1' })
+    await expect(a).resolves.toBe('alive')
+    await expect(b).resolves.toBe('alive')
+    t.close()
+  })
+
+  it('probe skips a socket that is connecting or mid-handshake', async () => {
+    const { t, changes } = make()
+    t.connect().catch(() => {})
+    const ws = FakeWebSocket.instances[0]
+    await expect(t.probe(3000)).resolves.toBe('skipped')
+    ws.open()
+    await expect(t.probe(3000)).resolves.toBe('skipped')
+    // Only the handshake's own snapreq went out; the handshake timeout
+    // still governs this socket.
+    expect(ws.sent.map((f) => f.t)).toEqual(['snapreq'])
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(changes.at(-1)).toEqual([false, 'backend did not respond'])
+    t.close()
+  })
+
+  it('probe skips when the socket is closed, or after close()', async () => {
+    const { t, ws } = await connected()
+    ws.serverClose()
+    await expect(t.probe(3000)).resolves.toBe('skipped')
+    t.close()
+    await expect(t.probe(3000)).resolves.toBe('skipped')
+    expect(ws.sent.filter((f) => f.name === 'transport:getClientId')).toHaveLength(1)
+  })
+
+  it('probe ifIdleMs skips a connection with recent traffic', async () => {
+    const { t, ws } = await connected()
+    await vi.advanceTimersByTimeAsync(10_000)
+    ws.reply({ t: 'state', event: { type: 'settings/themeChanged', payload: 'dracula' }, seq: 1 })
+    await vi.advanceTimersByTimeAsync(20_000)
+    const before = ws.sent.length
+    await expect(t.probe(3000, { ifIdleMs: 30_000 })).resolves.toBe('skipped')
+    expect(ws.sent.length).toBe(before)
+    await vi.advanceTimersByTimeAsync(10_000)
+    const p = t.probe(3000, { ifIdleMs: 30_000 })
+    expect(ws.sent.length).toBe(before + 1)
+    ws.reply({ t: 'res', id: lastProbe(ws).id, ok: true, value: 'c1' })
+    await expect(p).resolves.toBe('alive')
+    t.close()
+  })
+
   it('close() during CONNECTING stops the timeout and any retry', async () => {
     const { t } = make()
     t.connect().catch(() => {})
