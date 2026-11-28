@@ -27,13 +27,14 @@ import { Spin } from '../components/Spin'
 import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
 import { TerminalView } from '../terminal/TerminalView'
+import { ViewerTab } from '../viewer/ViewerTab'
 
 export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
   const { fleet, backends } = useWorkspace()
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; x: number; y: number } | null>(null)
+  const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; convertible: boolean; x: number; y: number } | null>(null)
   const windowWidth = useWindowDimensions().width
 
   const activeWorktree = useMemo(() => worktrees.find((w) => w.path === wtPath) ?? null, [worktrees, wtPath])
@@ -226,8 +227,8 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
                   onSelect={() => handleSelectTab(tab.id)}
                   onLayout={(x, w) => (tabLayouts.current[tab.id] = { x, w })}
                   // With the picker open, a tap on the active tab means
-                  // "dismiss the picker", so no convert menu.
-                  onOpenMenu={convertible && !pickerOpen ? (pos) => setConvertMenu({ tab, ...pos }) : undefined}
+                  // "dismiss the picker", so no tab menu.
+                  onOpenMenu={!pickerOpen ? (pos) => setConvertMenu({ tab, convertible, ...pos }) : undefined}
                 />
               )
             })}
@@ -289,7 +290,10 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
               onRestartAgent={selectedTab.type === 'agent' ? () => handleRestartAgent(selectedTab.id) : undefined}
             />
           ))}
-        {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell'].includes(selectedTab.type) && (
+        {activeWorktree && client && selectedTab && (selectedTab.type === 'file' || selectedTab.type === 'diff') && (
+          <ViewerTab key={`${client.id}:${selectedTab.id}`} client={client} worktreePath={activeWorktree.path} tab={selectedTab} />
+        )}
+        {activeWorktree && selectedTab && !['json-claude', 'agent', 'shell', 'file', 'diff'].includes(selectedTab.type) && (
           <NonRunnablePlaceholder tab={selectedTab} />
         )}
         {activeWorktree && !selectedTab && <Empty message="This worktree has no tabs yet. Open it on desktop to spawn one." />}
@@ -299,17 +303,37 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
         {convertMenu && (
           <Pressable style={[StyleSheet.absoluteFill, { zIndex: 40 }]} onPress={() => setConvertMenu(null)}>
             <View style={[s.menu, { left: Math.max(4, Math.min(convertMenu.x, windowWidth - 232)), top: 0 }]}>
+              {convertMenu.convertible && (
+                <Pressable
+                  style={({ pressed }) => [s.menuItem, pressed && { backgroundColor: c.panel }]}
+                  onPress={() => {
+                    const { tab } = convertMenu
+                    setConvertMenu(null)
+                    handleConvertTabType(tab.id, tab.type === 'agent' ? 'json-claude' : 'agent')
+                  }}
+                >
+                  <Text style={{ color: c.fgBright, fontSize: fs.xs }}>
+                    {convertMenu.tab.type === 'agent' ? 'Switch to Chat mode' : 'Switch to Terminal mode'}
+                  </Text>
+                </Pressable>
+              )}
+              {/* The desktop chip's X: any tab, the last one included, no
+                  confirm; PanesFSM.closeTab ends the tab's process. */}
               <Pressable
                 style={({ pressed }) => [s.menuItem, pressed && { backgroundColor: c.panel }]}
                 onPress={() => {
                   const { tab } = convertMenu
                   setConvertMenu(null)
-                  handleConvertTabType(tab.id, tab.type === 'agent' ? 'json-claude' : 'agent')
+                  if (!activeWorktree || !client) return
+                  // Land on the neighbour, as the desktop's pane does (the
+                  // one before it, else the one after).
+                  const i = tabs.findIndex((t) => t.id === tab.id)
+                  const next = tabs[i - 1] ?? tabs[i + 1]
+                  if (next) rememberTab(activeWorktree.path, next.id)
+                  void client.api.panesCloseTab(activeWorktree.path, tab.id)
                 }}
               >
-                <Text style={{ color: c.fgBright, fontSize: fs.xs }}>
-                  {convertMenu.tab.type === 'agent' ? 'Switch to Chat mode' : 'Switch to Terminal mode'}
-                </Text>
+                <Text style={{ color: c.fgBright, fontSize: fs.xs }}>Close tab</Text>
               </Pressable>
             </View>
           </Pressable>

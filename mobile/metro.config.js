@@ -17,6 +17,30 @@ const { getDefaultConfig } = require('expo/metro-config')
 const projectRoot = __dirname
 const srcRoot = path.resolve(projectRoot, '../src')
 
+// Mermaid diagrams in chat render in a WebView from this page: mermaid's
+// own browser build inlined into one HTML file, which Metro ships as an
+// asset ('html' is in Expo's assetExts). As an asset rather than a JS
+// string it stays out of the main bundle, works offline, and an OTA update
+// only re-downloads it when its hash changes. Built here, not committed,
+// because it's 3.5MB derived from node_modules; this runs before every
+// `expo start` / `expo export` / `eas update`.
+function ensureMermaidPage() {
+  const fs = require('fs')
+  const dist = require.resolve('mermaid/dist/mermaid.min.js', { paths: [projectRoot] })
+  const version = require(require.resolve('mermaid/package.json', { paths: [projectRoot] })).version
+  const out = path.join(projectRoot, 'generated/mermaid.html')
+  const page = fs.readFileSync(path.join(projectRoot, 'src/components/mermaid-page.html'), 'utf8')
+  // Both inputs in the stamp: a template edit must rebuild a page that
+  // already exists, or the app keeps talking to the old nessRender.
+  const templateHash = require('crypto').createHash('sha1').update(page).digest('hex').slice(0, 8)
+  const stamp = `<!-- mermaid ${version} page ${templateHash} -->`
+  if (fs.existsSync(out) && fs.readFileSync(out, 'utf8').startsWith(stamp)) return
+  const lib = fs.readFileSync(dist, 'utf8').replace(/<\/script/gi, '<\\/script')
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, `${stamp}\n${page.replace('/*MERMAID*/', () => lib)}`)
+}
+ensureMermaidPage()
+
 const config = getDefaultConfig(projectRoot)
 config.watchFolders = [...(config.watchFolders ?? []), srcRoot]
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')]

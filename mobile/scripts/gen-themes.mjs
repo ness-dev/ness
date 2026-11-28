@@ -27,9 +27,12 @@ export function generate() {
     throw new Error('unbalanced block')
   }
 
+  // --syntax-* (highlight.js token colours) ride along as `syntax-*` keys;
+  // their defaults live in `:root` rather than `@theme`.
   const colorVars = (block) => {
     const out = {}
     for (const m of block.matchAll(/--color-([a-z-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim()
+    for (const m of block.matchAll(/--(syntax-[a-z-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim()
     return out
   }
 
@@ -41,7 +44,7 @@ export function generate() {
     return out
   }
 
-  const base = colorVars(blockAfter(css.indexOf('@theme {')))
+  const base = { ...colorVars(blockAfter(css.indexOf('@theme {'))), ...colorVars(blockAfter(css.search(/^:root\s*\{/m))) }
   const themes = { dark: { ...base } }
   const terms = {}
   for (const m of css.matchAll(/^\[data-theme="([a-z0-9-]+)"\]\s*\{/gm)) {

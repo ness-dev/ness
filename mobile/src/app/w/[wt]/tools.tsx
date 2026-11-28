@@ -5,6 +5,8 @@ import { useWorkspace } from '../../../workspace'
 import { useMerged } from '../../../fleet'
 import { rememberTab, useSelectedTabId } from '../../../navState'
 import { agentTargetFor } from '../../../tabs'
+import { commitFileDiffTab, diffTab, fileTab, openViewerTab } from '../../../viewer/open-tab'
+import type { TerminalTab } from '../../../../../src/shared/state/terminals'
 import { PanelsHost } from '../../../panels/PanelsHost'
 import { Empty } from '../../../components/Empty'
 
@@ -30,6 +32,13 @@ export default function ToolsRoute() {
     router.back()
   }
 
+  // Opening a file or diff adds (or reselects) its shared tab, then back to
+  // the worktree showing it.
+  const open = (tab: TerminalTab) => {
+    openViewerTab(client, wt, tabs, merged.panes[wt], tab)
+    router.back()
+  }
+
   return (
     <PanelsHost
       key={`${client.id}:${wt}`}
@@ -38,6 +47,11 @@ export default function ToolsRoute() {
       focusedTabId={selectedTabId}
       onSendToAgent={sendToAgent}
       onClose={() => router.back()}
+      openers={{
+        onOpenFile: (path) => open(fileTab(path)),
+        onOpenDiff: (path, staged, mode) => open(diffTab(path, staged, mode)),
+        onOpenCommitFileDiff: (hash, short, path) => open(commitFileDiffTab(hash, short, path))
+      }}
     />
   )
 }

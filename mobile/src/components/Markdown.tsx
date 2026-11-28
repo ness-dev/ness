@@ -7,8 +7,9 @@
 // `preserveNewlines` selects USER_REMARK_PLUGINS (text a person typed:
 // single newlines stay line breaks, indentation is never code).
 //
-// Not drawn yet: mermaid diagrams (shown as their source, as while a
-// diagram streams on desktop) and syntax highlighting.
+// Finished ```mermaid blocks (remarkMermaid's dataMermaid: 'closed') draw
+// as diagrams; one still streaming stays code, as on desktop. Not drawn
+// yet: syntax highlighting.
 import { memo, useMemo, useState, type ReactNode } from 'react'
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
 import { unified } from 'unified'
@@ -20,6 +21,7 @@ import { c, fs, mono, themed } from '../theme'
 import { ChatImage } from '../chat/ChatImage'
 import { SelectableText as T } from './SelectableText'
 import { sameCtx, sameNode, type BlockCtx } from './markdown-memo'
+import { MermaidDiagram } from './MermaidDiagram'
 
 const assistantProcessor = unified().use(remarkParse).use(ASSISTANT_REMARK_PLUGINS).freeze()
 const userProcessor = unified().use(remarkParse).use(USER_REMARK_PLUGINS).freeze()
@@ -101,8 +103,10 @@ function BlockView({ node, ctx }: { node: RootContent; ctx: Ctx }): ReactNode {
       )
     case 'list':
       return <ListBlock node={node} ctx={ctx} />
-    case 'code':
-      return <CodeBlock code={node.value} />
+    case 'code': {
+      const block = <CodeBlock code={node.value} />
+      return node.data?.hProperties?.dataMermaid === 'closed' ? <MermaidDiagram source={node.value} fallback={block} /> : block
+    }
     case 'table':
       return <TableBlock node={node} ctx={ctx} />
     case 'html':

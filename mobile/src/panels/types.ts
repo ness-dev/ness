@@ -1,6 +1,6 @@
 // Contract every ported right-column panel implements. Mirrors the props
-// RightColumn.tsx hands its panels, minus desktop-only affordances (open a
-// diff/file tab, open in editor), which have no phone equivalent yet.
+// RightColumn.tsx hands its panels, minus desktop-only affordances (open in
+// editor, reveal in Finder).
 import type { ComponentType } from 'react'
 import type { Worktree } from '../../../src/shared/state/worktrees'
 import type { RepoConfig } from '../../../src/shared/state/repo-configs'
@@ -24,6 +24,11 @@ export interface PanelProps {
   onOpenUrl: (url: string) => void
   /** Close the panel sheet (e.g. after "remove worktree"). */
   onClose: () => void
+  /** RightColumn's openers: each opens (or reselects) a shared file / diff
+   *  tab and returns to the worktree showing it. Optional, as on desktop. */
+  onOpenFile?: (filePath: string) => void
+  onOpenDiff?: (filePath: string, staged: boolean, mode: 'working' | 'branch') => void
+  onOpenCommitFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
 }
 
 export type PanelComponent = ComponentType<PanelProps>

@@ -2,8 +2,11 @@
 // popover it opens (CommitInfoModal.tsx, with its prev/next nav). The
 // popover becomes a modal sheet; ↑/↓/Esc become buttons.
 //
-// Desktop-only, omitted: "Open diff in tab" on a commit's files
-// (onOpenCommitFileDiff), and drag-a-commit-into-the-composer.
+// Desktop-only, omitted: drag-a-commit-into-the-composer.
+//
+// A commit file row's tap opens its diff tab (the desktop's context-menu
+// "Open diff in tab"); copying the path, the desktop's click, moves to the
+// row's copy button.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { ArrowUp, Check, ChevronDown, ChevronUp, Copy, GitCommitHorizontal, RefreshCw, X } from 'lucide-react-native'
@@ -17,7 +20,7 @@ import { STATUS_COLOR, STATUS_LABEL } from './ChangedFilesPanel'
 import type { PanelProps } from './types'
 import { copyText } from '../clipboard'
 
-export function CommitsPanel({ client, worktreePath }: PanelProps) {
+export function CommitsPanel({ client, worktreePath, onOpenCommitFileDiff }: PanelProps) {
   const fetcher = useCallback((path: string) => client.api.getBranchCommits(path), [client])
   // Tracks the selected commit by index so the up/down controls can walk the list.
   const [popover, setPopover] = useState<number | null>(null)
@@ -81,6 +84,7 @@ export function CommitsPanel({ client, worktreePath }: PanelProps) {
             hasNext: popover < commits.length - 1
           }}
           onClose={() => setPopover(null)}
+          onOpenFileDiff={onOpenCommitFileDiff}
         />
       )}
     </>
@@ -155,13 +159,15 @@ function CommitInfoSheet({
   worktreePath,
   sha,
   nav,
-  onClose
+  onClose,
+  onOpenFileDiff
 }: {
   client: NessClient
   worktreePath: string
   sha: string
   nav: CommitNav
   onClose: () => void
+  onOpenFileDiff?: (commitHash: string, shortHash: string, filePath: string) => void
 }) {
   const [meta, setMeta] = useState<CommitMeta | null>(null)
   const [files, setFiles] = useState<ChangedFile[]>([])
@@ -280,7 +286,20 @@ function CommitInfoSheet({
                   {files.length} {files.length === 1 ? 'file' : 'files'} changed
                 </Text>
                 {files.map((file) => (
-                  <CommitFileRow key={file.path} file={file} copied={copiedPath === file.path} onCopyPath={() => copyPath(file.path)} />
+                  <CommitFileRow
+                    key={file.path}
+                    file={file}
+                    copied={copiedPath === file.path}
+                    onCopyPath={() => copyPath(file.path)}
+                    onOpen={
+                      onOpenFileDiff &&
+                      (() => {
+                        // The sheet is a Modal, which would stay over the tab.
+                        onClose()
+                        onOpenFileDiff(meta.hash, meta.shortHash, file.path)
+                      })
+                    }
+                  />
                 ))}
               </View>
             </ScrollView>
@@ -313,16 +332,20 @@ function HeaderBtn({ label, onPress, disabled, children }: { label: string; onPr
   )
 }
 
-/** CommitInfoModal's FileRow: tap copies the path. Its context menu's other
- *  item, "Open diff in tab", is desktop-only. */
-function CommitFileRow({ file, copied, onCopyPath }: { file: ChangedFile; copied: boolean; onCopyPath: () => void }) {
+/** CommitInfoModal's FileRow. Without an opener, tapping the row copies the
+ *  path, as on desktop. */
+function CommitFileRow({ file, copied, onCopyPath, onOpen }: { file: ChangedFile; copied: boolean; onCopyPath: () => void; onOpen?: () => void }) {
   const lastSlash = file.path.lastIndexOf('/')
   const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : ''
   const name = lastSlash >= 0 ? file.path.slice(lastSlash + 1) : file.path
   return (
     <Pressable
-      onPress={onCopyPath}
-      accessibilityLabel={`Copy path ${file.path}`}
+      onPress={onOpen ?? onCopyPath}
+      accessibilityLabel={onOpen ? `Open diff ${file.path}` : `Copy path ${file.path}`}
+      // The copy button inside an accessible row is hidden from VoiceOver,
+      // so the row offers it as an action.
+      accessibilityActions={onOpen ? [{ name: 'copy', label: 'Copy path' }] : undefined}
+      onAccessibilityAction={(e) => e.nativeEvent.actionName === 'copy' && onCopyPath()}
       style={({ pressed }) => ({
         minHeight: 44,
         flexDirection: 'row',
@@ -337,13 +360,22 @@ function CommitFileRow({ file, copied, onCopyPath }: { file: ChangedFile; copied
         {dir ? <Text style={{ color: c.faint }}>{dir}</Text> : null}
         <Text style={{ color: c.fg }}>{name}</Text>
       </Text>
-      {copied ? <Check color={c.success} size={10} /> : <Copy color={alpha(c.fg, 0.6)} size={10} />}
+      {!onOpen && (copied ? <Check color={c.success} size={10} /> : <Copy color={alpha(c.fg, 0.6)} size={10} />)}
       {(file.additions || file.deletions) ? (
         <Text style={{ fontFamily: mono, fontSize: fs.xs, fontVariant: ['tabular-nums'] }}>
           {file.additions ? <Text style={{ color: c.success }}>+{file.additions}</Text> : null}
           {file.deletions ? <Text style={{ color: c.danger }}> −{file.deletions}</Text> : null}
         </Text>
       ) : null}
+      {onOpen && (
+        <Pressable
+          onPress={onCopyPath}
+          accessibilityLabel={`Copy path ${file.path}`}
+          style={({ pressed }) => ({ width: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? c.surface : 'transparent' })}
+        >
+          {copied ? <Check color={c.success} size={12} /> : <Copy color={alpha(c.fg, 0.6)} size={12} />}
+        </Pressable>
+      )}
     </Pressable>
   )
 }

@@ -513,8 +513,6 @@ Each item is meant for its own worktree.
   changed (`grownKey`). A `patches/` fix (assign the frame first, or reset
   `textContainer.size` after it) would let that go, and would keep a
   selection alive inside a block that's still streaming.
-- **File and diff viewer** from Changed Files, All Files and commits.
-  Wanted before launch.
 - **Paged history loading.** A server change so long transcripts arrive
   in pages instead of one `getEntries` response.
 - **Polish:**

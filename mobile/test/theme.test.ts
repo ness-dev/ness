@@ -12,7 +12,9 @@ import { generate, OUTPUT } from '../scripts/gen-themes.mjs'
 const PALETTE_KEYS: (keyof Palette)[] = [
   'app', 'panel', 'panelRaised', 'surface', 'surfaceHover', 'well', 'border', 'borderStrong',
   'fg', 'fgBright', 'muted', 'dim', 'faint', 'success', 'warning', 'danger', 'info', 'accent',
-  'brand', 'brandMid', 'brandDeep'
+  'brand', 'brandMid', 'brandDeep',
+  'syntaxKeyword', 'syntaxType', 'syntaxString', 'syntaxNumber', 'syntaxComment', 'syntaxVariable', 'syntaxParams',
+  'syntaxAddition', 'syntaxDeletion'
 ]
 const COLOR = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))$/
 
