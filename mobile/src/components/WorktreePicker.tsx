@@ -351,8 +351,9 @@ function GroupHeader({ label, count, collapsed, onPress }: { label: string; coun
 }
 
 /** RowBlock: mx-1.5 rounded-md, bg-surface when active, /50 for context.
- *  `selected` outlines the project the picker has expanded — the one a
- *  second tap opens — so it reads apart from the active worktree. */
+ *  `selected` outlines the project the picker has expanded, so it reads
+ *  apart from the active worktree. Only project blocks pass it (true or
+ *  false) and so reserve the 1px border; other rows keep main's metrics. */
 function Block({ active, context, selected, children }: { active: boolean; context?: boolean; selected?: boolean; children: ReactNode }) {
   return (
     <View
@@ -361,7 +362,7 @@ function Block({ active, context, selected, children }: { active: boolean; conte
         borderRadius: 6,
         overflow: 'hidden',
         backgroundColor: active ? c.surface : context ? alpha(c.surface, 0.5) : 'transparent',
-        borderWidth: 1,
+        borderWidth: selected === undefined ? 0 : 1,
         borderColor: selected ? alpha(c.accent, 0.5) : 'transparent'
       }}
     >
