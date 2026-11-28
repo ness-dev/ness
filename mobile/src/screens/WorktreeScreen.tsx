@@ -28,12 +28,14 @@ import { Connecting } from '../components/Connecting'
 import { Empty } from '../components/Empty'
 import { TerminalView } from '../terminal/TerminalView'
 import { ViewerTab } from '../viewer/ViewerTab'
+import { DemoBadge, DemoMenu } from '../demo/DemoUI'
 
 export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?: string }) {
   const { fleet, backends } = useWorkspace()
   const merged = useMerged(fleet)
   const worktrees = merged.flatWorktrees
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [demoMenuOpen, setDemoMenuOpen] = useState(false)
   const [convertMenu, setConvertMenu] = useState<{ tab: TerminalTab; convertible: boolean; x: number; y: number } | null>(null)
   const windowWidth = useWindowDimensions().width
 
@@ -194,9 +196,20 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
           {activeWorktree ? (
             <>
               <View style={{ minWidth: 0, flexShrink: 1 }}>
-                <Text style={s.repoLabel} numberOfLines={1}>
-                  {activeWorktree.repoRoot.split('/').pop()}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[s.repoLabel, { flexShrink: 1 }]} numberOfLines={1}>
+                    {activeWorktree.repoRoot.split('/').pop()}
+                  </Text>
+                  {client?.demo && (
+                    <DemoBadge
+                      onPress={() => {
+                        Keyboard.dismiss()
+                        setPickerOpen(false)
+                        setDemoMenuOpen(true)
+                      }}
+                    />
+                  )}
+                </View>
                 <Text style={s.branchLabel} numberOfLines={1}>
                   {label}
                 </Text>
@@ -355,6 +368,15 @@ export function WorktreeScreen({ wtPath, tabParam }: { wtPath: string; tabParam?
               setPickerOpen(false)
               router.push('/settings')
             }}
+          />
+        )}
+        {demoMenuOpen && client?.demo && (
+          <DemoMenu
+            client={client}
+            backends={backends}
+            // The phone's theme follows the first backend; only then is it the demo's to change.
+            themeFollowsDemo={fleet.getEntries()[0]?.backendId === client.id}
+            onClose={() => setDemoMenuOpen(false)}
           />
         )}
       </View>

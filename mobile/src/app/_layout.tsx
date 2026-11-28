@@ -18,6 +18,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller'
 import { WorkspaceProvider, useWorkspace } from '../workspace'
 import { c, getThemeMode } from '../theme'
+import { DemoNotice } from '../demo/DemoUI'
 
 export default function RootLayout() {
   return (
@@ -46,7 +47,7 @@ export default function RootLayout() {
 // new palette, without resetting navigation. This component reads the
 // workspace, so it re-renders with the new background too.
 function Shell() {
-  const { themeKey } = useWorkspace()
+  const { themeKey, backends } = useWorkspace()
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.app }} edges={['top', 'left', 'right']}>
       <StatusBar style={getThemeMode() === 'light' ? 'dark' : 'light'} />
@@ -67,6 +68,7 @@ function Shell() {
           <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
         </Stack>
       </KeyboardAvoidingView>
+      <DemoNotice client={backends.clients.find((cl) => cl.demo)} />
     </SafeAreaView>
   )
 }

@@ -9,9 +9,11 @@ import { parseConnectionUrl } from '../../../src/shared/transport/parse-connecti
 import type { Backends } from '../backends'
 import { NessClient, useConn, useNess } from '../ness'
 import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
+import { DemoBadge, TryDemoCard } from '../demo/DemoUI'
 
 export function BackendsSheet({ backends, onClose }: { backends: Backends; onClose?: () => void }) {
   const [adding, setAdding] = useState(backends.saved.length === 0)
+  const firstRun = backends.saved.length === 0 && !backends.demo
   return (
     <View style={s.sheet} accessibilityViewIsModal>
       <View style={s.head}>
@@ -62,13 +64,34 @@ export function BackendsSheet({ backends, onClose }: { backends: Backends; onClo
               backends.add(b)
               setAdding(false)
             }}
-            onCancel={backends.saved.length > 0 ? () => setAdding(false) : undefined}
+            onCancel={backends.saved.length > 0 || backends.demo ? () => setAdding(false) : undefined}
           />
         ) : (
           <Pressable style={s.addRow} onPress={() => setAdding(true)}>
             <Plus color={c.accent} size={16} />
             <Text style={{ color: c.accent, fontSize: fs.sm }}>Add backend</Text>
           </Pressable>
+        )}
+        {firstRun ? (
+          <TryDemoCard onTry={() => backends.setDemo(true)} />
+        ) : (
+          <View style={s.card}>
+            <View style={[s.dot, { backgroundColor: backends.demo ? c.success : c.faint }]} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={s.label}>Demo workspace</Text>
+                <DemoBadge />
+              </View>
+              <Text style={s.status}>Sample data, works offline. Never mixed into your backends.</Text>
+            </View>
+            <Switch
+              value={backends.demo}
+              onValueChange={(v) => backends.setDemo(v)}
+              accessibilityLabel="Show the demo workspace"
+              trackColor={{ true: c.accent, false: c.surface }}
+              thumbColor="#fff"
+            />
+          </View>
         )}
       </ScrollView>
     </View>

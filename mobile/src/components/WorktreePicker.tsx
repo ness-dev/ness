@@ -49,6 +49,8 @@ import type { AssignedPR } from '../../../src/shared/state/assigned-prs'
 import { Fleet, useFleetEntries, useListModel } from '../fleet'
 import { useCollapse, type CollapseState } from '../collapse'
 import { alpha, c, fs, mono, themed, getThemeMode } from '../theme'
+import { DemoBadge } from '../demo/DemoUI'
+import { DEMO_BACKEND_ID } from '../demo/constants'
 import { tokenColor, tw } from '../tw'
 import { Pulse, Spin } from './Spin'
 import { Connecting } from './Connecting'
@@ -149,7 +151,10 @@ export function WorktreePicker({
   return (
     <View style={s.sheet} accessibilityViewIsModal>
       <View style={s.head}>
-        <Text style={s.headTitle}>WORKTREES</Text>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={s.headTitle}>WORKTREES</Text>
+          {!ctx.multiBackend && fleet.getClients().some((cl) => cl.demo) && <DemoBadge />}
+        </View>
         <IconBtn
           label={collapse.unifiedRepos ? 'Split by repo' : 'Merge repos into one list'}
           disabled={repoCount <= 1}
@@ -570,7 +575,8 @@ function Subtitle({ row, ctx, active, prunable }: { row: WorktreeRowModel; ctx: 
   const origin = ctx.multiBackend && backendId ? ctx.merged.backendMeta[backendId]?.label : undefined
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, minWidth: 0, overflow: 'hidden' }}>
-      {origin && (
+      {origin && backendId === DEMO_BACKEND_ID && <DemoBadge />}
+      {origin && backendId !== DEMO_BACKEND_ID && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: 90, flexShrink: 1 }}>
           <Server color={c.info} size={10} />
           <Text style={{ fontSize: fs.xs, color: c.info }} numberOfLines={1}>
@@ -782,7 +788,7 @@ function IconBtn({ label, onPress, disabled, children }: { label: string; onPres
 const s = themed(() => StyleSheet.create({
   sheet: { ...(StyleSheet.absoluteFill as object), backgroundColor: c.app, zIndex: 30 },
   head: { flexDirection: 'row', alignItems: 'center', paddingLeft: 12, paddingRight: 4, borderBottomWidth: 1, borderColor: c.border, backgroundColor: c.panel },
-  headTitle: { flex: 1, color: c.dim, fontSize: fs.xs, fontWeight: '600', letterSpacing: 1.2 },
+  headTitle: { color: c.dim, fontSize: fs.xs, fontWeight: '600', letterSpacing: 1.2 },
   icon44: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
   dimText: { color: c.dim, fontSize: fs.sm },
   faintXs: { color: c.faint, fontSize: fs.xs },
