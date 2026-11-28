@@ -20,6 +20,15 @@ function emit(): void {
   for (const l of listeners) l()
 }
 
+/** Ticked files still in the diff. The ticked set only resets on a
+ *  selection change, but the whole-branch file list can change under the
+ *  same selection, so a bare `reviewed.size` counts files that are gone. */
+export function reviewedCount(files: readonly { path: string }[], reviewed: ReadonlySet<string>): number {
+  let n = 0
+  for (const f of files) if (reviewed.has(f.path)) n++
+  return n
+}
+
 export function setReviewProgress(tabId: string, value: ReviewProgress): void {
   const prev = progressByTabId.get(tabId)
   if (prev && prev.reviewed === value.reviewed && prev.total === value.total) return

@@ -11,7 +11,7 @@ import { AgentTabPicker, ReviewSubmissionsPanel } from './ReviewSubmissions'
 import { ReviewTimeline } from './ReviewTimeline'
 import { ReviewStatusIcon } from './ReviewStatusIcon'
 import { formatReviewComments } from '../../shared/review-format'
-import { setReviewProgress, clearReviewProgress } from '../review-progress'
+import { setReviewProgress, clearReviewProgress, reviewedCount } from '../review-progress'
 
 interface ReviewPaneProps {
   tabId: string
@@ -123,10 +123,12 @@ export function ReviewPane({
     void backend.refreshReviewAnchors(worktreePath, selectedFile ?? undefined)
   }, [backend, worktreePath, selectedFile])
 
+  const reviewedInView = useMemo(() => reviewedCount(files, reviewedFiles), [files, reviewedFiles])
+
   // Push "(N/M)" up to the tab strip. Clear on unmount.
   useEffect(() => {
-    setReviewProgress(tabId, { reviewed: reviewedFiles.size, total: files.length })
-  }, [tabId, reviewedFiles, files.length])
+    setReviewProgress(tabId, { reviewed: reviewedInView, total: files.length })
+  }, [tabId, reviewedInView, files.length])
 
   useEffect(() => {
     return () => {
@@ -317,8 +319,8 @@ export function ReviewPane({
     [filesInView, isWholeBranch, backend, worktreePath, tabId]
   )
 
-  const allReviewed = files.length > 0 && reviewedFiles.size === files.length
-  const progress = files.length > 0 ? reviewedFiles.size / files.length : 0
+  const allReviewed = files.length > 0 && reviewedInView === files.length
+  const progress = files.length > 0 ? reviewedInView / files.length : 0
 
   return (
     <div className="flex flex-col h-full w-full bg-bg">
@@ -371,7 +373,7 @@ export function ReviewPane({
               </span>
             ) : (
               <span className="text-faint tabular-nums">
-                {reviewedFiles.size}/{files.length} reviewed
+                {reviewedInView}/{files.length} reviewed
               </span>
             )}
 
