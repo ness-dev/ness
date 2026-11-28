@@ -133,7 +133,7 @@ export function reviewIconSpec(
   switch (status.kind) {
     case 'none':
       if (!showNone) return null
-      return { icon: 'ListChecks', tone: 'dim', label: 'Review', unsent: false }
+      return { icon: 'ListChecks', tone: 'dim', label: 'No agent review', unsent: false }
     case 'reviewing':
       // A reviewer that went idle without submitting has stalled; a
       // spinner there would never stop.
